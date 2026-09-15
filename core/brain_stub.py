@@ -1,6 +1,6 @@
 """Static brain stub for lenoxvi Phase 1 (echo bot).
 
-Phase 1 proves the audio round trip (ears -> brain-shape -> mouth) with a
+Phase 1 proves the audio round trip (ears -> brain-shape -> TTS) with a
 deterministic stub. Phase 3 replaces this with the Hermes agent path.
 
 Frame timing (pipecat 1.10, segmented STT + VADProcessor):
@@ -47,7 +47,7 @@ class StubBrain(FrameProcessor):
         if "your name" in t or "who are you" in t:
             return "I'm the lenoxvi stub brain. Phase three swaps me for the real Hermes brain."
         if any(w in t for w in ("bye", "goodbye", "good night")):
-            return "Later! Remember, the mouth moves to Sonos in phase two."
+            return "Later! Remember, sonos_output arrives in phase two."
         return f"You said: {text.strip()}. I'm the stub brain - the real agent arrives in phase three."
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

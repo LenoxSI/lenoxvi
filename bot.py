@@ -1,4 +1,4 @@
-"""lenoxvi Phase 1 bot: local whisper ears, stub brain, ElevenLabs mouth.
+"""lenoxvi Phase 1 bot: local whisper ears, stub brain, ElevenLabs TTS (sonos_output later).
 
 Pipeline: WebRTC in -> VAD (Silero) -> local faster-whisper STT (gpu)
           -> StubBrain -> ElevenLabs TTS (Ivy) -> WebRTC out
