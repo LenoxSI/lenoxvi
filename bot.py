@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from brain_stub import StubBrain
+from echo_gate import EchoGate
 from sonos_output import SonosOutput
 from stt_local import LocalWhisperSTTService
 
@@ -50,7 +51,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         voice_id=os.getenv("LVI_TTS_VOICE_ID"),  # Ivy; set in .env
         model=os.getenv("LVI_TTS_MODEL", "eleven_v3"),
     )
-    brain = StubBrain()
+    gate = EchoGate()
+    brain = StubBrain(echo_gate=gate)
 
     task = PipelineTask(
         Pipeline(
@@ -60,7 +62,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 stt,
                 brain,
                 tts,
-                SonosOutput(),  # same reply to the zone's Sonos (audioClip overlay)
+                SonosOutput(echo_gate=gate),  # same reply to the zone's Sonos (audioClip overlay)
                 transport.output(),
             ]
         ),

@@ -29,7 +29,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class StubBrain(FrameProcessor):
     """Buffers user speech and emits a TTSSpeakFrame after an end-of-turn lull."""
 
-    def __init__(self, lull_secs: float = 0.6, max_history: int = 6, **kwargs):
+    def __init__(self, lull_secs: float = 0.6, max_history: int = 6, echo_gate=None, **kwargs):
         super().__init__(**kwargs)
         self._buffer: list[str] = []
         self._history: list[dict] = []
@@ -38,6 +38,7 @@ class StubBrain(FrameProcessor):
         self._lull_secs = lull_secs
         self._speaking = False
         self._flushed = False
+        self._echo_gate = echo_gate
 
     def _reply(self, text: str) -> str:
         t = text.lower()
@@ -58,8 +59,13 @@ class StubBrain(FrameProcessor):
             self._flushed = False
         elif isinstance(frame, TranscriptionFrame):
             if frame.text.strip():
-                self._buffer.append(frame.text.strip())
-                self._last_transcription = time.monotonic()
+                if self._echo_gate and self._echo_gate.blocked():
+                    # the mic heard the bot's own reply off the speakers —
+                    # drop it or the stub replies to itself forever
+                    logger.debug(f"stub-brain: echo-gate dropped [{frame.text.strip()}]")
+                else:
+                    self._buffer.append(frame.text.strip())
+                    self._last_transcription = time.monotonic()
         # Let silence pass through; check lull on any frame once speaking stopped.
         if (
             self._speaking

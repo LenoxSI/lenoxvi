@@ -62,8 +62,9 @@ class ClipServer:
 class SonosOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
-    def __init__(self, config_path: str = "config.yaml", **kwargs):
+    def __init__(self, config_path: str = "config.yaml", echo_gate=None, **kwargs):
         super().__init__(**kwargs)
+        self._echo_gate = echo_gate
         cfg = yaml.safe_load(Path(config_path).read_text()) or {}
         sonos = cfg.get("sonos", {})
         self._enabled = bool(sonos.get("enabled"))
@@ -95,6 +96,11 @@ class SonosOutput(FrameProcessor):
         await super().cleanup()
 
     async def _speak_to_sonos(self, pcm: bytes) -> None:
+        # Block echo handling for exactly as long as this clip will sound:
+        # the mic will hear it off the zone speakers (no AEC by design).
+        if self._echo_gate is not None:
+            duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+            self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
         zone = self._zones.get(self._zone)
         if not zone:
             logger.warning("sonos_output: no zone config, skipping Sonos playback")
