@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from brain_stub import StubBrain
+from sonos_output import SonosOutput
 from stt_local import LocalWhisperSTTService
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -59,6 +60,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 stt,
                 brain,
                 tts,
+                SonosOutput(),  # same reply to the zone's Sonos (audioClip overlay)
                 transport.output(),
             ]
         ),
