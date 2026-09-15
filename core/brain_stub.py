@@ -1,0 +1,82 @@
+"""Static brain stub for lenoxvi Phase 1 (echo bot).
+
+Phase 1 proves the audio round trip (ears -> brain-shape -> mouth) with a
+deterministic stub. Phase 3 replaces this with the Hermes agent path.
+
+Frame timing (pipecat 1.10, segmented STT + VADProcessor):
+  - VADUserStartedSpeakingFrame -> start buffering
+  - TranscriptionFrame(s)       -> append text
+  - a lull of ~0.6s with no new transcription -> user is done; flush
+
+The debounce exists because TranscriptionFrames land AFTER the
+VAD stop frame, so reacting to the stop frame itself would flush too
+early. A time-based lull is race-free.
+"""
+
+import time
+
+from loguru import logger
+
+from pipecat.frames.frames import (
+    Frame,
+    TTSSpeakFrame,
+    TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+class StubBrain(FrameProcessor):
+    """Buffers user speech and emits a TTSSpeakFrame after an end-of-turn lull."""
+
+    def __init__(self, lull_secs: float = 0.6, max_history: int = 6, **kwargs):
+        super().__init__(**kwargs)
+        self._buffer: list[str] = []
+        self._history: list[dict] = []
+        self._max_history = max_history
+        self._last_transcription: float = 0.0
+        self._lull_secs = lull_secs
+        self._speaking = False
+        self._flushed = False
+
+    def _reply(self, text: str) -> str:
+        t = text.lower()
+        if any(w in t for w in ("hello", "hi", "hey")):
+            return ("Hey! Phase one check passed: I heard you on the local GPU and "
+                    "this reply is coming out of the Eleven Labs pipeline.")
+        if "your name" in t or "who are you" in t:
+            return "I'm the lenoxvi stub brain. Phase three swaps me for the real Hermes brain."
+        if any(w in t for w in ("bye", "goodbye", "good night")):
+            return "Later! Remember, the mouth moves to Sonos in phase two."
+        return f"You said: {text.strip()}. I'm the stub brain - the real agent arrives in phase three."
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._speaking = True
+            self._flushed = False
+        elif isinstance(frame, TranscriptionFrame):
+            if frame.text.strip():
+                self._buffer.append(frame.text.strip())
+                self._last_transcription = time.monotonic()
+        # Let silence pass through; check lull on any frame once speaking stopped.
+        if (
+            self._speaking
+            and self._flushed is False
+            and self._buffer
+            and self._last_transcription > 0
+            and (time.monotonic() - self._last_transcription) >= self._lull_secs
+        ):
+            self._speaking = False
+            self._flushed = True
+            text = " ".join(self._buffer).strip()
+            self._buffer.clear()
+            reply = self._reply(text)
+            self._history.append({"role": "user", "content": text})
+            self._history.append({"role": "assistant", "content": reply})
+            self._history = self._history[-self._max_history:]
+            logger.info(f"stub-brain: [{text}] -> [{reply}]")
+            await self.push_frame(TTSSpeakFrame(text=reply))
+
+        await self.push_frame(frame, direction)
