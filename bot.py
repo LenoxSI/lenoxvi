@@ -24,6 +24,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from brain_stub import StubBrain
 from echo_gate import EchoGate
+from hermes_agent import HermesAgent
 from sonos_output import SonosOutput
 from stt_local import LocalWhisperSTTService
 
@@ -52,7 +53,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         model=os.getenv("LVI_TTS_MODEL", "eleven_v3"),
     )
     gate = EchoGate()
-    brain = StubBrain(echo_gate=gate)
+    brain = StubBrain(echo_gate=gate) if os.getenv("LVI_BRAIN", "stub") == "stub" else HermesAgent(echo_gate=gate)
 
     task = PipelineTask(
         Pipeline(
