@@ -7,7 +7,7 @@ v1 (`LenoxVI/lenoxvi` + `LenoxVI/lenoxvi-firmware`) is **reference, not foundati
 ## Layout
 
 - `AGENTS.md` — empty until real conventions exist
-- `notes/` — development notes for vibe-coding v2 (source of truth for intent)
+- `notes/` — development notes for vibe-coding lenoxvi (source of truth for intent and findings)
 
 ## Status
 
