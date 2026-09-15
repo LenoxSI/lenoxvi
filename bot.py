@@ -27,6 +27,7 @@ from echo_gate import EchoGate
 from hermes_agent import HermesAgent
 from sonos_output import SonosOutput
 from stt_local import LocalWhisperSTTService
+from wake_word import WakeWordFilter
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.processors.audio.vad_processor import VADProcessor
@@ -59,6 +60,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         Pipeline(
             [
                 transport.input(),
+                # wake gate AFTER the source (frames flow downstream from
+                # transport.input()), BEFORE VAD/STT: gates audio in IDLE/LOCKED
+                *( [WakeWordFilter(echo_gate=gate)] if os.getenv("LVI_WAKE_WORD", "1") == "1" else [] ),
                 VADProcessor(vad_analyzer=SileroVADAnalyzer()),
                 stt,
                 brain,

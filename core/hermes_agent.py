@@ -52,6 +52,17 @@ def _strip_tags(text: str) -> str:
 
 FILLER_TEXT = "On it — one sec."
 
+# Standalone wake-phrase transcriptions (the wake word repeated after the
+# gate opened — observed live 2026-09-15: "Hey Linux." went to the brain).
+# If the utterance is just the wake phrase, it's not a command: drop it.
+_WAKE_PHRASE_RE = re.compile(
+    r"^\s*(hey|ok|okay|hi)?\s*,?\s*(willow|linux|yellow)\s*[.!?]?\s*$", re.IGNORECASE
+)
+
+
+def _is_wake_phrase_only(text: str) -> bool:
+    return bool(_WAKE_PHRASE_RE.match(text))
+
 
 class HermesAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
@@ -177,36 +188,39 @@ class HermesAgent(FrameProcessor):
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             if text:
-                import time as _t
-
-                now = _t.monotonic()
-                if text == self._last_user_text and (now - self._last_user_time) < self._dedup_window:
-                    logger.info(f"hermes_agent: dedup dropped repeat [{text[:60]}]")
-                    self._speaking = False
-                    self._flushed = True
+                if _is_wake_phrase_only(text):
+                    logger.info(f"hermes_agent: dropped wake-phrase-only [{text}]")
                 else:
-                    self._last_user_text = text
-                    self._last_user_time = now
-                    # Blocking HTTP in a thread so the pipeline stays live.
-                    # Stream-and-ack: if the brain takes >3s, speak a filler
-                    # first so the house doesn't feel dead (tool-heavy turns
-                    # measured at 20-40s+ server-side, 2026-09-15).
-                    import asyncio
+                    import time as _t
 
-                    ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
-                    try:
-                        reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
-                    except TimeoutError:
-                        await self.push_frame(TTSSpeakFrame(text=FILLER_TEXT))
-                        self._echo_texts.append(FILLER_TEXT)
-                        reply = await ask
-                    reply = _strip_tags(reply)
-                    self._echo_texts.append(reply)
-                    self._echo_texts = self._echo_texts[-4:]
-                    self._history.append({"role": "user", "content": text})
-                    self._history.append({"role": "assistant", "content": reply})
-                    self._history = self._history[-self._max_history:]
-                    logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
-                    await self.push_frame(TTSSpeakFrame(text=reply))
+                    now = _t.monotonic()
+                    if text == self._last_user_text and (now - self._last_user_time) < self._dedup_window:
+                        logger.info(f"hermes_agent: dedup dropped repeat [{text[:60]}]")
+                        self._speaking = False
+                        self._flushed = True
+                    else:
+                        self._last_user_text = text
+                        self._last_user_time = now
+                        # Blocking HTTP in a thread so the pipeline stays live.
+                        # Stream-and-ack: if the brain takes >3s, speak a filler
+                        # first so the house doesn't feel dead (tool-heavy turns
+                        # measured at 20-40s+ server-side, 2026-09-15).
+                        import asyncio
+
+                        ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
+                        try:
+                            reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
+                        except TimeoutError:
+                            await self.push_frame(TTSSpeakFrame(text=FILLER_TEXT))
+                            self._echo_texts.append(FILLER_TEXT)
+                            reply = await ask
+                        reply = _strip_tags(reply)
+                        self._echo_texts.append(reply)
+                        self._echo_texts = self._echo_texts[-4:]
+                        self._history.append({"role": "user", "content": text})
+                        self._history.append({"role": "assistant", "content": reply})
+                        self._history = self._history[-self._max_history:]
+                        logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
+                        await self.push_frame(TTSSpeakFrame(text=reply))
 
         await self.push_frame(frame, direction)
