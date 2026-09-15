@@ -34,6 +34,24 @@ VOICE_SYSTEM_PROMPT = (
     "never read out raw command output — summarize it conversationally."
 )
 
+# TTS audio tags ([laughs] etc.) render on eleven_v3 but flash_v2_5 speaks them
+# literally — strip from spoken text until the TTS backend renders tags.
+import re
+
+_TAG_RE = re.compile(r"\[[^\]]{1,20}\]")
+
+
+def _normalize(text: str) -> str:
+    """Lowercase alphanumerics only — for echo containment checks."""
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _strip_tags(text: str) -> str:
+    return _TAG_RE.sub(" ", text).strip()
+
+
+FILLER_TEXT = "On it — one sec."
+
 
 class HermesAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
@@ -59,6 +77,11 @@ class HermesAgent(FrameProcessor):
         self._last_user_text: str = ""
         self._last_user_time: float = 0.0
         self._dedup_window: float = 10.0
+        # Echo containment: her last spoken texts (reply + filler) — a
+        # transcription that contains a chunk of these IS her echo, whenever
+        # it arrives (duration gates lose the race when her Sonos reply talks
+        # over the mic and whisper transcribes late; measured live 2026-09-15).
+        self._echo_texts: list[str] = []
         # Server-side conversation chain (per-connection): "voice-<zone>-<ts>"
         import os
         import uuid
@@ -67,6 +90,25 @@ class HermesAgent(FrameProcessor):
             "LVI_CONVERSATION", f"voice-{os.getenv('LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
         )
         logger.info(f"hermes_agent: conversation '{self._conversation}'")
+
+    def _is_own_echo(self, text: str) -> bool:
+        """True if `text` contains a meaningful chunk of her own last words.
+
+        An echo is her words coming back out of the mic — so containment beats
+        timing. Matches on any 5+ word run of a previously spoken text.
+        """
+        norm = _normalize(text)
+        if not norm or not self._echo_texts:
+            return False
+        words = norm.split()
+        if len(words) < 3:
+            return False
+        for spoken in self._echo_texts:
+            spoken_words = set(_normalize(spoken).split())
+            hits = sum(1 for w in words if w in spoken_words)
+            if words and hits / len(words) >= 0.6:
+                return True
+        return False
 
     def _ask_hermes(self, text: str) -> str:
         """One chat completion; returns the reply text.
@@ -117,6 +159,8 @@ class HermesAgent(FrameProcessor):
             if frame.text.strip():
                 if self._echo_gate and self._echo_gate.blocked():
                     logger.debug(f"hermes_agent: echo-gate dropped [{frame.text.strip()}]")
+                elif self._is_own_echo(frame.text):
+                    logger.info(f"hermes_agent: containment dropped echo [{frame.text.strip()[:60]}]")
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()
@@ -153,8 +197,12 @@ class HermesAgent(FrameProcessor):
                     try:
                         reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
                     except TimeoutError:
-                        await self.push_frame(TTSSpeakFrame(text="On it — one sec."))
+                        await self.push_frame(TTSSpeakFrame(text=FILLER_TEXT))
+                        self._echo_texts.append(FILLER_TEXT)
                         reply = await ask
+                    reply = _strip_tags(reply)
+                    self._echo_texts.append(reply)
+                    self._echo_texts = self._echo_texts[-4:]
                     self._history.append({"role": "user", "content": text})
                     self._history.append({"role": "assistant", "content": reply})
                     self._history = self._history[-self._max_history:]
