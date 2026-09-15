@@ -34,7 +34,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         language: Optional[str] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(api_key="sk-local-whisper-unused", **kwargs)
         self._model_name = model
         self._device = device
         self._compute_type = compute_type

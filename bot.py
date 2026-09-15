@@ -17,6 +17,11 @@ from loguru import logger
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
 
+# Load .env (secrets live only on the host, gitignored) before any env reads.
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 from brain_stub import StubBrain
 from stt_local import LocalWhisperSTTService
 
@@ -86,5 +91,24 @@ async def bot(runner_args: RunnerArguments):
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
+
+    # Serve HTTPS when certs exist: plain-HTTP LAN origins are insecure
+    # contexts, so browsers hide getUserMedia/RTCPeerConnection and the
+    # prebuilt client dies with "WebRTC not supported or suppressed".
+    # The pipecat runner has no SSL args, so we wrap uvicorn.run to inject
+    # the certfile/keyfile. Certs: scripts/make-cert.sh (self-signed, click
+    # through the browser warning once).
+    import uvicorn
+
+    _cert = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
+    if os.path.exists(os.path.join(_cert, "cert.pem")):
+        _orig_run = uvicorn.run
+
+        def _tls_run(app, host=None, port=None, **kw):
+            kw["ssl_certfile"] = os.path.join(_cert, "cert.pem")
+            kw["ssl_keyfile"] = os.path.join(_cert, "key.pem")
+            return _orig_run(app, host=host, port=port, **kw)
+
+        uvicorn.run = _tls_run
 
     main()
