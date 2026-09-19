@@ -11,5 +11,5 @@ sleep 1
 cd ~/projects/lenoxvi
 NV=~/venvs/lenoxvi/lib/python3.14/site-packages/nvidia
 export LD_LIBRARY_PATH="$NV/cublas/lib:$NV/cudnn/lib:$NV/cuda_nvrtc/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-nohup ~/venvs/lenoxvi/bin/python bot.py --host 0.0.0.0 --port 7860 > logs/bot.log 2>&1 &
+nohup ~/venvs/lenoxvi/bin/python bot.py --host 203.0.113.185 --port 7860 --esp32 > logs/bot.log 2>&1 &
 echo RESTARTED-PID=$!

@@ -84,51 +84,91 @@ class WakeWordFilter(FrameProcessor):
         now = time.monotonic()
 
         if isinstance(frame, InputAudioRawFrame):
-            # LOCKED = browser playback (BotStarted/StoppedSpeaking frames).
-            # echo-gate blocked = Sonos clip still sounding (SonosOutput blocks
-            # it for clip duration + margin; clips play ASYNC after the bot's
-            # browser audio ends — observed live: fillers and replies leaking
-            # into user transcriptions through the open mic, 2026-09-15).
-            if self._state is TurnState.LOCKED:
-                return
-            if self._echo_gate and self._echo_gate.blocked():
-                return
-
-            if self._state is TurnState.AWAKE:
-                self._last_activity = now
-                await self.push_frame(frame, direction)  # VAD/STT get it
-                return
-
-            # IDLE: feed the wake listener, swallow downstream
+            # Feed the wake listener in EVERY state (2026-09-19): starving OWW
+            # during AWAKE/LOCKED spliced a multi-second hole in its spectrogram
+            # buffer; on resume it false-fired 0.93-0.98 within 50ms of gate
+            # close — an endless close->rewake loop that kept the ring purple
+            # forever (decaying scores vs a real wake's steady 1.0 were the
+            # tell). Continuous feeding = no discontinuity, no false wakes.
             self._audio_buf.extend(frame.audio)
             while len(self._audio_buf) >= self._frame_size:
                 chunk = bytes(self._audio_buf[: self._frame_size])
                 del self._audio_buf[: self._frame_size]
                 score = await asyncio.to_thread(self._score, chunk)
-                if score >= self._threshold:
-                    # Drop buffered audio (wake-phrase tail) but keep flowing
-                    # audio to VAD/STT: the observed failure (2026-09-15) was a
-                    # REPEATED wake word after the gate opened — that's a
-                    # standalone wake-phrase transcription, which hermes_agent
-                    # drops. Swallowing audio here would deadlock VAD (it sits
-                    # downstream and needs audio to signal fresh speech).
+                # Diag (2026-09-16): once/sec report of the best OWW score and
+                # the input peak, so a silent gate is distinguishable from a
+                # gate that never got audio. Remove once the node is stable.
+                self._diag_best = max(getattr(self, "_diag_best", 0.0), score)
+                pk = int(np.abs(np.frombuffer(chunk, dtype=np.int16)).max()) if chunk else 0
+                self._diag_peak = max(getattr(self, "_diag_peak", 0), pk)
+                if now - getattr(self, "_diag_t", 0.0) >= 1.0:
+                    logger.info(f"wake_word: idle diag best_score={self._diag_best:.2f} in_peak={self._diag_peak}")
+                    self._diag_best, self._diag_peak, self._diag_t = 0.0, 0, now
+                if score >= self._threshold and self._state is TurnState.IDLE:
+                    # Only IDLE acts on the wake score. Drop buffered audio
+                    # (wake-phrase tail) but keep flowing audio to VAD/STT:
+                    # swallowing it would deadlock VAD (it sits downstream and
+                    # needs audio to signal fresh speech).
                     self._audio_buf.clear()
                     self._state = TurnState.AWAKE
                     self._last_activity = now
                     logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
+                    await self._send_led("oww-awake")
                     break
+
+            # Audio gating: only IDLE swallows downstream audio. LOCKED = bot
+            # speaking (her voice can't re-trigger STT); echo-gate blocked =
+            # Sonos clip still sounding (SonosOutput blocks it for clip
+            # duration + margin; clips play ASYNC after the bot's browser
+            # audio ends — observed live 2026-09-15).
+            if self._state is TurnState.LOCKED:
+                return
+            if self._echo_gate and self._echo_gate.blocked():
+                return
+            if self._state is TurnState.AWAKE:
+                await self.push_frame(frame, direction)  # VAD/STT get it
+                # Timeout check must run HERE: in a quiet room only audio
+                # frames flow, so the non-audio elif below would never fire.
+                # Raw audio is NOT activity — activity is a VAD speech start
+                # or a bot turn frame.
+                if (now - self._last_activity) > self._awake_timeout:
+                    self._state = TurnState.IDLE
+                    logger.debug("wake_word: -> IDLE (timeout)")
+                    await self._send_led("oww-sleeping")
+                return
+            # IDLE: audio already fed the wake listener above — swallow
             return
 
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
             self._swallowing_bleed = False
             logger.debug("wake_word: LOCKED (bot speaking)")
+            await self._send_led("bot-started-speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._state = TurnState.AWAKE
             self._last_activity = now
             logger.debug("wake_word: -> AWAKE (bot finished)")
+            await self._send_led("bot-stopped-speaking")
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            # Real activity: user is talking (this is what keeps AWAKE alive)
+            if self._state is TurnState.AWAKE:
+                self._last_activity = now
         elif self._state is TurnState.AWAKE and (now - self._last_activity) > self._awake_timeout:
             self._state = TurnState.IDLE
             logger.debug("wake_word: -> IDLE (timeout)")
+            await self._send_led("oww-sleeping")
 
         await self.push_frame(frame, direction)
+
+    async def _send_led(self, msg_type: str):
+        """Push a state message downstream so the node's LED ring can follow
+        the wake/listen/speak cycle. Transport is reachable via the frame
+        pipeline's task; OutputTransportMessageFrame rides the data channel.
+        Filtered per direction below (only downstream)."""
+        try:
+            from pipecat.frames.frames import OutputTransportMessageFrame
+            await self.push_frame(
+                OutputTransportMessageFrame(message={"type": msg_type})
+            )
+        except Exception as e:  # LED state is cosmetic — never kill the turn
+            logger.debug(f"wake_word: LED msg '{msg_type}' failed: {e}")

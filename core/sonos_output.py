@@ -62,6 +62,8 @@ class ClipServer:
 class SonosOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
+    _shared_clip_server = None  # module-level: ONE server for all pipelines
+
     def __init__(self, config_path: str = "config.yaml", echo_gate=None, **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
@@ -72,9 +74,16 @@ class SonosOutput(FrameProcessor):
         self._volume = int(sonos.get("clip_volume", 70))
         self._zones = sonos.get("zones", {})
         cs = cfg.get("clip_server", {})
-        self._clip_server = ClipServer(
-            Path("clips"), cs.get("host_ip", "203.0.113.185"), int(cs.get("port", 8765))
-        )
+        # The clip server binds a fixed port (8765); binding per-pipeline
+        # leaks the port when a pipeline is cancelled without cleanup()
+        # (idle-timeout cancel path), and the next session then dies with
+        # "[Errno 98] address already in use" (seen 2026-09-15 with the
+        # always-reconnecting ESP32 node). Bind ONCE, share across pipelines.
+        if SonosOutput._shared_clip_server is None:
+            SonosOutput._shared_clip_server = ClipServer(
+                Path("clips"), cs.get("host_ip", "203.0.113.185"), int(cs.get("port", 8765))
+            )
+        self._clip_server = SonosOutput._shared_clip_server
         self._pcm = bytearray()
         self._sample_rate = 24000
         self._channels = 1
@@ -88,11 +97,12 @@ class SonosOutput(FrameProcessor):
         # setup() is the guaranteed lifecycle hook in pipecat 1.10 —
         # FrameProcessor.start() is NOT auto-called for bare processors.
         await super().setup(setup)
-        if self._enabled:
+        if self._enabled and not self._clip_server._runner:
             await self._clip_server.start()
 
     async def cleanup(self):
-        await self._clip_server.stop()
+        # Shared server: do NOT stop it here — other pipelines may still
+        # reference it, and the bot process exit releases the port anyway.
         await super().cleanup()
 
     async def _speak_to_sonos(self, pcm: bytes) -> None:

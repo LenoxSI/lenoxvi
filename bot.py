@@ -22,6 +22,13 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
+# aiortc debug: RTP/SRTP drops inside aiortc are silent by default. This is
+# the only way to see WHY frames never reach the track (decrypt failure,
+# demux mismatch, wrong SSRC/PT routing). Remove once the node is stable.
+import logging as _std_logging
+_std_logging.getLogger("aiortc").setLevel(_std_logging.DEBUG)
+_std_logging.basicConfig(level=_std_logging.WARNING)
+
 from brain_stub import StubBrain
 from echo_gate import EchoGate
 from hermes_agent import HermesAgent
@@ -71,7 +78,15 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 transport.output(),
             ]
         ),
-        params=PipelineParams(allow_interruptions=False),  # no barge-in by design
+        params=PipelineParams(
+            allow_interruptions=False,  # no barge-in by design
+        ),
+        # Always-on ESP32 node: a quiet house is NOT a dead session. This is a
+        # PipelineTask kwarg (NOT a PipelineParams field — putting it there
+        # silently did nothing and the 300s worker default killed every quiet
+        # session at exactly 5 min). None = never idle-cancel; the node's STUN
+        # keepalive + on_client_disconnected handle real disconnects.
+        idle_timeout_secs=None,
     )
 
     @transport.event_handler("on_client_connected")
