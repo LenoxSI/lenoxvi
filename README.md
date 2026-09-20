@@ -13,8 +13,11 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 - `bot.py` — pipecat pipeline: transport, wake gate, VAD, STT, brain, TTS, Sonos out
 - `core/` — the pieces the pipeline wires together
   - `wake_word.py` — openWakeWord gate + turn lock (IDLE/AWAKE/LOCKED, 5s window)
-  - `hermes_agent.py` — the real brain (Hermes API over LAN, bearer key)
-  - `brain_stub.py` — the default dev brain (echo), selected via `LVI_BRAIN=stub`
+  - `hermes_agent.py` — the real brain (Hermes API over LAN, bearer key);
+    **production runs this** (`LVI_BRAIN=hermes` in appliance-host's .env)
+  - `brain_stub.py` — deterministic echo brain for bench/dev runs without
+    the Hermes API (the code default via `LVI_BRAIN` unset; a misconfigured
+    deploy answers with canned lines — fail-loudly by setting LVI_BRAIN)
   - `stt_local.py` — faster-whisper large-v3-turbo on the GPU
   - `sonos_output.py` — replies as Sonos audioClip overlays (S2 only, vol ~70)
   - `echo_gate.py` — room-echo containment (safety net behind the turn lock)

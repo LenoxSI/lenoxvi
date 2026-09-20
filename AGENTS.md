@@ -15,7 +15,8 @@ House voice rig (v2). Read `notes/v2/` first — that tree is the source of trut
 ## Landmines (measured, not lore)
 
 - **sonos_output**: S2 Port/Amp only (`notes/v2/001-sonos-output.md` — clip volume ~70, ~200ms load, WiiM cannot overlay, never route through HA).
-- **Node reality**: WiFi first; ESP32-S3 with real PSRAM or the firmware starves; see v1 post-mortem before designing nodes.
+- **Node firmware** (reSpeaker, measured 2026-09-19; runbook = `notes/v2/014`): XMOS **I2S-master image only** (slave image = boot lottery); I2C command maps are **per-firmware-image** (Seeed wiki map for v1.0.x); never I2C-scan the bus; ESP32 internal RAM is exhausted post-WiFi/WebRTC — big stacks need static/PSRAM allocation, and mbedtls needs `MBEDTLS_EXTERNAL_MEM_ALLOC` or every TLS call fails alloc.
+- **OTA deploys**: bump `project(VERSION)` in the firmware CMakeLists *and* the server manifest together — a mismatch re-flashes the same firmware every boot (design note). USB is retired; the only flash path is `scripts/deploy_firmware.sh`.
 
 ## Style
 
