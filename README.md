@@ -31,8 +31,9 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 - `firmware/` — node firmware images + OTA manifests
   - `node/` — served by firmware_server (`version.json` + current bin)
   - `xvf3800/` — XMOS images; **master** = the one that works, slave = reference only
-- `config.yaml` — **the tuning surface**: every behavior knob in one file
-  (wake threshold/timeout, VAD params, STT/TTS/brain settings, Sonos zones).
+- `config.example.yaml` — **the tuning surface template**: every behavior knob
+  in one file (wake threshold/timeout, VAD params, STT/TTS/brain settings,
+  Sonos zones). Copy to `config.yaml` (gitignored, per-machine) and edit.
   Precedence: `config.yaml` > `TK_*` env var > code default (`core/config.py`).
   Secrets stay in `.env`. Edit + `scripts/restart.sh` to apply — no rebuild.
 - `logs/` — gitignored runtime logs (`bot.log` lives on appliance-host)
@@ -44,7 +45,6 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
   carry them). Start at `TODO.md`, then the numbered notes.
 - **Node firmware:** `LenoxVI/lenoxvi-firmware` (branch `respeaker-xvf3800`) —
   the node is pure firmware; lenoxvi only serves it (`/api/offer` + `/firmware/*`).
-- **Working rules:** `AGENTS.md`.
 
 ## Run
 

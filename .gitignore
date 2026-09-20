@@ -13,3 +13,9 @@ node_modules/
 
 # wake word models — stay local, never in GitHub
 *.onnx
+
+# agent-facing rule files — notes-backed, never GitHub
+AGENTS.md
+CLAUDE.md
+# runtime config — template is config.example.yaml
+config.yaml

@@ -1,0 +1,79 @@
+# lenoxvi config — THE tuning surface for the house voice bot.
+# Behavior lives here; secrets stay in gitignored .env (API keys).
+# Precedence: this file > TK_* env var > code default (core/config.py).
+# Edit + `bash scripts/restart.sh` on your bot host to apply.
+#
+# This is the TEMPLATE. Copy to config.yaml and fill in your values:
+#   cp config.example.yaml config.yaml
+# Placeholders use <ANGLE_BRACKETS> — every one must be replaced.
+
+# ── Wake gate ──────────────────────────────────────────────────────────
+wake:
+  enabled: true
+  threshold: 0.40        # OWW score needed to wake; real "Hey <YourName>"
+                        # typically lands 0.84-1.00. Lower = more sensitive,
+                        # but scores below real speech risk false wakes.
+  awake_timeout: 5.0     # seconds of no user/bot activity before the gate
+                        # closes and the mic stops feeding STT
+  # model: <your-wake-word.onnx>   # repo-root .onnx; see README (wake-word
+  #                                # training is beyond this template's scope)
+
+# ── Voice activity detection (Silero, via bot.py) ───────────────────────
+vad:
+  confidence: 0.7       # speech probability to trigger start/stop
+  start_secs: 0.2
+  stop_secs: 0.2        # lower = snappier turn-ends but clips word onsets
+  min_volume: 0.6       # floor under VAD (ignores very quiet rooms)
+
+# ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
+stt:
+  model: large-v3-turbo
+  device: cuda
+  compute_type: float16
+  # language: en         # unset = auto-detect per utterance
+
+# ── Text-to-speech (ElevenLabs; voice_id is in .env, it's account data) ─
+tts:
+  # backend: elevenlabs | chatterbox — the swap is ONE line + restart.
+  # chatterbox = local lane (Chatterbox-TTS-Server on port 4123, Web UI +
+  # voice cloning; systemd unit chatterbox-tts.service).
+  backend: elevenlabs
+  model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
+                            # the websocket handshake rejects v3 with HTTP 400
+  chatterbox:
+    url: http://localhost:4123/v1   # OpenAI-compatible endpoint
+    voice: Emily.wav               # stock voice; upload your own via the
+                                   # Web UI (http://<host>:4123) and set the
+                                   # filename here.
+    model: chatterbox-turbo        # hot-swappable in the Web UI dropdown
+
+# ── Brain (OpenAI-compatible chat endpoint — we use a Hermes agent) ─────
+brain:
+  kind: hermes          # hermes | stub (stub = canned echo, bench only)
+  url: http://<brain-host>:8642/v1
+  model: hermes-agent
+  zone: living_room     # conversation tag prefix: voice-<zone>-<id>
+  # Fillers spoken when the brain takes >3s. Keep each <2s spoken.
+  fillers:
+    - "On it."
+    - "Working on it…"
+    - "Give me a sec."
+    - "Let me check…"
+    - "One moment."
+
+# ── Sonos output (Sonos audioClip overlay; S2 Port/Amp only) ────────────
+sonos:
+  enabled: true
+  default_zone: <zone-name>
+  clip_volume: 70          # measured sweet spot for a Port at normal volume
+  clip_retention_days: 2   # 48h retention: clips are served once, then garbage
+  zones:
+    <zone-name>:
+      ip: <sonos-player-ip>
+      player_uid: <RINCON_uid>    # from the Sonos device info page
+
+# How the Sonos players fetch TTS clips: the appliance serves them over
+# LAN HTTP. host_ip must be the LAN IP the Sonos players can reach.
+clip_server:
+  host_ip: <bot-host-ip>
+  port: 8765
