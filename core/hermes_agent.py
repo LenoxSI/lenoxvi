@@ -13,8 +13,10 @@ Config (.env on the host):
 """
 
 import json
+import os
 import time
 import urllib.request
+import uuid
 
 from loguru import logger
 
@@ -100,13 +102,14 @@ class HermesAgent(FrameProcessor):
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None, **kwargs):
         super().__init__(**kwargs)
-        import os
         from config import cfg_env
 
-        self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://203.0.113.135:8642/v1")
+        self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://<brain-host>:8642/v1")
         self._key = os.environ["LVI_HERMES_KEY"]
         self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
-        self._lull_secs = lull_secs
+        # Turn-shape tunables — the knobs closest to conversation UX. Same
+        # precedence as every other knob: config.yaml > TK_* env > default.
+        self._lull_secs = float(cfg_env("brain", "lull_secs", "LVI_LULL_SECS", lull_secs))
         self._max_history = max_history
         self._echo_gate = echo_gate
         self._buffer: list[str] = []
@@ -119,16 +122,13 @@ class HermesAgent(FrameProcessor):
         # bot is still speaking a slow reply).
         self._last_user_text: str = ""
         self._last_user_time: float = 0.0
-        self._dedup_window: float = 10.0
+        self._dedup_window: float = float(cfg_env("brain", "dedup_window", "LVI_DEDUP_WINDOW", 10.0))
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
         # over the mic and whisper transcribes late; measured live 2026-09-15).
         self._echo_texts: list[str] = []
         # Server-side conversation chain (per-connection): "voice-<zone>-<ts>"
-        import os
-        import uuid
-
         self._conversation = os.getenv(
             "LVI_CONVERSATION",
             f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
@@ -224,9 +224,7 @@ class HermesAgent(FrameProcessor):
                 if _is_wake_phrase_only(text):
                     logger.info(f"hermes_agent: dropped wake-phrase-only [{text}]")
                 else:
-                    import time as _t
-
-                    now = _t.monotonic()
+                    now = time.monotonic()
                     if text == self._last_user_text and (now - self._last_user_time) < self._dedup_window:
                         logger.info(f"hermes_agent: dedup dropped repeat [{text[:60]}]")
                         self._speaking = False

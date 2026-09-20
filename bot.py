@@ -1,12 +1,17 @@
-"""lenoxvi Phase 1 bot: local whisper ears, stub brain, ElevenLabs TTS (sonos_output later).
+"""lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> brain -> TTS.
 
-Pipeline: WebRTC in -> VAD (Silero) -> local faster-whisper STT (gpu)
-          -> StubBrain -> ElevenLabs TTS (Ivy) -> WebRTC out
+Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord "Hey Willow") ->
+Silero VAD -> local faster-whisper STT -> brain (HermesAgent via config.yaml
+brain.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
+(voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.
 
 Run on appliance-host from ~/projects/lenoxvi:
   ~/venvs/lenoxvi/bin/python bot.py
-Then open http://203.0.113.185:7860/client in a LAN browser.
-Requires .env (see .env.example) with ELEVENLABS_API_KEY and LVI_TTS_VOICE_ID.
+Then open https://<bot-host-LAN-IP>:7860/client in a LAN browser
+(mic access needs the HTTPS secure context; certs via scripts/make-cert.sh).
+
+Requires .env (see .env.example) with all three keys:
+  ELEVENLABS_API_KEY, LVI_TTS_VOICE_ID, LVI_HERMES_KEY.
 """
 
 import asyncio
@@ -21,13 +26,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cor
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-
-# aiortc debug: RTP/SRTP drops inside aiortc are silent by default. This is
-# the only way to see WHY frames never reach the track (decrypt failure,
-# demux mismatch, wrong SSRC/PT routing). Remove once the node is stable.
-import logging as _std_logging
-_std_logging.getLogger("aiortc").setLevel(_std_logging.DEBUG)
-_std_logging.basicConfig(level=_std_logging.WARNING)
 
 from brain_stub import StubBrain
 from echo_gate import EchoGate

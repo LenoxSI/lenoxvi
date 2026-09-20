@@ -56,7 +56,9 @@ class WakeWordFilter(FrameProcessor):
         from config import cfg_env
 
         super().__init__(**kwargs)
-        self._model_path = str(Path(model_path))
+        # Model path: config.yaml wake.model > LVI_WAKE_MODEL env > the repo-root
+        # default (a trained .onnx; gitignored — see config.example.yaml).
+        self._model_path = str(Path(cfg_env("wake", "model", "LVI_WAKE_MODEL", model_path) or model_path))
         # threshold: config.yaml wake.threshold > LVI_WAKE_THRESHOLD > code default
         _default_thresh = WAKE_THRESHOLD if threshold is None else threshold
         _thresh = cfg_env("wake", "threshold", "LVI_WAKE_THRESHOLD", str(_default_thresh))
@@ -67,7 +69,12 @@ class WakeWordFilter(FrameProcessor):
         self._state = TurnState.IDLE
         self._oww = None  # lazy-loaded in setup
         self._name = ""
-        self._frame_size = 1280  # OWW 80ms @ 16kHz
+        # OWW's canonical frame is 1280 SAMPLES (80ms @ 16kHz) = 2560 bytes
+        # int16 (verified in openWakeWord 0.4.0: predict() expects multiples
+        # of 80ms/1280 samples). This buffer is BYTES — 1280 bytes here would
+        # feed OWW at half cadence, doubling predict() calls on the 24/7 hot
+        # path vs the designed rate.
+        self._frame_size = 2560
         self._audio_buf = bytearray()
         self._last_activity = time.monotonic()
 
@@ -100,15 +107,6 @@ class WakeWordFilter(FrameProcessor):
                 chunk = bytes(self._audio_buf[: self._frame_size])
                 del self._audio_buf[: self._frame_size]
                 score = await asyncio.to_thread(self._score, chunk)
-                # Diag (2026-09-16): once/sec report of the best OWW score and
-                # the input peak, so a silent gate is distinguishable from a
-                # gate that never got audio. Remove once the node is stable.
-                self._diag_best = max(getattr(self, "_diag_best", 0.0), score)
-                pk = int(np.abs(np.frombuffer(chunk, dtype=np.int16)).max()) if chunk else 0
-                self._diag_peak = max(getattr(self, "_diag_peak", 0), pk)
-                if now - getattr(self, "_diag_t", 0.0) >= 1.0:
-                    logger.info(f"wake_word: idle diag best_score={self._diag_best:.2f} in_peak={self._diag_peak}")
-                    self._diag_best, self._diag_peak, self._diag_t = 0.0, 0, now
                 if score >= self._threshold and self._state is TurnState.IDLE:
                     # Only IDLE acts on the wake score. Drop buffered audio
                     # (wake-phrase tail) but keep flowing audio to VAD/STT:
@@ -146,7 +144,6 @@ class WakeWordFilter(FrameProcessor):
 
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
-            self._swallowing_bleed = False
             logger.debug("wake_word: LOCKED (bot speaking)")
             await self._send_led("bot-started-speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
