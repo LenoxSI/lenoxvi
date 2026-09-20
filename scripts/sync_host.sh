@@ -23,10 +23,12 @@ scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 # config.yaml/AGENTS.md/CLAUDE.md are NOT in git anymore (2026-09-20).
 # They live in the repo root here; sync them explicitly.
 scp -q "$DIR/config.yaml" "$HOST:/tmp/lenoxvi-config.yaml"
+scp -q "$DIR/AGENTS.md" "$DIR/CLAUDE.md" "$HOST:/tmp/" 2>/dev/null || true
 ssh -o BatchMode=yes "$HOST" 'cd ~/projects/lenoxvi && \
   git fetch /tmp/lenoxvi.bundle refs/heads/main:refs/remotes/origin/main && \
   git reset --hard refs/remotes/origin/main && \
   mv /tmp/lenoxvi-config.yaml config.yaml && \
+  mv /tmp/AGENTS.md /tmp/CLAUDE.md . 2>/dev/null; \
   rm -f /tmp/lenoxvi.bundle && \
   echo "--- host now at:" && git log --oneline -1 && \
   git status --short | head -5 && echo "--- status clean if nothing listed above"'
