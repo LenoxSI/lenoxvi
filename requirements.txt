@@ -1,0 +1,20 @@
+# lenoxvi — runtime dependencies (top-level, version-pinned to what's
+# actually running on appliance-host as of 2026-09-20; pipecat 1.11.0).
+# Transitive deps resolve from these pins; if a fresh install ever needs
+# more, add it here rather than committing a 174-line `pip freeze`.
+#
+# GPU extras: faster-whisper pulls CUDA wheels (nvidia-cublas/cudnn) on
+# CUDA-capable hosts. LD_LIBRARY_PATH for those wheels is set in the
+# systemd unit (lenoxvi-bot.service), NOT in code.
+pipecat-ai==1.11.0
+pipecat-ai-small-webrtc-prebuilt==2.5.0
+faster-whisper==1.2.1
+openwakeword==0.4.0
+fastapi==0.141.1
+uvicorn==0.53.0
+aiohttp==3.14.3
+openai==3.14.0
+loguru==0.7.3
+python-dotenv==1.2.3
+PyYAML==6.0.3
+numpy==2.5.3
