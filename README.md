@@ -25,7 +25,7 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 - `scripts/` — ops & bench tests (each has a docstring header):
   - `restart.sh` — bot restart on appliance-host (`--esp32 --host` flags)
   - `deploy_firmware.sh` — build + version + ship a node firmware OTA (VM-side)
-  - `serial_watch.py` / `replay_clip.py` — node serial capture / clip replay
+  - `serial_watch.py` — node serial capture (survives replug)
   - `*-test.py` — headless bench tests for the core pieces
   - `make-cert.sh` — self-signed HTTPS certs for the bot
 - `firmware/` — node firmware images + OTA manifests
