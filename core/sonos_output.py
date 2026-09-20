@@ -14,6 +14,7 @@ The processor is pass-through: frames continue downstream, so the browser
 client keeps its audio while Sonos gets the same reply.
 """
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -59,10 +60,40 @@ class ClipServer:
         return f"http://{self._host_ip}:{self._port}/{filename}"
 
 
+def _prune_clips(clips_dir: Path, retention_days: int) -> int:
+    """Age-gated .mp3 prune. Returns count removed. Shared by the startup
+    pass and the hourly task — one implementation, no drift."""
+    cutoff = time.time() - retention_days * 86400
+    removed = 0
+    if clips_dir.is_dir():
+        for f in clips_dir.glob("*.mp3"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    removed += 1
+            except OSError:
+                pass  # raced a fetch; leave it for next pass
+    return removed
+
+
+async def _clip_prune_loop(clips_dir: Path, retention_days: int):
+    """Hourly clip prune (2026-09-20): the old construction-time-only prune
+    never fired on a quiet month — the node holds ONE long-lived session, so
+    SonosOutput constructs ~once per boot, not per session. This task runs
+    every hour regardless of restarts/sessions. Lives and dies with the bot
+    (which systemd keeps alive)."""
+    while True:
+        await asyncio.sleep(3600)
+        removed = _prune_clips(clips_dir, retention_days)
+        if removed:
+            logger.info(f"sonos_output: hourly prune removed {removed} clip(s)")
+
+
 class SonosOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
     _shared_clip_server = None  # module-level: ONE server for all pipelines
+    _prune_task_started = False  # ONE hourly prune loop per process
 
     def __init__(self, config_path: str = "config.yaml", echo_gate=None, **kwargs):
         super().__init__(**kwargs)
@@ -74,24 +105,17 @@ class SonosOutput(FrameProcessor):
         self._volume = int(sonos.get("clip_volume", 70))
         self._zones = sonos.get("zones", {})
         cs = cfg.get("clip_server", {})
-        # Opportunistic clip pruning (2026-09-20): clips are served to the
-        # Sonos within SECONDS of creation and never fetched again — anything
-        # old is garbage. Prune at startup (restarts are frequent) instead of
-        # a cron. Age-gated, .mp3 only, never touches fresh clips.
+        # Opportunistic clip pruning (2026-09-20): once at startup AND hourly
+        # via _clip_prune_loop (a quiet month with no restarts must not grow
+        # clips/ — the node holds one long-lived session, so construction
+        # alone fires ~never). Retention: sonos.clip_retention_days (48h).
         retention_days = int(sonos.get("clip_retention_days", 7))
-        cutoff = time.time() - retention_days * 86400
-        clips_dir = Path("clips")
-        removed = 0
-        if clips_dir.is_dir():
-            for f in clips_dir.glob("*.mp3"):
-                try:
-                    if f.stat().st_mtime < cutoff:
-                        f.unlink()
-                        removed += 1
-                except OSError:
-                    pass  # raced a fetch; leave it for next pass
+        removed = _prune_clips(Path("clips"), retention_days)
         if removed:
             logger.info(f"sonos_output: pruned {removed} clip(s) older than {retention_days}d")
+        if not SonosOutput._prune_task_started:
+            SonosOutput._prune_task_started = True
+            asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
         # The clip server binds a fixed port (8765); binding per-pipeline
         # leaks the port when a pipeline is cancelled without cleanup()
         # (idle-timeout cancel path), and the next session then dies with
