@@ -31,7 +31,10 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 - `firmware/` — node firmware images + OTA manifests
   - `node/` — served by firmware_server (`version.json` + current bin)
   - `xvf3800/` — XMOS images; **master** = the one that works, slave = reference only
-- `config.yaml` — Sonos zone map (IP + UID per zone)
+- `config.yaml` — **the tuning surface**: every behavior knob in one file
+  (wake threshold/timeout, VAD params, STT/TTS/brain settings, Sonos zones).
+  Precedence: `config.yaml` > `TK_*` env var > code default (`core/config.py`).
+  Secrets stay in `.env`. Edit + `scripts/restart.sh` to apply — no rebuild.
 - `logs/` — gitignored runtime logs (`bot.log` lives on appliance-host)
 
 ## Where the knowledge lives
