@@ -70,10 +70,11 @@ class HermesAgent(FrameProcessor):
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None, **kwargs):
         super().__init__(**kwargs)
         import os
+        from config import cfg_env
 
-        self._url = os.getenv("LVI_HERMES_URL", "http://203.0.113.135:8642/v1")
+        self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://203.0.113.135:8642/v1")
         self._key = os.environ["LVI_HERMES_KEY"]
-        self._model = os.getenv("LVI_HERMES_MODEL", "hermes-agent")
+        self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
         self._lull_secs = lull_secs
         self._max_history = max_history
         self._echo_gate = echo_gate
@@ -98,7 +99,8 @@ class HermesAgent(FrameProcessor):
         import uuid
 
         self._conversation = os.getenv(
-            "LVI_CONVERSATION", f"voice-{os.getenv('LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
+            "LVI_CONVERSATION",
+            f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
         )
         logger.info(f"hermes_agent: conversation '{self._conversation}'")
 

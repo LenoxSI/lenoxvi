@@ -50,15 +50,20 @@ class TurnState(Enum):
 class WakeWordFilter(FrameProcessor):
     """Wake-word gate + turn lock. Non-audio frames always pass through."""
 
-    def __init__(self, model_path: str = WAKE_MODEL, threshold: float = WAKE_THRESHOLD,
+    def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
                  echo_gate=None, **kwargs):
         import os
+        from config import cfg_env
 
         super().__init__(**kwargs)
         self._model_path = str(Path(model_path))
-        self._threshold = threshold
+        # threshold: config.yaml wake.threshold > LVI_WAKE_THRESHOLD > code default
+        _default_thresh = WAKE_THRESHOLD if threshold is None else threshold
+        _thresh = cfg_env("wake", "threshold", "LVI_WAKE_THRESHOLD", str(_default_thresh))
+        self._threshold = float(_thresh)
         self._echo_gate = echo_gate
-        self._awake_timeout = float(os.getenv("LVI_AWAKE_TIMEOUT", str(AWAKE_TIMEOUT)))
+        _awake = cfg_env("wake", "awake_timeout", "LVI_AWAKE_TIMEOUT", str(AWAKE_TIMEOUT))
+        self._awake_timeout = float(_awake)
         self._state = TurnState.IDLE
         self._oww = None  # lazy-loaded in setup
         self._name = ""

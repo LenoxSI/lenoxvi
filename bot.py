@@ -49,19 +49,36 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
+    from config import cfg_env
+
     stt = LocalWhisperSTTService(
-        model=os.getenv("LVI_STT_MODEL", "large-v3-turbo"),
-        device=os.getenv("LVI_STT_DEVICE", "cuda"),
-        compute_type=os.getenv("LVI_STT_COMPUTE", "float16"),
-        language=os.getenv("LVI_STT_LANGUAGE") or None,
+        model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
+        device=cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
+        compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
+        language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
     tts = ElevenLabsTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id=os.getenv("LVI_TTS_VOICE_ID"),  # Ivy; set in .env
-        model=os.getenv("LVI_TTS_MODEL", "eleven_v3"),
+        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
     )
     gate = EchoGate()
-    brain = StubBrain(echo_gate=gate) if os.getenv("LVI_BRAIN", "stub") == "stub" else HermesAgent(echo_gate=gate)
+    brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
+            else StubBrain(echo_gate=gate))
+
+    # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes
+    # VADParams directly (pipecat 1.10); defaults match the old hardcodes.
+    from config import cfg
+    vad_cfg = cfg("vad") or {}
+    vad_params = {}
+    for k in ("confidence", "start_secs", "stop_secs", "min_volume"):
+        if k in vad_cfg:
+            vad_params[k] = float(vad_cfg[k])
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    vad_analyzer = (SileroVADAnalyzer(params=VADParams(**vad_params)) if vad_params
+                    else SileroVADAnalyzer())
+    if vad_params:
+        logger.info(f"vad params from config.yaml: {vad_params}")
 
     task = PipelineTask(
         Pipeline(
@@ -69,8 +86,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 transport.input(),
                 # wake gate AFTER the source (frames flow downstream from
                 # transport.input()), BEFORE VAD/STT: gates audio in IDLE/LOCKED
-                *( [WakeWordFilter(echo_gate=gate)] if os.getenv("LVI_WAKE_WORD", "1") == "1" else [] ),
-                VADProcessor(vad_analyzer=SileroVADAnalyzer()),
+                *( [WakeWordFilter(echo_gate=gate)] if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true") else [] ),
+                VADProcessor(vad_analyzer=vad_analyzer),
                 stt,
                 brain,
                 tts,
