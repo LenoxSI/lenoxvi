@@ -10,6 +10,7 @@ House voice rig (v2). Read `notes/v2/` first — that tree is the source of trut
 - **Staged ≠ built.** No installs, firmware flashes, or hardware orders without the owner's explicit go. Read-only recon on appliance-host (the appliance host, 203.0.113.185) is fine; state-changing work gets asked by class first.
 - **Mic-only nodes.** No speaker, AEC, or barge-in on satellites. Ducking handles overlap; sonos_output is the **Sonos audioClip overlay** (ratified 2026-09-15; see `notes/v2/001-sonos-output.md`). Triad analog paging is dead.
 - **Survivability is the point.** The appliance lives on appliance-host and talks to Hermes over a URL — a Hermes rebuild must never take house voice down.
+- **This repo goes public one day.** Keep it permanently clone-capable for collaborators: a stranger must be able to clone, follow the README, and reach a running bot. That means — no secrets in committed files or history (`.env` is secrets-only), no host-only paths or machine-specific values baked into tracked files, venv patching avoided in favor of upstream fixes (if a patch is unavoidable, it lives in `patches/` with an apply script), and the README always documents the fresh-clone path (certs, `.env.example`, config, model acquisition). Before flipping public: run the fresh-clone audit (design note).
 - `logs/` contents are gitignored; don't commit them.
 
 ## Landmines (measured, not lore)
