@@ -50,7 +50,38 @@ def _strip_tags(text: str) -> str:
     return _TAG_RE.sub(" ", text).strip()
 
 
-FILLER_TEXT = "On it — one sec."
+# Filler pool — spoken when the brain takes >3s so the house doesn't feel
+# dead. Pool (not one line) so slow turns don't sound robotic. Each variant
+# must ALSO land in _echo_texts: Sonos plays the filler back into the room
+# and containment must drop the echo (the 2026-09-15 double-fire lesson).
+# Tunable via config.yaml brain.fillers (this list is the fallback default).
+# Rule: never address the user as "boss" (the owner, 2026-09-20).
+import random
+
+_DEFAULT_FILLERS = [
+    "On it.",
+    "Working on it…",
+    "Give me a sec.",
+    "Let me check…",
+    "One moment.",
+]
+
+
+def _pick_filler() -> str:
+    global _LAST_FILLER
+    from config import cfg
+    pool = cfg("brain", "fillers") or _DEFAULT_FILLERS
+    if not isinstance(pool, list) or not pool:
+        pool = _DEFAULT_FILLERS
+    choice = random.choice(pool)
+    # avoid the same filler twice in a row (still possible on a 1-item pool)
+    if len(pool) > 1 and choice == _LAST_FILLER:
+        choice = random.choice([f for f in pool if f != choice])
+    _LAST_FILLER = choice
+    return choice
+
+
+_LAST_FILLER = ""
 
 # Standalone wake-phrase transcriptions (the wake word repeated after the
 # gate opened — observed live 2026-09-15: "Hey Linux." went to the brain).
@@ -213,8 +244,9 @@ class HermesAgent(FrameProcessor):
                         try:
                             reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
                         except TimeoutError:
-                            await self.push_frame(TTSSpeakFrame(text=FILLER_TEXT))
-                            self._echo_texts.append(FILLER_TEXT)
+                            filler = _pick_filler()
+                            await self.push_frame(TTSSpeakFrame(text=filler))
+                            self._echo_texts.append(filler)
                             reply = await ask
                         reply = _strip_tags(reply)
                         self._echo_texts.append(reply)

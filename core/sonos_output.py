@@ -74,6 +74,24 @@ class SonosOutput(FrameProcessor):
         self._volume = int(sonos.get("clip_volume", 70))
         self._zones = sonos.get("zones", {})
         cs = cfg.get("clip_server", {})
+        # Opportunistic clip pruning (2026-09-20): clips are served to the
+        # Sonos within SECONDS of creation and never fetched again — anything
+        # old is garbage. Prune at startup (restarts are frequent) instead of
+        # a cron. Age-gated, .mp3 only, never touches fresh clips.
+        retention_days = int(sonos.get("clip_retention_days", 7))
+        cutoff = time.time() - retention_days * 86400
+        clips_dir = Path("clips")
+        removed = 0
+        if clips_dir.is_dir():
+            for f in clips_dir.glob("*.mp3"):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        removed += 1
+                except OSError:
+                    pass  # raced a fetch; leave it for next pass
+        if removed:
+            logger.info(f"sonos_output: pruned {removed} clip(s) older than {retention_days}d")
         # The clip server binds a fixed port (8765); binding per-pipeline
         # leaks the port when a pipeline is cancelled without cleanup()
         # (idle-timeout cancel path), and the next session then dies with
