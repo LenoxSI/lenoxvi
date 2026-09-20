@@ -22,3 +22,4 @@ House voice rig (v2). Read `notes/v2/` first — that tree is the source of trut
 
 - Append numbered notes in `notes/v2/`; never rewrite history in place.
 - Decisions go in notes/, not in chat memory.
+- **Tunables go in `config.yaml`** — never hardcode a knob in source or bury it in `.env`. Precedence is config.yaml > `TK_*` env > code default (`core/config.py`); `.env` is secrets only.
