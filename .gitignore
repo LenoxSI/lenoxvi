@@ -19,3 +19,10 @@ AGENTS.md
 CLAUDE.md
 # runtime config — template is config.example.yaml
 config.yaml
+
+# runtime artifacts — certs are regenerable per-host (make-cert.sh), clips
+# are serve-once garbage, firmware/node is scp-populated by deploy_firmware.sh
+certs/
+clips/
+firmware/node/
+*.bundle
