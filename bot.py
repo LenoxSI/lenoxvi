@@ -61,7 +61,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     tts = ElevenLabsTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id=os.getenv("LVI_TTS_VOICE_ID"),
-        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
+        # Code default = the measured-good model. Do NOT default to eleven_v3:
+        # the websocket handshake rejects v3 with HTTP 400 (config.yaml:32-34,
+        # commit fb0cf94). A config.yaml without tts.model — the fresh-clone
+        # state — must land on a model that actually speaks.
+        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
     )
     logger.info("tts backend: elevenlabs")
     gate = EchoGate()

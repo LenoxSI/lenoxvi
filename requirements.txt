@@ -1,15 +1,27 @@
 # lenoxvi — runtime dependencies (top-level, version-pinned to what's
 # actually running on appliance-host as of 2026-09-20; pipecat 1.11.0).
+# Host Python: 3.14. numpy==2.5.3 needs >=3.12; on older interpreters pip
+# fails the install — by design, not by accident: this file pins the
+# appliance, and a version that resolves differently on a dev box is a
+# warning, not something to paper over with a looser pin.
 # Transitive deps resolve from these pins; if a fresh install ever needs
 # more, add it here rather than committing a 174-line `pip freeze`.
 #
 # GPU extras: faster-whisper pulls CUDA wheels (nvidia-cublas/cudnn) on
 # CUDA-capable hosts. LD_LIBRARY_PATH for those wheels is set in the
 # systemd unit (lenoxvi-bot.service), NOT in code.
+#
+# Provenance note (2026-09-20 review): pipecat-ai[runner] pulls
+# pipecat-ai-prebuilt only via its [runner] extra; bot.py imports
+# pipecat.runner.run, which hard-imports pipecat_ai_prebuilt, so it is
+# a direct runtime dep of this repo, not transitive.
 pipecat-ai==1.11.0
+pipecat-ai-prebuilt==1.1.0
 pipecat-ai-small-webrtc-prebuilt==2.5.0
 faster-whisper==1.2.1
 openwakeword==0.4.0
+lameenc==1.8.4
+sonos-websocket==0.2.0
 fastapi==0.141.1
 uvicorn==0.53.0
 aiohttp==3.14.3
@@ -18,3 +30,6 @@ loguru==0.7.3
 python-dotenv==1.2.3
 PyYAML==6.0.3
 numpy==2.5.3
+# Bench scripts only (scripts/serial_watch.py and friends) — not imported
+# by the bot itself:
+pyserial==3.5
