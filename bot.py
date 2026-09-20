@@ -49,7 +49,7 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
-    from config import cfg_env
+    from config import cfg, cfg_env
 
     stt = LocalWhisperSTTService(
         model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
@@ -57,11 +57,26 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
-    tts = ElevenLabsTTSService(
-        api_key=os.environ["ELEVENLABS_API_KEY"],
-        voice_id=os.getenv("LVI_TTS_VOICE_ID"),  # Ivy; set in .env
-        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
-    )
+    # TTS backend swap (design note / 018): elevenlabs | chatterbox — one
+    # config.yaml line. Chatterbox rides pipecat's OpenAI TTS client against
+    # the local Chatterbox-TTS-Server's OpenAI-compatible endpoint.
+    backend = cfg_env("tts", "backend", "LVI_TTS_BACKEND", "elevenlabs")
+    if backend == "chatterbox":
+        from pipecat.services.openai.tts import OpenAITTSService
+        tts = OpenAITTSService(
+            api_key="not-needed",  # local server has no auth
+            base_url=cfg("tts", "chatterbox", {}).get("url", "http://localhost:4123/v1"),
+            voice=cfg("tts", "chatterbox", {}).get("voice", "Emily.wav"),
+            model=cfg("tts", "chatterbox", {}).get("model", "chatterbox-turbo"),
+        )
+        logger.info(f"tts backend: chatterbox (local)")
+    else:
+        tts = ElevenLabsTTSService(
+            api_key=os.environ["ELEVENLABS_API_KEY"],
+            voice_id=os.getenv("LVI_TTS_VOICE_ID"),  # Ivy; set in .env
+            model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
+        )
+        logger.info(f"tts backend: elevenlabs")
     gate = EchoGate()
     brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
             else StubBrain(echo_gate=gate))
