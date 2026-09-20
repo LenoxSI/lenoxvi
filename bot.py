@@ -57,34 +57,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
-    # TTS backend swap (design note / 018): elevenlabs | chatterbox — one
-    # config.yaml line. Chatterbox rides pipecat's OpenAI TTS client against
-    # the local Chatterbox-TTS-Server's OpenAI-compatible endpoint.
-    backend = cfg_env("tts", "backend", "LVI_TTS_BACKEND", "elevenlabs")
-    if backend == "chatterbox":
-        from pipecat.services.openai import tts as openai_tts
-        # pipecat's OpenAITTSService validates the voice against OpenAI's
-        # fixed dict (alloy/nova/...) and refuses anything else BEFORE the
-        # request. Against our LOCAL Chatterbox server that gate is wrong —
-        # voices are filenames (Emily.wav, or anything uploaded via the
-        # server's Web UI). Widen the dict; we're the only client.
-        _cb_voices = cfg("tts", "chatterbox", {}).get("voice", "Emily.wav")
-        openai_tts.VALID_VOICES = {**openai_tts.VALID_VOICES, _cb_voices: _cb_voices}
-        from pipecat.services.openai.tts import OpenAITTSService
-        tts = OpenAITTSService(
-            api_key="not-needed",  # local server has no auth
-            base_url=cfg("tts", "chatterbox", {}).get("url", "http://localhost:4123/v1"),
-            voice=_cb_voices,
-            model=cfg("tts", "chatterbox", {}).get("model", "chatterbox-turbo"),
-        )
-        logger.info(f"tts backend: chatterbox (local, voice={_cb_voices})")
-    else:
-        tts = ElevenLabsTTSService(
-            api_key=os.environ["ELEVENLABS_API_KEY"],
-            voice_id=os.getenv("LVI_TTS_VOICE_ID"),  # Ivy; set in .env
-            model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
-        )
-        logger.info(f"tts backend: elevenlabs")
+    # TTS: ElevenLabs (api key + voice_id in .env; model in config.yaml).
+    tts = ElevenLabsTTSService(
+        api_key=os.environ["ELEVENLABS_API_KEY"],
+        voice_id=os.getenv("LVI_TTS_VOICE_ID"),
+        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v3"),
+    )
+    logger.info("tts backend: elevenlabs")
     gate = EchoGate()
     brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
             else StubBrain(echo_gate=gate))
