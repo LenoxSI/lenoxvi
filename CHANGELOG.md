@@ -6,6 +6,34 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.2.1] — 2026-09-20
+
+Cleanup/efficiency pass from the superpowers-driven review (all 14 findings).
+
+### Fixed
+- requirements.txt: fresh-clone booby traps — missing `lameenc`,
+  `sonos-websocket`, `pipecat-ai-prebuilt` (fresh install died at the
+  first spoken reply); TTS code default was the repo's own
+  measured-broken `eleven_v3` (`3db43e4`)
+- OWW wake gate fed 640 samples per chunk (1280 *bytes* labeled "80ms")
+  — half openWakeWord's canonical 1280-sample frame, 2x inference on
+  the 24/7 hot path; now 2560 bytes (`443b8e2`)
+- containment_test Case 3 had `or True` — an assertion structurally
+  unable to fail; now asserts real output (`766bd4d`)
+- brain outage now speaks a fallback line instead of filler-then-silence
+
+### Added
+- `wake.model`, `brain.lull_secs`, `brain.dedup_window` config knobs
+  (were documented-but-ignored or buried in constructor defaults)
+- README fresh-clone section (deps → config → .env → wake model → cert → run)
+
+### Removed
+- config.yaml untracked (was in the index despite .gitignore — baked LAN
+  IPs/Sonos UID into history); template is config.example.yaml
+- 888KB never-flashable slave XMOS bin (notes preserves the bytes)
+- Overdue debug scaffolding: aiortc DEBUG, once-per-second wake diag
+  (~86k journald lines/day), dead attribute, no-op assignments
+
 ## [0.2.0] — 2026-09-20
 
 First tagged snapshot: the house voice rig as it stands. Phase 1–4 pipeline

@@ -43,6 +43,10 @@ brain:
   url: http://<brain-host>:8642/v1
   model: hermes-agent
   zone: living_room     # conversation tag prefix: voice-<zone>-<id>
+  lull_secs: 0.6        # silence after speech before the turn flushes to the
+                        # brain; lower = snappier but risks clipping slow talkers
+  dedup_window: 10.0    # same utterance re-heard within this window = echo,
+                        # dropped (the lull-timer double-fire fix)
   # Fillers spoken when the brain takes >3s. Keep each <2s spoken.
   fillers:
     - "On it."
