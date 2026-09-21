@@ -38,7 +38,9 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask, PipelineParams
+# PipelineTask/PipelineParams (pipecat.pipeline.task) are deprecated aliases,
+# removed in pipecat 2.0 — import the real names from pipeline.worker.
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.runner.utils import create_transport
 from pipecat.runner.types import RunnerArguments
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
@@ -71,8 +73,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             else StubBrain(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes
-    # VADParams directly (pipecat 1.10); defaults match the old hardcodes.
-    from config import cfg
+    # VADParams directly; defaults match the old hardcodes.
     vad_cfg = cfg("vad") or {}
     vad_params = {}
     for k in ("confidence", "start_secs", "stop_secs", "min_volume"):
@@ -84,7 +85,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     if vad_params:
         logger.info(f"vad params from config.yaml: {vad_params}")
 
-    task = PipelineTask(
+    task = PipelineWorker(
         Pipeline(
             [
                 transport.input(),

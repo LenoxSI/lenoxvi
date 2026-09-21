@@ -4,7 +4,7 @@ Deterministic echo brain for bench and dev runs without the Hermes API
 (production uses HermesAgent via config.yaml brain.kind: hermes; the stub
 is the code-default fallback when kind is unset).
 
-Frame timing (pipecat 1.10, segmented STT + VADProcessor):
+Frame timing (pipecat 1.11, segmented STT + VADProcessor):
   - VADUserStartedSpeakingFrame -> start buffering
   - TranscriptionFrame(s)       -> append text
   - a lull of ~0.6s with no new transcription -> user is done; flush

@@ -6,6 +6,24 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.2.2] — 2026-09-20
+
+Review Minors + efficiency pass (final findings from the 2026-09-20 review).
+
+### Changed
+- PipelineTask → PipelineWorker (deprecated alias, removed in pipecat 2.0);
+  imports from `pipecat.pipeline.worker` — verified on host pipecat 1.11.0
+- Whisper + OWW models now cached per-process, shared across pipelines:
+  every node reconnect used to reload large-v3-turbo onto the GPU (seconds
+  of deaf STT + VRAM churn); OWW shared model resets its rolling buffers
+  per pipeline (`reset()`)
+- continuity_test reads brain.url via the config surface (was env-only,
+  KeyError against a secrets-only .env)
+- SonosOutput reads config via core/config's CONFIG_PATH (LVI_CONFIG split-brain)
+- stt_local: dead `settings.language` branch → the real `self._language`
+- .env.example: real voice ID replaced with placeholder (account data)
+- Version comments drifted to pipecat 1.11 (were 1.10)
+
 ## [0.2.1] — 2026-09-20
 
 Cleanup/efficiency pass from the superpowers-driven review (all 14 findings).

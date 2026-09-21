@@ -95,10 +95,15 @@ class SonosOutput(FrameProcessor):
     _shared_clip_server = None  # module-level: ONE server for all pipelines
     _prune_task_started = False  # ONE hourly prune loop per process
 
-    def __init__(self, config_path: str = "config.yaml", echo_gate=None, **kwargs):
+    def __init__(self, config_path: str | None = None, echo_gate=None, **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
-        cfg = yaml.safe_load(Path(config_path).read_text()) or {}
+        # Read through core/config so LVI_CONFIG (if ever set) applies here
+        # too — a direct Path("config.yaml") default would let the bot read
+        # two different config files in one process.
+        from config import CONFIG_PATH
+
+        cfg = yaml.safe_load(Path(config_path or CONFIG_PATH).read_text()) or {}
         sonos = cfg.get("sonos", {})
         self._enabled = bool(sonos.get("enabled"))
         self._zone = sonos.get("default_zone")
@@ -141,7 +146,7 @@ class SonosOutput(FrameProcessor):
             logger.warning(f"sonos_output: zone '{self._zone}' not in config zones {list(self._zones)}")
 
     async def setup(self, setup):
-        # setup() is the guaranteed lifecycle hook in pipecat 1.10 —
+        # setup() is the guaranteed lifecycle hook in pipecat 1.11 —
         # FrameProcessor.start() is NOT auto-called for bare processors.
         await super().setup(setup)
         if self._enabled and not self._clip_server._runner:

@@ -48,7 +48,16 @@ class TurnState(Enum):
 
 
 class WakeWordFilter(FrameProcessor):
-    """Wake-word gate + turn lock. Non-audio frames always pass through."""
+    """Wake-word gate + turn lock. Non-audio frames always pass through.
+
+    The OWW model is cached at module level and shared across pipelines
+    (the bot builds a fresh filter per WebRTC offer — a per-instance model
+    reloads the ONNX + melspectrogram + embedding stack on every node
+    reconnect). OWW keeps rolling audio buffers, so each new pipeline
+    resets the shared model in setup() to start clean.
+    """
+
+    _shared_oww = None  # module-level: ONE Model for all pipelines
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
                  echo_gate=None, **kwargs):
@@ -80,9 +89,16 @@ class WakeWordFilter(FrameProcessor):
 
     async def setup(self, setup):
         await super().setup(setup)
-        from openwakeword.model import Model
+        if WakeWordFilter._shared_oww is None:
+            from openwakeword.model import Model
 
-        self._oww = await asyncio.to_thread(Model, wakeword_model_paths=[self._model_path])
+            WakeWordFilter._shared_oww = await asyncio.to_thread(
+                Model, wakeword_model_paths=[self._model_path]
+            )
+        # Fresh pipeline: clear the shared model's rolling audio buffers so
+        # the previous session's tail can't bleed scores into this one.
+        WakeWordFilter._shared_oww.reset()
+        self._oww = WakeWordFilter._shared_oww
         self._name = list(self._oww.models.keys())[0]
         logger.info(f"wake_word: model '{self._name}' loaded; threshold={self._threshold}; state=IDLE")
 
