@@ -1,8 +1,9 @@
 """Headless GPU transcribe test: proves faster-whisper runs on the gpu.
 
-Generates a 1.5s 440Hz tone, transcribes it (expect empty/silence output,
-NOT an error), and prints VRAM usage. Run with the venv python + the same
-LD_LIBRARY_PATH as restart.sh sets.
+Generates a 1.5s 300Hz amplitude-modulated tone, transcribes it (expect
+empty/silence output, NOT an error), and prints VRAM usage. Run with the
+venv python; LD_LIBRARY_PATH for the CUDA wheels is set by the systemd
+unit (lenoxvi-bot.service), not by any repo script.
 """
 
 import asyncio

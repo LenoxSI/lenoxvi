@@ -1,15 +1,25 @@
-"""Echo gate — interim self-loop breaker for lenoxvi (pre-wake-word phases).
+"""Echo gate — duration-based echo containment, the permanent safety net.
 
-The mic hears the bot's own replies from the browser and Sonos speakers; the
-stub brain then replies to itself, which plays again, which is heard again —
-a feedback loop (observed live 2026-09-15: she kept repeating herself).
+The mic hears the bot's own replies from the browser and Sonos speakers;
+without containment that's a feedback loop (observed live 2026-09-15:
+she kept repeating herself).
 
-The real fix is the Phase 4 wake-word gate + turn lock. Until then, this gate
-blocks transcription handling while the bot is speaking: TTS start sets a
-provisional block, and the actual clip duration (known from PCM length)
-extends it past the Sonos playback tail.
+The wake-word turn lock (wake_word.py) is the primary gate — LOCKED
+while the bot speaks — but Sonos clips play ASYNC after the browser
+audio ends, and late whisper transcriptions of her own voice can
+arrive after the lock releases. This gate covers that tail.
 
-Zero infrastructure: one deadline timestamp, checked by the stub brain.
+Role (ratified 2026-09-20, superseding the old "interim" framing):
+PERMANENT defense-in-depth behind the turn lock, NOT scaffolding —
+do not remove. SonosOutput.block() sets a duration (clip length +
+load + tail margin) whenever a clip ships; blocked() consumers drop
+echo transcriptions during that window. Layers alongside: text
+containment (hermes_agent._is_own_echo), dedup, wake-phrase drop.
+
+Consumers of blocked(): wake_word.py, hermes_agent.py, brain_stub.py.
+Driver of block(): sonos_output.py (_speak_to_sonos).
+
+Zero infrastructure: one deadline timestamp, monotonic clock.
 """
 
 import time

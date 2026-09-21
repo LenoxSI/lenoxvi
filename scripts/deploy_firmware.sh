@@ -24,9 +24,9 @@ LVI_LOCAL="${LVI_LOCAL:-$HOME/projects/lenoxvi}"
 LVI_HOST="${LVI_HOST:-lenoxvi}"
 LVI_REMOTE_DIR="projects/lenoxvi/firmware/node"
 
-WIFI_SSID="${WIFI_SSID:-MyWiFiNetwork}"
+WIFI_SSID="${WIFI_SSID:?must be set (your WiFi network name)}"
 WIFI_PASSWORD="${WIFI_PASSWORD:?must be set}"
-PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:-https://203.0.113.185:7860/api/offer}"
+PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:?must be set (e.g. https://<bot-host-LAN-IP>:7860/api/offer)}"
 PIPECAT_ROOM="${PIPECAT_ROOM:-bedroom}"
 
 # ── 1. Build ────────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ Config (.env on the host):
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -246,6 +247,13 @@ class HermesAgent(FrameProcessor):
                             await self.push_frame(TTSSpeakFrame(text=filler))
                             self._echo_texts.append(filler)
                             reply = await ask
+                        except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as e:
+                            # Brain unreachable/dead: say so instead of silence —
+                            # a filler-then-nothing is indistinguishable from a
+                            # dead rig (survivability rule: Hermes rebuilds must
+                            # never take house voice down WITH it).
+                            logger.error(f"hermes_agent: brain call failed: {e}")
+                            reply = "Sorry — I can't reach my brain right now."
                         reply = _strip_tags(reply)
                         self._echo_texts.append(reply)
                         self._echo_texts = self._echo_texts[-4:]

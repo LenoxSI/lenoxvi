@@ -1,7 +1,8 @@
-"""Static brain stub for lenoxvi Phase 1 (echo bot).
+"""Static brain stub for lenoxvi (bench/dev echo brain).
 
-Phase 1 proves the audio round trip (ears -> brain-shape -> TTS) with a
-deterministic stub. Phase 3 replaces this with the Hermes agent path.
+Deterministic echo brain for bench and dev runs without the Hermes API
+(production uses HermesAgent via config.yaml brain.kind: hermes; the stub
+is the code-default fallback when kind is unset).
 
 Frame timing (pipecat 1.10, segmented STT + VADProcessor):
   - VADUserStartedSpeakingFrame -> start buffering
@@ -43,13 +44,13 @@ class StubBrain(FrameProcessor):
     def _reply(self, text: str) -> str:
         t = text.lower()
         if any(w in t for w in ("hello", "hi", "hey")):
-            return ("Hey! Phase one check passed: I heard you on the local GPU and "
-                    "this reply is coming out of the Eleven Labs pipeline.")
+            return ("Hey! Stub brain here: audio round trip works — local GPU "
+                    "STT heard you and ElevenLabs is speaking this reply.")
         if "your name" in t or "who are you" in t:
-            return "I'm the lenoxvi stub brain. Phase three swaps me for the real Hermes brain."
+            return "I'm the lenoxvi stub brain — the bench stand-in while the Hermes brain is unset in config."
         if any(w in t for w in ("bye", "goodbye", "good night")):
-            return "Later! Remember, sonos_output arrives in phase two."
-        return f"You said: {text.strip()}. I'm the stub brain - the real agent arrives in phase three."
+            return "Later! Set brain.kind: hermes in config.yaml for the real brain."
+        return f"You said: {text.strip()}. I'm the stub brain — set brain.kind: hermes for the real one."
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

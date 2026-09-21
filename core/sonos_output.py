@@ -123,7 +123,12 @@ class SonosOutput(FrameProcessor):
         # always-reconnecting ESP32 node). Bind ONCE, share across pipelines.
         if SonosOutput._shared_clip_server is None:
             SonosOutput._shared_clip_server = ClipServer(
-                Path("clips"), cs.get("host_ip", "203.0.113.185"), int(cs.get("port", 8765))
+                Path("clips"),
+                # host_ip is REQUIRED config: it's the address Sonos players
+                # fetch clips from, so it can't default to a guess. A missing
+                # value fails the TCPSite bind loudly at startup.
+                cs.get("host_ip") or "<bot-host-ip>",
+                int(cs.get("port", 8765)),
             )
         self._clip_server = SonosOutput._shared_clip_server
         self._pcm = bytearray()
