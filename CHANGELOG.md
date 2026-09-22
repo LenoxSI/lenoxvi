@@ -12,6 +12,8 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 - Comment de-personalization pass (public-repo prep): the voice system
   prompt and code comments no longer name the user; the OWW model test
   docstring defers its positive case to a live test instead of a person
+- Removed the "never address the user as boss" rule comment — how the
+  brain addresses its user is brain-side (Hermes) config, not repo policy
 
 ## [0.2.2] — 2026-09-20
 

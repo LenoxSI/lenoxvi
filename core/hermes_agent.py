@@ -58,7 +58,6 @@ def _strip_tags(text: str) -> str:
 # must ALSO land in _echo_texts: Sonos plays the filler back into the room
 # and containment must drop the echo (the 2026-09-15 double-fire lesson).
 # Tunable via config.yaml brain.fillers (this list is the fallback default).
-# Rule: never address the user as "boss" (standing rule, 2026-09-20).
 import random
 
 _DEFAULT_FILLERS = [
