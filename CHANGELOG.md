@@ -6,6 +6,13 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [Unreleased]
+
+### Changed
+- Comment de-personalization pass (public-repo prep): the voice system
+  prompt and code comments no longer name the user; the OWW model test
+  docstring defers its positive case to a live test instead of a person
+
 ## [0.2.2] — 2026-09-20
 
 Review Minors + efficiency pass (final findings from the 2026-09-20 review).

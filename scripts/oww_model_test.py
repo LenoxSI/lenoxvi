@@ -2,7 +2,7 @@
 
 Feed 10s of synthetic noise (no wake word) — scores must stay LOW.
 We cannot synthesize a positive without real 'Hey Willow' audio, so the
-positive case is validated by the owner's live test.
+positive case is validated by a live test.
 """
 
 import sys

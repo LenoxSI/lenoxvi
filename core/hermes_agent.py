@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 VOICE_SYSTEM_PROMPT = (
-    "You are the house voice assistant, currently talking to the owner over speakers. "
+    "You are the house voice assistant, currently talking to the user over speakers. "
     "Replies are spoken aloud by TTS, so keep them SHORT — one to three sentences, "
     "plain conversational English. No markdown, no bullet points, no emojis, no "
     "URLs. You have all your normal tools and memory; use them when asked, but "
@@ -58,7 +58,7 @@ def _strip_tags(text: str) -> str:
 # must ALSO land in _echo_texts: Sonos plays the filler back into the room
 # and containment must drop the echo (the 2026-09-15 double-fire lesson).
 # Tunable via config.yaml brain.fillers (this list is the fallback default).
-# Rule: never address the user as "boss" (the owner, 2026-09-20).
+# Rule: never address the user as "boss" (standing rule, 2026-09-20).
 import random
 
 _DEFAULT_FILLERS = [

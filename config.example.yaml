@@ -37,7 +37,7 @@ tts:
   model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
                             # the websocket handshake rejects v3 with HTTP 400
 
-# ── Brain (OpenAI-compatible chat endpoint — we use a Hermes agent) ─────
+# ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 brain:
   kind: hermes          # hermes | stub (stub = canned echo, bench only)
   url: http://<brain-host>:8642/v1
