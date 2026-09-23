@@ -8,14 +8,15 @@ listener itself always hears everything.
 Turn semantics (plan of record, 2026-09-15):
 - IDLE: audio feeds OWW only. "Hey Willow" (score >= threshold) -> AWAKE.
 - AWAKE: audio flows to VAD/STT (the brain works normally). Falls back to
-  IDLE after AWAKE_TIMEOUT of no downstream audio activity.
-- LOCKED: bot speaking. Audio stops feeding BOTH OWW and STT — her voice
-  can't re-wake herself, even if she literally says the wake phrase
-  (e.g. when asked to repeat it).
+  IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity.
+- LOCKED: bot speaking. STT is gated; the wake listener is still fed
+  (since 2026-09-19 — starving OWW mid-turn caused false rewakes) but its
+  score is ignored outside IDLE, so her voice can't re-wake herself, even
+  if she literally says the wake phrase (e.g. when asked to repeat it).
 
-This structurally retires the echo-gate duration hack (the lock is the
-gate). The text-containment check stays as a cheap safety net (mid-turn
-echoes from room speakers). Dedup + TTS tag-stripping stay: they fix
+The echo gate stays as permanent defense-in-depth behind the lock (see
+echo_gate.py). The text-containment check stays as a cheap safety net
+(mid-turn echoes from room speakers). Dedup + TTS tag-stripping stay: they fix
 unrelated bugs (lull double-fire, flash_v2_5 not rendering v3 tags).
 """
 
@@ -32,13 +33,14 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
+    OutputTransportMessageFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 WAKE_MODEL = "Hey_Willow_trial21_96x2_85000_20260621_163001.onnx"
 WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
-AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (env: LVI_AWAKE_TIMEOUT)
+AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
 
 
 class TurnState(Enum):
@@ -50,18 +52,17 @@ class TurnState(Enum):
 class WakeWordFilter(FrameProcessor):
     """Wake-word gate + turn lock. Non-audio frames always pass through.
 
-    The OWW model is cached at module level and shared across pipelines
+    The OWW model is cached at class level and shared across pipelines
     (the bot builds a fresh filter per WebRTC offer — a per-instance model
     reloads the ONNX + melspectrogram + embedding stack on every node
     reconnect). OWW keeps rolling audio buffers, so each new pipeline
     resets the shared model in setup() to start clean.
     """
 
-    _shared_oww = None  # module-level: ONE Model for all pipelines
+    _shared_oww = None  # class-level: ONE Model for all pipelines
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
                  echo_gate=None, **kwargs):
-        import os
         from config import cfg_env
 
         super().__init__(**kwargs)
@@ -97,6 +98,8 @@ class WakeWordFilter(FrameProcessor):
             )
         # Fresh pipeline: clear the shared model's rolling audio buffers so
         # the previous session's tail can't bleed scores into this one.
+        # One live session assumed — two concurrent pipelines would share
+        # one set of rolling buffers.
         WakeWordFilter._shared_oww.reset()
         self._oww = WakeWordFilter._shared_oww
         self._name = list(self._oww.models.keys())[0]
@@ -179,12 +182,9 @@ class WakeWordFilter(FrameProcessor):
         await self.push_frame(frame, direction)
 
     async def _send_led(self, msg_type: str):
-        """Push a state message downstream so the node's LED ring can follow
-        the wake/listen/speak cycle. Transport is reachable via the frame
-        pipeline's task; OutputTransportMessageFrame rides the data channel.
-        Filtered per direction below (only downstream)."""
+        """Push an LED state message downstream over the data channel, so the
+        node's LED ring can follow the wake/listen/speak cycle."""
         try:
-            from pipecat.frames.frames import OutputTransportMessageFrame
             await self.push_frame(
                 OutputTransportMessageFrame(message={"type": msg_type})
             )

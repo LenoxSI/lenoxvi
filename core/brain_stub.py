@@ -47,10 +47,12 @@ class StubBrain(FrameProcessor):
             return ("Hey! Stub brain here: audio round trip works — local GPU "
                     "STT heard you and ElevenLabs is speaking this reply.")
         if "your name" in t or "who are you" in t:
-            return "I'm the lenoxvi stub brain — the bench stand-in while the Hermes brain is unset in config."
+            return ("I'm the lenoxvi stub brain — the bench stand-in while the "
+                    "Hermes brain is unset in config.")
         if any(w in t for w in ("bye", "goodbye", "good night")):
             return "Later! Set brain.kind: hermes in config.yaml for the real brain."
-        return f"You said: {text.strip()}. I'm the stub brain — set brain.kind: hermes for the real one."
+        return (f"You said: {text.strip()}. I'm the stub brain — set "
+                "brain.kind: hermes for the real one.")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

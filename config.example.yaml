@@ -11,10 +11,10 @@
 wake:
   enabled: true
   threshold: 0.40        # OWW score needed to wake; real "Hey <YourName>"
-                        # typically lands 0.84-1.00. Lower = more sensitive,
-                        # but scores below real speech risk false wakes.
-  awake_timeout: 5.0     # seconds of no user/bot activity before the gate
-                        # closes and the mic stops feeding STT
+                         # typically lands 0.84-1.00. Lower = more sensitive,
+                         # but scores below real speech risk false wakes.
+  awake_timeout: 15.0    # seconds of no user/bot activity before the gate
+                         # closes and the mic stops feeding STT
   # model: <your-wake-word.onnx>   # repo-root .onnx; see README (wake-word
   #                                # training is beyond this template's scope)
 
@@ -23,7 +23,7 @@ vad:
   confidence: 0.7       # speech probability to trigger start/stop
   start_secs: 0.2
   stop_secs: 0.2        # lower = snappier turn-ends but clips word onsets
-  min_volume: 0.6       # floor under VAD (ignores very quiet rooms)
+  min_volume: 0.6       # floor under VAD (ignores very quiet speech/noise)
 
 # ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
 stt:
@@ -35,7 +35,7 @@ stt:
 # ── Text-to-speech (ElevenLabs; voice_id is in .env, it's account data) ─
 tts:
   model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
-                            # the websocket handshake rejects v3 with HTTP 400
+                             # the websocket handshake rejects v3 with HTTP 400
 
 # ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 brain:
@@ -59,8 +59,8 @@ brain:
 sonos:
   enabled: true
   default_zone: <zone-name>
-  clip_volume: 70          # measured sweet spot for a Port at normal volume
-  clip_retention_days: 2   # 48h retention: clips are served once, then garbage
+  clip_volume: 70                 # measured sweet spot for a Port at normal volume
+  clip_retention_days: 2          # 48h retention: clips are served once, then garbage
   zones:
     <zone-name>:
       ip: <sonos-player-ip>

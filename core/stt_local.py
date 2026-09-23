@@ -7,6 +7,7 @@ and TranscriptionFrame plumbing for free.
 """
 
 import asyncio
+import io
 from typing import Optional
 
 from loguru import logger
@@ -75,8 +76,6 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         The base class hands us WAV bytes; we run the (blocking) transcribe
         call in a thread so the event loop stays live.
         """
-        import io
-
         await self.ensure_model()
         loop = asyncio.get_running_loop()
 

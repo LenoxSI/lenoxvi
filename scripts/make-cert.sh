@@ -4,7 +4,7 @@
 # Regenerate after expiry (825 days). Not a secret; safe to keep on the box.
 #
 # Usage: make-cert.sh <bot-host-LAN-IP>
-#   bash scripts/make-cert.sh 203.0.113.185
+#   bash scripts/make-cert.sh <bot-host-LAN-IP>
 # The IP goes into the cert's subjectAltName — it must be the IP browsers
 # will actually load the client from, so it can't be baked in here.
 set -e

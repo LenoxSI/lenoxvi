@@ -6,14 +6,17 @@ comes from the Hermes API server (OpenAI-compatible, bearer auth) instead of a
 canned echo. The agent keeps its full toolset + memory; our system prompt
 layers voice-appropriate instructions on top (short, spoken-word replies).
 
-Config (.env on the host):
-    LVI_HERMES_URL   — e.g. http://203.0.113.135:8642/v1
-    LVI_HERMES_KEY   — the API server's bearer key
-    LVI_HERMES_MODEL — defaults to "hermes-agent"
+Config (config.yaml `brain:` section; .env holds the key only):
+    brain.url / brain.model / brain.zone / brain.lull_secs /
+    brain.dedup_window / brain.fillers — see config.example.yaml
+    LVI_HERMES_KEY (.env) — the API server's bearer key
 """
 
+import asyncio
 import json
 import os
+import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -39,8 +42,6 @@ VOICE_SYSTEM_PROMPT = (
 
 # TTS audio tags ([laughs] etc.) render on eleven_v3 but flash_v2_5 speaks them
 # literally — strip from spoken text until the TTS backend renders tags.
-import re
-
 _TAG_RE = re.compile(r"\[[^\]]{1,20}\]")
 
 
@@ -58,8 +59,6 @@ def _strip_tags(text: str) -> str:
 # must ALSO land in _echo_texts: Sonos plays the filler back into the room
 # and containment must drop the echo (the 2026-09-15 double-fire lesson).
 # Tunable via config.yaml brain.fillers (this list is the fallback default).
-import random
-
 _DEFAULT_FILLERS = [
     "On it.",
     "Working on it…",
@@ -67,6 +66,8 @@ _DEFAULT_FILLERS = [
     "Let me check…",
     "One moment.",
 ]
+
+_LAST_FILLER = ""
 
 
 def _pick_filler() -> str:
@@ -82,8 +83,6 @@ def _pick_filler() -> str:
     _LAST_FILLER = choice
     return choice
 
-
-_LAST_FILLER = ""
 
 # Standalone wake-phrase transcriptions (the wake word repeated after the
 # gate opened — observed live 2026-09-15: "Hey Linux." went to the brain).
@@ -128,7 +127,7 @@ class HermesAgent(FrameProcessor):
         # it arrives (duration gates lose the race when her Sonos reply talks
         # over the mic and whisper transcribes late; measured live 2026-09-15).
         self._echo_texts: list[str] = []
-        # Server-side conversation chain (per-connection): "voice-<zone>-<ts>"
+        # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
         self._conversation = os.getenv(
             "LVI_CONVERSATION",
             f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
@@ -139,7 +138,8 @@ class HermesAgent(FrameProcessor):
         """True if `text` contains a meaningful chunk of her own last words.
 
         An echo is her words coming back out of the mic — so containment beats
-        timing. Matches on any 5+ word run of a previously spoken text.
+        timing. True when >= 60% of the words (minimum 3) appear in one of
+        her recent spoken texts, in any order.
         """
         norm = _normalize(text)
         if not norm or not self._echo_texts:
@@ -232,12 +232,11 @@ class HermesAgent(FrameProcessor):
                     else:
                         self._last_user_text = text
                         self._last_user_time = now
-                        # Blocking HTTP in a thread so the pipeline stays live.
+                        # Blocking HTTP in a thread: the event loop stays live;
+                        # this processor stalls until the reply lands.
                         # Stream-and-ack: if the brain takes >3s, speak a filler
                         # first so the house doesn't feel dead (tool-heavy turns
                         # measured at 20-40s+ server-side, 2026-09-15).
-                        import asyncio
-
                         ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
                         try:
                             reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)

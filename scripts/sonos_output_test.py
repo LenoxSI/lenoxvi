@@ -2,7 +2,7 @@
 
 Exercises the real path: PCM -> MP3 (lameenc) -> clip file -> LAN HTTP serve
 -> sonos-websocket play_clip on the configured zone (vol from config.yaml).
-Plays one ~1s quiet tone. Run from the repo root on appliance-host.
+Plays one ~1s tone. Run from the repo root on appliance-host.
 """
 
 import asyncio

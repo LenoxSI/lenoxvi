@@ -13,14 +13,14 @@
 - Decoupled DOA state updates from the currently selected LED effect.
 - DOA direction and speech-detection state are now updated when internal DOA data is received, ensuring that `DOA_VALUE` remains current even when the DOA LED effect is not active.
 
-## v1.0.7 
+## v1.0.7
 
 ### Audio and DSP Tuning
 
 - Disabled the AEC 125 Hz high-pass filter by default.
 - Reduced the post-processing AGC maximum gain from `64.0` to `32.0`.
 - Changed the default system delay from `12` to `-30`.
-- Routed both default I2S output channels to ASR ouput beam 0.
+- Routed both default I2S output channels to ASR output beam 0.
 - Reduced the AIC3104 headphone and line-output gain from `6 dB` to `3 dB`.
 
 ## v1.0.6
@@ -43,7 +43,7 @@
 
 - Increased the AIC3104 headphone and line-output gain from `0 dB` to `6 dB`.
 
-## v1.0.4 
+## v1.0.4
 
 ### Fixed
 

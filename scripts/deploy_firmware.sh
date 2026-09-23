@@ -8,10 +8,10 @@
 #   2. Bump firmware/node/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
 #   3. Copy bin + version.json to lenoxvi repo on appliance-host
-#   4. Restart the bot (serves /firmware/* via core/firmware_server.py)
-#   5. Poke the node: send "check-ota" over the WebRTC data channel via the
-#      bot's debug hook — or wait for the node's boot-time check on next
-#      natural reboot
+#   4. Restart the bot (serves /firmware/* via core/firmware_server.py) —
+#      only drops the node's live session; files are picked up per request
+#   5. Poke the node (future: an HTTP poke endpoint); today the node picks
+#      it up on its next boot/reconnect
 #
 # Usage:
 #   ./scripts/deploy_firmware.sh              # patch bump
@@ -81,20 +81,21 @@ echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
 echo "==> copying firmware + manifest to $LVI_HOST"
 scp -q "$BIN" "$VFILE" "$LVI_HOST:$LVI_REMOTE_DIR/"
 
-# ── 4. Restart bot (picks up new /firmware/* files) ────────────────────────
+# ── 4. Restart bot (drops the node's session; files read per request) ──────
 echo "==> restarting bot on $LVI_HOST"
 ssh "$LVI_HOST" 'bash ~/projects/lenoxvi/scripts/restart.sh'
 
 # ── 5. Poke the node ───────────────────────────────────────────────────────
-# The node checks at every boot; for a no-touch update, send check-ota over
-# the data channel. Simplest reliable poke today: none needed if the node
-# reboots naturally; otherwise use the bot's console (future: an HTTP poke
-# endpoint). We log what to watch for:
+# The node checks at every boot; in-place updates (an HTTP poke
+# endpoint) are future work — nothing sends a data-channel message
+# today. We log what to watch for:
 cat <<EOF
 
 ==> DONE. Firmware $NEW staged on $LVI_HOST.
-    The node will pick it up on its next boot, or send it the
-    {"type": "check-ota"} data-channel message to update in place.
-    Watch (appliance-host): tail -f ~/esp32-flash/serial via serial_watch.py
-    Expected: "OTA: Update available -> $NEW" then reboot into new build.
+    The node will pick it up on its next boot (in-place updates are
+    future work — nothing sends a data-channel message today).
+    OTA is the only flash path (USB is retired). Watch (appliance-host):
+      journalctl --user -u lenoxvi-bot -f | grep firmware_server
+    Expected: "firmware_server: serving node_esp32.bin" then the node
+    reboots into $NEW.
 EOF

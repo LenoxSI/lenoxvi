@@ -28,7 +28,7 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
   - `deploy_firmware.sh` — build + version + ship a node firmware OTA (VM-side)
   - `sync_host.sh` — bundle-based repo sync VM → host (no creds on hosts)
   - `serial_watch.py` — node serial capture (survives replug)
-  - `*-test.py` — headless bench tests for the core pieces
+  - `*_test.py` — headless bench tests for the core pieces
   - `make-cert.sh <bot-host-LAN-IP>` — self-signed HTTPS certs for the bot
 - `firmware/` — node firmware images + OTA manifests
   - `xvf3800/` — XMOS images; **master** = the one that works, slave = reference only
@@ -41,7 +41,8 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
   and edit. Precedence: `config.yaml` > `TK_*` env var > code default
   (`core/config.py`). Secrets stay in `.env`. Edit + `scripts/restart.sh` to
   apply — no rebuild.
-- `logs/` — gitignored runtime logs (`bot.log` lives on appliance-host)
+- `logs/` — gitignored runtime logs (the bot itself logs to journald:
+  `journalctl --user -u lenoxvi-bot`)
 
 ## Fresh clone → running bot
 
@@ -57,6 +58,7 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
    the default.
 5. `bash scripts/make-cert.sh <bot-host-LAN-IP>` (mic access needs HTTPS)
 6. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/client`
+   (run from the repo root — config and clips paths are relative)
 
 [openWakeWord]: https://github.com/dscripka/openWakeWord
 

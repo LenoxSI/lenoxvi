@@ -11,8 +11,8 @@ arrive after the lock releases. This gate covers that tail.
 
 Role (ratified 2026-09-20, superseding the old "interim" framing):
 PERMANENT defense-in-depth behind the turn lock, NOT scaffolding —
-do not remove. SonosOutput.block() sets a duration (clip length +
-load + tail margin) whenever a clip ships; blocked() consumers drop
+do not remove. EchoGate.block(), called from SonosOutput._speak_to_sonos,
+sets a duration (clip length + load + tail margin) whenever a clip ships; blocked() consumers drop
 echo transcriptions during that window. Layers alongside: text
 containment (hermes_agent._is_own_echo), dedup, wake-phrase drop.
 

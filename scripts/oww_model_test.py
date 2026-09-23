@@ -5,7 +5,6 @@ We cannot synthesize a positive without real 'Hey Willow' audio, so the
 positive case is validated by a live test.
 """
 
-import sys
 import time
 
 import numpy as np
@@ -18,7 +17,7 @@ def main():
 
     t0 = time.time()
     m = Model(wakeword_model_paths=[MODEL])
-    print(f"model loaded in {time.time()-t0:.1f}s")
+    print(f"model loaded in {time.time() - t0:.1f}s")
 
     names = list(m.models.keys())
     print("prediction keys:", names)
@@ -34,7 +33,7 @@ def main():
         scores.append(m.predict(noise[i : i + chunk])[names[0]])
     peak = max(scores)
     print(f"noise chunks: {len(scores)}, peak score: {peak:.3f}")
-    assert peak < 0.5, f"model fired on noise (peak {peak:.3f}) — false positives expected"
+    assert peak < 0.5, f"model fired on noise (peak {peak:.3f}) — false positives must stay under 0.5"
     print("OWW-MODEL-OK (no false fire on noise; positive case awaits live test)")
 
 

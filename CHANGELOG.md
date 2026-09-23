@@ -14,6 +14,13 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
   docstring defers its positive case to a live test instead of a person
 - Removed the "never address the user as boss" rule comment — how the
   brain addresses its user is brain-side (Hermes) config, not repo policy
+- Comment accuracy + formatting sweep (opus-5-5 review, design note):
+  wake_word docstring now matches the 2026-09-19 OWW-always-fed behavior
+  and the permanent echo gate; sonos_output says MP3 not WAV; _is_own_echo
+  describes the >=60%/3-word overlap it actually does; deploy_firmware
+  drop the fictional check-ota message; config.example awake_timeout
+  aligned with the code default (15.0); README glob/journald fixes;
+  unused imports removed; import order tightened; no logic changes
 
 ## [0.2.2] — 2026-09-20
 

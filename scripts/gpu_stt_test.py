@@ -1,4 +1,4 @@
-"""Headless GPU transcribe test: proves faster-whisper runs on the gpu.
+"""Headless GPU transcribe test: proves faster-whisper runs on a CUDA GPU.
 
 Generates a 1.5s 300Hz amplitude-modulated tone, transcribes it (expect
 empty/silence output, NOT an error), and prints VRAM usage. Run with the

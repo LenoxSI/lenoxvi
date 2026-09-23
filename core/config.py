@@ -10,8 +10,9 @@ Secrets NEVER live here (API keys stay in gitignored .env); this file holds
 behavior only. Sonos zones/clip-server keys are consumed directly by
 sonos_output.py; everything else reads through `cfg()` below.
 
-Load once at bot startup (bot.py), pass nothing around — modules import
-`cfg()` and read their section lazily so a restart picks up edits.
+Loaded lazily on the first cfg() call and cached for the process; pass
+nothing around — modules import `cfg()` and read their section, so a
+restart picks up edits.
 """
 
 import os
@@ -36,10 +37,10 @@ def _load() -> dict:
 
 
 def cfg(section: str, key: str = None, default=None):
-    """Read a section (dict) or a section.key value with env fallback.
+    """Read a section (dict) or a section.key value from config.yaml only.
 
-    cfg("wake")             -> the whole wake: dict
-    cfg("wake", "threshold")-> float value (or None); env fallback below
+    cfg("wake")              -> the whole wake: dict
+    cfg("wake", "threshold") -> float value (or None); use cfg_env for env fallback
     """
     data = _load().get(section, {}) or {}
     if key is None:

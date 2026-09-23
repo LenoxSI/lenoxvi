@@ -1,7 +1,7 @@
 """sonos_output — lenoxvi's Sonos audioClip output path.
 
-Sits after the TTS service in the pipeline, captures the spoken reply into a
-WAV clip, serves it over LAN HTTP, and tells the zone's Sonos Port/Amp to play
+Sits after the TTS service in the pipeline, captures the spoken reply into an
+MP3 clip, serves it over LAN HTTP, and tells the zone's Sonos Port/Amp to play
 it as an audioClip overlay (ducks music without pausing it — design note).
 
 Config (config.yaml):
@@ -92,7 +92,7 @@ async def _clip_prune_loop(clips_dir: Path, retention_days: int):
 class SonosOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
-    _shared_clip_server = None  # module-level: ONE server for all pipelines
+    _shared_clip_server = None  # class-level: ONE server for all pipelines
     _prune_task_started = False  # ONE hourly prune loop per process
 
     def __init__(self, config_path: str | None = None, echo_gate=None, **kwargs):
@@ -121,7 +121,7 @@ class SonosOutput(FrameProcessor):
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
             asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
-        # The clip server binds a fixed port (8765); binding per-pipeline
+        # The clip server binds clip_server.port; binding per-pipeline
         # leaks the port when a pipeline is cancelled without cleanup()
         # (idle-timeout cancel path), and the next session then dies with
         # "[Errno 98] address already in use" (seen 2026-09-15 with the

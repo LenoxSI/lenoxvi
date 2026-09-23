@@ -8,13 +8,15 @@ The node's OTA client (lenoxvi-firmware/src/ota.cpp) does a plain GET of
 then downloads /firmware/<filename> as the raw app image and flashes it
 (esp_ota_ops, A/B partitions, rollback-safe). Versions compare numerically.
 
-Files live in lenoxvi/firmware/node/ inside the repo — nothing stray:
+Files live in lenoxvi/firmware/node/ — gitignored on the host and
+populated by scp from deploy_firmware.sh, not tracked in the repo:
     firmware/node/version.json    served at /firmware/version
     firmware/node/node_esp32.bin served at /firmware/node_esp32.bin
 
 Deploy flow: scripts/deploy_firmware.sh (VM) builds + copies + bumps
-version.json; the node picks it up within its idle poll window (or on the
-"check-ota" data-channel message from the bot).
+version.json; the node picks it up within its idle poll window. (Future
+work: a "check-ota" data-channel message from the bot — nothing sends one
+today.)
 """
 
 import json
@@ -46,11 +48,14 @@ def register_firmware_routes(app) -> None:
     """Attach /firmware/* to the pipecat runner's FastAPI app (bot.py calls
     this before main()). Plain GETs; the node's TLS-skip handles the
     self-signed cert and it never sends secrets, so no auth on this path —
-    it's read-only delivery of files that live in the repo anyway."""
+    it's read-only delivery of deployed firmware files (scp-populated by
+    deploy_firmware.sh; gitignored, not in the repo)."""
 
     @app.get("/firmware/version")
     async def firmware_version():
         manifest = _read_manifest()
+        # Only version + filename pass through: the manifest's md5 (if any) is
+        # currently dropped, not served to the node.
         filename = manifest.get("filename", "node_esp32.bin")
         return JSONResponse({"version": manifest["version"], "filename": filename})
 
