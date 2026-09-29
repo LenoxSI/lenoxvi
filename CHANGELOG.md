@@ -6,7 +6,36 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-29
+
+Web dashboard v1 — the rig gets a GUI. Mapping, node status, zone
+management, and test clips, all served by the bot process itself.
+
+### Added
+- `core/dashboard/` package: web dashboard at `/dashboard` — room→zone
+  mapping page, live node list, Sonos LAN discovery (soco), per-zone
+  test clips, status strip. Served by the bot's own FastAPI app on
+  :7860 (same pattern as firmware_server); no new process or port
+  (`ce8b35f`)
+- Offer tee (pure ASGI): correlates the node firmware's `room` field
+  in POST /api/offer with pipecat's server-side pc_id at
+  response-send time — the pipeline runs as the offer request's
+  background task, so session-end correlation is minutes too late
+  (measured live; `ce81afb`)
+- Room-aware reply routing: wake gate `on_wake` hook + SonosOutput
+  `zone_selector` — a wake in a mapped room plays the reply clip in
+  that room's zone; unmapped falls back to `sonos.default_zone`
+  (`ce8b35f`)
+- Dashboard config writes: comment-preserving config.yaml round-trip
+  (ruamel.yaml), atomic write + rolling backup, config cache
+  invalidated so reads reflect writes immediately (`ce8b35f`)
+- `room_zones:` and `dashboard.enabled:` config sections; new deps
+  soco 0.31.4 + ruamel.yaml 0.19.1 (optional at boot — voice runs
+  without them, `f47f6a0`)
+- `scripts/test_dashboard.py`: 20-check offline rig (fakes /api/offer
+  in both immediate and background-task shapes; exercises the tee,
+  registry, config round-trips, validation, and a live Sonos test
+  clip)
 
 ### Changed
 - Comment de-personalization pass (public-repo prep): the voice system
