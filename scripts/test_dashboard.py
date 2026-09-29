@@ -48,6 +48,11 @@ def main():
     cfg_src = REPO_CORE.parent / "config.yaml"
     cfg_test = SCRATCH / "config.yaml"
     shutil.copy2(cfg_src, cfg_test)
+    # The LIVE bot owns :8765 — this rig runs out-of-process, so serve
+    # test clips from a free port on the same LAN IP (Sonos fetches the
+    # URL over HTTP either way). In production the dashboard shares the
+    # bot's own clip server, so this collision cannot happen there.
+    cfg_test.write_text(cfg_test.read_text().replace("port: 8765", "port: 8766"))
     os.environ["LVI_CONFIG"] = str(cfg_test)
 
     from fastapi import FastAPI
