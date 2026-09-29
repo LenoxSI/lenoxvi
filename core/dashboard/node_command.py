@@ -54,7 +54,7 @@ def send_pong(pc_id: str) -> None:
         return
     from pipecat.frames.frames import OutputTransportMessageFrame
 
-    fut = task.queue_frame(OutputTransportMessageFrame(message={"cmd": "ping"}))
+    fut = task.queue_frame(OutputTransportMessageFrame(message={"cmd": "pong"}))
     import asyncio
 
     asyncio.get_event_loop().create_task(fut) if asyncio.iscoroutine(fut) else None
@@ -98,9 +98,11 @@ def on_message(message, pc_id: str) -> None:
     if not isinstance(data, dict):
         return
 
-    # Liveness probe: answer immediately, unconditionally.
-    if data.get("evt") == "cmd_result" and data.get("cmd") == "ping" \
-            and data.get("data") == "probe":
+    # Liveness probe: answer immediately, unconditionally. The protocol
+    # is ASYMMETRIC (node sends evt cmd_result "probe" every 5 min; bot
+    # answers {"cmd":"pong"}; node consumes pong silently — no reply).
+    # Symmetric ping/pong looped ~1/sec for 12 min (measured 19:35–19:47).
+    if data.get("evt") == "cmd_result" and data.get("cmd") == "probe":
         send_pong(pc_id)
         return
 
