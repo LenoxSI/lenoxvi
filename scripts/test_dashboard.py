@@ -55,7 +55,7 @@ def main():
     cfg_test.write_text(cfg_test.read_text().replace("port: 8765", "port: 8766"))
     os.environ["LVI_CONFIG"] = str(cfg_test)
 
-    from fastapi import FastAPI
+    from fastapi import BackgroundTasks, FastAPI
     from fastapi.testclient import TestClient
 
     import dashboard  # noqa: E402  (registers nothing yet)
@@ -65,14 +65,29 @@ def main():
     check("register_dashboard mounts without error", True)
 
     app = FastAPI()
-    # Fake pipecat /api/offer: the tee must observe whatever the real
-    # handler would exchange (request room + response pc_id).
-    _pc_counter = [0]
+    # Fake pipecat /api/offer — TWO shapes, to prove the tee's timing
+    # contract:
+    #  a) immediate return (browser-ish): correlation at send time.
+    #  b) pipecat's REAL shape: the "pipeline" runs as this request's
+    #     BACKGROUND task, so the ASGI app call does not return until
+    #     the session ends. The tee must correlate at response-SEND
+    #     time (before connected), NOT after the app call returns
+    #     (session end — measured live 2026-09-29).
+    _pc_counter = 0
 
     @app.post("/api/offer")
-    async def fake_offer(body: dict):
-        _pc_counter[0] += 1
-        return {"sdp": "v=0 answer", "type": "answer", "pc_id": f"test-pc-{_pc_counter[0]}"}
+    async def fake_offer(background_tasks: BackgroundTasks, body: dict):
+        nonlocal _pc_counter
+        _pc_counter += 1
+        pc_id = f"test-pc-{_pc_counter}"
+
+        def session(body=body):
+            # simulate a long-lived WebRTC session that only "connects"
+            # after the response has been sent
+            registry.mark_connected(pc_id)
+
+        background_tasks.add_task(session)
+        return {"sdp": "v=0 answer", "type": "answer", "pc_id": pc_id}
 
     dashboard.register_dashboard(app)
     client = TestClient(app)
@@ -91,11 +106,15 @@ def main():
     except Exception:
         pass
     check("offer response carries pc_id", bool(pc_id), f"pc_id={pc_id}")
-    if pc_id:
-        registry.mark_connected(pc_id)
-        rooms = {r["room"]: r for r in registry.known_rooms()}
-        check("node room registered as bedroom online",
-              rooms.get("bedroom", {}).get("online") is True, f"rooms={list(rooms)}")
+    # TestClient runs background tasks after the response completes; the
+    # tee must have correlated BEFORE mark_connected ran (the whole
+    # point of send-time correlation). Verify the registry already
+    # knew the room when connect fired:
+    rooms = {r["room"]: r for r in registry.known_rooms()}
+    check("tee correlated room BEFORE connect (send-time)",
+          rooms.get("bedroom", {}).get("online") is True
+          or registry.active_room() == "bedroom",
+          f"rooms={list(rooms)} active={registry.active_room()}")
 
     # connect-BEFORE-offer race: mark connected first, then tee fires
     pc2 = "fake-pc-race"

@@ -53,6 +53,8 @@ def register_dashboard(app) -> None:
         )
         return
 
+    registry.mark_boot()
+
     # Tee /api/offer so node room labels can be tied to connections
     # (the firmware sends `room` in the offer; pipecat generates the
     # pc_id server-side — see offer_tee.py).
