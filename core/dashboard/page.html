@@ -212,7 +212,7 @@ async function loadNodes() {
         try {
           const r = await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/name`, {
             method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ room, name }),
+            body: JSON.stringify({ name }),
           });
           msg($("#node-msg"), `Renamed to '${name}' — hostname follows on the router.`, "ok");
           loadStatus(); loadNodes(); loadMapping();
@@ -236,7 +236,7 @@ async function loadNodes() {
         try {
           await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/wifi`, {
             method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ room, ssid, password: pass }),
+            body: JSON.stringify({ ssid, password: pass }),
           });
           msg($("#node-msg"), `Wi-Fi applying — ${room} reconnects with new creds; bad password auto-rolls back.`, "ok");
         } catch (e) { msg($("#node-msg"), "Wi-Fi set failed: " + e.message, "err"); }

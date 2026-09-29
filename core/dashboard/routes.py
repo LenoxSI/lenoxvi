@@ -249,13 +249,11 @@ async def test_zone(name: str):
 
 
 class WifiPayload(BaseModel):
-    room: str = Field(min_length=1, max_length=32)
     ssid: str = Field(min_length=1, max_length=32)
     password: str = Field(min_length=1, max_length=63)
 
 
 class NamePayload(BaseModel):
-    room: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=31, pattern=r"^[A-Za-z0-9_-]+$")
 
 
