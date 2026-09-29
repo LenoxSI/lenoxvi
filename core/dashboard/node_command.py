@@ -28,14 +28,20 @@ _pending_lock = asyncio.Lock()
 
 
 def send_to_room(room: str, payload: dict) -> bool:
-    """Queue a data-channel message to the node currently in `room`."""
+    """Queue a data-channel message to the node currently in `room`.
+    Returns False if no live session. Schedules the async queue on the
+    running loop — safe to call from sync or async context."""
     task, pc_id = registry.task_for_room(room)
     if task is None:
         logger.warning(f"node_command: no live session for room '{room}'")
         return False
     from pipecat.frames.frames import OutputTransportMessageFrame
 
-    task.queue_frame(OutputTransportMessageFrame(message=payload))
+    import asyncio
+
+    fut = task.queue_frame(OutputTransportMessageFrame(message=payload))
+    # PipelineWorker.queue_frame is async; fire it on the loop
+    asyncio.get_event_loop().create_task(fut) if asyncio.iscoroutine(fut) else None
     logger.info(f"node_command: -> '{room}' ({pc_id[:24]}…): {payload}")
     return True
 
@@ -48,7 +54,10 @@ def send_pong(pc_id: str) -> None:
         return
     from pipecat.frames.frames import OutputTransportMessageFrame
 
-    task.queue_frame(OutputTransportMessageFrame(message={"cmd": "ping"}))
+    fut = task.queue_frame(OutputTransportMessageFrame(message={"cmd": "ping"}))
+    import asyncio
+
+    asyncio.get_event_loop().create_task(fut) if asyncio.iscoroutine(fut) else None
 
 
 async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0):
@@ -69,7 +78,10 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
 
     from pipecat.frames.frames import OutputTransportMessageFrame
 
-    task.queue_frame(OutputTransportMessageFrame(message=payload))
+    # PipelineWorker.queue_frame is async — await it (a sync call leaves
+    # the coroutine unawaited and the frame NEVER leaves the bot; the
+    # RuntimeWarning at 18:10:07 was exactly this).
+    await task.queue_frame(OutputTransportMessageFrame(message=payload))
     try:
         return await asyncio.wait_for(fut, timeout)
     finally:

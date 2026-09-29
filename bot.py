@@ -149,11 +149,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         logger.info("client disconnected")
         await task.cancel()
 
-    @transport.event_handler("on_client_message")
-    async def on_client_message(transport, message, client):
+    @transport.event_handler("on_app_message")
+    async def on_app_message(transport, message, sender):
         # Dashboard command replies + liveness probes (firmware 1.1.0).
+        # NOTE: the smallwebrtc transport registers "on_app_message" —
+        # NOT "on_client_message" (that name is the RTVI processor's;
+        # using it silently never fires, measured 2026-09-29 18:10).
+        # Signature is (message, sender) where sender IS the pc_id
+        # string (transport.py:578 passes connection.pc_id directly) —
+        # not a connection object.
         from dashboard import node_command
-        node_command.on_message(message, client.pc_id)
+        node_command.on_message(message, sender)
 
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
