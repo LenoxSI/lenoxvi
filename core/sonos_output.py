@@ -95,9 +95,15 @@ class SonosOutput(FrameProcessor):
     _shared_clip_server = None  # class-level: ONE server for all pipelines
     _prune_task_started = False  # ONE hourly prune loop per process
 
-    def __init__(self, config_path: str | None = None, echo_gate=None, **kwargs):
+    def __init__(self, config_path: str | None = None, echo_gate=None,
+                 zone_selector=None, **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
+        # Optional sync callable returning a zone NAME for the reply clip
+        # (room-aware routing: the dashboard registry records which
+        # room's wake opened the turn; bot.py passes a selector that
+        # maps it through config.yaml room_zones). Must never raise.
+        self._zone_selector = zone_selector
         # Read through core/config so LVI_CONFIG (if ever set) applies here
         # too — a direct Path("config.yaml") default would let the bot read
         # two different config files in one process.
@@ -163,9 +169,15 @@ class SonosOutput(FrameProcessor):
         if self._echo_gate is not None:
             duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
             self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
-        zone = self._zones.get(self._zone)
+        zone_name = self._zone
+        if self._zone_selector:
+            try:
+                zone_name = self._zone_selector() or self._zone
+            except Exception as e:  # routing hint must never break the reply
+                logger.debug(f"sonos_output: zone_selector failed: {e}")
+        zone = self._zones.get(zone_name)
         if not zone:
-            logger.warning("sonos_output: no zone config, skipping Sonos playback")
+            logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
             return
         # MP3, not WAV — the proven-working format for Sonos audioClip
         # (design note; WAV is not in Sonos's documented supported set).
@@ -184,7 +196,7 @@ class SonosOutput(FrameProcessor):
         clip_path.parent.mkdir(parents=True, exist_ok=True)
         clip_path.write_bytes(mp3)
         url = self._clip_server.url_for(filename)
-        logger.info(f"sonos_output: playing clip {url} on '{self._zone}' at vol {self._volume}")
+        logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {self._volume}")
 
         from sonos_websocket import SonosWebsocket
 

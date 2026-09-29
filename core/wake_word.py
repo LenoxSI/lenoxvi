@@ -62,10 +62,15 @@ class WakeWordFilter(FrameProcessor):
     _shared_oww = None  # class-level: ONE Model for all pipelines
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
-                 echo_gate=None, **kwargs):
+                 echo_gate=None, on_wake=None, **kwargs):
         from config import cfg_env
 
         super().__init__(**kwargs)
+        # Optional sync callback fired on IDLE -> AWAKE. The dashboard's
+        # room registry uses it to record which room's wake opened the
+        # turn (room-aware reply routing); must be cheap and must never
+        # raise into the pipeline.
+        self._on_wake = on_wake
         # Model path: config.yaml wake.model > LVI_WAKE_MODEL env > the repo-root
         # default (a trained .onnx; gitignored — see config.example.yaml).
         self._model_path = str(Path(cfg_env("wake", "model", "LVI_WAKE_MODEL", model_path) or model_path))
@@ -135,6 +140,11 @@ class WakeWordFilter(FrameProcessor):
                     self._state = TurnState.AWAKE
                     self._last_activity = now
                     logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
+                    if self._on_wake:
+                        try:
+                            self._on_wake()
+                        except Exception as e:  # observer must never break the gate
+                            logger.debug(f"wake_word: on_wake callback failed: {e}")
                     await self._send_led("oww-awake")
                     break
 

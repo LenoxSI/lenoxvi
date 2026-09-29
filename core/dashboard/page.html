@@ -1,0 +1,269 @@
+<!-- lenoxvi dashboard — thin, unstyled skin over /api/dashboard/*
+     (design note: v1 is deliberately plain; a later restyle swaps
+     this file only, endpoints are the contract). No framework, no
+     build step, no external assets. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lenoxvi dashboard</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; max-width: 920px; color: #1c1c1e; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 32px 0 10px; border-bottom: 1px solid #d8d8dc; padding-bottom: 6px; }
+  .sub { color: #6b6b70; font-size: 13px; margin: 0 0 18px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5ea; vertical-align: middle; }
+  th { font-size: 12.5px; color: #6b6b70; text-transform: uppercase; letter-spacing: .04em; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: #c7c7cc; }
+  .dot.on { background: #30d158; }
+  select, button, input { font: inherit; }
+  select { padding: 4px 6px; min-width: 140px; }
+  button { padding: 5px 12px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row-actions button { margin-right: 6px; }
+  .muted { color: #6b6b70; font-size: 13px; }
+  .err { color: #d70015; font-size: 13px; margin: 6px 0; }
+  .ok { color: #248a3d; font-size: 13px; margin: 6px 0; }
+  form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  form.inline input { padding: 5px 7px; }
+  #statusbar { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px;
+               background: #f2f2f7; border-radius: 8px; padding: 10px 14px; }
+  #statusbar b { font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>lenoxvi dashboard</h1>
+<p class="sub">Mic-room &rarr; Sonos zone mapping. LAN-only; no login by design.
+Config edits save to config.yaml and apply on the next bot restart.</p>
+
+<div id="statusbar">Loading…</div>
+
+<h2>Room &rarr; zone mapping</h2>
+<p class="sub" id="mapping-help">Pick a Sonos zone for each mic room. Rooms appear here once
+their node has connected at least once (firmware reports its room on connect).</p>
+<table id="mapping"><thead><tr>
+  <th>Room (mic node)</th><th>Zone (Sonos)</th><th></th>
+</tr></thead><tbody></tbody></table>
+<div id="mapping-msg"></div>
+
+<h2>Nodes</h2>
+<table id="nodes"><thead><tr>
+  <th>Room</th><th>Status</th><th>Last seen</th>
+</tr></thead><tbody></tbody></table>
+
+<h2>Zones</h2>
+<p class="sub">Sonos S2 Port/Amp only for the audioClip path (tested); other models are
+your own experiment.</p>
+<button id="btn-discover">Discover Sonos on LAN</button>
+<span id="discover-msg" class="muted"></span>
+<table id="zones"><thead><tr>
+  <th>Name</th><th>IP</th><th>Player UID</th><th>Test</th><th></th>
+</tr></thead><tbody></tbody></table>
+<div id="zone-msg"></div>
+<form class="inline" id="form-zone">
+  <input id="z-name" placeholder="zone name (e.g. living_room)" size="24">
+  <input id="z-ip" placeholder="IP" size="14">
+  <input id="z-uid" placeholder="player UID (RINCON_…)" size="26">
+  <button>Add zone</button>
+</form>
+
+<script>
+"use strict";
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let zones = {}, mapping = {};
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.status);
+  return body;
+}
+
+function fmtAgo(ts) {
+  if (!ts) return "—";
+  const s = Math.max(0, Math.round(Date.now()/1000 - ts));
+  if (s < 90) return s + "s ago";
+  if (s < 5400) return Math.round(s/60) + "m ago";
+  if (s < 172800) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+}
+
+function msg(el, text, cls) {
+  el.textContent = text || "";
+  el.className = cls || "muted";
+}
+
+// ── status strip ──────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await api("/api/dashboard/status");
+    const up = s.uptime_secs == null ? "—" :
+      Math.floor(s.uptime_secs/86400) + "d " +
+      new Date(s.uptime_secs*1000).toISOString().slice(11,16) + "h";
+    const wake = s.last_wake
+      ? esc(s.last_wake.room || "?") + ", " + fmtAgo(s.last_wake.time)
+      : "none since boot";
+    $("#statusbar").innerHTML =
+      `<span>Uptime <b>${up}</b></span>` +
+      `<span>Nodes online <b>${s.rooms.filter(r => r.online).length}/${s.rooms.length}</b></span>` +
+      `<span>Active room <b>${esc(s.active_room || "—")}</b></span>` +
+      `<span>Last wake <b>${wake}</b></span>`;
+  } catch (e) { $("#statusbar").textContent = "status unavailable: " + e.message; }
+}
+
+// ── mapping table ─────────────────────────────────────────────
+async function loadMapping() {
+  try {
+    const m = await api("/api/dashboard/mapping");
+    zones = m.zones; mapping = m.room_zones;
+    const tb = $("#mapping tbody"); tb.innerHTML = "";
+    const rooms = [...new Set([
+      ...Object.keys(mapping),
+      ...(await api("/api/dashboard/status")).rooms.map(r => r.room),
+    ])].sort();
+    if (!rooms.length) {
+      tb.innerHTML = `<tr><td colspan="3" class="muted">No rooms yet —
+        power on a mic node and reload; it appears after its first connect.</td></tr>`;
+      return;
+    }
+    for (const room of rooms) {
+      const tr = document.createElement("tr");
+      const opts = ["<option value=''>— none —</option>"].concat(
+        Object.keys(zones).sort().map(z =>
+          `<option value="${esc(z)}"${mapping[room] === z ? " selected" : ""}>${esc(z)}</option>`));
+      tr.innerHTML =
+        `<td>${esc(room)}</td>` +
+        `<td><select data-room="${esc(room)}">${opts.join("")}</select></td>` +
+        `<td class="row-actions"><button data-save="${esc(room)}">Save</button></td>`;
+      tb.appendChild(tr);
+    }
+    tb.querySelectorAll("button[data-save]").forEach(b =>
+      b.addEventListener("click", async () => {
+        const room = b.dataset.save;
+        const sel = tb.querySelector(`select[data-room="${CSS.escape(room)}"]`);
+        const next = { ...mapping, [room]: sel.value };
+        try {
+          const r = await api("/api/dashboard/mapping", {
+            method: "PUT", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ room_zones: next }),
+          });
+          mapping = r.room_zones;
+          msg($("#mapping-msg"), r.changed ? `Saved mapping for '${room}'.` : "No changes.", "ok");
+          loadStatus();
+        } catch (e) { msg($("#mapping-msg"), "Save failed: " + e.message, "err"); }
+      }));
+  } catch (e) { msg($("#mapping-msg"), "Load failed: " + e.message, "err"); }
+}
+
+// ── nodes table ───────────────────────────────────────────────
+async function loadNodes() {
+  try {
+    const s = await api("/api/dashboard/status");
+    const tb = $("#nodes tbody"); tb.innerHTML = "";
+    if (!s.rooms.length) {
+      tb.innerHTML = `<tr><td colspan="3" class="muted">No nodes seen yet.</td></tr>`;
+      return;
+    }
+    for (const r of s.rooms) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.room)}</td>` +
+        `<td>${r.online ? "connected" : "offline"}</td>` +
+        `<td>${fmtAgo(r.last_seen)}</td>`;
+      tb.appendChild(tr);
+    }
+  } catch (e) { /* status strip already surfaces errors */ }
+}
+
+// ── zones table ───────────────────────────────────────────────
+function renderZones() {
+  const tb = $("#zones tbody"); tb.innerHTML = "";
+  const names = Object.keys(zones).sort();
+  if (!names.length) {
+    tb.innerHTML = `<tr><td colspan="5" class="muted">No zones configured.
+      Discover on LAN or add one manually below.</td></tr>`;
+    return;
+  }
+  for (const name of names) {
+    const z = zones[name];
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${esc(name)}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid)}</td>` +
+      `<td><button data-test="${esc(name)}">Play test clip</button></td>` +
+      `<td><button data-del="${esc(name)}">Remove</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll("button[data-test]").forEach(b =>
+    b.addEventListener("click", async () => {
+      b.disabled = true; msg($("#zone-msg"), "Playing test clip on " + b.dataset.test + "…");
+      try {
+        await api(`/api/dashboard/zones/${encodeURIComponent(b.dataset.test)}/test`, { method: "POST" });
+        msg($("#zone-msg"), "Test clip sent to " + b.dataset.test + ".", "ok");
+      } catch (e) { msg($("#zone-msg"), "Test failed: " + e.message, "err"); }
+      b.disabled = false;
+    }));
+  tb.querySelectorAll("button[data-del]").forEach(b =>
+    b.addEventListener("click", async () => {
+      if (!confirm(`Remove zone '${b.dataset.del}'? Rooms mapped to it lose their mapping.`)) return;
+      try {
+        await api(`/api/dashboard/zones/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
+        delete zones[b.dataset.del];
+        renderZones(); loadMapping();
+      } catch (e) { msg($("#zone-msg"), "Remove failed: " + e.message, "err"); }
+    }));
+}
+
+async function loadZones() {
+  try {
+    const m = await api("/api/dashboard/mapping");
+    zones = m.zones; renderZones();
+  } catch (e) { msg($("#zone-msg"), "Zones load failed: " + e.message, "err"); }
+}
+
+$("#btn-discover").addEventListener("click", async () => {
+  const b = $("#btn-discover");
+  b.disabled = true; msg($("#discover-msg"), "Scanning LAN (a few seconds)…");
+  try {
+    const r = await api("/api/dashboard/zones/discover", { method: "POST" });
+    msg($("#discover-msg"), r.found.length
+      ? `${r.found.length} player(s) found — add the ones you want below.`
+      : "No players found on the LAN.");
+    r.found.forEach(f => {
+      $("#z-name").value = f.name.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
+      $("#z-ip").value = f.ip;
+      $("#z-uid").value = f.uid;
+    });
+    if (r.found.length === 1) {
+      // single-player households: prefill, let the human confirm
+      msg($("#discover-msg"), "1 player found and prefilled — check the fields, then Add zone.");
+    }
+  } catch (e) { msg($("#discover-msg"), "Discovery failed: " + e.message, "err"); }
+  b.disabled = false;
+});
+
+$("#form-zone").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/dashboard/zones", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        name: $("#z-name").value, ip: $("#z-ip").value, player_uid: $("#z-uid").value,
+      }),
+    });
+    $("#form-zone").reset();
+    await loadZones(); loadMapping();
+    msg($("#zone-msg"), "Zone added.", "ok");
+  } catch (e) { msg($("#zone-msg"), "Add failed: " + e.message, "err"); }
+});
+
+loadStatus(); loadMapping(); loadNodes(); loadZones();
+setInterval(loadStatus, 5000);
+setInterval(loadNodes, 5000);
+</script>
+</body>
+</html>

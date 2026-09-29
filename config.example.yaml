@@ -71,3 +71,17 @@ sonos:
 clip_server:
   host_ip: <bot-host-ip>
   port: 8765
+
+# ── Room → zone mapping (mic rooms → Sonos zones) ─────────────────────
+# Edited via the web dashboard (https://<bot-host-LAN-IP>:7860/dashboard)
+# — or by hand here. The mic node's firmware sends its room name in the
+# WebRTC offer; when a wake fires in a mapped room, the reply clip plays
+# in that room's zone instead of default_zone. Unmapped rooms and the
+# browser client keep using default_zone.
+room_zones:
+  <room>: <zone-name>
+
+# ── Web dashboard ─────────────────────────────────────────────────────
+# Served by the bot at /dashboard (LAN-only, no login by design).
+dashboard:
+  enabled: true

@@ -1,0 +1,182 @@
+"""Offline test rig for the lenoxvi dashboard package.
+
+Runs against the host's REAL venv (pipecat, fastapi, soco, ruamel) in a
+scratch dir — NOT the live repo checkout (host is a pure deploy target).
+
+Exercises:
+  1. imports + register_dashboard() on a plain FastAPI app
+  2. /dashboard page serves
+  3. offer tee -> registry correlation (node offer with room, browser
+     offer without; connect-before-offer ordering race)
+  4. GET /api/dashboard/status shape
+  5. config write round-trip (room_zones) on a THROWAWAY config file —
+     comment preservation + cache reload + validation
+  6. zone add via API + config round-trip
+  7. mapping PUT validation (unknown zone rejected)
+  8. REAL Sonos test clip on the REAL configured zone (if reachable)
+
+Usage (host): ~/venvs/lenoxvi/bin/python test_dashboard.py <repo-core-path>
+"""
+
+import asyncio
+import copy
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+REPO_CORE = Path(sys.argv[1]).resolve()  # .../lenoxvi/core
+SCRATCH = Path(tempfile.mkdtemp(prefix="tk-dash-test-"))
+FAILS = []
+
+
+def check(name, cond, detail=""):
+    tag = "PASS" if cond else "FAIL"
+    print(f"[{tag}] {name}" + (f" — {detail}" if detail else ""))
+    if not cond:
+        FAILS.append(name)
+
+
+def main():
+    sys.path.insert(0, str(REPO_CORE))
+
+    # ── throwaway config: copy the repo's real config, then point the
+    # package at it via LVI_CONFIG (the documented env override).
+    cfg_src = REPO_CORE.parent / "config.yaml"
+    cfg_test = SCRATCH / "config.yaml"
+    shutil.copy2(cfg_src, cfg_test)
+    os.environ["LVI_CONFIG"] = str(cfg_test)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import dashboard  # noqa: E402  (registers nothing yet)
+    from dashboard import registry  # noqa: E402
+
+    dashboard.register_dashboard(FastAPI())
+    check("register_dashboard mounts without error", True)
+
+    app = FastAPI()
+    # Fake pipecat /api/offer: the tee must observe whatever the real
+    # handler would exchange (request room + response pc_id).
+    _pc_counter = [0]
+
+    @app.post("/api/offer")
+    async def fake_offer(body: dict):
+        _pc_counter[0] += 1
+        return {"sdp": "v=0 answer", "type": "answer", "pc_id": f"test-pc-{_pc_counter[0]}"}
+
+    dashboard.register_dashboard(app)
+    client = TestClient(app)
+
+    # 2. page
+    r = client.get("/dashboard")
+    check("GET /dashboard -> 200 html", r.status_code == 200 and "dashboard" in r.text)
+
+    # 3. offer tee + registry: node offer (with room), browser (no room)
+    offer = {"sdp": "v=0\r\n", "type": "offer", "room": "bedroom"}
+    resp = client.post("/api/offer", json=offer)
+    check("POST /api/offer (fake) accepted", resp.status_code == 200, f"status={resp.status_code}")
+    pc_id = None
+    try:
+        pc_id = resp.json().get("pc_id")
+    except Exception:
+        pass
+    check("offer response carries pc_id", bool(pc_id), f"pc_id={pc_id}")
+    if pc_id:
+        registry.mark_connected(pc_id)
+        rooms = {r["room"]: r for r in registry.known_rooms()}
+        check("node room registered as bedroom online",
+              rooms.get("bedroom", {}).get("online") is True, f"rooms={list(rooms)}")
+
+    # connect-BEFORE-offer race: mark connected first, then tee fires
+    pc2 = "fake-pc-race"
+    registry.mark_connected(pc2)  # provisional 'unknown'
+    check("provisional room assigned pre-offer",
+          registry.active_room() == "unknown")
+    registry.note_offer(pc2, "kitchen")
+    rooms = {r["room"]: r for r in registry.known_rooms()}
+    check("race reconciled to kitchen",
+          rooms.get("kitchen", {}).get("online") is True and "unknown" not in rooms,
+          f"rooms={list(rooms)}")
+
+    # browser client: no room
+    resp = client.post("/api/offer", json={"sdp": "v=0\r\n", "type": "offer"})
+    pc3 = resp.json().get("pc_id") if resp.status_code == 200 else None
+    if pc3:
+        registry.mark_connected(pc3)
+        rooms = {r["room"]: r for r in registry.known_rooms()}
+        check("browser client -> 'browser' room",
+              rooms.get("browser", {}).get("online") is True, f"rooms={list(rooms)}")
+
+    # 4. status shape
+    s = client.get("/api/dashboard/status").json()
+    check("status shape", all(k in s for k in
+          ("uptime_secs", "active_room", "last_wake", "rooms")), f"s={s}")
+    registry.note_wake()
+    s = client.get("/api/dashboard/status").json()
+    check("note_wake records room", s["last_wake"] and s["last_wake"]["room"] is not None,
+          f"last_wake={s['last_wake']}")
+
+    # 5. config write round-trip on throwaway file
+    before_text = cfg_test.read_text()
+    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "living_room"}})
+    check("mapping PUT ok", r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
+    after_text = cfg_test.read_text()
+    check("config write changed the file", after_text != before_text)
+    check("comment preservation (header survives)",
+          "# lenoxvi config" in after_text or "THE tuning surface" in after_text,
+          )
+    m = client.get("/api/dashboard/mapping").json()
+    check("mapping read-back after write", m["room_zones"] == {"bedroom": "living_room"},
+          f"m={m['room_zones']}")
+    check("backup file created", (SCRATCH / "config.backup.yaml").is_file())
+
+    # 6. zone add round-trip
+    r = client.post("/api/dashboard/zones", json={
+        "name": "test_zone", "ip": "203.0.113.222", "player_uid": "RINCON_TEST"})
+    check("zone add ok", r.status_code == 200, f"status={r.status_code}")
+    m = client.get("/api/dashboard/mapping").json()
+    check("new zone visible in mapping GET", "test_zone" in m["zones"], f"zones={list(m['zones'])}")
+
+    # 7. validation: unknown zone in mapping rejected
+    r = client.put("/api/dashboard/mapping",
+                   json={"room_zones": {"bedroom": "nonexistent_zone"}})
+    check("mapping PUT rejects unknown zone", r.status_code == 400, f"status={r.status_code}")
+
+    # 8. REAL Sonos test clip on the REAL zone
+    real_zones = m["zones"]
+    # use the REAL living_room zone (from the real config), not test_zone
+    real = [z for z in ("living_room",) if z in real_zones]
+    if real:
+        r = client.post(f"/api/dashboard/zones/{real[0]}/test")
+        ok = r.status_code == 200
+        check(f"REAL test clip on '{real[0]}'", ok,
+              "" if ok else f"status={r.status_code} body={r.text[:200]}")
+    else:
+        print("[SKIP] no real zone in config — skipping live Sonos test")
+
+    # 9. REAL soco discovery on the LAN (best effort — players may nap)
+    r = client.post("/api/dashboard/zones/discover")
+    if r.status_code == 200:
+        found = r.json()["found"]
+        check("soco discovery ran", True, f"found {len(found)} player(s): "
+              + ", ".join(f"{f['name']} ({f['model']})" for f in found))
+    else:
+        print(f"[WARN] discovery endpoint returned {r.status_code}: {r.text[:120]}")
+
+    # cleanup: restore nothing (throwaway dir), but show diff summary
+    print()
+    print(f"scratch dir kept for inspection: {SCRATCH}")
+    print(f"throwaway config: {cfg_test}")
+    if FAILS:
+        print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
+        sys.exit(1)
+    print("\nALL CHECKS PASSED")
+
+
+if __name__ == "__main__":
+    main()

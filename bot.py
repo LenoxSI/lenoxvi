@@ -69,6 +69,25 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     )
     logger.info("tts backend: elevenlabs")
     gate = EchoGate()
+    # Room-aware reply routing (dashboard registry + config room_zones):
+    # the wake gate records which room's wake opened the turn, and this
+    # selector maps it to that room's zone — falling back to the
+    # configured default zone everywhere else (unknown room, browser
+    # client, or selector failure must never silence a reply).
+    from dashboard import registry as dash_registry
+    dash_registry.set_gate(gate)
+
+    def _reply_zone():
+        room = dash_registry.active_room()
+        if not room:
+            return None
+        from config import cfg
+        mapped = (cfg("room_zones") or {}).get(room)
+        return mapped  # None -> default zone fallback in SonosOutput
+
+    def _on_wake():
+        dash_registry.note_wake()
+
     brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
             else StubBrain(echo_gate=gate))
 
@@ -91,12 +110,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 transport.input(),
                 # wake gate AFTER the source (frames flow downstream from
                 # transport.input()), BEFORE VAD/STT: gates audio in IDLE/LOCKED
-                *( [WakeWordFilter(echo_gate=gate)] if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true") else [] ),
+                *([WakeWordFilter(echo_gate=gate, on_wake=_on_wake)]
+                  if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true") else []),
                 VADProcessor(vad_analyzer=vad_analyzer),
                 stt,
                 brain,
                 tts,
-                SonosOutput(echo_gate=gate),  # same reply to the zone's Sonos (audioClip overlay)
+                SonosOutput(echo_gate=gate, zone_selector=_reply_zone),  # reply in the wake room's zone when mapped
                 transport.output(),
             ]
         ),
@@ -113,11 +133,18 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info("browser client connected")
+        # client = SmallWebRTCConnection (pipecat smallwebrtc): tie it to
+        # the room recorded by the offer tee; the dashboard registry
+        # turns "a client connected" into "the bedroom node is online".
+        from dashboard import registry
+        registry.mark_connected(client.pc_id)
+        logger.info("client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info("browser client disconnected")
+        from dashboard import registry
+        registry.mark_disconnected(client.pc_id)
+        logger.info("client disconnected")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
@@ -143,6 +170,12 @@ if __name__ == "__main__":
     from pipecat.runner.run import app as _runner_app
     from firmware_server import register_firmware_routes
     register_firmware_routes(_runner_app)
+
+    # Web dashboard: /dashboard page + /api/dashboard/* endpoints
+    # (mapping, nodes, zones, test clips). Same registration pattern
+    # as firmware_server; see core/dashboard/.
+    from dashboard import register_dashboard
+    register_dashboard(_runner_app)
 
     # Serve HTTPS when certs exist: plain-HTTP LAN origins are insecure
     # contexts, so browsers hide getUserMedia/RTCPeerConnection and the
