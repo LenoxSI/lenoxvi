@@ -37,6 +37,22 @@ _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 PROVISIONAL = "unknown"
 
 
+def _evict_other_sessions(pc_id, room):
+    """Single live session per room: when pc_id claims `room`, drop any
+    OLDER pc_id still mapped to it (and its task). The node re-offers
+    before pipecat reaps its dead session (~22s zombie window) —
+    measured 2026-09-29 19:11: rename/scan queued into the dead
+    session's task and 504'd while the live session sat idle."""
+    if not pc_id or not room or room == PROVISIONAL:
+        return
+    stale = [p for p, r in _room_by_pc.items() if r == room and p != pc_id]
+    for p in stale:
+        _room_by_pc.pop(p, None)
+        _task_by_pc.pop(p, None)
+        if len(stale) > 0:
+            logger.info(f"registry: evicted stale session {p[:24]}… from room '{room}'")
+
+
 def mark_boot():
     global _boot_time
     _boot_time = time.time()
@@ -81,6 +97,7 @@ def note_offer(pc_id, room):
             rec["last_seen"] = time.time()
     else:
         _room_by_pc[pc_id] = label
+    _evict_other_sessions(pc_id, label)
 
 
 def mark_connected(pc_id):
@@ -127,11 +144,14 @@ def note_wake():
 def task_for_room(room: str):
     """(task, pc_id) for the node currently connected in `room`, or
     (None, None). task is the pipecat PipelineTask whose queue_frame()
-    sends on that node's data channel."""
+    sends on that node's data channel. LAST match wins: with eviction
+    there's at most one, but if a stale mapping ever survives, the
+    newest session is the one that can actually hear us."""
+    found = (None, None)
     for pc_id, r in _room_by_pc.items():
         if r == room and _task_by_pc.get(pc_id) is not None:
-            return _task_by_pc[pc_id], pc_id
-    return None, None
+            found = (_task_by_pc[pc_id], pc_id)
+    return found
 
 
 def task_for_pc(pc_id: str):
