@@ -32,17 +32,25 @@ def register_dashboard(app) -> None:
     """Mount the dashboard (page + API) on the runner's FastAPI app.
 
     Call once at process start, before the app begins serving.
+    Fail-safe: if the dashboard's optional deps (ruamel.yaml, soco)
+    are missing on a fresh clone, log and skip — the voice pipeline
+    must never depend on dashboard dependencies.
     """
     from config import cfg
 
-    from . import registry
-    from .offer_tee import OfferTeeMiddleware
-    from .routes import router
-
-    registry.mark_boot()
-
     if not bool(cfg("dashboard", "enabled", True)):
         logger.info("dashboard: disabled in config.yaml — not mounting")
+        return
+
+    try:
+        from . import registry
+        from .offer_tee import OfferTeeMiddleware
+        from .routes import router
+    except ImportError as e:
+        logger.warning(
+            f"dashboard: optional deps missing ({e}) — not mounting. "
+            "pip install soco ruamel.yaml to enable it."
+        )
         return
 
     # Tee /api/offer so node room labels can be tied to connections
