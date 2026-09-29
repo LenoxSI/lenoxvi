@@ -101,11 +101,21 @@ def mark_connected(pc_id):
 
 def mark_disconnected(pc_id):
     room = _room_by_pc.pop(pc_id, None) if pc_id else None
-    if room:
-        rec = _known_rooms.get(room)
-        if rec:
-            rec["online"] = False
-            rec["last_seen"] = time.time()
+    if not room:
+        # Unknown pc_id: a stale session from before this boot, or a
+        # duplicate disconnect. Don't touch room state — a newer session
+        # may own the room right now (measured 2026-09-29: new session
+        # connected 17:59:06, zombie reaped 17:99:31, dashboard lied).
+        return
+    # Only mark offline if NO other live pc_id still claims this room —
+    # pipecat reaps zombie sessions after the replacement connected.
+    still_live = any(r == room for other, r in _room_by_pc.items() if other != pc_id)
+    if still_live:
+        return
+    rec = _known_rooms.get(room)
+    if rec:
+        rec["online"] = False
+        rec["last_seen"] = time.time()
 
 
 def note_wake():
