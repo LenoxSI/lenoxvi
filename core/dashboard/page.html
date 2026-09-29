@@ -49,9 +49,22 @@ their node has connected at least once (firmware reports its room on connect).</
 <div id="mapping-msg"></div>
 
 <h2>Nodes</h2>
+<p class="sub">Firmware 1.1.0+ required for restart / rename / Wi-Fi
+(config over the air). Older firmware: nodes show status only.</p>
 <table id="nodes"><thead><tr>
-  <th>Room</th><th>Status</th><th>Last seen</th>
+  <th>Room</th><th>Status</th><th>Last seen</th><th></th>
 </tr></thead><tbody></tbody></table>
+<div id="node-msg"></div>
+
+<h2>Firmware</h2>
+<p class="sub">Upload a firmware .bin and set its version — nodes pick
+it up over OTA on their next boot. Same files deploy_firmware.sh ships.</p>
+<form class="inline" id="form-fw">
+  <input type="file" id="fw-file" accept=".bin">
+  <input id="fw-version" placeholder="version (e.g. 1.1.0)" size="14">
+  <button>Push firmware</button>
+</form>
+<div id="fw-msg"></div>
 
 <h2>Zones</h2>
 <p class="sub">Sonos S2 Port/Amp only for the audioClip path (tested); other models are
@@ -174,9 +187,61 @@ async function loadNodes() {
       tr.innerHTML =
         `<td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.room)}</td>` +
         `<td>${r.online ? "connected" : "offline"}</td>` +
-        `<td>${fmtAgo(r.last_seen)}</td>`;
+        `<td>${fmtAgo(r.last_seen)}</td>` +
+        `<td class="row-actions">` +
+        `<button data-rename="${esc(r.room)}" ${r.online ? "" : "disabled"}>Rename</button>` +
+        `<button data-restart="${esc(r.room)}" ${r.online ? "" : "disabled"}>Restart</button>` +
+        `<button data-wifi="${esc(r.room)}" ${r.online ? "" : "disabled"}>Wi-Fi…</button>` +
+        `</td>`;
       tb.appendChild(tr);
     }
+    tb.querySelectorAll("button[data-restart]").forEach(b =>
+      b.addEventListener("click", async () => {
+        if (!confirm(`Restart node '${b.dataset.restart}'?`)) return;
+        b.disabled = true; msg($("#node-msg"), "Restarting " + b.dataset.restart + "…");
+        try {
+          await api(`/api/dashboard/nodes/${encodeURIComponent(b.dataset.restart)}/restart`, { method: "POST" });
+          msg($("#node-msg"), "Restart sent — node reboots and reconnects (~15s).", "ok");
+        } catch (e) { msg($("#node-msg"), "Restart failed: " + e.message, "err"); }
+        b.disabled = false;
+      }));
+    tb.querySelectorAll("button[data-rename]").forEach(b =>
+      b.addEventListener("click", async () => {
+        const room = b.dataset.rename;
+        const name = prompt(`New name for node '${room}' (letters, numbers, _ or -):`, room);
+        if (!name) return;
+        try {
+          const r = await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/name`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ room, name }),
+          });
+          msg($("#node-msg"), `Renamed to '${name}' — hostname follows on the router.`, "ok");
+          loadStatus(); loadNodes(); loadMapping();
+        } catch (e) { msg($("#node-msg"), "Rename failed: " + e.message, "err"); }
+      }));
+    tb.querySelectorAll("button[data-wifi]").forEach(b =>
+      b.addEventListener("click", async () => {
+        const room = b.dataset.wifi;
+        msg($("#node-msg"), "Scanning from " + room + "…");
+        let nets = [];
+        try {
+          const r = await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/scan`, { method: "POST" });
+          nets = Object.entries(r.data || {}).sort((a, c) => c[1] - a[1]);
+        } catch (e) { msg($("#node-msg"), "Scan failed: " + e.message, "err"); return; }
+        const ssid = prompt("Networks seen by " + room + ":\n" +
+          nets.map(([s, r]) => `  ${s} (${r})`).join("\n") +
+          "\n\nSSID to join (blank = keep current):", nets[0]?.[0] || "");
+        if (!ssid) return;
+        const pass = prompt(`Password for '${ssid}':`, "");
+        if (pass === null) return;
+        try {
+          await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/wifi`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ room, ssid, password: pass }),
+          });
+          msg($("#node-msg"), `Wi-Fi applying — ${room} reconnects with new creds; bad password auto-rolls back.`, "ok");
+        } catch (e) { msg($("#node-msg"), "Wi-Fi set failed: " + e.message, "err"); }
+      }));
   } catch (e) { /* status strip already surfaces errors */ }
 }
 
@@ -259,6 +324,26 @@ $("#form-zone").addEventListener("submit", async (ev) => {
     await loadZones(); loadMapping();
     msg($("#zone-msg"), "Zone added.", "ok");
   } catch (e) { msg($("#zone-msg"), "Add failed: " + e.message, "err"); }
+});
+
+$("#form-fw").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = $("#fw-file").files[0];
+  const ver = $("#fw-version").value.trim();
+  if (!f || !ver) { msg($("#fw-msg"), "Pick a .bin and a version.", "err"); return; }
+  msg($("#fw-msg"), `Uploading ${f.name}…`);
+  try {
+    const fd = new FormData();
+    fd.append("file", f, f.name);
+    const up = await fetch("/api/dashboard/firmware/upload", { method: "POST", body: fd });
+    const upj = await up.json();
+    if (!up.ok) throw new Error(upj.detail || up.status);
+    const vr = await api("/api/dashboard/firmware/version", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ version: ver }),
+    });
+    msg($("#fw-msg"), `Firmware ${ver} served — nodes pick it up on next boot.`, "ok");
+  } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 
 loadStatus(); loadMapping(); loadNodes(); loadZones();

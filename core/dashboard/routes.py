@@ -13,13 +13,13 @@ import time
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from config import cfg
 
-from . import config_store, registry
+from . import config_store, node_command, registry
 
 router = APIRouter(prefix="/api/dashboard")
 
@@ -241,3 +241,106 @@ async def test_zone(name: str):
         await sw.close()
     logger.info(f"dashboard: test clip on '{name}' ({url})")
     return {"ok": True, "zone": name, "url": url}
+
+
+# ── node commands (firmware 1.1.0: restart / scan / set_wifi / set_name) ──
+
+
+class WifiPayload(BaseModel):
+    room: str = Field(min_length=1, max_length=32)
+    ssid: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=63)
+
+
+class NamePayload(BaseModel):
+    room: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=31, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+def _room_online(room: str) -> None:
+    if not any(r["room"] == room and r["online"] for r in registry.known_rooms()):
+        raise HTTPException(status_code=409, detail=f"node '{room}' is not online")
+
+
+@router.post("/nodes/{room}/restart")
+async def restart_node(room: str):
+    _room_online(room)
+    try:
+        reply = await node_command.request(room, "restart", timeout=8.0)
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    return reply
+
+
+@router.post("/nodes/{room}/scan")
+async def scan_node(room: str):
+    _room_online(room)
+    try:
+        reply = await node_command.request(room, "scan", timeout=20.0)
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"scan failed: {reply.get('data')}")
+    return reply  # {"ok": true, "data": {"ssid": rssi, ...}}
+
+
+@router.post("/nodes/{room}/wifi")
+async def set_node_wifi(room: str, payload: WifiPayload):
+    _room_online(room)
+    # Fire-and-report: the node disconnects to apply creds; the final
+    # verify/rollback result lands over the NEW session (firmware
+    # reports on reconnect). The dashboard shows "applying…".
+    try:
+        reply = await node_command.request(room, "set_wifi",
+                                           {"ssid": payload.ssid, "pass": payload.password},
+                                           timeout=8.0)
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    return reply
+
+
+@router.post("/nodes/{room}/name")
+async def set_node_name(room: str, payload: NamePayload):
+    _room_online(room)
+    try:
+        reply = await node_command.request(room, "set_name", {"name": payload.name})
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"rename failed: {reply.get('data')}")
+    return reply
+
+
+# ── firmware push (operator side of firmware_server.py) ─────────────
+
+
+@router.post("/firmware/upload")
+async def upload_firmware(file: UploadFile = File(...)):
+    """Upload a firmware .bin; the node OTA's itself on next boot."""
+    if not (file.filename or "").endswith(".bin"):
+        raise HTTPException(status_code=400, detail="must be a .bin")
+    dest_dir = Path("firmware/node")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / (file.filename or "firmware.bin")
+    size = 0
+    with open(dest, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            f.write(chunk)
+    if size < 1024 * 200:
+        raise HTTPException(status_code=400, detail="file too small to be a firmware image")
+    return {"ok": True, "filename": dest.name, "size": size}
+
+
+class FirmwareVersionPayload(BaseModel):
+    version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+
+
+@router.post("/firmware/version")
+async def set_firmware_version(payload: FirmwareVersionPayload):
+    """Write version.json (manifest) so nodes pick the uploaded bin up."""
+    manifest = {"version": payload.version, "filename": "node_esp32.bin"}
+    p = Path("firmware/node/version.json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(__import__("json").dumps(manifest, indent=2))
+    return {"ok": True, "manifest": manifest}

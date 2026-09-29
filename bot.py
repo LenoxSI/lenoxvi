@@ -138,14 +138,22 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # turns "a client connected" into "the bedroom node is online".
         from dashboard import registry
         registry.mark_connected(client.pc_id)
+        registry.register_task(client.pc_id, task)
         logger.info("client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         from dashboard import registry
         registry.mark_disconnected(client.pc_id)
+        registry.drop_task(client.pc_id)
         logger.info("client disconnected")
         await task.cancel()
+
+    @transport.event_handler("on_client_message")
+    async def on_client_message(transport, message, client):
+        # Dashboard command replies + liveness probes (firmware 1.1.0).
+        from dashboard import node_command
+        node_command.on_message(message, client.pc_id)
 
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)

@@ -24,10 +24,13 @@ Persistence split:
 
 import time
 
+from loguru import logger
+
 _boot_time = None
 _active_room = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
+_task_by_pc = {}  # pc_id -> pipeline task (node_command sends on its data channel)
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -109,6 +112,50 @@ def note_wake():
     """Called by the wake gate on IDLE -> AWAKE (sync, cheap)."""
     global _last_wake
     _last_wake = {"time": time.time(), "room": _active_room}
+
+
+def task_for_room(room: str):
+    """(task, pc_id) for the node currently connected in `room`, or
+    (None, None). task is the pipecat PipelineTask whose queue_frame()
+    sends on that node's data channel."""
+    for pc_id, r in _room_by_pc.items():
+        if r == room and _task_by_pc.get(pc_id) is not None:
+            return _task_by_pc[pc_id], pc_id
+    return None, None
+
+
+def task_for_pc(pc_id: str):
+    return _task_by_pc.get(pc_id), pc_id
+
+
+def register_task(pc_id: str, task) -> None:
+    """bot.py hands the pipeline task over at connect so node_command
+    can queue data-channel frames to that specific node."""
+    _task_by_pc[pc_id] = task
+
+
+def drop_task(pc_id: str) -> None:
+    _task_by_pc.pop(pc_id, None)
+
+
+def relabel_room(pc_id: str, info: dict | None) -> None:
+    """Node acked set_name: move its room record to the new name and
+    keep the pc→room binding consistent (in-memory only — the offer
+    carries the new name after the node reconnects)."""
+    old = _room_by_pc.get(pc_id)
+    new = None
+    if isinstance(info, dict):
+        new = info.get("name")
+    if not new or new == old:
+        return
+    _room_by_pc[pc_id] = new
+    rec = _known_rooms.pop(old, None)
+    if rec:
+        _known_rooms[new] = rec
+    global _active_room
+    if _active_room == old:
+        _active_room = new
+    logger.info(f"registry: room '{old}' relabeled '{new}' (set_name ack)")
 
 
 def active_room():
