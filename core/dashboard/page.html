@@ -56,16 +56,6 @@ their node has connected at least once (firmware reports its room on connect).</
 </tr></thead><tbody></tbody></table>
 <div id="node-msg"></div>
 
-<h2>Firmware</h2>
-<p class="sub">Upload a firmware .bin and set its version — nodes pick
-it up over OTA on their next boot. Same files deploy_firmware.sh ships.</p>
-<form class="inline" id="form-fw">
-  <input type="file" id="fw-file" accept=".bin">
-  <input id="fw-version" placeholder="version (e.g. 1.1.0)" size="14">
-  <button>Push firmware</button>
-</form>
-<div id="fw-msg"></div>
-
 <h2>Zones</h2>
 <p class="sub">Sonos S2 Port/Amp only for the audioClip path (tested); other models are
 your own experiment.</p>
@@ -81,6 +71,15 @@ your own experiment.</p>
   <input id="z-uid" placeholder="player UID (RINCON_…)" size="26">
   <button>Add zone</button>
 </form>
+
+<h2>Firmware</h2>
+<p class="sub">Push a firmware .bin — its version is read from the image
+itself; nodes pick it up over OTA on their next boot.</p>
+<form class="inline" id="form-fw">
+  <input type="file" id="fw-file" accept=".bin">
+  <button>Push firmware</button>
+</form>
+<div id="fw-msg"></div>
 
 <script>
 "use strict";
@@ -329,8 +328,7 @@ $("#form-zone").addEventListener("submit", async (ev) => {
 $("#form-fw").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const f = $("#fw-file").files[0];
-  const ver = $("#fw-version").value.trim();
-  if (!f || !ver) { msg($("#fw-msg"), "Pick a .bin and a version.", "err"); return; }
+  if (!f) { msg($("#fw-msg"), "Pick a .bin to push.", "err"); return; }
   msg($("#fw-msg"), `Uploading ${f.name}…`);
   try {
     const fd = new FormData();
@@ -338,11 +336,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
     const up = await fetch("/api/dashboard/firmware/upload", { method: "POST", body: fd });
     const upj = await up.json();
     if (!up.ok) throw new Error(upj.detail || up.status);
-    const vr = await api("/api/dashboard/firmware/version", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ version: ver }),
-    });
-    msg($("#fw-msg"), `Firmware ${ver} served — nodes pick it up on next boot.`, "ok");
+    msg($("#fw-msg"), `Firmware ${upj.version} served — nodes pick it up on next boot.`, "ok");
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 

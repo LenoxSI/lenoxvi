@@ -9,6 +9,8 @@ No auth by ratified design (design note): LAN-only page. Anyone on
 the LAN can read status and edit mappings — accepted risk.
 """
 
+import json
+import re
 import time
 from pathlib import Path
 
@@ -316,12 +318,17 @@ async def set_node_name(room: str, payload: NamePayload):
 
 @router.post("/firmware/upload")
 async def upload_firmware(file: UploadFile = File(...)):
-    """Upload a firmware .bin; the node OTA's itself on next boot."""
+    """Upload a firmware .bin; version comes from the image's embedded
+    ESP app descriptor (magic 0xABCD5432 at byte 24; version string at
+    byte 48, NUL-padded — measured against the real image 2026-09-29,
+    same string the node self-reports via get_info). Manifest written
+    atomically in the same step: no typed-version mismatch is
+    possible (manual version entry removed 2026-09-29)."""
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
     dest_dir = Path("firmware/node")
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / (file.filename or "firmware.bin")
+    dest = dest_dir / "node_esp32.bin"  # fixed served name (manifest points here)
     size = 0
     with open(dest, "wb") as f:
         while chunk := await file.read(1024 * 1024):
@@ -329,7 +336,27 @@ async def upload_firmware(file: UploadFile = File(...)):
             f.write(chunk)
     if size < 1024 * 200:
         raise HTTPException(status_code=400, detail="file too small to be a firmware image")
-    return {"ok": True, "filename": dest.name, "size": size}
+    # Version from the embedded descriptor: magic 0xABCD5432 at 24,
+    # version string at 48 (measured — see docstring).
+    with open(dest, "rb") as f:
+        head = f.read(256)
+    if head[24:28] != b"\x32\x54\xcd\xab":
+        raise HTTPException(
+            status_code=400,
+            detail="not an ESP32 app image (no app-descriptor magic) — is this a lenoxvi build?",
+        )
+    version = head[48:80].split(b"\x00")[0].decode(errors="replace").strip()
+    if not re.match(r"^\d+\.\d+\.\d+$", version):
+        raise HTTPException(
+            status_code=400,
+            detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
+        )
+    manifest = {"version": version, "filename": "node_esp32.bin"}
+    mpath = Path("firmware/node/version.json")
+    tmp = mpath.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(manifest, indent=2))
+    tmp.replace(mpath)
+    return {"ok": True, "filename": dest.name, "size": size, "version": version}
 
 
 class FirmwareVersionPayload(BaseModel):
