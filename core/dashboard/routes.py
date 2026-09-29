@@ -330,32 +330,41 @@ async def upload_firmware(file: UploadFile = File(...)):
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / "node_esp32.bin"  # fixed served name (manifest points here)
     size = 0
-    with open(dest, "wb") as f:
+    # Stage to a temp file FIRST: a rejected upload must never clobber
+    # the currently-served good image (loaded-gun rule, design note).
+    tmp = dest.with_suffix(".bin.uploading")
+    with open(tmp, "wb") as f:
         while chunk := await file.read(1024 * 1024):
             size += len(chunk)
             f.write(chunk)
     if size < 1024 * 200:
+        tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="file too small to be a firmware image")
-    # Version from the embedded descriptor: magic 0xABCD5432 at 24,
-    # version string at 48 (measured — see docstring).
-    with open(dest, "rb") as f:
+    # Version from the embedded descriptor: the .bin carries a 32-byte
+    # SPI image header, then esp_app_desc_t — magic 0xABCD5432 (LE) at
+    # byte 32, version[32] at byte 48 (measured against the real image
+    # 2026-09-29; an offset of 24 was wrong and rejected a good bin).
+    with open(tmp, "rb") as f:
         head = f.read(256)
-    if head[24:28] != b"\x32\x54\xcd\xab":
+    if head[32:36] != b"\x32\x54\xcd\xab":
+        tmp.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
             detail="not an ESP32 app image (no app-descriptor magic) — is this a lenoxvi build?",
         )
     version = head[48:80].split(b"\x00")[0].decode(errors="replace").strip()
     if not re.match(r"^\d+\.\d+\.\d+$", version):
+        tmp.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
             detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
         )
+    tmp.replace(dest)  # validated: swap in atomically
     manifest = {"version": version, "filename": "node_esp32.bin"}
     mpath = Path("firmware/node/version.json")
-    tmp = mpath.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(manifest, indent=2))
-    tmp.replace(mpath)
+    mtmp = mpath.with_suffix(".json.tmp")
+    mtmp.write_text(json.dumps(manifest, indent=2))
+    mtmp.replace(mpath)
     return {"ok": True, "filename": dest.name, "size": size, "version": version}
 
 
