@@ -116,7 +116,7 @@ def on_message(message, pc_id: str) -> None:
 
     # Room rename: the registry relabels, and the room_zones mapping key
     # must follow — otherwise the rename silently orphans the node's
-    # zone mapping (bedroom-mic → living_room was lost when the node
+    # zone mapping (the node's zone was lost when it
     # renamed to bedroom-mic1, measured 2026-09-29 21:49) and the
     # mapping table keeps a ghost row for the old name.
     if cmd == "set_name" and data.get("ok"):

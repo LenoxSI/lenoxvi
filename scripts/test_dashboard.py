@@ -147,7 +147,7 @@ def main():
 
     # 5. config write round-trip on throwaway file
     before_text = cfg_test.read_text()
-    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "living_room"}})
+    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Sonos Port"}})
     check("mapping PUT ok", r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
     after_text = cfg_test.read_text()
     check("config write changed the file", after_text != before_text)
@@ -155,7 +155,7 @@ def main():
           "# lenoxvi config" in after_text or "THE tuning surface" in after_text,
           )
     m = client.get("/api/dashboard/mapping").json()
-    check("mapping read-back after write", m["room_zones"] == {"bedroom": "living_room"},
+    check("mapping read-back after write", m["room_zones"] == {"bedroom": "Sonos Port"},
           f"m={m['room_zones']}")
     check("backup file created", (SCRATCH / "config.backup.yaml").is_file())
 
@@ -173,8 +173,8 @@ def main():
 
     # 8. REAL Sonos test clip on the REAL zone
     real_zones = m["zones"]
-    # use the REAL living_room zone (from the real config), not test_zone
-    real = [z for z in ("living_room",) if z in real_zones]
+    # use the REAL configured zone (from the live config), not test_zone
+    real = [z for z in ("Sonos Port",) if z in real_zones]
     if real:
         r = client.post(f"/api/dashboard/zones/{real[0]}/test")
         ok = r.status_code == 200
