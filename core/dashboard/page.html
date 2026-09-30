@@ -87,7 +87,7 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-let zones = {}, mapping = {};
+let zones = {}, mapping = {}, sonosNames = {};
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -132,7 +132,7 @@ async function loadStatus() {
 async function loadMapping() {
   try {
     const m = await api("/api/dashboard/mapping");
-    zones = m.zones; mapping = m.room_zones;
+    zones = m.zones; mapping = m.room_zones; sonosNames = m.sonos_names || {};
     const tb = $("#mapping tbody"); tb.innerHTML = "";
     const rooms = [...new Set([
       ...Object.keys(mapping),
@@ -147,7 +147,9 @@ async function loadMapping() {
       const tr = document.createElement("tr");
       const opts = ["<option value=''>— none —</option>"].concat(
         Object.keys(zones).sort().map(z =>
-          `<option value="${esc(z)}"${mapping[room] === z ? " selected" : ""}>${esc(z)}</option>`));
+          // Display the Sonos-side player name verbatim (config key as
+          // routing identity — Sonos renames can't orphan a mapping).
+          `<option value="${esc(z)}"${mapping[room] === z ? " selected" : ""}>${esc(sonosNames[z] ? sonosNames[z] + " (" + z + ")" : z)}</option>`));
       tr.innerHTML =
         `<td>${esc(room)}</td>` +
         `<td><select data-room="${esc(room)}">${opts.join("")}</select></td>` +
@@ -255,9 +257,12 @@ function renderZones() {
   }
   for (const name of names) {
     const z = zones[name];
+    const label = sonosNames[name] ? sonosNames[name] : name;
+    const sub = sonosNames[name] && sonosNames[name] !== name
+      ? ` <span class="muted">(${esc(name)})</span>` : "";
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td>${esc(name)}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid)}</td>` +
+      `<td>${esc(label)}${sub}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid)}</td>` +
       `<td><button data-test="${esc(name)}">Play test clip</button></td>` +
       `<td><button data-del="${esc(name)}">Remove</button></td>`;
     tb.appendChild(tr);

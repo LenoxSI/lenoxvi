@@ -61,12 +61,40 @@ def _zones() -> dict:
     return dict(cfg("sonos", "zones") or {})
 
 
+def _sonos_names(zones: dict) -> dict:
+    """Live player_name per zone key (soco, per-IP). Missing/unreachable
+    players just don't get a name — the config key still displays.
+    Display-only (design note amendment 2026-09-30): the Sonos-side
+    name shows verbatim for mapping UX; routing stays keyed on the
+    config key + UID so a Sonos-side rename can't orphan a mapping."""
+    out = {}
+    for key, z in zones.items():
+        ip = (z or {}).get("ip")
+        if not ip:
+            continue
+        try:
+            import soco
+
+            player = soco.SoCo(ip)
+            uid = player.uid
+            if (z or {}).get("player_uid") and uid != z.get("player_uid"):
+                logger.warning(f"zones: '{key}' UID mismatch — sonos says {uid}, config says {z.get('player_uid')}")
+            out[key] = player.player_name
+        except ImportError:
+            break  # soco absent: skip the whole enrichment, keys still display
+        except Exception as e:
+            logger.debug(f"zones: sonos name fetch failed for '{key}' ({ip}): {e}")
+    return out
+
+
 @router.get("/mapping")
 async def get_mapping():
+    zones = _zones()
     return {
         "room_zones": dict(config_store.read_section("room_zones") or {}),
-        "zones": _zones(),
+        "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
+        "sonos_names": _sonos_names(zones),
     }
 
 
