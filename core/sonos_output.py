@@ -127,6 +127,8 @@ class SonosOutput(FrameProcessor):
 
     _shared_clip_server = None  # class-level: ONE server for all pipelines
     _prune_task_started = False  # ONE hourly prune loop per process
+    _zones_audited = False  # ONE capability audit per process
+    _audit_task = None  # keep a ref: a GC'd task dies mid-audit
 
     def __init__(self, config_path: str | None = None, echo_gate=None,
                  zone_selector=None, wake_gate=None, led=None, **kwargs):
@@ -217,6 +219,30 @@ class SonosOutput(FrameProcessor):
             logger.info("sonos_output disabled in config.yaml")
         elif self._zone not in self._zones:
             logger.warning(f"sonos_output: zone '{self._zone}' not in config zones {list(self._zones)}")
+        # Zone capability audit (2026-09-30): audioClip works on every S2
+        # player (Era/Arc/Roam/Five/Ray/SYMFONISK included) but NOT on S1
+        # legacy gear — and our playback path can't notice: we construct
+        # SonosWebsocket(ip, player_id=uid) with the id from config, which
+        # BYPASSES the library's AUDIO_CLIP capability check
+        # (get_player_id() short-circuits on a provided id; design note
+        # says "S2 Port/Amp only" but the real rule is the capability flag,
+        # per docs.sonos.com/reference/audioclip). Audit ONCE per process:
+        # connect WITHOUT player_id (forcing the library to resolve the id
+        # — and check AUDIO_CLIP — itself), cross-check the resolved id
+        # against config's player_uid, and log the verdict per zone. Log-only:
+        # a dead/legacy zone must never crash the bot at startup or
+        # mid-session.
+        if (self._enabled and self._zones
+                and not SonosOutput._zones_audited):
+            SonosOutput._zones_audited = True
+            try:
+                SonosOutput._audit_task = (
+                    asyncio.get_event_loop().create_task(
+                        self._audit_zone_capabilities()
+                    )
+                )
+            except RuntimeError:
+                pass  # no loop (sync/test context) — audit is best-effort
 
     async def setup(self, setup):
         # setup() is the guaranteed lifecycle hook in pipecat 1.11 —
@@ -232,6 +258,68 @@ class SonosOutput(FrameProcessor):
         # Shared server: do NOT stop it here — other pipelines may still
         # reference it, and the bot process exit releases the port anyway.
         await super().cleanup()
+
+    async def _audit_zone_capabilities(self) -> None:
+        """Log-only AUDIO_CLIP capability verdict for every configured zone.
+
+        Connects without player_id so the library must resolve the id via
+        get_player_id() — that path raises Unsupported when the player lacks
+        the AUDIO_CLIP capability. Also cross-checks the resolved id against
+        config's player_uid (a mismatch means config points at the wrong
+        player — clips would load on the wrong speaker). Verdict per zone in
+        the log; failures are warnings, never exceptions: a dead zone at
+        boot is information, not a crash.
+        """
+        from sonos_websocket import SonosWebsocket
+        from sonos_websocket.exception import Unsupported
+
+        for name, zone in self._zones.items():
+            uid = zone.get("player_uid")
+            ip = zone.get("ip")
+            if not uid or not ip:
+                logger.warning(
+                    f"sonos_output: zone '{name}' missing ip/player_uid — "
+                    f"cannot audit; clips will fail for this zone at runtime"
+                )
+                continue
+            sw = SonosWebsocket(ip)  # NO player_id: force the capability check
+            try:
+                try:
+                    resolved = await asyncio.wait_for(sw.get_player_id(), 15)
+                except Unsupported:
+                    logger.warning(
+                        f"sonos_output: zone '{name}' ({ip}) does NOT support "
+                        f"AUDIO_CLIP — S1/legacy player? Clips will fail; "
+                        f"replace the zone or the speaker"
+                    )
+                    continue
+                if resolved != uid:
+                    logger.warning(
+                        f"sonos_output: zone '{name}' player_uid mismatch: "
+                        f"config says {uid}, player reports {resolved} — "
+                        f"updating config will make clip loads target the "
+                        f"intended player"
+                    )
+                else:
+                    logger.info(
+                        f"sonos_output: zone '{name}' ({ip}) AUDIO_CLIP capable, "
+                        f"player_uid {uid} verified"
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"sonos_output: zone '{name}' ({ip}) audit timed out — "
+                    f"speaker offline or slow; clips will fail until it's back"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"sonos_output: zone '{name}' ({ip}) audit failed: {e} — "
+                    f"proceeding; playback errors (if any) will surface at clip time"
+                )
+            finally:
+                try:
+                    await sw.close()
+                except Exception:
+                    pass
 
     async def _ensure_duck_clip(self) -> str:
         """Lazily create the permanent silence clip (30s @ 24kHz mono) and
