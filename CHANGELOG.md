@@ -6,6 +6,62 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.3.1] — 2026-09-30
+
+Node management + audio UX — the rig gets self-service and learns to
+duck. All fixes and adjustments to existing features (per the
+versioning rule: settings ship on main; a tag marks the day's shipped
+state).
+
+### Added
+- **Duck-holder** (`sonos.duck_while_awake`, default on): the Sonos
+  audioClip duck now spans the ENTIRE awake window, not just reply
+  clips — an eternal loop holds a 30s silence clip on the wake room's
+  zone while the gate is awake (refresh at 24s), so full-volume music/TV
+  can no longer feed STT as phantom user turns (the "Nantucket." lyric
+  transcription). Reply clips carry an 8s silence TAIL so the holder's
+  refresh lands silence-on-silence — the duck is gapless from wake to
+  sleep, no full-volume blips between reply and listening. Gate close
+  cancels the holder and the music unducks once. Echo gate + LED timing
+  stay tied to SPEECH-only duration (`9b4000d`, `3d28fa7`, `20d5d25`)
+- **LED direct wire** (`core/led_state.py`): LED state messages ride
+  the WebRTC data channel directly (output transport `send_message`),
+  bypassing the pipeline — a blocked brain call stalls pipeline frames
+  3-40s in both directions, which left the ring holding stale purple
+  through the whole "On it." → answer gap (measured 12:23). Speaking
+  state now fires from SonosOutput's real-time TTS frames downstream
+  of the brain; end-of-speaking is duration-timed to actual playback
+  (`d02075a`, `69d9c5f`)
+- Dashboard: firmware push reads the version from the uploaded image's
+  embedded app descriptor (magic-checked; manual version entry removed);
+  uploads stage to a temp file and swap atomically — a rejected upload
+  can never clobber the served image (`6f04906`, `a09aa80`)
+
+### Changed
+- Firmware binary renamed `node_esp32.bin` → `node_esp32.bin` across
+  the OTA chain (served name, manifest, deploy script, upload dest,
+  firmware CMake project name) — generic naming for the public repo;
+  version untouched, node unaffected (equal-version skip) (`c73832c`)
+- Zone keys are now the player's native Sonos name (ruling: a player's
+  native name IS its name) — dashboard displays live Sonos names
+  verbatim; `living_room` ghost name retired (`bbed6cd`, `c2062f3`)
+
+### Fixed
+- Command channel end-to-end: `on_app_message` transport handler
+  (sender = pc_id string), awaited `queue_frame`, `"type":"cmd_result"`
+  envelopes, room eviction for stale same-room sessions (504s into a
+  zombie session), NVS writes on an internal-RAM stack (PSRAM stack +
+  flash-cache suspend = double fault), asymmetric liveness protocol
+  (probe/pong without reply-to-reply loop) (`fd3fb32`…`3a9da0d`)
+- Renames carry the `room_zones` mapping key — no ghost rows, no
+  orphaned zone routing (`7465111`)
+- Sync pipeline: host `config.yaml` is now authoritative —
+  `sync_host.sh` PULLS it to the VM, never pushes (push-every-sync
+  clobbered dashboard-written `room_zones` twice) (`26208bf`)
+- Stale-session disconnects no longer mark a live room offline
+  (`b7137d0`); payload schemas drop the redundant `room` field
+  (`8777e85`)
+
 ## [0.3.0] — 2026-09-29
 
 Web dashboard v1 — the rig gets a GUI. Mapping, node status, zone

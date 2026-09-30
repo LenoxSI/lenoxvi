@@ -61,6 +61,10 @@ sonos:
   default_zone: <zone-name>
   clip_volume: 70                 # measured sweet spot for a Port at normal volume
   clip_retention_days: 2          # 48h retention: clips are served once, then garbage
+  duck_while_awake: true           # hold the audioClip duck for the whole awake window
+                                   # (silence-holder clip + reply-clip silence tail = gapless
+                                   # duck from wake to sleep; false = duck only while
+                                   # reply clips sound)
   zones:
     <zone-name>:
       ip: <sonos-player-ip>
