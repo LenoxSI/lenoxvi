@@ -158,6 +158,11 @@ def task_for_pc(pc_id: str):
     return _task_by_pc.get(pc_id), pc_id
 
 
+def room_for_pc(pc_id: str):
+    """Current room label for a session (None if unknown)."""
+    return _room_by_pc.get(pc_id)
+
+
 def register_task(pc_id: str, task) -> None:
     """bot.py hands the pipeline task over at connect so node_command
     can queue data-channel frames to that specific node."""

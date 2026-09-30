@@ -114,9 +114,27 @@ def on_message(message, pc_id: str) -> None:
     fut = _pending.get(key)
     logger.info(f"node_command: <- {pc_id[:24]}… cmd_result '{cmd}' ok={data.get('ok')} data={str(data.get('data'))[:80]}")
 
-    # Room rename: the registry relabels when the node acks set_name.
+    # Room rename: the registry relabels, and the room_zones mapping key
+    # must follow — otherwise the rename silently orphans the node's
+    # zone mapping (bedroom-mic → living_room was lost when the node
+    # renamed to bedroom-mic1, measured 2026-09-29 21:49) and the
+    # mapping table keeps a ghost row for the old name.
     if cmd == "set_name" and data.get("ok"):
-        registry.relabel_room(pc_id, data.get("data") if isinstance(data.get("data"), dict) else None)
+        info = data.get("data") if isinstance(data.get("data"), dict) else None
+        old = registry.room_for_pc(pc_id)
+        new = info.get("name") if info else None
+        if old and new and old != new:
+            from . import config_store
+
+            mapping = dict(config_store.read_section("room_zones") or {})
+            if old in mapping:
+                mapping[new] = mapping.pop(old)
+                config_store.write_section("room_zones", mapping)
+                logger.info(
+                    f"node_command: rename carried mapping '{old}' -> '{new}' "
+                    f"(zone '{mapping[new]}')"
+                )
+        registry.relabel_room(pc_id, info)
 
     if fut and not fut.done():
         fut.set_result(data)
