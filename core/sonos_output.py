@@ -234,14 +234,14 @@ class SonosOutput(FrameProcessor):
         await super().cleanup()
 
     async def _ensure_duck_clip(self) -> str:
-        """Lazily create the permanent silence clip (8s @ 24kHz mono) and
+        """Lazily create the permanent silence clip (30s @ 24kHz mono) and
         return its served URL. Volume 0 content — the audioClip duck is
         what we want, not the sound."""
         if self._duck_url:
             return self._duck_url
         import lameenc
 
-        pcm = b"\x00\x00" * (24000 * 8)  # 8s of silence, 16-bit mono
+        pcm = b"\x00\x00" * (24000 * 30)  # 30s of silence, 16-bit mono
         encoder = lameenc.Encoder()
         encoder.set_bit_rate(96)
         encoder.set_in_sample_rate(24000)
@@ -259,10 +259,11 @@ class SonosOutput(FrameProcessor):
         """Eternal per-pipeline duck state machine. Polls the wake gate's
         live state every 0.5s (no pipeline frames — immune to brain
         stalls): idle→awake = connect to the wake room's zone and load the
-        8s silence clip (the audioClip duck); awake = refresh at 6s so it
-        never lapses, but NEVER while a reply clip is sounding (a load
-        would replace her clip mid-sentence); awake→idle = cancel the
-        holder clip (snappy unduck) or let it expire."""
+        30s silence clip (the audioClip duck); awake = refresh at 24s so
+        it never lapses, but never while her SPEECH is sounding (a load
+        would replace her clip mid-sentence — and the reply clip's silence
+        tail makes the post-reply handoff gapless); awake→idle = cancel
+        the holder clip (snappy unduck) or let it expire."""
         url = None
         try:
             url = await self._ensure_duck_clip()
@@ -327,8 +328,14 @@ class SonosOutput(FrameProcessor):
                     logger.info(f"sonos_output: duck-holder active on '{zone_name}'")
 
                 if time.monotonic() < self._clip_active_until:
-                    # A reply clip is sounding: it owns the duck. Wait it
-                    # out (no refresh — a load would replace her clip).
+                    # Her SPEECH is sounding: it owns the duck (a load
+                    # would replace her clip mid-sentence). The reply clip
+                    # carries a silence TAIL, so the moment this window
+                    # passes, refreshing silence over the tail is
+                    # silence-for-silence — a gapless handoff from "she
+                    # stopped talking" to "still listening" (kills the
+                    # ~1s full-volume blip after every reply, 2026-09-30).
+                    next_refresh = min(next_refresh, self._clip_active_until)
                     continue
                 if time.monotonic() >= next_refresh:
                     # (Re)load the silence clip. A loadAudioClip REPLACES
@@ -347,7 +354,7 @@ class SonosOutput(FrameProcessor):
                     if not self._duck_logged_response:
                         logger.info(f"sonos_output: duck load resp: {str(resp)[:140]}")
                         self._duck_logged_response = True
-                    next_refresh = time.monotonic() + 6.0
+                    next_refresh = time.monotonic() + 24.0
         except asyncio.CancelledError:
             pass
         finally:
@@ -387,6 +394,13 @@ class SonosOutput(FrameProcessor):
         if self._echo_gate is not None:
             duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
             self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
+        # Duck-tail (2026-09-30): pad 8s of silence onto the clip so the
+        # duck outlives her speech — the holder refreshes its own silence
+        # over this tail (silence-for-silence, no seam), so the duck never
+        # blips to full volume between "reply ended" and "still
+        # listening". Echo gating above stays tied to the SPEECH
+        # duration, so the mic reopens the moment she finishes.
+        pcm = pcm + b"\x00" * int(2 * self._sample_rate * 8)
         zone_name = self._zone
         if self._zone_selector:
             try:
@@ -450,11 +464,13 @@ class SonosOutput(FrameProcessor):
                     # for when the audio stops SOUNDING, not when frames stop.
                     duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
                     self._schedule_end_of_speech(duration + 0.5)  # Sonos load ~0.2 + tail
-                # Duck ownership: while THIS clip sounds, the duck-holder must not
-                # refresh silence over it (a loadAudioClip replaces the active
-                # clip — refreshing mid-reply would mute her mid-sentence).
+                # Duck ownership: while her SPEECH sounds, the duck-holder
+                # must not refresh silence over it (a loadAudioClip
+                # replaces the active clip). Margin +0.7: refresh lands
+                # after her last syllable even with load jitter; the clip's
+                # silence TAIL absorbs the handoff gaplessly.
                 duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
-                self._clip_active_until = time.monotonic() + duration + 1.0
+                self._clip_active_until = time.monotonic() + duration + 0.7
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm))
             elif self._led:
