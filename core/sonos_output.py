@@ -160,6 +160,11 @@ class SonosOutput(FrameProcessor):
         # must not refresh silence over it (a loadAudioClip replaces the
         # active clip; refreshing mid-reply would mute her mid-sentence).
         self._clip_active_until = 0.0
+        # Duration-timed end-of-speaking LED (see process_frame): a loop
+        # timer, cancelled on new speech / session teardown. (Re-added
+        # 2026-09-30 — the duck-holder insertion clobbered this line and
+        # every TTS frame threw AttributeError, killing reply dispatch.)
+        self._end_of_speech_timer = None
         # Optional sync callable returning a zone NAME for the reply clip
         # (room-aware routing: the dashboard registry records which
         # room's wake opened the turn; bot.py passes a selector that
