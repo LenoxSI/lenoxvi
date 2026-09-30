@@ -158,6 +158,10 @@ class SonosOutput(FrameProcessor):
         self._duck_clip_id = None
         self._duck_url = None
         self._duck_logged_response = False
+        # Reply clip id (from loadAudioClip response) — cancelled on gate
+        # close so a still-sounding silence TAIL can't hold the duck after
+        # the conversation ends (M2, Opus review).
+        self._reply_clip_id = None
         # Monotonic time until which a REPLY clip is sounding — the holder
         # must not refresh silence over it (a loadAudioClip replaces the
         # active clip; refreshing mid-reply would mute her mid-sentence).
@@ -257,6 +261,9 @@ class SonosOutput(FrameProcessor):
     async def cleanup(self):
         # Shared server: do NOT stop it here — other pipelines may still
         # reference it, and the bot process exit releases the port anyway.
+        # M13 (Opus review): the duck-holder task dies with THIS pipeline
+        # whatever ended it (EndFrame/error shutdown), not just CancelFrame.
+        self._stop_duck_holder()
         await super().cleanup()
 
     async def _audit_zone_capabilities(self) -> None:
@@ -370,21 +377,27 @@ class SonosOutput(FrameProcessor):
 
                 if not awake:
                     if sw is not None:
-                        # Gate closed: cancel the holder clip (if we have
-                        # its id) and drop the connection. The music
+                        # Gate closed: cancel the holder clip AND any
+                        # still-active reply-tail clip (M2 — an 8s tail
+                        # sounding past the conversation would hold the
+                        # duck), then drop the connection. The music
                         # unducks the moment no clip is active.
+                        for cid in (self._duck_clip_id, self._reply_clip_id):
+                            if cid:
+                                try:
+                                    await asyncio.wait_for(
+                                        sw.cancel_clip(cid), timeout=2.0
+                                    )
+                                except Exception:
+                                    pass  # player gone: clip dies with it
                         try:
-                            if self._duck_clip_id:
-                                await sw.cancel_clip(self._duck_clip_id)
-                        except Exception:
-                            pass
-                        try:
-                            await sw.close()
+                            await asyncio.wait_for(sw.close(), timeout=2.0)
                         except Exception:
                             pass
                         sw = None
                         self._duck_holding = False
                         self._duck_clip_id = None
+                        self._reply_clip_id = None
                         logger.info("sonos_output: duck-holder released")
                     continue
 
@@ -405,9 +418,16 @@ class SonosOutput(FrameProcessor):
                         sw = SonosWebsocket(
                             zone["ip"], player_id=zone["player_uid"]
                         )
-                        await sw.connect()
+                        # H7 (Opus review): every Sonos call is bounded —
+                        # a hung player must never stall the holder.
+                        await asyncio.wait_for(sw.connect(), timeout=5.0)
                     except Exception as e:
                         logger.warning(f"sonos_output: duck-holder connect failed: {e}")
+                        if sw is not None:
+                            try:
+                                await asyncio.wait_for(sw.close(), timeout=2.0)
+                            except Exception:
+                                pass
                         sw = None
                         await asyncio.sleep(2.0)  # retry next tick
                         continue
@@ -431,9 +451,20 @@ class SonosOutput(FrameProcessor):
                     # and refreshes the duck. Capture the clip id for a
                     # snappy cancel on release.
                     try:
-                        resp = await sw.play_clip(url, volume=self._volume)
+                        resp = await asyncio.wait_for(
+                            sw.play_clip(url, volume=self._volume), timeout=5.0
+                        )
                     except Exception as e:
+                        # H7: the websocket may be dead (Sonos reboot, wifi
+                        # blip) — close and drop it so the NEXT tick
+                        # reconnects instead of retrying on the corpse.
                         logger.warning(f"sonos_output: duck load failed: {e}")
+                        try:
+                            await asyncio.wait_for(sw.close(), timeout=2.0)
+                        except Exception:
+                            pass
+                        sw = None
+                        self._duck_clip_id = None
                         await asyncio.sleep(2.0)
                         continue
                     clip_id = _extract_clip_id(resp)
@@ -447,13 +478,14 @@ class SonosOutput(FrameProcessor):
             pass
         finally:
             if sw is not None:
+                for cid in (self._duck_clip_id, self._reply_clip_id):
+                    if cid:
+                        try:
+                            await asyncio.wait_for(sw.cancel_clip(cid), timeout=2.0)
+                        except Exception:
+                            pass
                 try:
-                    if self._duck_clip_id:
-                        await sw.cancel_clip(self._duck_clip_id)
-                except Exception:
-                    pass
-                try:
-                    await sw.close()
+                    await asyncio.wait_for(sw.close(), timeout=2.0)
                 except Exception:
                     pass
             self._duck_holding = False
@@ -482,13 +514,17 @@ class SonosOutput(FrameProcessor):
         if self._echo_gate is not None:
             duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
             self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
-        # Duck-tail (2026-09-30): pad 8s of silence onto the clip so the
-        # duck outlives her speech — the holder refreshes its own silence
-        # over this tail (silence-for-silence, no seam), so the duck never
-        # blips to full volume between "reply ended" and "still
-        # listening". Echo gating above stays tied to the SPEECH
-        # duration, so the mic reopens the moment she finishes.
-        pcm = pcm + b"\x00" * int(2 * self._sample_rate * 8)
+        # Duck-tail (M2, Opus review): pad 8s of silence onto the clip so
+        # the duck outlives her speech — the holder refreshes its own
+        # silence over this tail (silence-for-silence, no seam). ONLY when
+        # the holder is enabled AND the gate still holds the turn: with
+        # ducking off (or the gate already idle), the tail would duck the
+        # music ~8s past every reply for nothing. Padded AFTER the echo
+        # gate above so the mic reopens at her last syllable, not +8s.
+        gate_state = getattr(self._wake_gate, "state", None)
+        state_val = getattr(gate_state, "value", gate_state)
+        if self._duck_while_awake and state_val not in (None, "idle"):
+            pcm = pcm + b"\x00" * int(2 * self._sample_rate * 8)
         zone_name = self._zone
         if self._zone_selector:
             try:
@@ -522,10 +558,22 @@ class SonosOutput(FrameProcessor):
 
         sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
         try:
-            await sw.connect()
-            await sw.play_clip(url, volume=self._volume)
+            await asyncio.wait_for(sw.connect(), timeout=5.0)  # H7: bounded
+            resp = await asyncio.wait_for(
+                sw.play_clip(url, volume=self._volume), timeout=5.0
+            )
+            # M3 (Opus review): duck ownership starts HERE — the clip is
+            # actually sounding on the player now, so this is the honest
+            # start of the "reply owns the duck" window. (duration counts
+            # the tail too, which is exactly what the player will play.)
+            clip_duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+            self._clip_active_until = time.monotonic() + clip_duration + 0.7
+            self._reply_clip_id = _extract_clip_id(resp)
         finally:
-            await sw.close()
+            try:
+                await asyncio.wait_for(sw.close(), timeout=2.0)
+            except Exception:
+                pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -552,13 +600,19 @@ class SonosOutput(FrameProcessor):
                     # for when the audio stops SOUNDING, not when frames stop.
                     duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
                     self._schedule_end_of_speech(duration + 0.5)  # Sonos load ~0.2 + tail
-                # Duck ownership: while her SPEECH sounds, the duck-holder
-                # must not refresh silence over it (a loadAudioClip
-                # replaces the active clip). Margin +0.7: refresh lands
-                # after her last syllable even with load jitter; the clip's
-                # silence TAIL absorbs the handoff gaplessly.
-                duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
-                self._clip_active_until = time.monotonic() + duration + 0.7
+                # M1: the wake gate's LOCKED safety cap tracks the REAL
+                # speech window (not its 30s fallback).
+                if self._wake_gate is not None:
+                    try:
+                        self._wake_gate.note_speech(
+                            len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+                        )
+                    except Exception:
+                        pass  # gate hint must never break the reply
+                # Duck ownership (M3, Opus review): starts when the clip
+                # actually LOADS on the player (in _speak_to_sonos), not
+                # here at generation end — the encode/write/connect/load
+                # chain can exceed any margin set this early.
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm))
             elif self._led:

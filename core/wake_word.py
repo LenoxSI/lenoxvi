@@ -96,6 +96,11 @@ class WakeWordFilter(FrameProcessor):
         self._frame_size = 2560
         self._audio_buf = bytearray()
         self._last_activity = time.monotonic()
+        # M1 (Opus review): LOCKED safety cap — monotonic time after which
+        # LOCKED releases itself if BotStoppedSpeakingFrame never arrives
+        # (TTS error mid-stream). SonosOutput refines it via note_speech()
+        # when it knows the real clip duration; 30s is the fallback.
+        self._speech_until = 0.0
 
     async def setup(self, setup):
         await super().setup(setup)
@@ -120,6 +125,13 @@ class WakeWordFilter(FrameProcessor):
         pick the honest LED (purple while the turn lives, dark when the
         gate already timed out mid-brain-call)."""
         return self._state
+
+    def note_speech(self, seconds: float) -> None:
+        """SonosOutput reports how long the loaded clip will actually
+        sound (M1): the LOCKED safety cap tracks the real speech window
+        instead of the 30s fallback. Must be cheap and never raise into
+        the reply path."""
+        self._speech_until = time.monotonic() + seconds + 2.0
 
     def _score(self, pcm: bytes) -> float:
         audio = np.frombuffer(pcm, dtype=np.int16)
@@ -166,6 +178,17 @@ class WakeWordFilter(FrameProcessor):
             # duration + margin; clips play ASYNC after the bot's browser
             # audio ends — observed live 2026-09-15).
             if self._state is TurnState.LOCKED:
+                # M1 (Opus review): the only other exit from LOCKED is
+                # BotStoppedSpeakingFrame — a TTS error mid-stream can
+                # swallow it and leave the mic deaf (and the duck held)
+                # until reconnect. Safety cap: release to AWAKE when the
+                # known speech window (note_speech; 30s fallback) passes.
+                if now > self._speech_until:
+                    self._state = TurnState.AWAKE
+                    self._last_activity = now
+                    logger.warning("wake_word: LOCKED safety release — no stop frame before the speech cap")
+                    if self._led:
+                        self._led.send("oww-awake")  # ring back to listening
                 return
             if self._echo_gate and self._echo_gate.blocked():
                 return
@@ -186,6 +209,7 @@ class WakeWordFilter(FrameProcessor):
 
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
+            self._speech_until = now + 30.0  # M1 fallback cap; SonosOutput refines via note_speech
             logger.debug("wake_word: LOCKED (bot speaking)")
             # Speaking LED now fires from SonosOutput's real-time TTS
             # frames (led_state direct wire) — this frame itself arrives
