@@ -238,13 +238,30 @@ class HermesAgent(FrameProcessor):
                         # first so the house doesn't feel dead (tool-heavy turns
                         # measured at 20-40s+ server-side, 2026-09-15).
                         ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
+                        failed = False
                         try:
                             reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
                         except TimeoutError:
                             filler = _pick_filler()
                             await self.push_frame(TTSSpeakFrame(text=filler))
                             self._echo_texts.append(filler)
-                            reply = await ask
+                            # H3 (Opus review 2026-09-30): the brain can
+                            # still fail AFTER the filler — a sibling except
+                            # clause does NOT catch exceptions raised inside
+                            # this handler, so a 5xx/socket/JSON error here
+                            # escaped process_frame entirely and the house
+                            # heard "On it." then NOTHING (the dead-rig case
+                            # the survivability rule exists to prevent).
+                            # Broad Exception: this is the LAST defense
+                            # before user-facing silence; CancelledError is
+                            # not an Exception subclass, so session teardown
+                            # still propagates.
+                            try:
+                                reply = await ask
+                            except Exception as e:
+                                logger.error(f"hermes_agent: brain call failed after filler: {e}")
+                                reply = "Sorry — I can't reach my brain right now."
+                                failed = True
                         except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as e:
                             # Brain unreachable/dead: say so instead of silence —
                             # a filler-then-nothing is indistinguishable from a
@@ -252,12 +269,18 @@ class HermesAgent(FrameProcessor):
                             # never take house voice down WITH it).
                             logger.error(f"hermes_agent: brain call failed: {e}")
                             reply = "Sorry — I can't reach my brain right now."
+                            failed = True
                         reply = _strip_tags(reply)
                         self._echo_texts.append(reply)
                         self._echo_texts = self._echo_texts[-4:]
-                        self._history.append({"role": "user", "content": text})
-                        self._history.append({"role": "assistant", "content": reply})
-                        self._history = self._history[-self._max_history:]
+                        # A failed call never reached the brain — don't write
+                        # the exchange into server-side history (Opus rider):
+                        # the next turn would see the brain "remember" an
+                        # outage reply it never produced.
+                        if not failed:
+                            self._history.append({"role": "user", "content": text})
+                            self._history.append({"role": "assistant", "content": reply})
+                            self._history = self._history[-self._max_history:]
                         logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
                         await self.push_frame(TTSSpeakFrame(text=reply))
 
