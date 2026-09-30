@@ -115,6 +115,9 @@ class SonosOutput(FrameProcessor):
         # and stalled behind the brain (2026-09-30 12:23 incident).
         self._wake_gate = wake_gate
         self._led = led
+        # Duration-timed end-of-speaking LED (see process_frame): a loop
+        # timer, cancelled on new speech / session teardown.
+        self._end_of_speech_timer = None
         # Optional sync callable returning a zone NAME for the reply clip
         # (room-aware routing: the dashboard registry records which
         # room's wake opened the turn; bot.py passes a selector that
@@ -228,35 +231,66 @@ class SonosOutput(FrameProcessor):
 
         if isinstance(frame, TTSStartedFrame):
             self._pcm.clear()
-            if self._led:  # speech is sounding on the node's zone now
+            if self._led:  # speech starts sounding within ~0.5s — light now
+                self._cancel_end_of_speech()
                 self._led.send("bot-started-speaking")
         elif isinstance(frame, TTSAudioRawFrame):
             self._pcm.extend(frame.audio)
             self._sample_rate = frame.sample_rate or self._sample_rate
             self._channels = frame.num_channels or self._channels
         elif isinstance(frame, TTSStoppedFrame):
-            # End of speech: the honest LED is the GATE's actual state —
-            # purple (LISTENING) while the turn lives on, dark when the
-            # gate already timed out mid-brain-call (its oww-sleeping
-            # went out the moment it happened on the direct wire).
-            if self._led:
-                # state is a TurnState enum (wake_word); normalize to its
-                # value string — comparing the enum member against "idle"
-                # is always unequal (2026-09-30 self-caught before deploy).
-                gate_state = getattr(self._wake_gate, "state", None)
-                state_val = getattr(gate_state, "value", gate_state)
-                self._led.send("bot-stopped-speaking"
-                               if state_val not in (None, "idle")
-                               else "oww-sleeping")
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
+                if self._led:
+                    # TTSStopped = GENERATION end, not playback end. ElevenLabs
+                    # bursts the whole clip through the pipeline in <1s while
+                    # the Sonos sounds it for `duration` seconds (measured
+                    # 2026-09-30 15:16: cyan flashed 0.6s, then purple through
+                    # 18s of actual speech). Schedule the end-of-speaking LED
+                    # for when the audio stops SOUNDING, not when frames stop.
+                    duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+                    self._schedule_end_of_speech(duration + 0.5)  # Sonos load ~0.2 + tail
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm))
+            elif self._led:
+                # No clip to time (Sonos disabled): end immediately.
+                self._schedule_end_of_speech(0.0)
         elif isinstance(frame, CancelFrame):
             # Session teardown: ring goes dark, no matter what.
+            self._cancel_end_of_speech()
             if self._led:
                 self._led.send("oww-sleeping")
             self._pcm.clear()
 
         await self.push_frame(frame, direction)
+
+    def _schedule_end_of_speech(self, delay: float) -> None:
+        """End-of-speaking LED fires `delay` seconds from now (clip
+        duration + load margin). Loop-native timer: no pipeline frames, no
+        processors — can't be stalled by a blocked brain."""
+        self._cancel_end_of_speech()
+        try:
+            self._end_of_speech_timer = asyncio.get_running_loop().call_later(
+                delay, self._fire_end_of_speech
+            )
+        except RuntimeError:  # no running loop (sync/test context)
+            pass
+
+    def _cancel_end_of_speech(self) -> None:
+        if self._end_of_speech_timer is not None:
+            self._end_of_speech_timer.cancel()
+            self._end_of_speech_timer = None
+
+    def _fire_end_of_speech(self) -> None:
+        self._end_of_speech_timer = None
+        if not self._led:
+            return
+        # Honest end state = the gate's LIVE state at the moment speech
+        # stops sounding: purple while the turn lives on, dark when the
+        # gate already timed out mid-brain-call.
+        gate_state = getattr(self._wake_gate, "state", None)
+        state_val = getattr(gate_state, "value", gate_state)
+        self._led.send("bot-stopped-speaking"
+                       if state_val not in (None, "idle")
+                       else "oww-sleeping")
