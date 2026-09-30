@@ -12,6 +12,13 @@ Config (config.yaml):
 
 The processor is pass-through: frames continue downstream, so the browser
 client keeps its audio while Sonos gets the same reply.
+
+LED ring (2026-09-30): this processor is the REAL-TIME speaking signal —
+it sits directly downstream of TTS, so TTSStarted/TTSStopped frames
+reach it the moment speech starts/ends, even while HermesAgent is
+blocked on a brain call (the wake gate's speaking view rides upstream
+frames, which stall behind the brain). Speaking LEDs go out on the
+pipeline-free led_state wire.
 """
 
 import asyncio
@@ -96,9 +103,18 @@ class SonosOutput(FrameProcessor):
     _prune_task_started = False  # ONE hourly prune loop per process
 
     def __init__(self, config_path: str | None = None, echo_gate=None,
-                 zone_selector=None, **kwargs):
+                 zone_selector=None, wake_gate=None, led=None, **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
+        # Direct LED wire + the wake gate's state (bot.py wires both).
+        # Speaking LEDs fire HERE, from real-time TTS frames — this
+        # processor sits downstream of the brain, so TTSStarted/
+        # TTSStopped reach it the moment speech starts/ends even while
+        # HermesAgent is blocked on a brain call. The old speaking signal
+        # (BotStartedSpeakingFrame at the wake gate) rides upstream frames
+        # and stalled behind the brain (2026-09-30 12:23 incident).
+        self._wake_gate = wake_gate
+        self._led = led
         # Optional sync callable returning a zone NAME for the reply clip
         # (room-aware routing: the dashboard registry records which
         # room's wake opened the turn; bot.py passes a selector that
@@ -212,15 +228,35 @@ class SonosOutput(FrameProcessor):
 
         if isinstance(frame, TTSStartedFrame):
             self._pcm.clear()
+            if self._led:  # speech is sounding on the node's zone now
+                self._led.send("bot-started-speaking")
         elif isinstance(frame, TTSAudioRawFrame):
             self._pcm.extend(frame.audio)
             self._sample_rate = frame.sample_rate or self._sample_rate
             self._channels = frame.num_channels or self._channels
-        elif isinstance(frame, (TTSStoppedFrame, CancelFrame)):
+        elif isinstance(frame, TTSStoppedFrame):
+            # End of speech: the honest LED is the GATE's actual state —
+            # purple (LISTENING) while the turn lives on, dark when the
+            # gate already timed out mid-brain-call (its oww-sleeping
+            # went out the moment it happened on the direct wire).
+            if self._led:
+                # state is a TurnState enum (wake_word); normalize to its
+                # value string — comparing the enum member against "idle"
+                # is always unequal (2026-09-30 self-caught before deploy).
+                gate_state = getattr(self._wake_gate, "state", None)
+                state_val = getattr(gate_state, "value", gate_state)
+                self._led.send("bot-stopped-speaking"
+                               if state_val not in (None, "idle")
+                               else "oww-sleeping")
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm))
+        elif isinstance(frame, CancelFrame):
+            # Session teardown: ring goes dark, no matter what.
+            if self._led:
+                self._led.send("oww-sleeping")
+            self._pcm.clear()
 
         await self.push_frame(frame, direction)

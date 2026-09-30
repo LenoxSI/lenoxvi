@@ -33,7 +33,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
-    OutputTransportMessageFrame,
     VADUserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -62,10 +61,15 @@ class WakeWordFilter(FrameProcessor):
     _shared_oww = None  # class-level: ONE Model for all pipelines
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
-                 echo_gate=None, on_wake=None, **kwargs):
+                 echo_gate=None, on_wake=None, led=None, **kwargs):
         from config import cfg_env
 
         super().__init__(**kwargs)
+        # Direct LED wire (led_state.LedSender): wake/sleep notifications
+        # must NOT ride the pipeline — they stall behind a blocked brain
+        # (2026-09-30 12:23: oww-sleeping sat 27s in the queue while the
+        # node's ring held stale purple). None = no LED (tests/rig).
+        self._led = led
         # Optional sync callback fired on IDLE -> AWAKE. The dashboard's
         # room registry uses it to record which room's wake opened the
         # turn (room-aware reply routing); must be cheap and must never
@@ -110,6 +114,13 @@ class WakeWordFilter(FrameProcessor):
         self._name = list(self._oww.models.keys())[0]
         logger.info(f"wake_word: model '{self._name}' loaded; threshold={self._threshold}; state=IDLE")
 
+    @property
+    def state(self) -> "TurnState":
+        """Current gate state — SonosOutput reads this at end-of-speech to
+        pick the honest LED (purple while the turn lives, dark when the
+        gate already timed out mid-brain-call)."""
+        return self._state
+
     def _score(self, pcm: bytes) -> float:
         audio = np.frombuffer(pcm, dtype=np.int16)
         return float(self._oww.predict(audio)[self._name])
@@ -145,7 +156,8 @@ class WakeWordFilter(FrameProcessor):
                             self._on_wake()
                         except Exception as e:  # observer must never break the gate
                             logger.debug(f"wake_word: on_wake callback failed: {e}")
-                    await self._send_led("oww-awake")
+                    if self._led:
+                        self._led.send("oww-awake")
                     break
 
             # Audio gating: only IDLE swallows downstream audio. LOCKED = bot
@@ -166,7 +178,8 @@ class WakeWordFilter(FrameProcessor):
                 if (now - self._last_activity) > self._awake_timeout:
                     self._state = TurnState.IDLE
                     logger.debug("wake_word: -> IDLE (timeout)")
-                    await self._send_led("oww-sleeping")
+                    if self._led:
+                        self._led.send("oww-sleeping")
                 return
             # IDLE: audio already fed the wake listener above — swallow
             return
@@ -174,12 +187,14 @@ class WakeWordFilter(FrameProcessor):
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
             logger.debug("wake_word: LOCKED (bot speaking)")
-            await self._send_led("bot-started-speaking")
+            # Speaking LED now fires from SonosOutput's real-time TTS
+            # frames (led_state direct wire) — this frame itself arrives
+            # late when the brain stalls the pipeline, so the gate is the
+            # wrong place to notify the ring.
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._state = TurnState.AWAKE
             self._last_activity = now
             logger.debug("wake_word: -> AWAKE (bot finished)")
-            await self._send_led("bot-stopped-speaking")
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # Real activity: user is talking (this is what keeps AWAKE alive)
             if self._state is TurnState.AWAKE:
@@ -187,16 +202,7 @@ class WakeWordFilter(FrameProcessor):
         elif self._state is TurnState.AWAKE and (now - self._last_activity) > self._awake_timeout:
             self._state = TurnState.IDLE
             logger.debug("wake_word: -> IDLE (timeout)")
-            await self._send_led("oww-sleeping")
+            if self._led:
+                self._led.send("oww-sleeping")
 
         await self.push_frame(frame, direction)
-
-    async def _send_led(self, msg_type: str):
-        """Push an LED state message downstream over the data channel, so the
-        node's LED ring can follow the wake/listen/speak cycle."""
-        try:
-            await self.push_frame(
-                OutputTransportMessageFrame(message={"type": msg_type})
-            )
-        except Exception as e:  # LED state is cosmetic — never kill the turn
-            logger.debug(f"wake_word: LED msg '{msg_type}' failed: {e}")

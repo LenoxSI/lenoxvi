@@ -104,20 +104,39 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     if vad_params:
         logger.info(f"vad params from config.yaml: {vad_params}")
 
+    # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
+    # behind a blocked processor — HermesAgent holds the queue 3-40s on
+    # brain calls and every LED message used to arrive as one late burst
+    # (2026-09-30 12:23: the ring held stale purple through the whole
+    # "On it." -> answer gap). One output transport, shared by the pipeline
+    # and the LED wire; per-pipeline LedSender = per-node targeting free.
+    from led_state import LedSender
+
+    out = transport.output()
+    led = LedSender(out)
+    # Wake gate built once: the pipeline gets it conditionally, and
+    # SonosOutput reads its state for the end-of-speech LED (purple vs
+    # dark) and fires speaking LEDs from its real-time TTS frames.
+    wake_filter = (WakeWordFilter(echo_gate=gate, on_wake=_on_wake, led=led)
+                   if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true")
+                   else None)
+
     task = PipelineWorker(
         Pipeline(
             [
                 transport.input(),
                 # wake gate AFTER the source (frames flow downstream from
                 # transport.input()), BEFORE VAD/STT: gates audio in IDLE/LOCKED
-                *([WakeWordFilter(echo_gate=gate, on_wake=_on_wake)]
-                  if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true") else []),
+                *([wake_filter] if wake_filter else []),
                 VADProcessor(vad_analyzer=vad_analyzer),
                 stt,
                 brain,
                 tts,
-                SonosOutput(echo_gate=gate, zone_selector=_reply_zone),  # reply in the wake room's zone when mapped
-                transport.output(),
+                # reply in the wake room's zone when mapped; speaking LEDs
+                # fire from its real-time TTS frames on the direct wire
+                SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
+                            wake_gate=wake_filter, led=led),
+                out,
             ]
         ),
         params=PipelineParams(
