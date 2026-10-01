@@ -6,6 +6,49 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.3.2] — 2026-10-01
+
+The Opus 5.5 review release. A full-repo read-only review (design note,
+7 high / 15 medium findings) drove four fix batches — 13 findings — ending
+the reviewer's core verdict that "the design still assumes one node."
+Behavior is unchanged on a single-node rig; the fixes are correctness,
+resilience, and the multi-node foundation.
+
+### Added
+- **Zone capability audit at startup**: every configured zone is checked
+  against the all-S2 audioClip scope at boot — an unsupported player is
+  logged before it can eat a reply mid-conversation (design note, `fb2e585`)
+
+### Fixed
+- **Brain failure after the filler no longer goes silent**: the post-filler
+  brain await has its own try/except (a sibling except clause cannot catch
+  an exception raised in another handler's body) — the house hears
+  "Sorry — I can't reach my brain right now" instead of dead air, and the
+  outage reply never enters the server-side history as a fake memory
+  (`897de5d`, review H3)
+- **Duck-holder hardening**: every Sonos call is timeout-bounded; a dead
+  websocket is dropped and reconnected on the next poll tick instead of
+  retrying forever on the corpse; the wake gate's LOCKED state has a
+  safety cap (refined by real clip duration via `note_speech`) so a lost
+  stop-frame can no longer deafen the mic; the 8s silence tail is padded
+  only when the holder is enabled and the turn is live, and lands AFTER
+  the echo gate so the mic still reopens at her last syllable; duck
+  ownership starts when the clip LOADS, not at generation end; the holder
+  dies in `cleanup()`, not just on CancelFrame (`634af8f`, review
+  H7/M1/M2/M3/M13)
+- **Event loop unblocked**: MP3 encodes (reply clips, duck clip, dashboard
+  test tones) and soco calls (name lookups, UPnP discovery) run in
+  threads; dashboard node commands (restart/scan/rename/Wi-Fi) ride the
+  direct data-channel wire via the output transport — a 40s brain call
+  can no longer stall a command into a 504 (`7ae9ecb`, review M4–M7)
+- **Multi-node architecture**: room identity is per-pipeline — replies,
+  wake records, and ducks resolve through THIS connection's pc_id instead
+  of the global last-connected room; one openWakeWord Model per pipeline
+  (the class-shared model mixed concurrent sessions' rolling buffers and
+  every reconnect reset the live session's buffers); two physical nodes
+  sharing a room name now log a loud rename warning instead of silently
+  evicting each other into a reconnect loop (`a23187a`, review H1/H2/M8)
+
 ## [0.3.1] — 2026-09-30
 
 Node management + audio UX — the rig gets self-service and learns to
