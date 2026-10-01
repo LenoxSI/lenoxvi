@@ -31,7 +31,7 @@ scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 scp -q "$HOST:~/projects/lenoxvi/config.yaml" "$DIR/config.yaml"
 scp -q "$DIR/AGENTS.md" "$DIR/CLAUDE.md" "$HOST:/tmp/" 2>/dev/null || true
 ssh -o BatchMode=yes "$HOST" 'cd ~/projects/lenoxvi && \
-  git fetch /tmp/lenoxvi.bundle refs/heads/main:refs/remotes/origin/main "refs/tags/*:refs/tags/*" && \
+  git fetch /tmp/lenoxvi.bundle +refs/heads/main:refs/remotes/origin/main "+refs/tags/*:refs/tags/*" && \
   git reset --hard refs/remotes/origin/main && \
   mv /tmp/AGENTS.md /tmp/CLAUDE.md . 2>/dev/null; \
   echo "--- host now at:" && git log --oneline -1 && \

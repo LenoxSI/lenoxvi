@@ -200,7 +200,7 @@ Cleanup/efficiency pass from the superpowers-driven review (all 14 findings).
 
 First tagged snapshot: the house voice rig as it stands. Phase 1–4 pipeline
 live (wake gate → VAD → local whisper STT → Hermes brain → ElevenLabs TTS →
-Sonos audioClip overlay), running as a systemd service on appliance-host,
+Sonos audioClip overlay), running as a systemd service on the appliance host,
 serving the house daily.
 
 ### Added

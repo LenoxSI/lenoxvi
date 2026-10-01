@@ -92,7 +92,7 @@ def main():
     dashboard.register_dashboard(app)
     # H5: guard.py requires an IP-literal Host (public-DNS hosts are the
     # rebinding vector) — TestClient's default 'testserver' would 403.
-    client = TestClient(app, base_url="http://203.0.113.10")
+    client = TestClient(app, base_url="http://192.0.2.10")
 
     # 2. page
     r = client.get("/dashboard")
@@ -165,7 +165,7 @@ def main():
 
     # 6. zone add round-trip
     r = client.post("/api/dashboard/zones", json={
-        "name": "test_zone", "ip": "203.0.113.222", "player_uid": "RINCON_TEST"})
+        "name": "test_zone", "ip": "192.0.2.222", "player_uid": "RINCON_TEST"})
     check("zone add ok", r.status_code == 200, f"status={r.status_code}")
     m = client.get("/api/dashboard/mapping").json()
     check("new zone visible in mapping GET", "test_zone" in m["zones"], f"zones={list(m['zones'])}")
