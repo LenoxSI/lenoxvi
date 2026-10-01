@@ -51,14 +51,16 @@ class TurnState(Enum):
 class WakeWordFilter(FrameProcessor):
     """Wake-word gate + turn lock. Non-audio frames always pass through.
 
-    The OWW model is cached at class level and shared across pipelines
-    (the bot builds a fresh filter per WebRTC offer — a per-instance model
-    reloads the ONNX + melspectrogram + embedding stack on every node
-    reconnect). OWW keeps rolling audio buffers, so each new pipeline
-    resets the shared model in setup() to start clean.
+    Per-pipeline OWW model (H2, Opus review 2026-10-01): each pipeline
+    gets its OWN Model instance — OWW keeps rolling audio buffers, and a
+    class-shared model mixed concurrent sessions' audio (false/missed
+    wakes) while reset() calls fought each other. Model construction is
+    serialized by a class lock and runs in a thread at connect time;
+    the resolved model path is the only thing shared.
     """
 
-    _shared_oww = None  # class-level: ONE Model for all pipelines
+    _shared_oww = None  # class-level: cached model FILE path (published by first setup)
+    _oww_lock = asyncio.Lock()  # serializes concurrent Model() inits (H2)
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
                  echo_gate=None, on_wake=None, led=None, **kwargs):
@@ -104,20 +106,26 @@ class WakeWordFilter(FrameProcessor):
 
     async def setup(self, setup):
         await super().setup(setup)
-        if WakeWordFilter._shared_oww is None:
+        # H2 (Opus review): ONE Model PER PIPELINE. The old class-shared
+        # model mixed two sessions' audio in the same rolling buffers
+        # from different threads (false/missed wakes — even single-node,
+        # the ~22s zombie window ran two pipelines through one model),
+        # and every new pipeline reset() the others' buffers. What stays
+        # shared: nothing stateful — just the resolved model path, and
+        # this lock, which serializes concurrent Model() constructions
+        # (two torch/onnx inits racing during session replacement is the
+        # failure we're dodging). Cost: each new session pays one Model()
+        # load in a thread (~seconds, at connect time — outside the
+        # audio path). Simpler is correct here.
+        WakeWordFilter._shared_oww = self._model_path  # publish the path
+        async with WakeWordFilter._oww_lock:
             from openwakeword.model import Model
 
-            WakeWordFilter._shared_oww = await asyncio.to_thread(
+            self._oww = await asyncio.to_thread(
                 Model, wakeword_model_paths=[self._model_path]
             )
-        # Fresh pipeline: clear the shared model's rolling audio buffers so
-        # the previous session's tail can't bleed scores into this one.
-        # One live session assumed — two concurrent pipelines would share
-        # one set of rolling buffers.
-        WakeWordFilter._shared_oww.reset()
-        self._oww = WakeWordFilter._shared_oww
         self._name = list(self._oww.models.keys())[0]
-        logger.info(f"wake_word: model '{self._name}' loaded; threshold={self._threshold}; state=IDLE")
+        logger.info(f"wake_word: model '{self._name}' loaded (per-pipeline); threshold={self._threshold}; state=IDLE")
 
     @property
     def state(self) -> "TurnState":

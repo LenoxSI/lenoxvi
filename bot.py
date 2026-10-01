@@ -69,24 +69,30 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     )
     logger.info("tts backend: elevenlabs")
     gate = EchoGate()
-    # Room-aware reply routing (dashboard registry + config room_zones):
-    # the wake gate records which room's wake opened the turn, and this
-    # selector maps it to that room's zone — falling back to the
-    # configured default zone everywhere else (unknown room, browser
-    # client, or selector failure must never silence a reply).
+    # Multi-node fix (Opus review H1): EVERYTHING room-related resolves
+    # through THIS pipeline's own pc_id — never the registry's global
+    # "last connected" room. The offer tee has already correlated
+    # {room, pc_id} by the time the pipeline runs (send-time tee, note
+    # 024), so room_for_pc is exact here.
+    pc_id = getattr(getattr(transport, "_webrtc_connection", None), "pc_id", None)
     from dashboard import registry as dash_registry
     dash_registry.set_gate(gate)
 
+    def _pipeline_room():
+        # This pipeline's room — fall back to None (-> default zone) if
+        # the tee hasn't correlated yet (ordering race, handled).
+        return dash_registry.room_for_pc(pc_id) if pc_id else None
+
     def _reply_zone():
-        room = dash_registry.active_room()
-        if not room:
+        room = _pipeline_room()
+        if not room or room == "unknown":
             return None
         from config import cfg
         mapped = (cfg("room_zones") or {}).get(room)
         return mapped  # None -> default zone fallback in SonosOutput
 
     def _on_wake():
-        dash_registry.note_wake()
+        dash_registry.note_wake(_pipeline_room())
 
     brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
             else StubBrain(echo_gate=gate))

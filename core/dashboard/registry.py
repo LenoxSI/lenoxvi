@@ -39,7 +39,7 @@ PROVISIONAL = "unknown"
 
 def _evict_other_sessions(pc_id, room):
     """Single live session per room: when pc_id claims `room`, drop any
-    OLDER pc_id still mapped to it (and its task). The node re-offers
+    OLDER pc_id still mapped to it (and its sender). The node re-offers
     before pipecat reaps its dead session (~22s zombie window) —
     measured 2026-09-29 19:11: rename/scan queued into the dead
     session's task and 504'd while the live session sat idle."""
@@ -51,6 +51,21 @@ def _evict_other_sessions(pc_id, room):
         _out_by_pc.pop(p, None)
         if stale:
             logger.info(f"registry: evicted stale session {p[:24]}… from room '{room}'")
+    # M8 (Opus review): two DIFFERENT nodes claiming the same room name
+    # is a config problem (both built with the default PIPECAT_ROOM, or
+    # a rename raced) — they'd evict each other into a reconnect loop.
+    # A stale-zombie eviction is normal churn; a collision between two
+    # LIVE senders is not. Warn loudly so it gets fixed (rename one node
+    # via the dashboard) instead of silently reboot-looping.
+    if stale and len(_out_by_pc) >= 2 and len({p for p, r in _room_by_pc.items() if r == room}) >= 1:
+        remaining = [p for p, r in _room_by_pc.items() if r == room]
+        if len(remaining) == 1 and _out_by_pc.get(remaining[0]) is not None:
+            logger.warning(
+                f"registry: room '{room}' churn — session {pc_id[:24]}… evicted "
+                f"{len(stale)} other session(s) that still had live senders. If "
+                f"two physical nodes share the room name '{room}', they will "
+                f"reconnect-loop: rename one of them (dashboard → Nodes)."
+            )
 
 
 def mark_boot():
@@ -135,10 +150,14 @@ def mark_disconnected(pc_id):
         rec["last_seen"] = time.time()
 
 
-def note_wake():
-    """Called by the wake gate on IDLE -> AWAKE (sync, cheap)."""
+def note_wake(room: str | None = None):
+    """Called by the wake gate on IDLE -> AWAKE (sync, cheap). Room is
+    THIS pipeline's room (H1: passed by bot.py from room_for_pc — the
+    old global-active-room read routed replies to the last-connected
+    room, wrong the moment a second node exists). None/unknown keeps
+    the wake record but marks the room unknown."""
     global _last_wake
-    _last_wake = {"time": time.time(), "room": _active_room}
+    _last_wake = {"time": time.time(), "room": room}
 
 
 def sender_for_room(room: str):
