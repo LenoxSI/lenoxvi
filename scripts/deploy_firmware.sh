@@ -7,7 +7,7 @@
 #   1. Build node_esp32.bin (WIFI creds + pipecat URL baked in)
 #   2. Bump firmware/node/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
-#   3. Copy bin + version.json to lenoxvi repo on appliance-host
+#   3. Copy bin + version.json to the lenoxvi repo on the appliance host
 #   4. Restart the bot (serves /firmware/* via core/firmware_server.py) —
 #      only drops the node's live session; files are picked up per request
 #   5. Poke the node (future: an HTTP poke endpoint); today the node picks
@@ -77,7 +77,7 @@ cat > "$VFILE" <<EOF
 EOF
 echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
 
-# ── 3. Ship to appliance-host ──────────────────────────────────────────────────
+# ── 3. Ship to the appliance host ──────────────────────────────────────────────────
 echo "==> copying firmware + manifest to $LVI_HOST"
 scp -q "$BIN" "$VFILE" "$LVI_HOST:$LVI_REMOTE_DIR/"
 
@@ -94,7 +94,7 @@ cat <<EOF
 ==> DONE. Firmware $NEW staged on $LVI_HOST.
     The node will pick it up on its next boot (in-place updates are
     future work — nothing sends a data-channel message today).
-    OTA is the only flash path (USB is retired). Watch (appliance-host):
+    OTA is the only flash path (USB is retired). Watch (appliance host):
       journalctl --user -u lenoxvi-bot -f | grep firmware_server
     Expected: "firmware_server: serving node_esp32.bin" then the node
     reboots into $NEW.

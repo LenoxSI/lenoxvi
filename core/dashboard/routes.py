@@ -16,15 +16,19 @@ import time
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from config import cfg
 
 from . import config_store, node_command, registry
+from .guard import mutation_guard
 
 router = APIRouter(prefix="/api/dashboard")
+# H5: every mutating route gets the Origin/Host guard (+optional
+# LVI_DASHBOARD_TOKEN check) — see guard.py.
+GUARD = [Depends(mutation_guard)]
 
 
 # ── models ───────────────────────────────────────────────────────────
@@ -104,7 +108,7 @@ async def get_mapping():
     }
 
 
-@router.put("/mapping")
+@router.put("/mapping", dependencies=GUARD)
 async def put_mapping(payload: MappingPayload):
     zones = _zones()
     # Validate BEFORE writing: every mapped zone must exist.
@@ -130,7 +134,7 @@ async def put_mapping(payload: MappingPayload):
 # ── zones ────────────────────────────────────────────────────────────
 
 
-@router.post("/zones/discover")
+@router.post("/zones/discover", dependencies=GUARD)
 async def discover_zones():
     """Scan the LAN for Sonos players (soco UPnP discovery)."""
     try:
@@ -164,7 +168,7 @@ async def discover_zones():
     return {"found": found}
 
 
-@router.post("/zones")
+@router.post("/zones", dependencies=GUARD)
 async def add_zone(payload: ZonePayload):
     name = payload.name.strip()
     if not name or "." in name or ":" in name:
@@ -178,7 +182,7 @@ async def add_zone(payload: ZonePayload):
     return {"ok": True, "zones": zones}
 
 
-@router.delete("/zones/{name}")
+@router.delete("/zones/{name}", dependencies=GUARD)
 async def delete_zone(name: str):
     zones = dict(_zones())
     if name not in zones:
@@ -239,7 +243,7 @@ async def _clip_server():
     return server
 
 
-@router.post("/zones/{name}/test")
+@router.post("/zones/{name}/test", dependencies=GUARD)
 async def test_zone(name: str):
     zones = _zones()
     if name not in zones:
@@ -301,7 +305,7 @@ def _room_online(room: str) -> None:
         raise HTTPException(status_code=409, detail=f"node '{room}' is not online")
 
 
-@router.post("/nodes/{room}/restart")
+@router.post("/nodes/{room}/restart", dependencies=GUARD)
 async def restart_node(room: str):
     _room_online(room)
     try:
@@ -311,7 +315,7 @@ async def restart_node(room: str):
     return reply
 
 
-@router.post("/nodes/{room}/scan")
+@router.post("/nodes/{room}/scan", dependencies=GUARD)
 async def scan_node(room: str):
     _room_online(room)
     try:
@@ -323,7 +327,7 @@ async def scan_node(room: str):
     return reply  # {"ok": true, "data": {"ssid": rssi, ...}}
 
 
-@router.post("/nodes/{room}/wifi")
+@router.post("/nodes/{room}/wifi", dependencies=GUARD)
 async def set_node_wifi(room: str, payload: WifiPayload):
     _room_online(room)
     # Fire-and-report: the node disconnects to apply creds; the final
@@ -338,7 +342,7 @@ async def set_node_wifi(room: str, payload: WifiPayload):
     return reply
 
 
-@router.post("/nodes/{room}/name")
+@router.post("/nodes/{room}/name", dependencies=GUARD)
 async def set_node_name(room: str, payload: NamePayload):
     _room_online(room)
     try:
@@ -353,7 +357,7 @@ async def set_node_name(room: str, payload: NamePayload):
 # ── firmware push (operator side of firmware_server.py) ─────────────
 
 
-@router.post("/firmware/upload")
+@router.post("/firmware/upload", dependencies=GUARD)
 async def upload_firmware(file: UploadFile = File(...)):
     """Upload a firmware .bin; version comes from the image's embedded
     ESP app descriptor (magic 0xABCD5432 at byte 24; version string at
@@ -409,7 +413,7 @@ class FirmwareVersionPayload(BaseModel):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
 
-@router.post("/firmware/version")
+@router.post("/firmware/version", dependencies=GUARD)
 async def set_firmware_version(payload: FirmwareVersionPayload):
     """Write version.json (manifest) so nodes pick the uploaded bin up."""
     manifest = {"version": payload.version, "filename": "node_esp32.bin"}

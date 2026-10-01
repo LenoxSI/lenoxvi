@@ -1,6 +1,6 @@
 # lenoxvi
 
-**v2 house-voice appliance for Willow.** A pipecat bot on appliance-host that
+**v2 house-voice appliance.** A pipecat bot that
 turns mic nodes into a house-wide voice assistant:
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
@@ -24,15 +24,16 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
   - `echo_gate.py` — room-echo containment (permanent safety net behind the turn lock)
   - `firmware_server.py` — `/firmware/*` OTA delivery for mic nodes
 - `scripts/` — ops & bench tests (each has a docstring header):
-  - `restart.sh` — systemd wrapper: restarts the bot unit on appliance-host (no flags)
+  - `restart.sh` — systemd wrapper: restarts the bot unit on the appliance host (no flags)
   - `deploy_firmware.sh` — build + version + ship a node firmware OTA (VM-side)
   - `sync_host.sh` — bundle-based repo sync VM → host (no creds on hosts)
   - `serial_watch.py` — node serial capture (survives replug)
   - `*_test.py` — headless bench tests for the core pieces
   - `make-cert.sh <bot-host-LAN-IP>` — self-signed HTTPS certs for the bot
 - `firmware/` — node firmware images + OTA manifests
-  - `xvf3800/` — XMOS images; **master** = the one that works, slave = reference only
-    (slave bytes live in the notes, not here)
+  - `xvf3800/` — XMOS image fetched via `scripts/fetch_xmos_fw.sh` at
+    bring-up (upstream ships **no license** — the binary is not
+    redistributed here; see the script header for md5 + provenance)
   - `node/` — scp-populated at deploy time by `deploy_firmware.sh` (empty in
     a fresh clone by design); served by firmware_server
 - `config.example.yaml` — **the tuning surface template**: every behavior knob
@@ -64,15 +65,55 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 
 ## Where the knowledge lives
 
-- **Dev notes:** the notes — `/path/to/your/notes/notes/v2/` (source of truth
-  for intent, decisions, and bring-up records; the repo deliberately does not
-  carry them). Start at `TODO.md`, then the numbered notes.
+- **Dev notes:** the original project keeps them in a private notes outside
+  the repo; bring your own. The repo README plus `AGENTS.md`-style docs
+  are the self-contained story.
 - **Node firmware:** `LenoxVI/lenoxvi-firmware` (branch `respeaker-xvf3800`) —
   the node is pure firmware; lenoxvi only serves it (`/api/offer` + `/firmware/*`).
 
 ## Run
 
-On appliance-host: `bash scripts/restart.sh` (systemd wrapper — the unit
+### Quick test (foreground)
+
+`python bot.py --host <bot-host-LAN-IP> --port 7860 --esp32` from the repo
+root — that's the whole launch line. `--esp32` enables SDP munging for the
+ESP32-S3 mic nodes; `--host` must be a LAN-reachable address (not
+localhost) or the mic nodes can't connect.
+
+### As a service (always-on)
+
+The production rig runs the bot as a systemd **user** unit — policy config
+(launch flags, `.env` loading, CUDA `LD_LIBRARY_PATH` for whisper's
+CTranslate2, restart-on-failure, SIGKILL after 10s on a hung WebRTC
+session) lives in the unit, not the code. Copy the sanitized unit:
+`deploy/lenoxvi-bot.service.example` → `~/.config/systemd/user/`,
+edit the `<PLACEHOLDER>`s (venv path, python version in the library paths,
+your LAN IP), then `systemctl --user daemon-reload && systemctl --user
+enable --now lenoxvi-bot`. Logs: `journalctl --user -u lenoxvi-bot -f`.
+
+### Security posture (read this before exposing the port)
+
+The dashboard is **LAN-only by design, no auth on reads** (design note):
+anyone on your LAN can view status and mappings. Mutating routes
+(POST/PUT/DELETE under `/api/dashboard/`) carry two guard rails
+(`core/dashboard/guard.py`):
+
+- **Origin/Host check** — same-origin browser requests pass; a
+  cross-origin `fetch` from any website you visit is rejected (403), as
+  is any public-DNS Host header (DNS-rebinding shape). This kills the
+  "malicious tab pushes firmware over your LAN" vector without touching
+  the no-auth LAN contract. Non-browser callers (curl, scripts) send no
+  Origin and pass untouched.
+- **Optional token** — set `LVI_DASHBOARD_TOKEN` in `.env` and mutating
+  routes also require `X-Dashboard-Token` to match. Leave it empty on a
+  trusted LAN (nothing changes); set it if you ignore the LAN-only
+  advice or want belt-and-suspenders. The page prompts for it once.
+
+Firmware images are additionally validated before serving (embedded
+app-descriptor magic check), so even a pushed image must be a real
+ESP32-S3 app image.
+
+On the appliance: `bash scripts/restart.sh` (systemd wrapper — the unit
 `lenoxvi-bot.service` owns restart policy and the CUDA wheels'
 LD_LIBRARY_PATH). Config/secrets in gitignored `.env` (see `.env.example`)
 and `config.yaml` (see `config.example.yaml`).

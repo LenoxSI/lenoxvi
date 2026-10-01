@@ -1,12 +1,12 @@
 #!/bin/bash
-# Sync appliance-host's checkout with this repo (run from the VM).
+# Sync the appliance host's checkout with this repo (run from the dev box).
 #
 # House rule: no GitHub credentials on hosts — the host can't pull.
 # So we ship the repo as a git bundle over SSH instead. After this,
 # GitHub == VM == host, byte for byte.
 #
 # SAFETY: the host reset is --hard. The host is a PURE DEPLOY TARGET:
-# never edit files on appliance-host directly — edit here, commit, push,
+# never edit files on the appliance host directly — edit here, commit, push,
 # then run this. (Untracked+gitignored files like .env, logs/, clips/
 # are NOT touched by reset --hard.)
 #
@@ -17,7 +17,7 @@ HOST=lenoxvi
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE=/tmp/lenoxvi.bundle
 
-git -C "$DIR" bundle create "$BUNDLE" main
+git -C "$DIR" bundle create "$BUNDLE" main --tags
 scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 # Gitignored runtime files travel alongside the bundle — the host's
 # config.yaml/AGENTS.md/CLAUDE.md are NOT in git anymore (2026-09-20).
@@ -31,7 +31,7 @@ scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 scp -q "$HOST:~/projects/lenoxvi/config.yaml" "$DIR/config.yaml"
 scp -q "$DIR/AGENTS.md" "$DIR/CLAUDE.md" "$HOST:/tmp/" 2>/dev/null || true
 ssh -o BatchMode=yes "$HOST" 'cd ~/projects/lenoxvi && \
-  git fetch /tmp/lenoxvi.bundle refs/heads/main:refs/remotes/origin/main && \
+  git fetch /tmp/lenoxvi.bundle refs/heads/main:refs/remotes/origin/main "refs/tags/*:refs/tags/*" && \
   git reset --hard refs/remotes/origin/main && \
   mv /tmp/AGENTS.md /tmp/CLAUDE.md . 2>/dev/null; \
   echo "--- host now at:" && git log --oneline -1 && \

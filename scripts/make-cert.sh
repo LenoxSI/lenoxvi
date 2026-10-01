@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 mkdir -p certs
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout certs/key.pem -out certs/cert.pem -days 825 \
-  -subj "/CN=appliance-host" \
-  -addext "subjectAltName=IP:${IP},DNS:appliance-host" 2>/dev/null
+  -subj "/CN=lenoxvi" \
+  -addext "subjectAltName=IP:${IP},DNS:lenoxvi" 2>/dev/null
 chmod 600 certs/key.pem
 echo CERT-OK $(openssl x509 -in certs/cert.pem -noout -enddate)

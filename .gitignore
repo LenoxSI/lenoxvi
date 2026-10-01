@@ -23,7 +23,10 @@ config.backup.yaml
 
 # runtime artifacts — certs are regenerable per-host (make-cert.sh), clips
 # are serve-once garbage, firmware/node is scp-populated by deploy_firmware.sh
+# firmware/xvf3800 is fetched at bring-up (fetch_xmos_fw.sh) — the upstream
+# image ships no license, so it must not be committed (M15)
 certs/
 clips/
 firmware/node/
+firmware/xvf3800/
 *.bundle

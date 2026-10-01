@@ -90,7 +90,9 @@ def main():
         return {"sdp": "v=0 answer", "type": "answer", "pc_id": pc_id}
 
     dashboard.register_dashboard(app)
-    client = TestClient(app)
+    # H5: guard.py requires an IP-literal Host (public-DNS hosts are the
+    # rebinding vector) — TestClient's default 'testserver' would 403.
+    client = TestClient(app, base_url="http://203.0.113.10")
 
     # 2. page
     r = client.get("/dashboard")
@@ -191,6 +193,30 @@ def main():
               + ", ".join(f"{f['name']} ({f['model']})" for f in found))
     else:
         print(f"[WARN] discovery endpoint returned {r.status_code}: {r.text[:120]}")
+
+    # 12. H5 guard: cross-origin mutation rejected, non-browser passes
+    r = client.put("/api/dashboard/mapping",
+                   json={"room_zones": {"bedroom": "Sonos Port"}},
+                   headers={"Origin": "https://evil.example"})
+    check("guard: cross-origin mutation 403", r.status_code == 403, f"status={r.status_code}")
+    r = client.put("/api/dashboard/mapping",
+                   json={"room_zones": {"bedroom": "Sonos Port"}})
+    check("guard: no-Origin (curl) mutation passes", r.status_code == 200, f"status={r.status_code}")
+    r = client.get("/api/dashboard/status", headers={"Origin": "https://evil.example"})
+    check("guard: cross-origin READ stays open", r.status_code == 200, f"status={r.status_code}")
+
+    # 13. H5 token mode (env set -> mutations need the header)
+    os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
+    try:
+        r = client.put("/api/dashboard/mapping",
+                       json={"room_zones": {"bedroom": "Sonos Port"}})
+        check("guard: token mode, bare mutation 401", r.status_code == 401, f"status={r.status_code}")
+        r = client.put("/api/dashboard/mapping",
+                       json={"room_zones": {"bedroom": "Sonos Port"}},
+                       headers={"X-Dashboard-Token": "rig-secret"})
+        check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
+    finally:
+        del os.environ["LVI_DASHBOARD_TOKEN"]
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()

@@ -5,7 +5,7 @@ Silero VAD -> local faster-whisper STT -> brain (HermesAgent via config.yaml
 brain.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
 (voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.
 
-Run on appliance-host from ~/projects/lenoxvi:
+Run on the appliance host from the repo root:
   ~/venvs/lenoxvi/bin/python bot.py
 Then open https://<bot-host-LAN-IP>:7860/client in a LAN browser
 (mic access needs the HTTPS secure context; certs via scripts/make-cert.sh).

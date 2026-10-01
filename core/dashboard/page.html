@@ -89,8 +89,24 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 
 let zones = {}, mapping = {}, sonosNames = {};
 
+// H5: mutations carry the dashboard token if one is configured
+// (LVI_DASHBOARD_TOKEN on the bot). Same-origin reads stay open.
+let _dashToken = localStorage.getItem("dashToken") || "";
 async function api(path, opts) {
+  opts = opts || {};
+  const isMutation = (opts.method || "GET").toUpperCase() !== "GET";
+  if (isMutation && _dashToken) {
+    opts.headers = Object.assign({}, opts.headers, {"X-Dashboard-Token": _dashToken});
+  }
   const r = await fetch(path, opts);
+  if (r.status === 401 && isMutation) {
+    // Token required/mismatched: prompt once, remember, retry once.
+    const t = prompt("Dashboard token required (set LVI_DASHBOARD_TOKEN on the bot):");
+    if (t) { _dashToken = t; localStorage.setItem("dashToken", t);
+      opts.headers = Object.assign({}, opts.headers, {"X-Dashboard-Token": t});
+      return api(path, opts);
+    }
+  }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || r.status);
   return body;
@@ -338,7 +354,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   try {
     const fd = new FormData();
     fd.append("file", f, f.name);
-    const up = await fetch("/api/dashboard/firmware/upload", { method: "POST", body: fd });
+    const up = await api("/api/dashboard/firmware/upload", { method: "POST", body: fd });
     const upj = await up.json();
     if (!up.ok) throw new Error(upj.detail || up.status);
     msg($("#fw-msg"), `Firmware ${upj.version} served — nodes pick it up on next boot.`, "ok");
