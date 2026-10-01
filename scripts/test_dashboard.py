@@ -142,9 +142,11 @@ def main():
     s = client.get("/api/dashboard/status").json()
     check("status shape", all(k in s for k in
           ("uptime_secs", "active_room", "last_wake", "rooms")), f"s={s}")
-    registry.note_wake()
+    # H1 contract: bot.py passes THIS pipeline's room (room_for_pc) — the
+    # bare-call form is gone; a wake with no room records room=None.
+    registry.note_wake("bedroom")
     s = client.get("/api/dashboard/status").json()
-    check("note_wake records room", s["last_wake"] and s["last_wake"]["room"] is not None,
+    check("note_wake records room", s["last_wake"] and s["last_wake"]["room"] == "bedroom",
           f"last_wake={s['last_wake']}")
 
     # 5. config write round-trip on throwaway file
