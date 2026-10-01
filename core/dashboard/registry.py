@@ -30,7 +30,7 @@ _boot_time = None
 _active_room = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
-_task_by_pc = {}  # pc_id -> pipeline task (node_command sends on its data channel)
+_out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire, M6)
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -48,8 +48,8 @@ def _evict_other_sessions(pc_id, room):
     stale = [p for p, r in _room_by_pc.items() if r == room and p != pc_id]
     for p in stale:
         _room_by_pc.pop(p, None)
-        _task_by_pc.pop(p, None)
-        if len(stale) > 0:
+        _out_by_pc.pop(p, None)
+        if stale:
             logger.info(f"registry: evicted stale session {p[:24]}… from room '{room}'")
 
 
@@ -141,21 +141,23 @@ def note_wake():
     _last_wake = {"time": time.time(), "room": _active_room}
 
 
-def task_for_room(room: str):
-    """(task, pc_id) for the node currently connected in `room`, or
-    (None, None). task is the pipecat PipelineTask whose queue_frame()
-    sends on that node's data channel. LAST match wins: with eviction
+def sender_for_room(room: str):
+    """(output_transport, pc_id) for the node currently connected in
+    `room`, or (None, None). The output transport sends on that node's
+    data channel DIRECTLY (send_message — no pipeline, M6 2026-10-01):
+    commands must not queue behind a blocked brain (same stall class
+    as the LED fix, Opus review M6). LAST match wins: with eviction
     there's at most one, but if a stale mapping ever survives, the
     newest session is the one that can actually hear us."""
     found = (None, None)
     for pc_id, r in _room_by_pc.items():
-        if r == room and _task_by_pc.get(pc_id) is not None:
-            found = (_task_by_pc[pc_id], pc_id)
+        if r == room and _out_by_pc.get(pc_id) is not None:
+            found = (_out_by_pc[pc_id], pc_id)
     return found
 
 
-def task_for_pc(pc_id: str):
-    return _task_by_pc.get(pc_id), pc_id
+def sender_for_pc(pc_id: str):
+    return _out_by_pc.get(pc_id), pc_id
 
 
 def room_for_pc(pc_id: str):
@@ -163,14 +165,16 @@ def room_for_pc(pc_id: str):
     return _room_by_pc.get(pc_id)
 
 
-def register_task(pc_id: str, task) -> None:
-    """bot.py hands the pipeline task over at connect so node_command
-    can queue data-channel frames to that specific node."""
-    _task_by_pc[pc_id] = task
+def register_sender(pc_id: str, out) -> None:
+    """bot.py hands the OUTPUT TRANSPORT over at connect so node_command
+    can send on that node's data channel without touching the pipeline
+    (M6: queue_frame enters at the pipeline source and queues behind a
+    blocked HermesAgent — restart/scan 504'd during 40s brain calls)."""
+    _out_by_pc[pc_id] = out
 
 
-def drop_task(pc_id: str) -> None:
-    _task_by_pc.pop(pc_id, None)
+def drop_sender(pc_id: str) -> None:
+    _out_by_pc.pop(pc_id, None)
 
 
 def relabel_room(pc_id: str, info: dict | None) -> None:

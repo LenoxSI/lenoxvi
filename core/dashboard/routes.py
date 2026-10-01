@@ -9,6 +9,7 @@ No auth by ratified design (design note): LAN-only page. Anyone on
 the LAN can read status and edit mappings — accepted risk.
 """
 
+import asyncio
 import json
 import re
 import time
@@ -66,7 +67,9 @@ def _sonos_names(zones: dict) -> dict:
     players just don't get a name — the config key still displays.
     Display-only (design note amendment 2026-09-30): the Sonos-side
     name shows verbatim for mapping UX; routing stays keyed on the
-    config key + UID so a Sonos-side rename can't orphan a mapping."""
+    config key + UID so a Sonos-side rename can't orphan a mapping.
+    SYNC soco network calls — caller MUST run this in a thread (M5,
+    Opus review: this is the voice pipeline's event loop)."""
     out = {}
     for key, z in zones.items():
         ip = (z or {}).get("ip")
@@ -94,7 +97,10 @@ async def get_mapping():
         "room_zones": dict(config_store.read_section("room_zones") or {}),
         "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
-        "sonos_names": _sonos_names(zones),
+        # M5: soco network calls go to a thread — the dashboard rides the
+        # voice pipeline's event loop; a slow/offline player must not
+        # stall audio ingest (Opus review).
+        "sonos_names": await asyncio.to_thread(_sonos_names, zones),
     }
 
 
@@ -133,7 +139,8 @@ async def discover_zones():
         raise HTTPException(status_code=503, detail="soco not installed")
     found = []
     try:
-        for z in soco.discover(timeout=5) or []:
+        # M5: soco UPnP discovery blocks 5s+ — off the event loop.
+        for z in await asyncio.to_thread(soco.discover, timeout=5) or []:
             try:
                 model = (z.model_name or "").strip()
                 found.append(
@@ -242,12 +249,16 @@ async def test_zone(name: str):
 
     server = await _clip_server()
     pcm = _test_tone_pcm()
-    enc = lameenc.Encoder()
-    enc.set_bit_rate(96)
-    enc.set_in_sample_rate(24000)
-    enc.set_channels(1)
-    enc.set_quality(2)
-    mp3 = bytes(enc.encode(pcm)) + bytes(enc.flush())
+    # M4: lameenc encode blocks — off the event loop (Opus review).
+    def _encode():
+        enc = lameenc.Encoder()
+        enc.set_bit_rate(96)
+        enc.set_in_sample_rate(24000)
+        enc.set_channels(1)
+        enc.set_quality(2)
+        return bytes(enc.encode(pcm)) + bytes(enc.flush())
+
+    mp3 = await asyncio.to_thread(_encode)
 
     filename = f"test-{name}-{int(time.time())}.mp3"
     path = Path("clips") / filename

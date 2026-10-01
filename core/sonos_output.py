@@ -337,12 +337,17 @@ class SonosOutput(FrameProcessor):
         import lameenc
 
         pcm = b"\x00\x00" * (24000 * 30)  # 30s of silence, 16-bit mono
-        encoder = lameenc.Encoder()
-        encoder.set_bit_rate(96)
-        encoder.set_in_sample_rate(24000)
-        encoder.set_channels(1)
-        encoder.set_quality(2)
-        mp3 = bytes(encoder.encode(pcm)) + bytes(encoder.flush())
+        # M4: same blocking-encode rule — one-shot, but the first holder
+        # start happens on the pipeline's event loop.
+        def _encode():
+            encoder = lameenc.Encoder()
+            encoder.set_bit_rate(96)
+            encoder.set_in_sample_rate(24000)
+            encoder.set_channels(1)
+            encoder.set_quality(2)
+            return bytes(encoder.encode(pcm)) + bytes(encoder.flush())
+
+        mp3 = await asyncio.to_thread(_encode)
         p = Path("clips") / "duck-silence.mp3"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(mp3)
@@ -539,12 +544,19 @@ class SonosOutput(FrameProcessor):
         # (design note; WAV is not in Sonos's documented supported set).
         import lameenc
 
-        encoder = lameenc.Encoder()
-        encoder.set_bit_rate(96)
-        encoder.set_in_sample_rate(self._sample_rate)
-        encoder.set_channels(self._channels)
-        encoder.set_quality(2)  # highest quality = slowest encode is fine here
-        mp3 = bytes(encoder.encode(pcm)) + bytes(encoder.flush())
+        # M4 (Opus review): lameenc encode is CPU-bound and blocks — it
+        # runs in a thread. This coroutine IS the voice pipeline's event
+        # loop context: a blocking encode stalls audio ingest, OWW
+        # scoring and the LEDs for the encode duration every reply.
+        def _encode(pcm_bytes):
+            encoder = lameenc.Encoder()
+            encoder.set_bit_rate(96)
+            encoder.set_in_sample_rate(self._sample_rate)
+            encoder.set_channels(self._channels)
+            encoder.set_quality(2)  # highest quality = slowest encode is fine here
+            return bytes(encoder.encode(pcm_bytes)) + bytes(encoder.flush())
+
+        mp3 = await asyncio.to_thread(_encode, pcm)
 
         self._clip_count += 1
         filename = f"reply-{int(time.time())}-{self._clip_count}.mp3"

@@ -4,15 +4,20 @@ Firmware 1.1.0 command schema (design note): {"cmd": name, ...args}
 out, {"evt":"cmd_result", "cmd": name, "ok": bool, "data": ...} back.
 
 Transport model (pipecat smallwebrtc, measured live): every node
-connection gets its own pipeline + transport; pushing an
-OutputTransportMessageFrame into that pipeline's task sends it on THAT
-node's data channel — the exact path the LED ring messages already
-use (wake_word._send_led), so it is proven on this stack.
+connection gets its own pipeline + transport; the OUTPUT TRANSPORT's
+send_message delivers on THAT node's data channel directly — no
+pipeline, no queues (M6, Opus review 2026-10-01). The old queue_frame
+path entered at the pipeline source and queued behind HermesAgent:
+a restart/scan during a 40s brain call 504'd. Same direct wire the LED
+messages use (led_state.LedSender).
 
-Liveness contract (design note zombie fix): the node probes every 5 min
-with {"evt":"cmd_result","cmd":"ping","data":"probe"}; the bot MUST
-answer {"cmd":"ping"} or the node reboots its session. This handler
-answers automatically — a quiet house never false-reboots a node.
+Liveness contract (design note zombie fix, ASYMMETRIC — docstring
+corrected 2026-10-01, was M7): the node probes every 5 min with
+{"evt":"cmd_result","cmd":"probe","data":"probe"}; the bot MUST answer
+{"cmd":"pong"} or the node reboots its session. The node consumes the
+pong silently — NO reply-to-reply (symmetric ping/pong looped ~1/sec
+for 12 min, measured 2026-09-29 19:35–19:47). This handler answers
+automatically — a quiet house never false-reboots a node.
 """
 
 import asyncio
@@ -27,37 +32,49 @@ _pending = {}
 _pending_lock = asyncio.Lock()
 
 
-def send_to_room(room: str, payload: dict) -> bool:
-    """Queue a data-channel message to the node currently in `room`.
-    Returns False if no live session. Schedules the async queue on the
-    running loop — safe to call from sync or async context."""
-    task, pc_id = registry.task_for_room(room)
-    if task is None:
-        logger.warning(f"node_command: no live session for room '{room}'")
-        return False
-    from pipecat.frames.frames import OutputTransportMessageFrame
-
+def _send(out, payload: dict) -> bool:
+    """Direct data-channel send via the output transport (M6): no
+    pipeline, no queue_frame — a blocked brain can't stall commands.
+    Schedules the async send on the running loop; never raises."""
     import asyncio
 
-    fut = task.queue_frame(OutputTransportMessageFrame(message=payload))
-    # PipelineWorker.queue_frame is async; fire it on the loop
-    asyncio.get_event_loop().create_task(fut) if asyncio.iscoroutine(fut) else None
-    logger.info(f"node_command: -> '{room}' ({pc_id[:24]}…): {payload}")
-    return True
+    from pipecat.frames.frames import OutputTransportMessageFrame
+
+    async def _go():
+        try:
+            await out.send_message(
+                OutputTransportMessageFrame(message=payload)
+            )
+        except Exception as e:  # command delivery is best-effort
+            logger.debug(f"node_command: send failed: {e}")
+
+    try:
+        asyncio.get_running_loop().create_task(_go())
+        return True
+    except RuntimeError:
+        return False
+
+
+def send_to_room(room: str, payload: dict) -> bool:
+    """Send a data-channel message to the node currently in `room`.
+    Returns False if no live session."""
+    out, pc_id = registry.sender_for_room(room)
+    if out is None:
+        logger.warning(f"node_command: no live session for room '{room}'")
+        return False
+    ok = _send(out, payload)
+    if ok:
+        logger.info(f"node_command: -> '{room}' ({pc_id[:24]}…): {payload}")
+    return ok
 
 
 def send_pong(pc_id: str) -> None:
     """Answer the node's liveness probe (keeps a quiet house's session
     alive — the node reboots if probes go unanswered)."""
-    task, _ = registry.task_for_pc(pc_id)
-    if task is None:
+    out, _ = registry.sender_for_pc(pc_id)
+    if out is None:
         return
-    from pipecat.frames.frames import OutputTransportMessageFrame
-
-    fut = task.queue_frame(OutputTransportMessageFrame(message={"cmd": "pong"}))
-    import asyncio
-
-    asyncio.get_event_loop().create_task(fut) if asyncio.iscoroutine(fut) else None
+    _send(out, {"cmd": "pong"})
 
 
 async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0):
@@ -65,8 +82,8 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     or raises TimeoutError. One in-flight request per cmd per node
     (single-node rooms by design)."""
     payload = {"cmd": cmd, **(args or {})}
-    task, pc_id = registry.task_for_room(room)
-    if task is None:
+    out, pc_id = registry.sender_for_room(room)
+    if out is None:
         raise TimeoutError(f"no live session for room '{room}'")
 
     key = (pc_id, cmd)
@@ -76,12 +93,10 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
         fut = asyncio.get_event_loop().create_future()
         _pending[key] = fut
 
-    from pipecat.frames.frames import OutputTransportMessageFrame
-
-    # PipelineWorker.queue_frame is async — await it (a sync call leaves
-    # the coroutine unawaited and the frame NEVER leaves the bot; the
-    # RuntimeWarning at 18:10:07 was exactly this).
-    await task.queue_frame(OutputTransportMessageFrame(message=payload))
+    if not _send(out, payload):
+        async with _pending_lock:
+            _pending.pop(key, None)
+        raise TimeoutError(f"send failed for '{cmd}' to '{room}'")
     try:
         return await asyncio.wait_for(fut, timeout)
     finally:
@@ -90,7 +105,7 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
 
 
 def on_message(message, pc_id: str) -> None:
-    """bot.py's on_client_message feeds every data-channel payload here."""
+    """bot.py's on_app_message feeds every data-channel payload here."""
     try:
         data = json.loads(message) if isinstance(message, str) else message
     except (ValueError, TypeError):

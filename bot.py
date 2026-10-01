@@ -157,14 +157,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # turns "a client connected" into "the bedroom node is online".
         from dashboard import registry
         registry.mark_connected(client.pc_id)
-        registry.register_task(client.pc_id, task)
+        # M6: register the OUTPUT TRANSPORT (direct data-channel wire),
+        # not the pipeline task — node commands must not queue behind a
+        # blocked brain. Same wire LedSender uses.
+        registry.register_sender(client.pc_id, out)
         logger.info("client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         from dashboard import registry
         registry.mark_disconnected(client.pc_id)
-        registry.drop_task(client.pc_id)
+        registry.drop_sender(client.pc_id)
         logger.info("client disconnected")
         await task.cancel()
 
