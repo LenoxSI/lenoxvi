@@ -6,6 +6,71 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.3.3] — 2026-10-03
+
+The rename + voice-UX release: the project takes its public name. One silent-failure bug found by a live test,
+one lying verify found by a deliberate wrong-password rollback test, and two
+conversation features shipped and live-proven the same day.
+
+### Added
+- **Per-node session modes (fresh | sticky)** — dashboard checkbox per node.
+  Sticky rooms keep conversation memory across node reconnects AND bot
+  restarts: history stash `data/sessions.json` (atomic write after every
+  successful turn — crash-safe, no teardown hook; gitignored) restored on
+  pipeline construction, plus the stable conversation label `voice-<room>`
+  so Hermes server-side conversation continuity applies. Fresh is the
+  privacy default — unmapped rooms start every session clean. New guarded
+  `POST /nodes/{room}/session-mode`; status carries `session_modes`.
+  Ratified spec: **sticky = stash + server-side continuity** (user ruling
+  2026-10-03). Live-proven: a "what's the last thing I asked you" test
+  across a node restart AND a bot restart answered correctly from restored
+  history (`01619f5`)
+- **Tiered fillers** — one spoken line per latency tier so a slow brain turn
+  no longer goes silent after the first ack: tier 1 acks at 3s (the classic
+  pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then she
+  waits quietly. Config `brain.fillers` is a tiered list; a flat string list
+  still parses as a single ack tier at `brain.filler_after_secs` (legacy
+  configs unchanged). All lines <2s spoken; tier 2/3 lines meet the ≥3-word
+  echo-containment contract. Live-proven same day: all three tiers fired in
+  sequence on a 48s turn, rotation never repeated a line across the session
+  (`31ef583`)
+- **Wake-window forensics** — an AWAKE window that closes without VAD now
+  logs delivered-frame count, peak amplitude, echo-gate state, and
+  whether VAD ever fired, so the next silent failure names its own cause
+  (frames=0 = stalled track; low peak = below-threshold speech;
+  echo_blocked = a Sonos clip swallowed it). The 2026-10-03 09:00 silent
+  failure (wake 0.98, then 7s of nothing, undiagnosable from the journal)
+  motivated it (`6df33ee`)
+
+### Fixed
+- **pc_id capture was a silent no-op** (H1 regression) — `SmallWebRTCTransport`
+  is a facade holding `._client`, not `._webrtc_connection`; the runner args
+  carry the connection directly. Every wake since 10-01 had recorded
+  `room: null` in the status API (`6df33ee`)
+- **Wi-Fi `set_wifi` lying verify** (firmware 1.1.1) — NVS writes never
+  reached the live WiFi driver (config only pushed at boot), so a wrong
+  password re-associated on the OLD creds and acked "connected" in 1.2s —
+  rollback unreachable. 1.1.1 pushes creds into the driver on `set_wifi`
+  AND after rollback restore; a wrong password now produces 3 auth strikes
+  → auto-restore → rejoin (journal-proven: 44s dark, node healthy after).
+  Found by the deliberate wrong-password rollback test; incident recovery
+  via USB full-flash + NVS region erase (see design note)
+- **Rename sweep coherence** — project renamed across 25 files: the env
+  prefix, the systemd unit example and the GitHub repo follow the new name; host dirs/venv/unit renamed
+  (lenoxvi-bot.service active); firmware factory default room name = "lenoxvi"
+  (fresh flashes boot as lenoxvi; deployed nodes keep their dashboard names —
+  user spec). Node renamed back to bedroom-mic after a mistaken rename
+  (recorded as the cautionary tale it is)
+
+### Known issues
+- Node command acks that fire while the node is off-network (rollback
+  notifications) never reach the dashboard — the node reappearing online
+  is the signal. Rider queued: queue the ack for delivery after rejoin
+- The 2026-10-03 17:45–17:52 disconnect loop (22s session deaths,
+  media-stream errors) occurred only on a bot process that booted while
+  the node was mid-restart; the fresh process at 18:01 held one clean
+  session with zero errors. Watch for recurrence; forensics now in place
+
 ## [0.3.2] — 2026-10-01
 
 The Opus 5.5 review release. A full-repo read-only review (design note,
