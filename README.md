@@ -1,7 +1,7 @@
 # lenoxvi
 
 **house-voice appliance.** A pipecat bot that
-turns mic nodes into a house-wide voice assistant:
+turns mic nodes into a house-wide voice assistant with any LLM you want:
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
     Hermes brain (API) → ElevenLabs TTS → Sonos reply in the room's zone
