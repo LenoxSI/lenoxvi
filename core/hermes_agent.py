@@ -54,28 +54,62 @@ def _strip_tags(text: str) -> str:
     return _TAG_RE.sub(" ", text).strip()
 
 
-# Filler pool — spoken when the brain takes >3s so the house doesn't feel
-# dead. Pool (not one line) so slow turns don't sound robotic. Each variant
-# must ALSO land in _echo_texts: Sonos plays the filler back into the room
-# and containment must drop the echo (the 2026-09-15 double-fire lesson).
-# Tunable via config.yaml brain.fillers (this list is the fallback default).
-_DEFAULT_FILLERS = [
-    "On it.",
-    "Working on it…",
-    "Give me a sec.",
-    "Let me check…",
-    "One moment.",
+# Tiered fillers (option B, 2026-10-03): one spoken line per latency tier so
+# a slow brain turn doesn't go silent after the first ack. Tool-heavy turns
+# measure 20-40s+ server-side (2026-09-15); the old single-filler design
+# spent its only line at 3s and left the rest as dead air.
+# Tier contract (every line, any pool):
+#   - <2s spoken (they ride the duck holder)
+#   - >=3 words so echo containment can catch the Sonos echo (the
+#     2026-09-15 double-fire lesson; 2-word "On it." is grandfathered —
+#     the echo gate covers its own playback window)
+#   - never command-shaped: a leaked filler reaches the brain as USER text
+# Config shape (brain.fillers) — tiered list (preferred):
+#     - after: 3.0    # seconds from turn start, cumulative
+#       lines: [...]
+# A flat string list still works = single ack tier at brain.filler_after_secs
+# (legacy configs keep behaving exactly as before). This default is the
+# fallback when config has no fillers key.
+_DEFAULT_TIERS = [
+    (3.0, ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]),
+    (12.0, ["Still on it — this one's a slow one.", "Still working — it's a deep one.",
+            "Still with you — taking a minute."]),
+    (25.0, ["Still here — it's a big one.", "Still here — give me a few more seconds.",
+            "Not done yet — hang tight."]),
 ]
 
 _LAST_FILLER = ""
 
 
-def _pick_filler() -> str:
+def _filler_tiers() -> list[tuple[float, list[str]]]:
+    """Normalized filler tiers [(after_secs, [lines...]), ...], sorted.
+
+    Accepts the tiered dict shape or a legacy flat string list (one ack
+    tier at brain.filler_after_secs); falls back to _DEFAULT_TIERS.
+    """
+    from config import cfg, cfg_env
+    raw = cfg("brain", "fillers")
+    tiers: list[tuple[float, list[str]]] = []
+    if isinstance(raw, list) and raw and isinstance(raw[0], dict):
+        for t in raw:
+            try:
+                after = float(t.get("after", 0) or 0)
+                lines = [str(x).strip() for x in (t.get("lines") or []) if str(x).strip()]
+            except (TypeError, ValueError):
+                continue
+            if lines and after > 0:
+                tiers.append((after, lines))
+        tiers.sort(key=lambda x: x[0])
+    elif isinstance(raw, list) and raw and all(isinstance(x, str) for x in raw):
+        # legacy flat pool -> one ack tier (timing knob: filler_after_secs)
+        after = float(cfg_env("brain", "filler_after_secs", "LVI_FILLER_AFTER_SECS", 3.0) or 3.0)
+        tiers.append((after, [x.strip() for x in raw if x.strip()]))
+    return tiers or _DEFAULT_TIERS
+
+
+def _pick_filler(pool: list[str]) -> str:
+    """One line from `pool`, never the same line twice in a row."""
     global _LAST_FILLER
-    from config import cfg
-    pool = cfg("brain", "fillers") or _DEFAULT_FILLERS
-    if not isinstance(pool, list) or not pool:
-        pool = _DEFAULT_FILLERS
     choice = random.choice(pool)
     # avoid the same filler twice in a row (still possible on a 1-item pool)
     if len(pool) > 1 and choice == _LAST_FILLER:
@@ -239,35 +273,50 @@ class HermesAgent(FrameProcessor):
                         # measured at 20-40s+ server-side, 2026-09-15).
                         ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
                         failed = False
+                        reply = None
+                        filler_spoken = False
                         try:
-                            reply = await asyncio.wait_for(asyncio.shield(ask), timeout=3.0)
-                        except TimeoutError:
-                            filler = _pick_filler()
-                            await self.push_frame(TTSSpeakFrame(text=filler))
-                            self._echo_texts.append(filler)
-                            # H3 (Opus review 2026-09-30): the brain can
-                            # still fail AFTER the filler — a sibling except
-                            # clause does NOT catch exceptions raised inside
-                            # this handler, so a 5xx/socket/JSON error here
-                            # escaped process_frame entirely and the house
-                            # heard "On it." then NOTHING (the dead-rig case
-                            # the survivability rule exists to prevent).
-                            # Broad Exception: this is the LAST defense
-                            # before user-facing silence; CancelledError is
-                            # not an Exception subclass, so session teardown
-                            # still propagates.
-                            try:
+                            # Tiered fillers (option B, 2026-10-03): wait to
+                            # each tier's cumulative `after` mark; on timeout
+                            # speak ONE line from that tier's pool and keep
+                            # waiting. After the last tier she waits quietly —
+                            # tool-heavy turns measure 20-40s+ (2026-09-15)
+                            # and endless reassurance is its own annoyance.
+                            tiers = _filler_tiers()
+                            turn_start = time.monotonic()
+                            for i, (after, pool) in enumerate(tiers):
+                                remaining = turn_start + after - time.monotonic()
+                                if remaining > 0:
+                                    try:
+                                        reply = await asyncio.wait_for(
+                                            asyncio.shield(ask), timeout=remaining
+                                        )
+                                        break
+                                    except TimeoutError:
+                                        filler = _pick_filler(pool)
+                                        await self.push_frame(TTSSpeakFrame(text=filler))
+                                        self._echo_texts.append(filler)
+                                        filler_spoken = True
+                                        logger.info(
+                                            f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
+                                        )
+                            if reply is None:
+                                # every tier spent, brain still working — wait it out
                                 reply = await ask
-                            except Exception as e:
-                                logger.error(f"hermes_agent: brain call failed after filler: {e}")
-                                reply = "Sorry — I can't reach my brain right now."
-                                failed = True
-                        except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as e:
-                            # Brain unreachable/dead: say so instead of silence —
-                            # a filler-then-nothing is indistinguishable from a
-                            # dead rig (survivability rule: Hermes rebuilds must
-                            # never take house voice down WITH it).
-                            logger.error(f"hermes_agent: brain call failed: {e}")
+                        except Exception as e:
+                            # H3 (Opus review 2026-09-30): the brain can fail
+                            # at ANY point — fast, mid-tier, or after a filler —
+                            # and a sibling except clause does NOT catch
+                            # exceptions raised inside another handler, so ONE
+                            # broad catch guards the whole wait. This is the
+                            # last defense before user-facing silence (the
+                            # dead-rig case the survivability rule exists to
+                            # prevent); CancelledError is not an Exception
+                            # subclass, so session teardown still propagates.
+                            logger.error(
+                                f"hermes_agent: brain call failed"
+                                f"{' after filler' if filler_spoken else ''}: {e}"
+                            )
                             reply = "Sorry — I can't reach my brain right now."
                             failed = True
                         reply = _strip_tags(reply)

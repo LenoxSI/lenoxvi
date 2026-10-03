@@ -47,13 +47,24 @@ brain:
                         # brain; lower = snappier but risks clipping slow talkers
   dedup_window: 10.0    # same utterance re-heard within this window = echo,
                         # dropped (the lull-timer double-fire fix)
-  # Fillers spoken when the brain takes >3s. Keep each <2s spoken.
+  # Tiered fillers: one line per latency tier so a slow brain turn doesn't
+  # go silent after the first ack. `after` = seconds from turn start.
+  # Keep each line <2s spoken, >=3 words (echo containment), never
+  # command-shaped. A flat string list still works = single ack tier at
+  # brain.filler_after_secs (default 3.0).
   fillers:
-    - "On it."
-    - "Working on it…"
-    - "Give me a sec."
-    - "Let me check…"
-    - "One moment."
+    - after: 3.0
+      lines: ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]
+    - after: 12.0
+      lines:
+        - "Still on it — this one's a slow one."
+        - "Still working — it's a deep one."
+        - "Still with you — taking a minute."
+    - after: 25.0
+      lines:
+        - "Still here — it's a big one."
+        - "Still here — give me a few more seconds."
+        - "Not done yet — hang tight."
 
 # ── Sonos output (Sonos audioClip overlay; S2 Port/Amp only) ────────────
 sonos:
