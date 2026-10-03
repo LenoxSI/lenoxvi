@@ -74,7 +74,18 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # "last connected" room. The offer tee has already correlated
     # {room, pc_id} by the time the pipeline runs (send-time tee, note
     # 024), so room_for_pc is exact here.
-    pc_id = getattr(getattr(transport, "_webrtc_connection", None), "pc_id", None)
+    # pc_id SOURCE FIX (measured 2026-10-03): SmallWebRTCTransport is a
+    # facade — it holds ._client, not ._webrtc_connection, so the
+    # original attribute walk always returned None and every wake since
+    # 10-01 recorded room=null. The runner args carry the connection as
+    # a public field; the facade walk stays as a defensive fallback.
+    pc_id = getattr(getattr(runner_args, "webrtc_connection", None), "pc_id", None)
+    if pc_id is None:
+        pc_id = getattr(
+            getattr(getattr(transport, "_client", None), "_webrtc_connection", None),
+            "pc_id",
+            None,
+        )
     from dashboard import registry as dash_registry
     dash_registry.set_gate(gate)
 

@@ -98,6 +98,15 @@ class WakeWordFilter(FrameProcessor):
         self._frame_size = 2560
         self._audio_buf = bytearray()
         self._last_activity = time.monotonic()
+        # Window forensics (2026-10-03): track what the MIC delivered
+        # during an AWAKE window so a speechless close can name its own
+        # cause. 2026-10-03 09:00:25: wake 0.98, then 7s of silence —
+        # VAD never fired and nothing in the journal could say whether
+        # the track stalled or the speech was below VAD thresholds.
+        self._awake_frames = 0
+        self._awake_peak = 0
+        self._awake_echo_blocked = False
+        self._vad_fired = False
         # M1 (Opus review): LOCKED safety cap — monotonic time after which
         # LOCKED releases itself if BotStoppedSpeakingFrame never arrives
         # (TTS error mid-stream). SonosOutput refines it via note_speech()
@@ -170,6 +179,11 @@ class WakeWordFilter(FrameProcessor):
                     self._audio_buf.clear()
                     self._state = TurnState.AWAKE
                     self._last_activity = now
+                    # Window forensics: reset the counters at window open.
+                    self._awake_frames = 0
+                    self._awake_peak = 0
+                    self._awake_echo_blocked = False
+                    self._vad_fired = False
                     logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
                     if self._on_wake:
                         try:
@@ -199,8 +213,20 @@ class WakeWordFilter(FrameProcessor):
                         self._led.send("oww-awake")  # ring back to listening
                 return
             if self._echo_gate and self._echo_gate.blocked():
+                # Window forensics: the echo gate was closed during this
+                # window (Sonos clip still sounding) — audio the mic DID
+                # deliver was swallowed before VAD could ever see it.
+                if self._state is TurnState.AWAKE:
+                    self._awake_echo_blocked = True
                 return
             if self._state is TurnState.AWAKE:
+                # Window forensics: count what the mic delivers while the
+                # gate is open (int16 peak amplitude; 2560-byte frames =
+                # 80ms @ 16kHz mono).
+                self._awake_frames += 1
+                _peak = int(np.max(np.frombuffer(frame.audio, dtype=np.int16)))
+                if _peak > self._awake_peak:
+                    self._awake_peak = _peak
                 await self.push_frame(frame, direction)  # VAD/STT get it
                 # Timeout check must run HERE: in a quiet room only audio
                 # frames flow, so the non-audio elif below would never fire.
@@ -208,7 +234,25 @@ class WakeWordFilter(FrameProcessor):
                 # or a bot turn frame.
                 if (now - self._last_activity) > self._awake_timeout:
                     self._state = TurnState.IDLE
-                    logger.debug("wake_word: -> IDLE (timeout)")
+                    if not self._vad_fired:
+                        # Window forensics (2026-10-03): the window closed
+                        # with VAD never firing. Name the cause so the
+                        # journal can distinguish a stalled mic track from
+                        # below-threshold speech on the NEXT occurrence:
+                        #   frames=0     -> track stalled (mic delivered
+                        #                    nothing — WebRTC/track level)
+                        #   frames>0, low peak + no VAD -> speech below the
+                        #                    confidence/volume thresholds
+                        #   echo_blocked -> audio arrived but the echo
+                        #                    gate ate it (Sonos sounding)
+                        logger.info(
+                            f"wake_word: -> IDLE (timeout) — window forensics: "
+                            f"frames={self._awake_frames} peak={self._awake_peak} "
+                            f"echo_blocked={self._awake_echo_blocked} "
+                            f"vad_fired={self._vad_fired}"
+                        )
+                    else:
+                        logger.debug("wake_word: -> IDLE (timeout)")
                     if self._led:
                         self._led.send("oww-sleeping")
                 return
@@ -229,11 +273,25 @@ class WakeWordFilter(FrameProcessor):
             logger.debug("wake_word: -> AWAKE (bot finished)")
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # Real activity: user is talking (this is what keeps AWAKE alive)
+            self._vad_fired = True
             if self._state is TurnState.AWAKE:
                 self._last_activity = now
         elif self._state is TurnState.AWAKE and (now - self._last_activity) > self._awake_timeout:
             self._state = TurnState.IDLE
-            logger.debug("wake_word: -> IDLE (timeout)")
+            if not self._vad_fired:
+                # Window forensics, stalled-track case: this branch fires on
+                # NON-audio frames only — if audio had been flowing, the
+                # audio-path timeout above would have fired first. Zero
+                # delivered frames here = the WebRTC track itself stalled
+                # (the 2026-10-02 18:33 "No audio frame received" shape).
+                logger.info(
+                    f"wake_word: -> IDLE (timeout, no audio path) — window forensics: "
+                    f"frames={self._awake_frames} peak={self._awake_peak} "
+                    f"echo_blocked={self._awake_echo_blocked} "
+                    f"vad_fired={self._vad_fired}"
+                )
+            else:
+                logger.debug("wake_word: -> IDLE (timeout)")
             if self._led:
                 self._led.send("oww-sleeping")
 
