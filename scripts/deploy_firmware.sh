@@ -27,7 +27,7 @@ LVI_REMOTE_DIR="projects/lenoxvi/firmware/node"
 WIFI_SSID="${WIFI_SSID:?must be set (your WiFi network name)}"
 WIFI_PASSWORD="${WIFI_PASSWORD:?must be set}"
 PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:?must be set (e.g. https://<bot-host-LAN-IP>:7860/api/offer)}"
-PIPECAT_ROOM="${PIPECAT_ROOM:-bedroom}"
+PIPECAT_ROOM="${PIPECAT_ROOM:-lenoxvi}"
 
 # ── 1. Build ────────────────────────────────────────────────────────────────
 echo "==> building firmware"
