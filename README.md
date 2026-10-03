@@ -1,12 +1,10 @@
 # lenoxvi
 
-**v2 house-voice appliance.** A pipecat bot that
+**house-voice appliance.** A pipecat bot that
 turns mic nodes into a house-wide voice assistant:
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
     Hermes brain (API) → ElevenLabs TTS → Sonos reply in the room's zone
-
-v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 
 ## Layout
 
