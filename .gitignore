@@ -30,3 +30,6 @@ clips/
 firmware/node/
 firmware/xvf3800/
 *.bundle
+
+# sticky-session history stash (dashboard checkbox; holds conversation text)
+data/

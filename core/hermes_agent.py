@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 from loguru import logger
 
@@ -130,10 +131,50 @@ def _is_wake_phrase_only(text: str) -> bool:
     return bool(_WAKE_PHRASE_RE.match(text))
 
 
+class _SessionStash:
+    """Disk stash for sticky-room conversation history (data/sessions.json).
+
+    Written after every successful turn (crash-safe — no teardown hook
+    needed: reconnects AND bot restarts both restore from disk). The file
+    holds plain conversation text and is gitignored; sticky rooms opt in
+    per node via the dashboard checkbox (config `session_modes`).
+    """
+
+    def __init__(self, path: str | None = None):
+        self._path = Path(path or os.getenv("LVI_SESSIONS", "data/sessions.json"))
+
+    def load(self, room: str) -> list:
+        try:
+            data = json.loads(self._path.read_text())
+            hist = data.get(room) or []
+            return hist if isinstance(hist, list) else []
+        except (OSError, json.JSONDecodeError):
+            return []
+
+    def save(self, room: str, history: list) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+            try:
+                data = json.loads(self._path.read_text())
+            except (OSError, json.JSONDecodeError):
+                pass
+            data[room] = history
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            os.replace(tmp, self._path)
+        except OSError as e:
+            logger.warning(f"hermes_agent: session stash write failed: {e}")
+
+
+_session_stash = _SessionStash()
+
+
 class HermesAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
 
-    def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None, **kwargs):
+    def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None,
+                 room: str = None, session_mode: str = "fresh", **kwargs):
         super().__init__(**kwargs)
         from config import cfg_env
 
@@ -161,12 +202,33 @@ class HermesAgent(FrameProcessor):
         # it arrives (duration gates lose the race when her Sonos reply talks
         # over the mic and whisper transcribes late; measured live 2026-09-15).
         self._echo_texts: list[str] = []
-        # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
-        self._conversation = os.getenv(
-            "LVI_CONVERSATION",
-            f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
-        )
-        logger.info(f"hermes_agent: conversation '{self._conversation}'")
+        # Session modes (fresh | sticky, per node — dashboard checkbox,
+        # 2026-10-03): sticky rooms keep conversation memory across node
+        # reconnects AND bot restarts via a disk stash; fresh rooms start
+        # every session clean (privacy default — a bedroom mic must not
+        # accumulate memory nobody asked for).
+        self._room = room
+        self._sticky = session_mode == "sticky"
+        if self._sticky and room:
+            self._conversation = f"voice-{room}"
+            self._history = _session_stash.load(room)[: self._max_history]
+            logger.info(
+                f"hermes_agent: sticky session '{self._conversation}' "
+                f"restored {len(self._history)} history entries"
+            )
+        else:
+            if self._sticky and not room:
+                # Sticky without a correlated room (offer-tee race, shouldn't
+                # happen): fail SAFE, not silent — fresh beats guessing which
+                # room's stash to load.
+                logger.warning("hermes_agent: sticky mode without a room — falling back to fresh")
+            # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
+            self._conversation = os.getenv(
+                "LVI_CONVERSATION",
+                f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
+            )
+        logger.info(f"hermes_agent: conversation '{self._conversation}'"
+                    f"{' (sticky)' if self._sticky and room else ''}")
 
     def _is_own_echo(self, text: str) -> bool:
         """True if `text` contains a meaningful chunk of her own last words.
@@ -330,6 +392,11 @@ class HermesAgent(FrameProcessor):
                             self._history.append({"role": "user", "content": text})
                             self._history.append({"role": "assistant", "content": reply})
                             self._history = self._history[-self._max_history:]
+                            # Sticky rooms persist after every successful
+                            # turn (crash-safe stash — no teardown hook):
+                            # reconnects AND restarts restore from disk.
+                            if self._sticky and self._room:
+                                _session_stash.save(self._room, self._history)
                         logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
                         await self.push_frame(TTSSpeakFrame(text=reply))
 

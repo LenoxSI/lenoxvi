@@ -38,6 +38,10 @@ class MappingPayload(BaseModel):
     room_zones: dict[str, str] = Field(default_factory=dict)
 
 
+class SessionModePayload(BaseModel):
+    mode: str = Field(pattern="^(fresh|sticky)$")
+
+
 class ZonePayload(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
@@ -55,6 +59,10 @@ async def status():
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
         "rooms": registry.known_rooms(),
+        # Session modes (fresh | sticky per node) — the dashboard renders
+        # these as the per-node checkbox; sticky rooms keep conversation
+        # memory across reconnects/restarts.
+        "session_modes": dict(config_store.read_section("session_modes") or {}),
         "note": "config edits apply on the next bot restart",
     }
 
@@ -352,6 +360,36 @@ async def set_node_name(room: str, payload: NamePayload):
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"rename failed: {reply.get('data')}")
     return reply
+
+
+# ── session mode (fresh | sticky per node — dashboard checkbox) ──────
+
+
+@router.post("/nodes/{room}/session-mode", dependencies=GUARD)
+async def set_session_mode(room: str, payload: SessionModePayload):
+    """Set fresh|sticky session mode for a node (dashboard checkbox).
+
+    Config `session_modes` section; applies on the node's next reconnect
+    (pipeline reconstruction) — the same contract as every other config
+    edit. Sticky rooms persist conversation history to data/sessions.json
+    (gitignored) and keep memory across reconnects AND bot restarts; fresh
+    is the privacy default (unmapped rooms are fresh — config stays
+    minimal, the dashboard can always read the effective mode).
+    """
+    if payload.mode not in ("fresh", "sticky"):
+        raise HTTPException(status_code=400, detail="mode must be 'fresh' or 'sticky'")
+    modes = dict(config_store.read_section("session_modes") or {})
+    before = modes.get(room)
+    if payload.mode == "fresh":
+        modes.pop(room, None)  # fresh is the default — config stays minimal
+    else:
+        modes[room] = "sticky"
+    try:
+        config_store.write_section("session_modes", modes)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    logger.info(f"dashboard: session-mode '{room}' -> {payload.mode}")
+    return {"ok": True, "room": room, "mode": payload.mode, "before": before}
 
 
 # ── firmware push (operator side of firmware_server.py) ─────────────

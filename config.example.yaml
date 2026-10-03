@@ -66,6 +66,14 @@ brain:
         - "Still here — give me a few more seconds."
         - "Not done yet — hang tight."
 
+# Session modes (fresh | sticky per node — dashboard checkbox). Sticky
+# rooms keep conversation memory across node reconnects and bot restarts
+# (history stash: data/sessions.json, gitignored). Fresh is the default —
+# rooms not listed here start every session clean.
+# session_modes:
+#   bedroom: sticky
+session_modes: {}
+
 # ── Sonos output (Sonos audioClip overlay; S2 Port/Amp only) ────────────
 sonos:
   enabled: true

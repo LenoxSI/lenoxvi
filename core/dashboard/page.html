@@ -52,7 +52,7 @@ their node has connected at least once (firmware reports its room on connect).</
 <p class="sub">Firmware 1.1.0+ required for restart / rename / Wi-Fi
 (config over the air). Older firmware: nodes show status only.</p>
 <table id="nodes"><thead><tr>
-  <th>Room</th><th>Status</th><th>Last seen</th><th></th>
+  <th>Room</th><th>Status</th><th>Last seen</th><th>Session</th><th></th>
 </tr></thead><tbody></tbody></table>
 <div id="node-msg"></div>
 
@@ -201,10 +201,13 @@ async function loadNodes() {
     }
     for (const r of s.rooms) {
       const tr = document.createElement("tr");
+      const sticky = (s.session_modes && s.session_modes[r.room]) === "sticky";
       tr.innerHTML =
         `<td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.room)}</td>` +
         `<td>${r.online ? "connected" : "offline"}</td>` +
         `<td>${fmtAgo(r.last_seen)}</td>` +
+        `<td><label class="session-toggle" title="Sticky rooms keep conversation memory across reconnects and bot restarts. Applies on next reconnect.">` +
+        `<input type="checkbox" data-sticky="${esc(r.room)}"${sticky ? " checked" : ""}> sticky</label></td>` +
         `<td class="row-actions">` +
         `<button data-rename="${esc(r.room)}" ${r.online ? "" : "disabled"}>Rename</button>` +
         `<button data-restart="${esc(r.room)}" ${r.online ? "" : "disabled"}>Restart</button>` +
@@ -212,6 +215,23 @@ async function loadNodes() {
         `</td>`;
       tb.appendChild(tr);
     }
+    tb.querySelectorAll("input[data-sticky]").forEach(cb =>
+      cb.addEventListener("change", async () => {
+        const room = cb.dataset.sticky;
+        const mode = cb.checked ? "sticky" : "fresh";
+        try {
+          const r = await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/session-mode`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ mode }),
+          });
+          msg($("#node-msg"),
+              `${room}: session ${r.mode}` +
+              (r.mode === "sticky" ? " — memory kept across reconnects (applies on next reconnect)."
+                                    : " — memory clears each reconnect (applies on next reconnect)."),
+              "ok");
+          loadStatus();
+        } catch (e) { msg($("#node-msg"), "Save failed: " + e.message, "err"); cb.checked = !cb.checked; }
+      }));
     tb.querySelectorAll("button[data-restart]").forEach(b =>
       b.addEventListener("click", async () => {
         if (!confirm(`Restart node '${b.dataset.restart}'?`)) return;

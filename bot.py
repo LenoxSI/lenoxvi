@@ -105,8 +105,15 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     def _on_wake():
         dash_registry.note_wake(_pipeline_room())
 
-    brain = (HermesAgent(echo_gate=gate) if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
-            else StubBrain(echo_gate=gate))
+    # Session mode for THIS pipeline's room (fresh default; sticky rooms
+    # keep conversation memory across reconnects/restarts — config
+    # `session_modes`, dashboard checkbox 2026-10-03).
+    _room = _pipeline_room()
+    _session_mode = (cfg("session_modes") or {}).get(_room, "fresh")
+
+    brain = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode)
+             if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
+             else StubBrain(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes
     # VADParams directly; defaults match the old hardcodes.
