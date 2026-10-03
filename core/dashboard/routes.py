@@ -164,6 +164,10 @@ async def discover_zones():
                 # {"found": []} silently (2026-10-03, dashboard button test).
                 info = await asyncio.to_thread(z.get_speaker_info) or {}
                 model = (info.get("model_name") or "").strip()
+                # soco reports "Sonos Port"/"Sonos Amp" with the prefix —
+                # normalize before the supported check, else the flag lies
+                # false for the exact device the audioClip path is proven on.
+                model_norm = model.removeprefix("Sonos").strip()
                 found.append(
                     {
                         "ip": z.ip_address,
@@ -173,7 +177,7 @@ async def discover_zones():
                         # The proven audioClip path is S2 Port/Amp only
                         # (design note); everything else is at the
                         # user's own risk and labeled as such.
-                        "supported": model in ("Port", "Sonos Amp", "Amp"),
+                        "supported": model_norm in ("Port", "Amp"),
                     }
                 )
             except Exception as e:  # one flaky device must not kill the scan
