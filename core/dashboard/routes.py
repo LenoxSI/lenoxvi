@@ -154,7 +154,16 @@ async def discover_zones():
         # M5: soco UPnP discovery blocks 5s+ — off the event loop.
         for z in await asyncio.to_thread(soco.discover, timeout=5) or []:
             try:
-                model = (z.model_name or "").strip()
+                # soco API (0.31.4): SoCo has NO .model_name attribute —
+                # model lives in get_speaker_info()["model_name"] (a
+                # per-device UPnP call, so it rides the SAME thread as
+                # discovery; M5). player_name IS a direct attribute
+                # (cached from get_speaker_info). The first cut read
+                # z.model_name, which raised AttributeError per device —
+                # the swallow-all handler turned "found the Port" into
+                # {"found": []} silently (2026-10-03, dashboard button test).
+                info = await asyncio.to_thread(z.get_speaker_info) or {}
+                model = (info.get("model_name") or "").strip()
                 found.append(
                     {
                         "ip": z.ip_address,
@@ -167,10 +176,10 @@ async def discover_zones():
                         "supported": model in ("Port", "Sonos Amp", "Amp"),
                     }
                 )
-            except Exception:  # one flaky device must not kill the scan
-                logger.debug("zones/discover: skipped one unresponsive player")
-                continue
+            except Exception as e:  # one flaky device must not kill the scan
+                logger.warning(f"discover: skipped a device: {e!r}")
     except Exception as e:
+        logger.warning(f"discover: scan failed: {e!r}")
         raise HTTPException(status_code=502, detail=f"discovery failed: {e}")
     found.sort(key=lambda d: d["name"].lower())
     return {"found": found}
