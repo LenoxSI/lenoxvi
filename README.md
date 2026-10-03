@@ -39,7 +39,7 @@ v1 (`LenoxVI/lenoxvi`) is **reference, not foundation** — never copy it in.
 - `config.example.yaml` — **the tuning surface template**: every behavior knob
   in one file (wake threshold/timeout/model, VAD params, STT/TTS/brain settings,
   Sonos zones, brain lull/dedup). Copy to `config.yaml` (gitignored, per-machine)
-  and edit. Precedence: `config.yaml` > `TK_*` env var > code default
+  and edit. Precedence: `config.yaml` > `LVI_*` env var > code default
   (`core/config.py`). Secrets stay in `.env`. Edit + `scripts/restart.sh` to
   apply — no rebuild.
 - `logs/` — gitignored runtime logs (the bot itself logs to journald:

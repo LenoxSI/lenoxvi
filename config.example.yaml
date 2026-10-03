@@ -1,6 +1,6 @@
 # lenoxvi config — THE tuning surface for the house voice bot.
 # Behavior lives here; secrets stay in gitignored .env (API keys).
-# Precedence: this file > TK_* env var > code default (core/config.py).
+# Precedence: this file > LVI_* env var > code default (core/config.py).
 # Edit + `bash scripts/restart.sh` on your bot host to apply.
 #
 # This is the TEMPLATE. Copy to config.yaml and fill in your values:

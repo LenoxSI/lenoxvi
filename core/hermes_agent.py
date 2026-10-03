@@ -107,7 +107,7 @@ class HermesAgent(FrameProcessor):
         self._key = os.environ["LVI_HERMES_KEY"]
         self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
         # Turn-shape tunables — the knobs closest to conversation UX. Same
-        # precedence as every other knob: config.yaml > TK_* env > default.
+        # precedence as every other knob: config.yaml > LVI_* env > default.
         self._lull_secs = float(cfg_env("brain", "lull_secs", "LVI_LULL_SECS", lull_secs))
         self._max_history = max_history
         self._echo_gate = echo_gate

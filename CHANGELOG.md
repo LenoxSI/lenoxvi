@@ -207,7 +207,7 @@ serving the house daily.
 - Phase 1 bot: local whisper ears, stub brain, ElevenLabs mouth (`8a8e8a8`)
 - sonos_output: Sonos audioClip overlay — clip volume ~70, ~200ms load,
   opportunistic clip pruning at startup (`20c2a72`)
-- config.yaml as the single tuning surface (yaml > `TK_*` env > code default) (`96ce51b`)
+- config.yaml as the single tuning surface (yaml > `LVI_*` env > code default) (`96ce51b`)
 - systemd service: boot survival, crash-restart, journald logging (`3a588e0`)
 - `scripts/sync_host.sh`: bundle-based host sync, no creds on hosts (`11b16eb`)
 - requirements.txt with pinned top-level deps (pipecat 1.11.0) (`f4d4203`)
