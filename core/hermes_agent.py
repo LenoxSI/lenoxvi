@@ -181,6 +181,15 @@ class HermesAgent(FrameProcessor):
         self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://<brain-host>:8642/v1")
         self._key = os.environ["LVI_HERMES_KEY"]
         self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
+        # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
+        # brain request carried no max_tokens, so a runaway model loop
+        # could monologue until the context window died (measured: one
+        # 16,145-token reply "degenerated into garbage" mid-session).
+        # ~300 tokens ≈ 220 words ≈ 90s of speech — generous for sass,
+        # impossible for a runaway. Honored by every OpenAI-compat
+        # endpoint (Hermes, Anthropic, OpenClaw — forward-compatible
+        # with the brain.kind arc). Config-gated per house law.
+        self._max_tokens = int(cfg_env("brain", "max_tokens", "LVI_BRAIN_MAX_TOKENS", 300) or 300)
         # Turn-shape tunables — the knobs closest to conversation UX. Same
         # precedence as every other knob: config.yaml > LVI_* env > default.
         self._lull_secs = float(cfg_env("brain", "lull_secs", "LVI_LULL_SECS", lull_secs))
@@ -264,6 +273,7 @@ class HermesAgent(FrameProcessor):
         payload = json.dumps({
             "model": self._model,
             "stream": False,
+            "max_tokens": self._max_tokens,
             "conversation": self._conversation,
             "messages": [
                 {"role": "system", "content": VOICE_SYSTEM_PROMPT},

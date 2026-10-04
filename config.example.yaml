@@ -42,6 +42,9 @@ brain:
   kind: hermes          # hermes | stub (stub = canned echo, bench only)
   url: http://<brain-host>:8642/v1
   model: hermes-agent
+  max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards
+                        # against runaway replies (the 16k-token
+                        # degenerate reply incident, 2026-10-04)
   zone: <room-name>    # conversation tag prefix: voice-<zone>-<id>
   lull_secs: 0.6        # silence after speech before the turn flushes to the
                         # brain; lower = snappier but risks clipping slow talkers
