@@ -6,6 +6,55 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.3.5] — 2026-10-04
+
+The second-output-backend release. The WiiM Pro arrives and becomes a
+first-class voice lane in one afternoon — plus the session-visibility fix
+that makes every voice conversation auditable in the Hermes dashboard.
+
+### Added
+- **WiiM output backend** (`core/wiim_output.py`) — interrupt-no-restore
+  reply playback on WiiM/LinkPlay streamers, ratified as the affordable
+  dedicated AI-out lane (Sonos stays the full-integration lane). Same
+  FrameProcessor contract as SonosOutput (speaking LEDs, echo gate,
+  wake-gate speech hints), no duck holder — the interrupt IS the duck.
+  Volume snapshot → set → play → restore around every clip. Arrival
+  verify first (design note correction): `playPromptUrl` is a STUB on
+  current firmware (Linkplay 4.8.827634) — acks OK, never fetches — so
+  replies play via `setPlayerCmd:play` as main media. Music stops when
+  she speaks, nothing restores (client-owned sources are unresumable).
+  `X-Hermes-Session-Key` rides every brain call: sticky rooms merge into
+  ONE long-lived dashboard session per room, fresh pipelines get one
+  session per connection — both visible and auditable in the Hermes
+  admin dash (previously voice sessions were unkeyed and invisible there)
+- **Per-zone backend dispatch** — a room mapped to a `wiim:` zone gets
+  WiiMOutput, `sonos:` zones keep the audioClip overlay path. One merged
+  zone namespace in the dashboard with backend tags; Add-zone takes a
+  backend selector (WiiM zones need no player_uid); delete / volume
+  slider / test tone all dispatch on backend. Adding a zone to a backend
+  implies enabling that backend
+
+### Fixed
+- **WiiM hardware-fade compensation** — the Pro ramps volume in over the
+  first ~1s of main-media playback and ramps out at the end; short
+  replies ramped down before finishing ("quiet, ramps up, ramps down" —
+  the owner's ear). No firmware knob exists, so reply clips carry 0.25s
+  lead-in silence + 0.35s tail. Sonos lane untouched
+- **Voice sessions invisible in the Hermes dashboard** — see
+  X-Hermes-Session-Key above
+- Three WiiM-backend boot bugs from the first deploy: hallucinated
+  `cfg_env` API (killed every pipeline construction — mic wouldn't wake),
+  missing `enabled: true` on dashboard-added wiim zones (silent disabled
+  backend), and the shared clip server never started when no SonosOutput
+  existed in the pipeline (LEDs cycled, zero audio). Deploy gate added:
+  host-venv import smoke before every restart touching core/
+
+### Changed
+- **Dashboard zone UX** — native-name prefill from discovery (no more
+  lowercase mangling), no parenthetical echo when key = native name,
+  backend column without decorative markers (the owner rulings, all
+  screenshot-caught)
+
 ## [0.3.4] — 2026-10-04
 
 The zone-tuning release. The matrix switch leaves the audio path and two
