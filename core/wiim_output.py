@@ -193,17 +193,33 @@ class WiiMOutput(FrameProcessor):
             self._echo_gate.block(duration + 1.5)
 
         # MP3 (proven on this unit; WAV unreliable on LinkPlay firmware).
+        # WiiM hardware fade (the owner's ear, 2026-10-04): the Pro ramps
+        # volume in over the first ~1s of main-media playback and ramps
+        # out at the end — long replies sound fine (ramp rides silence
+        # while she's mid-sentence) but SHORT replies ramp in, peak, and
+        # ramp out before finishing: "quiet, ramps up, ramps down."
+        # There is no firmware fade knob (HTTP API doc: vol/mute only),
+        # so the clip carries the fix: 0.25s lead-in silence gives the
+        # ramp nothing to swallow, and 0.35s tail holds the end audible.
+        sr = int(self._sample_rate)
+        ch = max(int(self._channels), 1)
+        lead_in = b"\x00" * int(2 * ch * sr * 0.25)
+        tail = b"\x00" * int(2 * ch * sr * 0.35)
+
         def _encode(pcm_bytes):
             import lameenc
             enc = lameenc.Encoder()
             enc.set_bit_rate(96)
-            enc.set_in_sample_rate(int(self._sample_rate))
-            enc.set_channels(self._channels)
+            enc.set_in_sample_rate(sr)
+            enc.set_channels(ch)
             enc.set_quality(2)
             return bytes(enc.encode(pcm_bytes)) + bytes(enc.flush())
 
         try:
-            mp3 = await asyncio.to_thread(_encode, pcm)
+            # Lead-in + tail ride INSIDE the clip: the Pro's fade envelope
+            # never touches her words, and the tail keeps the end of short
+            # replies audible instead of riding the fade-out down.
+            mp3 = await asyncio.to_thread(_encode, lead_in + pcm + tail)
         except Exception as e:
             logger.error(f"wiim_output: encode failed: {e}")
             return
