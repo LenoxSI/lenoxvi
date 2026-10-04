@@ -167,7 +167,7 @@ async function loadMapping() {
         Object.keys(zones).sort().map(z =>
           // Display the Sonos-side player name verbatim (config key as
           // routing identity — Sonos renames can't orphan a mapping).
-          `<option value="${esc(z)}"${mapping[room] === z ? " selected" : ""}>${esc(sonosNames[z] ? sonosNames[z] + " (" + z + ")" : z)}</option>`));
+          `<option value="${esc(z)}"${mapping[room] === z ? " selected" : ""}>${esc(sonosNames[z] && sonosNames[z] !== z ? sonosNames[z] + " (" + z + ")" : z)}</option>`));
       tr.innerHTML =
         `<td>${esc(room)}</td>` +
         `<td><select data-room="${esc(room)}">${opts.join("")}</select></td>` +
