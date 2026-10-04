@@ -285,7 +285,13 @@ async def test_zone(name: str):
 
     mp3 = await asyncio.to_thread(_encode)
 
-    filename = f"test-{name}-{int(time.time())}.mp3"
+    # Zone keys are free text (native Sonos names — "Sonos Port") but a
+    # filename is not: the Port's audioClip fetcher fails on raw spaces
+    # (2026-10-04 — test tone silent on 'Sonos Port', fine on
+    # 'living_room'; replies never hit this because their names are
+    # generated). Slugify before it reaches the filesystem/URL.
+    slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    filename = f"test-{slug}-{int(time.time())}.mp3"
     path = Path("clips") / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(mp3)

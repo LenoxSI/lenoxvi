@@ -64,7 +64,11 @@ class ClipServer:
             self._runner = None
 
     def url_for(self, filename: str) -> str:
-        return f"http://{self._host_ip}:{self._port}/{filename}"
+        from urllib.parse import quote
+        # Quote the path component: a filename with spaces/reserved chars
+        # breaks the Sonos audioClip fetcher silently (2026-10-04, the
+        # "Sonos Port" test tone). Safe for every existing name.
+        return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
 
 def _prune_clips(clips_dir: Path, retention_days: int) -> int:
