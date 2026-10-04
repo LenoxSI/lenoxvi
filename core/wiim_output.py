@@ -41,12 +41,11 @@ from pathlib import Path
 from pipecat.frames.frames import (
     CancelFrame,
     Frame,
-    FrameDirection,
     TTSStartedFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frameworks.pipeline import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 logger = logging.getLogger(__name__)
 
