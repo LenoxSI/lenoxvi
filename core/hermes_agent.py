@@ -303,6 +303,20 @@ class HermesAgent(FrameProcessor):
             data = json.loads(r.read())
         reply = data["choices"][0]["message"]["content"].strip()
         usage = data.get("usage", {})
+        # Client-side output cap (2026-10-04): Hermes's api_server IGNORES
+        # the request's max_tokens (verified live: max_tokens:5 returned a
+        # 360-char reply with finish_reason stop; api_server.py has zero
+        # references). Real OpenAI-compat endpoints honor the field, but
+        # our PRIMARY brain doesn't — so the client enforces too. Char
+        # budget ≈ 4 chars/token × max_tokens; truncate at the last word
+        # boundary so she never mid-words the speaker.
+        char_cap = self._max_tokens * 4
+        if len(reply) > char_cap:
+            logger.warning(
+                f"hermes_agent: reply {len(reply)} chars exceeded cap "
+                f"{char_cap} (max_tokens={self._max_tokens}) — truncated"
+            )
+            reply = reply[:char_cap].rsplit(maxsplit=1)[0].rstrip(",;:-—") + "."
         logger.info(
             f"hermes_agent: tokens in={usage.get('prompt_tokens', '?')} "
             f"out={usage.get('completion_tokens', '?')}"
