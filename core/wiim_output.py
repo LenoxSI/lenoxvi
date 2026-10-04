@@ -119,6 +119,25 @@ class WiiMOutput(FrameProcessor):
         if self._enabled and self._host_ip:
             self._ensure_clip_server()
 
+    async def setup(self, setup):
+        """Pipecat lifecycle hook — the ONLY reliable place to start the
+        shared clip server (SonosOutput does the same). The constructor
+        can't await; without this the WiiM fetches a URL nobody serves
+        and replies die silently (2026-10-04 bedroom outage: LEDs cycled,
+        zero audio — nothing listening on 8765 because no SonosOutput
+        existed in the pipeline to start it)."""
+        await super().setup(setup)
+        if self._enabled:
+            if self._shared_clip_server is not None and not self._shared_clip_server._runner:
+                await self._shared_clip_server.start()
+            logger.info(f"wiim_output: backend ready — zones {list(self._zones)}, "
+                        f"default '{self._zone}', global vol {self._volume}")
+
+    async def cleanup(self):
+        # Shared server: do NOT stop it — other pipelines may reference
+        # it and process exit releases the port (same call as SonosOutput).
+        await super().cleanup()
+
     # ── clip server (shared, one per process; same pattern as SonosOutput) ──
 
     def _ensure_clip_server(self):
