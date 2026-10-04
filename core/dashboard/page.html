@@ -63,7 +63,7 @@ your own experiment.</p>
 <select id="disc-pick" style="display:none"></select>
 <span id="discover-msg" class="muted"></span>
 <table id="zones"><thead><tr>
-  <th>Name</th><th>IP</th><th>Player UID</th><th>Test</th><th></th>
+  <th>Name</th><th>IP</th><th>Player UID</th><th>Volume</th><th>Test</th><th></th>
 </tr></thead><tbody></tbody></table>
 <div id="zone-msg"></div>
 <form class="inline" id="form-zone">
@@ -88,7 +88,7 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-let zones = {}, mapping = {}, sonosNames = {};
+let zones = {}, mapping = {}, sonosNames = {}, zoneVols = {}, clipVolume = 70;
 
 // H5: mutations carry the dashboard token if one is configured
 // (LVI_DASHBOARD_TOKEN on the bot). Same-origin reads stay open.
@@ -288,7 +288,7 @@ function renderZones() {
   const tb = $("#zones tbody"); tb.innerHTML = "";
   const names = Object.keys(zones).sort();
   if (!names.length) {
-    tb.innerHTML = `<tr><td colspan="5" class="muted">No zones configured.
+    tb.innerHTML = `<tr><td colspan="6" class="muted">No zones configured.
       Discover on LAN or add one manually below.</td></tr>`;
     return;
   }
@@ -297,13 +297,36 @@ function renderZones() {
     const label = sonosNames[name] ? sonosNames[name] : name;
     const sub = sonosNames[name] && sonosNames[name] !== name
       ? ` <span class="muted">(${esc(name)})</span>` : "";
+    const vol = (zoneVols && zoneVols[name] !== undefined) ? zoneVols[name] : clipVolume;
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td>${esc(label)}${sub}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid)}</td>` +
+      `<td><input type="range" min="0" max="100" value="${vol}" data-vol="${esc(name)}"
+        style="width:110px;vertical-align:middle" title="Voice-clip volume for this zone">
+        <span data-volval="${esc(name)}">${vol}</span></td>` +
       `<td><button data-test="${esc(name)}">Play test clip</button></td>` +
       `<td><button data-del="${esc(name)}">Remove</button></td>`;
     tb.appendChild(tr);
   }
+  tb.querySelectorAll("input[data-vol]").forEach(s =>
+    s.addEventListener("input", () => {
+      // live value readout while dragging
+      const out = tb.querySelector(`span[data-volval="${CSS.escape(s.dataset.vol)}"]`);
+      if (out) out.textContent = s.value;
+    }));
+  tb.querySelectorAll("input[data-vol]").forEach(s =>
+    s.addEventListener("change", async () => {
+      const zone = s.dataset.vol;
+      try {
+        const r = await api(`/api/dashboard/zones/${encodeURIComponent(zone)}/volume`, {
+          method: "PUT", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ volume: +s.value }),
+        });
+        zoneVols = zoneVols || {};
+        if (r.volume === clipVolume) delete zoneVols[zone]; else zoneVols[zone] = r.volume;
+        msg($("#zone-msg"), `${zone}: voice volume ${r.volume} — applies to the next clip, no restart.`, "ok");
+      } catch (e) { msg($("#zone-msg"), "Volume save failed: " + e.message, "err"); }
+    }));
   tb.querySelectorAll("button[data-test]").forEach(b =>
     b.addEventListener("click", async () => {
       b.disabled = true; msg($("#zone-msg"), "Playing test clip on " + b.dataset.test + "…");
@@ -327,7 +350,8 @@ function renderZones() {
 async function loadZones() {
   try {
     const m = await api("/api/dashboard/mapping");
-    zones = m.zones; renderZones();
+    zones = m.zones; zoneVols = m.zone_volumes || {}; clipVolume = m.clip_volume ?? 70;
+    renderZones();
   } catch (e) { msg($("#zone-msg"), "Zones load failed: " + e.message, "err"); }
 }
 

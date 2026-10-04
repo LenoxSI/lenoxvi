@@ -71,6 +71,27 @@ class ClipServer:
         return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
 
+def zone_volume_overrides(overrides: dict | None):
+    """Set the live per-zone volume overrides (dashboard slider lane).
+
+    Applied on the NEXT clip — no restart, by design: volume tuning is a
+    by-ear loop and waiting for a restart between attempts would make
+    the dashboard useless for it.
+    """
+    global _LIVE_ZONE_VOLUMES
+    _LIVE_ZONE_VOLUMES = {k: int(v) for k, v in (overrides or {}).items()
+                          if isinstance(v, (int, float))}
+
+
+def live_zone_volume(zone: str) -> int | None:
+    """The dashboard's live override for `zone`, if one is set."""
+    v = _LIVE_ZONE_VOLUMES.get(zone)
+    return int(v) if v is not None else None
+
+
+_LIVE_ZONE_VOLUMES: dict = {}
+
+
 def _prune_clips(clips_dir: Path, retention_days: int) -> int:
     """Age-gated .mp3 prune. Returns count removed. Shared by the startup
     pass and the hourly task — one implementation, no drift."""
@@ -190,6 +211,13 @@ class SonosOutput(FrameProcessor):
         self._enabled = bool(sonos.get("enabled"))
         self._zone = sonos.get("default_zone")
         self._volume = int(sonos.get("clip_volume", 70))
+        # Per-zone volume overrides (2026-10-04, dashboard slider): config
+        # `sonos.zone_volumes: {<zone>: int}` is the durable copy; the live
+        # layer (zone_volume_overrides below) lets the dashboard change a
+        # zone's clip volume for the NEXT clip without a bot restart —
+        # tuning by ear needs instant feedback, not the restart contract.
+        self._zone_volumes = {k: int(v) for k, v in (sonos.get("zone_volumes") or {}).items()
+                              if isinstance(v, (int, float))}
         self._zones = sonos.get("zones", {})
         self._duck_while_awake = bool(sonos.get("duck_while_awake", True))
         cs = cfg.get("clip_server", {})
@@ -461,7 +489,7 @@ class SonosOutput(FrameProcessor):
                     # snappy cancel on release.
                     try:
                         resp = await asyncio.wait_for(
-                            sw.play_clip(url, volume=self._volume), timeout=5.0
+                            sw.play_clip(url, volume=self._volume_for(zone_name or self._zone)), timeout=5.0
                         )
                     except Exception as e:
                         # H7: the websocket may be dead (Sonos reboot, wifi
@@ -517,6 +545,16 @@ class SonosOutput(FrameProcessor):
             self._duck_task.cancel()
             self._duck_task = None
 
+    def _volume_for(self, zone: str) -> int:
+        """Clip volume for `zone`: live override (dashboard slider) >
+        config `sonos.zone_volumes` > global `sonos.clip_volume`."""
+        live = live_zone_volume(zone)
+        if live is not None:
+            return live
+        if zone in self._zone_volumes:
+            return self._zone_volumes[zone]
+        return self._volume
+
     async def _speak_to_sonos(self, pcm: bytes) -> None:
         # Block echo handling for exactly as long as this clip will sound:
         # the mic will hear it off the zone speakers (no AEC by design).
@@ -544,6 +582,7 @@ class SonosOutput(FrameProcessor):
         if not zone:
             logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
             return
+        volume = self._volume_for(zone_name)
         # MP3, not WAV — the proven-working format for Sonos audioClip
         # (design note; WAV is not in Sonos's documented supported set).
         import lameenc
@@ -568,7 +607,7 @@ class SonosOutput(FrameProcessor):
         clip_path.parent.mkdir(parents=True, exist_ok=True)
         clip_path.write_bytes(mp3)
         url = self._clip_server.url_for(filename)
-        logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {self._volume}")
+        logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {volume}")
 
         from sonos_websocket import SonosWebsocket
 
@@ -576,7 +615,7 @@ class SonosOutput(FrameProcessor):
         try:
             await asyncio.wait_for(sw.connect(), timeout=5.0)  # H7: bounded
             resp = await asyncio.wait_for(
-                sw.play_clip(url, volume=self._volume), timeout=5.0
+                sw.play_clip(url, volume=volume), timeout=5.0
             )
             # M3 (Opus review): duck ownership starts HERE — the clip is
             # actually sounding on the player now, so this is the honest

@@ -109,6 +109,9 @@ async def get_mapping():
         "room_zones": dict(config_store.read_section("room_zones") or {}),
         "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
+        # Per-zone clip volumes (slider lane): config copy + live layer.
+        "zone_volumes": dict((cfg("sonos", "zone_volumes") or {})),
+        "clip_volume": cfg("sonos", "clip_volume"),
         # M5: soco network calls go to a thread — the dashboard rides the
         # voice pipeline's event loop; a slow/offline player must not
         # stall audio ingest (Opus review).
@@ -187,6 +190,45 @@ async def discover_zones():
         raise HTTPException(status_code=502, detail=f"discovery failed: {e}")
     found.sort(key=lambda d: d["name"].lower())
     return {"found": found}
+
+
+class ZoneVolumePayload(BaseModel):
+    volume: int = Field(ge=0, le=100)
+
+
+# ── per-zone clip volume (dashboard slider) ───────────────────────────
+
+
+@router.put("/zones/{name}/volume", dependencies=GUARD)
+async def set_zone_volume(name: str, payload: ZoneVolumePayload):
+    """Set a zone's voice-clip volume (0-100) from the dashboard slider.
+
+    Two layers, one call: writes `sonos.zone_volumes` in config.yaml
+    (durable, survives restarts) AND updates sonos_output's live override
+    so the NEXT clip uses it immediately — volume tuning is a by-ear
+    loop and the restart contract would make it useless (2026-10-04).
+    Resolution: live override > config per-zone > global clip_volume.
+    """
+    if name not in _zones():
+        raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+    sonos = dict(cfg("sonos") or {})
+    vols = {k: int(v) for k, v in (sonos.get("zone_volumes") or {}).items()}
+    before = vols.get(name)
+    if payload.volume == int(sonos.get("clip_volume", 70)):
+        # Setting a zone back to the global value = no override needed;
+        # keep the config minimal (same pattern as session modes).
+        vols.pop(name, None)
+    else:
+        vols[name] = payload.volume
+    try:
+        config_store.write_section("sonos", {**sonos, "zone_volumes": vols})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    # Live layer: next clip in this zone plays at the new volume.
+    from sonos_output import zone_volume_overrides
+    zone_volume_overrides(vols)
+    logger.info(f"dashboard: zone '{name}' clip volume -> {payload.volume} (live)")
+    return {"ok": True, "zone": name, "volume": payload.volume, "before": before}
 
 
 @router.post("/zones", dependencies=GUARD)
@@ -306,7 +348,14 @@ async def test_zone(name: str):
     sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
     try:
         await sw.connect()
-        await sw.play_clip(url, volume=int(cfg("sonos", "clip_volume") or 70))
+        # Honor the zone's slider volume (live override > config per-zone >
+        # global) so the tone IS the tuning instrument it was meant to be.
+        from sonos_output import live_zone_volume
+        vol = live_zone_volume(name)
+        if vol is None:
+            zv = (cfg("sonos", "zone_volumes") or {}).get(name)
+            vol = int(zv) if zv is not None else int(cfg("sonos", "clip_volume") or 70)
+        await sw.play_clip(url, volume=vol)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Sonos refused the clip: {e}")
     finally:
