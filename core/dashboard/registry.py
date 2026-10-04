@@ -23,8 +23,11 @@ Persistence split:
 """
 
 import time
+from pathlib import Path
 
 from loguru import logger
+
+_version = "unknown"
 
 _boot_time = None
 _active_room = None
@@ -71,6 +74,28 @@ def _evict_other_sessions(pc_id, room):
 def mark_boot():
     global _boot_time
     _boot_time = time.time()
+    # Resolve the running install's version ONCE at boot: `git describe`
+    # from the repo the bot runs from (the host checkout is the install
+    # — sync_host.sh rsyncs the repo to ~/projects/lenoxvi on the
+    # appliance). Falls back to "unknown" if git is missing or this is
+    # not a checkout (stranger clones still get a dashboard, per the
+    # public-flip rule). Not a static string on purpose (the owner's ask
+    # 2026-10-04): the statusbar shows the ACTUAL installed version,
+    # including -N-g<hash> drift past a tag.
+    global _version
+    try:
+        import subprocess
+        _version = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            cwd=str(Path(__file__).resolve().parent.parent.parent),
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or "unknown"
+    except Exception:
+        _version = "unknown"
+
+
+def version():
+    return _version
 
 
 def boot_time():

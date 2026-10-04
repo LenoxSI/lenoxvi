@@ -159,11 +159,12 @@ async function loadStatus() {
     const wake = s.last_wake
       ? esc(s.last_wake.room || "?") + ", " + fmtAgo(s.last_wake.time)
       : "none since boot";
-    $("#statusbar").innerHTML =
+    $("statusbar").innerHTML =
       `<span>Uptime <b>${up}</b></span>` +
       `<span>Nodes online <b>${s.rooms.filter(r => r.online).length}/${s.rooms.length}</b></span>` +
       `<span>Active room <b>${esc(s.active_room || "—")}</b></span>` +
-      `<span>Last wake <b>${wake}</b></span>`;
+      `<span>Last wake <b>${wake}</b></span>` +
+      `<span>Version <b>${esc(s.version || "unknown")}</b></span>`;
   } catch (e) { $("#statusbar").textContent = "status unavailable: " + e.message; }
 }
 

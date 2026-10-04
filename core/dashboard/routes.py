@@ -58,6 +58,7 @@ async def status():
     boot = registry.boot_time()
     return {
         "uptime_secs": round(time.time() - boot, 1) if boot else None,
+        "version": registry.version(),
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
         "rooms": registry.known_rooms(),
