@@ -78,16 +78,39 @@ session_modes: {}
 sonos:
   enabled: true
   default_zone: <zone-name>
-  clip_volume: 70                 # measured sweet spot for a Port at normal volume
-  clip_retention_days: 2          # 48h retention: clips are served once, then garbage
-  duck_while_awake: true           # hold the audioClip duck for the whole awake window
-                                   # (silence-holder clip + reply-clip silence tail = gapless
-                                   # duck from wake to sleep; false = duck only while
-                                   # reply clips sound)
-  zones:
-    <zone-name>:
-      ip: <sonos-player-ip>
-      player_uid: <RINCON_uid>    # from the Sonos device info page
+  # Voice-clip volume (0-100). 70 was the through-matrix sweet spot (note
+  # 001); 35 is the owner's ear-tuned direct-to-amp value (2026-10-04).
+  clip_volume: 35
+  # 48h retention: clips are served once, then garbage.
+  clip_retention_days: 2
+  # Hold the audioClip duck for the whole awake window (silence-holder
+  # clip + reply-clip silence tail = gapless duck from wake to sleep;
+  # false = duck only while reply clips sound).
+  duck_while_awake: true
+  # Per-zone overrides land here from the dashboard Volume slider — live
+  # layer applies to the NEXT clip, no restart (durable copy below).
+  zone_volumes: {}
+  zones: {}
+  #     Dining Room:
+  #       ip: 192.0.2.222
+  #       player_uid: RINCON_xxxxxxxxxxxx1400
+  #     Living Room:
+  #       ip: 192.0.2.70
+  #       player_uid: RINCON_xxxxxxxxxxxx1400
+
+# ── WiiM output (interrupt-no-restore; 2026-10-04 arrival verify) ──────
+# playPromptUrl is a STUB on current firmware (design note correction): acks
+# OK, never fetches. Replies play via setPlayerCmd:play as MAIN media —
+# music stops, nothing restores. Volume snapshots/restores around the
+# clip. No player_uid needed (HTTP API is UID-less, HTTPS-only).
+wiim:
+  enabled: true
+  default_zone: <zone-name>
+  clip_volume: 35
+  zone_volumes: {}
+  zones: {}
+  #     Master Bedroom:
+  #       ip: 192.0.2.50
 
 # How the Sonos players fetch TTS clips: the appliance serves them over
 # LAN HTTP. host_ip must be the LAN IP the Sonos players can reach.

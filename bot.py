@@ -31,6 +31,7 @@ from brain_stub import StubBrain
 from echo_gate import EchoGate
 from hermes_agent import HermesAgent
 from sonos_output import SonosOutput
+from wiim_output import WiiMOutput
 from stt_local import LocalWhisperSTTService
 from wake_word import WakeWordFilter
 
@@ -100,7 +101,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             return None
         from config import cfg
         mapped = (cfg("room_zones") or {}).get(room)
-        return mapped  # None -> default zone fallback in SonosOutput
+        return mapped  # None -> default zone fallback in the output backend
+
+    def _zone_backend(zone_name: str) -> str:
+        """Which output backend owns `zone_name`? 'wiim' if the zone lives
+        in the wiim: config, else 'sonos'. Zones are backend-tagged by
+        where they're configured — one namespace per backend, no
+        cross-backend lookups at reply time."""
+        from config import cfg
+        if zone_name and zone_name in (cfg("wiim", "zones") or {}):
+            return "wiim"
+        return "sonos"
 
     def _on_wake():
         dash_registry.note_wake(_pipeline_room())
@@ -157,9 +168,16 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 brain,
                 tts,
                 # reply in the wake room's zone when mapped; speaking LEDs
-                # fire from its real-time TTS frames on the direct wire
-                SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
-                            wake_gate=wake_filter, led=led),
+                # fire from its real-time TTS frames on the direct wire.
+                # Per-zone backend dispatch (2026-10-04): a room mapped to
+                # a wiim zone gets the WiiM interrupt-no-restore backend;
+                # sonos zones keep the overlay path. Same frame contract,
+                # same LED semantics, same echo gate.
+                (WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
+                            wake_gate=wake_filter, led=led)
+                 if _zone_backend(_reply_zone() or "") == "wiim"
+                 else SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
+                                 wake_gate=wake_filter, led=led)),
                 out,
             ]
         ),

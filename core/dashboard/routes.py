@@ -13,6 +13,7 @@ import asyncio
 import json
 import re
 import time
+import urllib.parse
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,7 @@ class ZonePayload(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
     player_uid: str = Field(min_length=8, max_length=64)
+    backend: str = Field(default="sonos", pattern="^(sonos|wiim)$")
 
 
 # ── status ───────────────────────────────────────────────────────────
@@ -72,6 +74,27 @@ async def status():
 
 def _zones() -> dict:
     return dict(cfg("sonos", "zones") or {})
+
+
+def _wiim_zones() -> dict:
+    return dict(cfg("wiim", "zones") or {})
+
+
+def _all_zones() -> dict:
+    """Merged zone namespace with backend tags: every zone (Sonos overlay
+    or WiiM interrupt) in one dict. The backend tag decides which output
+    path plays replies and how the test/volume routes behave
+    (2026-10-04, WiiM arrival)."""
+    return {**{k: {**v, "backend": "sonos"} for k, v in _zones().items()},
+            **{k: {**v, "backend": "wiim"} for k, v in _wiim_zones().items()}}
+
+
+def _backend_of(name: str) -> str:
+    return "wiim" if name in _wiim_zones() else "sonos"
+
+
+def _wiim_cfg() -> dict:
+    return dict(cfg("wiim") or {})
 
 
 def _sonos_names(zones: dict) -> dict:
@@ -104,13 +127,15 @@ def _sonos_names(zones: dict) -> dict:
 
 @router.get("/mapping")
 async def get_mapping():
-    zones = _zones()
+    zones = _all_zones()
     return {
         "room_zones": dict(config_store.read_section("room_zones") or {}),
         "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
-        # Per-zone clip volumes (slider lane): config copy + live layer.
-        "zone_volumes": dict((cfg("sonos", "zone_volumes") or {})),
+        # Per-zone clip volumes (slider lane): config copy + live layer,
+        # merged across both output backends.
+        "zone_volumes": {**(cfg("sonos", "zone_volumes") or {}),
+                         **(cfg("wiim", "zone_volumes") or {})},
         "clip_volume": cfg("sonos", "clip_volume"),
         # M5: soco network calls go to a thread — the dashboard rides the
         # voice pipeline's event loop; a slow/offline player must not
@@ -121,8 +146,8 @@ async def get_mapping():
 
 @router.put("/mapping", dependencies=GUARD)
 async def put_mapping(payload: MappingPayload):
-    zones = _zones()
-    # Validate BEFORE writing: every mapped zone must exist.
+    zones = _all_zones()
+    # Validate BEFORE writing: every mapped zone must exist (either backend).
     bad = {r: z for r, z in payload.room_zones.items() if z not in zones}
     if bad:
         raise HTTPException(
@@ -209,26 +234,36 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
     loop and the restart contract would make it useless (2026-10-04).
     Resolution: live override > config per-zone > global clip_volume.
     """
-    if name not in _zones():
+    if name not in _all_zones():
         raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-    sonos = dict(cfg("sonos") or {})
-    vols = {k: int(v) for k, v in (sonos.get("zone_volumes") or {}).items()}
+    backend = _backend_of(name)
+    from sonos_output import zone_volume_overrides
+    from wiim_output import wiim_volume_overrides
+    if backend == "wiim":
+        section = dict(cfg("wiim") or {})
+    else:
+        section = dict(cfg("sonos") or {})
+    vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
     before = vols.get(name)
-    if payload.volume == int(sonos.get("clip_volume", 70)):
+    if payload.volume == int(section.get("clip_volume", 35)):
         # Setting a zone back to the global value = no override needed;
         # keep the config minimal (same pattern as session modes).
         vols.pop(name, None)
     else:
         vols[name] = payload.volume
     try:
-        config_store.write_section("sonos", {**sonos, "zone_volumes": vols})
+        config_store.write_section("sonos" if backend == "sonos" else "wiim",
+                                   {**section, "zone_volumes": vols})
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     # Live layer: next clip in this zone plays at the new volume.
-    from sonos_output import zone_volume_overrides
-    zone_volume_overrides(vols)
-    logger.info(f"dashboard: zone '{name}' clip volume -> {payload.volume} (live)")
-    return {"ok": True, "zone": name, "volume": payload.volume, "before": before}
+    if backend == "wiim":
+        wiim_volume_overrides(vols)
+    else:
+        zone_volume_overrides(vols)
+    logger.info(f"dashboard: zone '{name}' ({backend}) clip volume -> {payload.volume} (live)")
+    return {"ok": True, "zone": name, "volume": payload.volume, "before": before,
+            "backend": backend}
 
 
 @router.post("/zones", dependencies=GUARD)
@@ -236,21 +271,44 @@ async def add_zone(payload: ZonePayload):
     name = payload.name.strip()
     if not name or "." in name or ":" in name:
         raise HTTPException(status_code=400, detail="bad zone name")
-    zones = dict(_zones())
-    zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
-    try:
-        config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    return {"ok": True, "zones": zones}
+    # Collision check across BOTH backends: one merged namespace (the
+    # mapping routes and the room_zones config key see one zone list).
+    if name in _all_zones():
+        raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
+    if payload.backend == "wiim":
+        # WiiM zones need no player_uid (HTTP API is UID-less) — but the
+        # form still sends one; accept and ignore it.
+        zones = _wiim_zones()
+        zones[name] = {"ip": payload.ip.strip()}
+        try:
+            config_store.write_section("wiim", {**_wiim_cfg(), "zones": zones})
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    else:
+        zones = _zones()
+        zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
+        try:
+            config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    return {"ok": True, "zones": zones, "backend": payload.backend}
 
 
 @router.delete("/zones/{name}", dependencies=GUARD)
 async def delete_zone(name: str):
-    zones = dict(_zones())
-    if name not in zones:
-        raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-    del zones[name]
+    backend = _backend_of(name)
+    if backend == "wiim":
+        if name not in _wiim_zones():
+            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+        zones = _wiim_zones()
+        del zones[name]
+        config_store.write_section("wiim", {**_wiim_cfg(), "zones": zones})
+    else:
+        if name not in _zones():
+            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+        zones = _zones()
+        del zones[name]
+        config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
     # rooms mapped to a deleted zone become dangling — drop them too
     mapping = dict(config_store.read_section("room_zones") or {})
     dangling = [r for r, z in mapping.items() if z == name]
@@ -258,8 +316,7 @@ async def delete_zone(name: str):
         for r in dangling:
             del mapping[r]
         config_store.write_section("room_zones", mapping)
-    config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
-    return {"ok": True, "dropped_room_mappings": dangling}
+    return {"ok": True, "dropped_room_mappings": dangling, "backend": backend}
 
 
 # ── zone test (the proven clip path, zero API cost) ──────────────────
@@ -308,11 +365,11 @@ async def _clip_server():
 
 @router.post("/zones/{name}/test", dependencies=GUARD)
 async def test_zone(name: str):
-    zones = _zones()
+    zones = _all_zones()
     if name not in zones:
         raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+    backend = _backend_of(name)
     import lameenc
-    from sonos_websocket import SonosWebsocket
 
     server = await _clip_server()
     pcm = _test_tone_pcm()
@@ -345,23 +402,64 @@ async def test_zone(name: str):
         gate.block(duration + 1.5)  # same margin sonos_output uses
 
     zone = zones[name]
+    if backend == "wiim":
+        # WiiM lane: interrupt semantics — snap the unit's main volume,
+        # set the voice vol, play the tone via the HTTP API, restore.
+        # 'OK' is documented-cheap; getPlayerStatus is the real check.
+        from wiim_output import wiim_api, wiim_get_status
+        ip = zone["ip"]
+
+        def _wiim_test():
+            st = wiim_get_status(ip)
+            raw = st.get("vol") if st else None
+            before_vol = int(raw) if raw is not None else None
+            if before_vol is not None:
+                wiim_api(ip, f"setPlayerCmd:vol:{_zone_test_volume(name, backend)}")
+            wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
+            return before_vol
+
+        try:
+            before_vol = await asyncio.to_thread(_wiim_test)
+            await asyncio.sleep(duration + 0.6)
+            if before_vol is not None:
+                await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"WiiM refused the clip: {e}")
+        logger.info(f"dashboard: test clip on '{name}' (wiim {ip}, {url})")
+        return {"ok": True, "zone": name, "url": url, "backend": backend}
+
+    from sonos_websocket import SonosWebsocket
     sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
     try:
         await sw.connect()
         # Honor the zone's slider volume (live override > config per-zone >
         # global) so the tone IS the tuning instrument it was meant to be.
-        from sonos_output import live_zone_volume
-        vol = live_zone_volume(name)
-        if vol is None:
-            zv = (cfg("sonos", "zone_volumes") or {}).get(name)
-            vol = int(zv) if zv is not None else int(cfg("sonos", "clip_volume") or 70)
+        vol = _zone_test_volume(name, backend)
         await sw.play_clip(url, volume=vol)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Sonos refused the clip: {e}")
     finally:
         await sw.close()
     logger.info(f"dashboard: test clip on '{name}' ({url})")
-    return {"ok": True, "zone": name, "url": url}
+    return {"ok": True, "zone": name, "url": url, "backend": backend}
+
+
+def _zone_test_volume(name: str, backend: str) -> int:
+    """Slider-aware test-tone volume (live override > config per-zone >
+    global), resolved through the right backend's live layer."""
+    if backend == "wiim":
+        from wiim_output import live_wiim_volume
+        vol = live_wiim_volume(name)
+        if vol is None:
+            zv = (cfg("wiim", "zone_volumes") or {}).get(name)
+            vol = int(zv) if zv is not None else int(cfg("wiim", "clip_volume") or 35)
+    else:
+        from sonos_output import live_zone_volume
+        vol = live_zone_volume(name)
+        if vol is None:
+            zv = (cfg("sonos", "zone_volumes") or {}).get(name)
+            vol = int(zv) if zv is not None else int(cfg("sonos", "clip_volume") or 35)
+    return int(vol)
 
 
 # ── node commands (firmware 1.1.0: restart / scan / set_wifi / set_name) ──

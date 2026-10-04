@@ -63,13 +63,14 @@ your own experiment.</p>
 <select id="disc-pick" style="display:none"></select>
 <span id="discover-msg" class="muted"></span>
 <table id="zones"><thead><tr>
-  <th>Name</th><th>IP</th><th>Player UID</th><th>Volume</th><th>Test</th><th></th>
+  <th>Name</th><th>IP</th><th>Player UID</th><th>Backend</th><th>Volume</th><th>Test</th><th></th>
 </tr></thead><tbody></tbody></table>
 <div id="zone-msg"></div>
 <form class="inline" id="form-zone">
-  <input id="z-name" placeholder="zone name — use the player's native Sonos name" size="24">
+  <input id="z-name" placeholder="zone name — use the player's native name" size="24">
   <input id="z-ip" placeholder="IP" size="14">
-  <input id="z-uid" placeholder="player UID (RINCON_…)" size="26">
+  <input id="z-uid" placeholder="player UID (RINCON_… — Sonos only)" size="26">
+  <select id="z-backend"><option value="sonos">Sonos (overlay)</option><option value="wiim">WiiM (interrupt)</option></select>
   <button>Add zone</button>
 </form>
 
@@ -288,7 +289,7 @@ function renderZones() {
   const tb = $("#zones tbody"); tb.innerHTML = "";
   const names = Object.keys(zones).sort();
   if (!names.length) {
-    tb.innerHTML = `<tr><td colspan="6" class="muted">No zones configured.
+    tb.innerHTML = `<tr><td colspan="7" class="muted">No zones configured.
       Discover on LAN or add one manually below.</td></tr>`;
     return;
   }
@@ -300,7 +301,8 @@ function renderZones() {
     const vol = (zoneVols && zoneVols[name] !== undefined) ? zoneVols[name] : clipVolume;
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td>${esc(label)}${sub}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid)}</td>` +
+      `<td>${esc(label)}${sub}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid || "—")}</td>` +
+      `<td><span class="muted">${esc(z.backend || "sonos")}${(z.backend || "sonos") === "wiim" ? " 🔵" : ""}</span></td>` +
       `<td><input type="range" min="0" max="100" value="${vol}" data-vol="${esc(name)}"
         style="width:110px;vertical-align:middle" title="Voice-clip volume for this zone">
         <span data-volval="${esc(name)}">${vol}</span></td>` +
@@ -399,6 +401,7 @@ $("#form-zone").addEventListener("submit", async (ev) => {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         name: $("#z-name").value, ip: $("#z-ip").value, player_uid: $("#z-uid").value,
+        backend: $("#z-backend").value,
       }),
     });
     $("#form-zone").reset();
