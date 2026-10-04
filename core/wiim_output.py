@@ -31,12 +31,13 @@ slider) > config wiim.zone_volumes > global clip_volume.
 
 import asyncio
 import json
-import logging
 import ssl
 import time
 import urllib.request
 import urllib.parse
 from pathlib import Path
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -46,8 +47,6 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-logger = logging.getLogger(__name__)
 
 # Shared SSL context: the WiiM serves a self-signed cert on 443.
 _SSL_CTX = ssl._create_unverified_context()
@@ -153,6 +152,7 @@ class WiiMOutput(FrameProcessor):
         end-of-speech timer is set in process_frame (same timing basis as
         SonosOutput)."""
         if not self._enabled:
+            logger.warning("wiim_output: reply dropped — backend disabled in config")
             return
         zone_name = self._zone
         if self._zone_selector:
