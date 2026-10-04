@@ -6,6 +6,50 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.3.4] — 2026-10-04
+
+The zone-tuning release. The matrix switch leaves the audio path and two
+config fossils follow it out: zone keys now match the players' native Sonos
+names, and volume becomes a by-ear dashboard control instead of a
+config-file number.
+
+### Added
+- **Per-zone volume sliders** — a Volume column in the dashboard zones table
+  with a slider (0–100) per zone and a live numeric readout. Two layers, one
+  write: durable `sonos.zone_volumes` in config.yaml PLUS a live in-memory
+  override in `sonos_output`, so a slider change applies to the very NEXT
+  clip — no bot restart. Volume tuning is a by-ear loop; the restart
+  contract would make the feature useless. Resolution: live override >
+  config per-zone > global `sonos.clip_volume`; sliding back to the global
+  value removes the override (config stays minimal). All three play sites
+  honor it — replies, duck-holder, and the test tone, so the tone IS the
+  tuning instrument. New guarded `PUT /zones/{name}/volume`; mapping GET
+  carries `zone_volumes` + `clip_volume`
+- **`brain.zone` documented as the conversation label prefix** — fresh-mode
+  pipelines mint `voice-<zone>-<id>` from it; with native-name zone keys the
+  labels read sensibly in Hermes conversation history
+
+### Fixed
+- **Test tone silent on zone keys containing spaces** — the tone's filename
+  embedded the raw zone key (`test-Sonos Port-….mp3`), and Sonos's audioClip
+  fetcher fails silently on unencoded spaces: the tone never sounded on
+  'Sonos Port' while 'living_room' worked, and replies dodged it by
+  generating space-free names. Slugify the filename at the route and
+  percent-encode the path in `url_for` — no future zone name can break a
+  clip fetch
+
+### Changed
+- **Zone keys = native Sonos player names** — 'Sonos Port' → 'Dining Room',
+  'living_room' → 'Living Room' across config (zones, default_zone,
+  room_zones, `brain.zone` label prefix, zone_volumes overrides). The
+  dashboard already displayed native names; now the keys match them, so a
+  user reading Sonos's app and the dashboard sees one name per player.
+  Keyed lookups all the way down (room_zones → zones → play), so a
+  consistent rename is safe, and the slug fix means spaces in keys are fine
+- **`sonos.clip_volume` 70 → 35** — recalibrated for the matrix-free direct
+  path (was measured through the matrix switch, design note); the owner
+  ear-tuned it the same day
+
 ## [0.3.3] — 2026-10-03
 
 The rename + voice-UX release: the project takes its public name. One silent-failure bug found by a live test,
