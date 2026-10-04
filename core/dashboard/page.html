@@ -302,7 +302,7 @@ function renderZones() {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td>${esc(label)}${sub}</td><td>${esc(z.ip)}</td><td>${esc(z.player_uid || "—")}</td>` +
-      `<td><span class="muted">${esc(z.backend || "sonos")}${(z.backend || "sonos") === "wiim" ? " 🔵" : ""}</span></td>` +
+      `<td><span class="muted">${esc(z.backend || "sonos")}</span></td>` +
       `<td><input type="range" min="0" max="100" value="${vol}" data-vol="${esc(name)}"
         style="width:110px;vertical-align:middle" title="Voice-clip volume for this zone">
         <span data-volval="${esc(name)}">${vol}</span></td>` +
