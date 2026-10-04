@@ -107,15 +107,15 @@ class WiiMOutput(FrameProcessor):
         # Optional sync callable returning the reply zone NAME (same
         # contract as SonosOutput's zone_selector — bot.py's _reply_zone).
         self._zone_selector = zone_selector
-        from config import cfg_env
-        wiim = cfg_env("wiim", section=True) or {}
+        from config import cfg
+        wiim = cfg("wiim") or {}
         self._enabled = bool(wiim.get("enabled"))
         self._zone = wiim.get("default_zone")
         self._volume = int(wiim.get("clip_volume", 35))
         self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
                               if isinstance(v, (int, float))}
         self._zones = dict(wiim.get("zones") or {})
-        cs = cfg_env("clip_server", section=True) or {}
+        cs = cfg("clip_server") or {}
         self._host_ip = cs.get("host_ip")
         if self._enabled and self._host_ip:
             self._ensure_clip_server()
@@ -126,7 +126,8 @@ class WiiMOutput(FrameProcessor):
         cls = type(self)
         if cls._shared_clip_server is None:
             from sonos_output import ClipServer
-            cs = cfg_env("clip_server", section=True) or {}
+            from config import cfg
+            cs = cfg("clip_server") or {}
             server = ClipServer(Path("clips"), self._host_ip, int(cs.get("port", 8765)))
             cls._shared_clip_server = server
 
