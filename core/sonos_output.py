@@ -635,6 +635,11 @@ class SonosOutput(FrameProcessor):
 
         if isinstance(frame, TTSStartedFrame):
             self._pcm.clear()
+            # Provider switches can change the audio rate between clips
+            # (ElevenLabs 24k ↔ Deepgram 16k): reset to the constructor
+            # default so a new clip never inherits the previous provider's
+            # rate; the first TTSAudioRawFrame overwrites with the real one.
+            self._sample_rate = 24000
             if self._led:  # speech starts sounding within ~0.5s — light now
                 self._cancel_end_of_speech()
                 self._led.send("bot-started-speaking")

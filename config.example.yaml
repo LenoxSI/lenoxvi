@@ -32,14 +32,18 @@ stt:
   compute_type: float16
   # language: en         # unset = auto-detect per utterance
 
-# ── Text-to-speech (ElevenLabs) ──────────────────────────────────────────
-# voice_id lives HERE (dashboard-editable; the owner's ask 2026-10-04) with the
-# legacy LVI_TTS_VOICE_ID env var as fallback. API key stays in .env only —
-# secrets never ride config.yaml (it ships in the public repo).
+# ── Text-to-speech ───────────────────────────────────────────────────────
+# Provider dropdown (dashboard Settings tab): elevenlabs | deepgram.
+# API keys stay in .env only — secrets never ride config.yaml (it ships
+# in the public repo). ElevenLabs voice_id/model; Deepgram Aura-2 uses a
+# single model-name-is-voice knob (aura-2-thalia-en …, full list on
+# developers.deepgram.com/docs/tts-models).
 tts:
+  provider: elevenlabs
   voice_id: <elevenlabs-voice-id>   # e.g. your custom voice's ID
   model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
                              # the websocket handshake rejects v3 with HTTP 400
+  # deepgram_voice: aura-2-thalia-en   # used when provider: deepgram
 
 # ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 brain:

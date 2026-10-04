@@ -94,23 +94,32 @@ WiiM zones play as main media — music stops while she talks (tested on Pro).</
 </div><!-- /pane-zones -->
 
 <div id="pane-settings" class="tabpane hidden">
-<h2>TTS — ElevenLabs</h2>
-<p class="sub">Voice ID and model save to config.yaml; the API key goes to
+<h2>TTS</h2>
+<p class="sub">Provider, voice and model save to config.yaml; API keys go to
 .env on the appliance (never displayed back). All apply on the next bot
 restart.</p>
 <div id="tts-msg"></div>
-<form class="inline" id="form-tts">
-  <label>API key <input type="password" id="tts-key" placeholder="paste key — set ✓ appears when saved" size="34" autocomplete="off"></label>
+<form class="inline" id="form-tts-cfg">
+  <label>Provider <select id="tts-provider">
+    <option value="elevenlabs">ElevenLabs</option>
+    <option value="deepgram">Deepgram (Aura-2)</option>
+  </select></label>
+  <span id="tts-eleven-fields">
+    <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
+    <label>Model <select id="tts-model">
+      <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
+      <option value="eleven_v2">eleven_v2</option>
+    </select></label>
+  </span>
+  <span id="tts-deepgram-fields" style="display:none">
+    <label>Voice <select id="tts-dg-voice"></select></label>
+  </span>
+  <button>Save</button>
+</form>
+<form class="inline" id="form-tts-key">
+  <label>API key <input type="password" id="tts-key" placeholder="paste key for the selected provider" size="34" autocomplete="off"></label>
   <span id="tts-key-state" class="muted"></span>
   <button id="btn-tts-key">Save key</button>
-</form>
-<form class="inline" id="form-tts-cfg">
-  <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
-  <label>Model <select id="tts-model">
-    <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
-    <option value="eleven_v2">eleven_v2</option>
-  </select></label>
-  <button>Save</button>
 </form>
 
 <h2>Firmware</h2>
@@ -409,43 +418,87 @@ document.querySelectorAll("#tabs button").forEach((b) => {
 });
 
 // ── TTS panel (Settings) ──────────────────────────────────────
+const DG_VOICES = ["aura-2-thalia-en","aura-2-andromeda-en","aura-2-helena-en",
+  "aura-2-apollo-en","aura-2-arcas-en","aura-2-aries-en","aura-2-asteria-en",
+  "aura-2-athena-en","aura-2-atlas-en","aura-2-aurora-en","aura-2-callista-en",
+  "aura-2-cora-en","aura-2-cordelia-en","aura-2-delia-en","aura-2-draco-en",
+  "aura-2-electra-en","aura-2-harmonia-en","aura-2-hera-en","aura-2-hermes-en",
+  "aura-2-hyperion-en","aura-2-iris-en","aura-2-janus-en","aura-2-juno-en",
+  "aura-2-jupiter-en","aura-2-luna-en","aura-2-mars-en","aura-2-minerva-en",
+  "aura-2-neptune-en","aura-2-odysseus-en","aura-2-ophelia-en","aura-2-orion-en",
+  "aura-2-orpheus-en","aura-2-pandora-en","aura-2-phoebe-en","aura-2-pluto-en",
+  "aura-2-saturn-en","aura-2-selene-en","aura-2-theia-en","aura-2-vesta-en",
+  "aura-2-zeus-en"];
+
+function ttsFlipFields() {
+  const p = $("#tts-provider").value;
+  $("#tts-eleven-fields").style.display = p === "elevenlabs" ? "" : "none";
+  $("#tts-deepgram-fields").style.display = p === "deepgram" ? "" : "none";
+  $("#tts-key").placeholder = p === "deepgram"
+    ? "paste Deepgram key" : "paste ElevenLabs key";
+  const ks = $("#tts-key-state");
+  if (p === "deepgram") {
+    ks.textContent = TTS_KEYS.deepgram ? "key set ✓" : "no key";
+    ks.className = TTS_KEYS.deepgram ? "ok" : "muted";
+  } else {
+    ks.textContent = TTS_KEYS.elevenlabs ? "key set ✓" : "no key";
+    ks.className = TTS_KEYS.elevenlabs ? "ok" : "muted";
+  }
+}
+
+let TTS_KEYS = {elevenlabs: false, deepgram: false};
+
 async function loadTTS() {
   try {
     const t = await api("/api/dashboard/tts");
+    TTS_KEYS = {elevenlabs: t.elevenlabs_key_set, deepgram: t.deepgram_key_set};
+    $("#tts-provider").value = t.provider || "elevenlabs";
     $("#tts-voice").value = t.voice_id || "";
     $("#tts-model").value = t.model || "eleven_flash_v2_5";
-    $("#tts-key-state").textContent = t.api_key_set ? "key set ✓" : "no key";
-    $("#tts-key-state").className = t.api_key_set ? "ok" : "muted";
+    const dg = $("#tts-dg-voice");
+    if (!dg.options.length) {
+      dg.innerHTML = DG_VOICES.map(v => `<option value="${v}">${v}</option>`).join("");
+    }
+    dg.value = t.deepgram_voice || "aura-2-thalia-en";
+    ttsFlipFields();
   } catch (e) { msg($("#tts-msg"), "TTS load failed: " + e.message, "err"); }
 }
+
+$("#tts-provider").addEventListener("change", ttsFlipFields);
 
 $("#btn-tts-key").addEventListener("click", async () => {
   const k = $("#tts-key").value.trim();
   if (!k) { msg($("#tts-msg"), "Paste a key first.", "err"); return; }
+  const p = $("#tts-provider").value;
   try {
-    await api("/api/dashboard/tts/key", {
+    await api(`/api/dashboard/tts/key/${p}`, {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({api_key: k}),
     });
     $("#tts-key").value = "";
     await loadTTS();
-    msg($("#tts-msg"), "API key saved to .env — applies on next bot restart.", "ok");
+    msg($("#tts-msg"), `${p === "deepgram" ? "Deepgram" : "ElevenLabs"} key saved to .env — applies on next bot restart.`, "ok");
   } catch (e) { msg($("#tts-msg"), "Key save failed: " + e.message, "err"); }
 });
 
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const v = $("#tts-voice").value.trim();
-  if (!v) { msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return; }
+  const p = $("#tts-provider").value;
+  const body = p === "deepgram"
+    ? {provider: p, deepgram_voice: $("#tts-dg-voice").value}
+    : {provider: p, voice_id: $("#tts-voice").value.trim(), model: $("#tts-model").value};
+  if (p === "elevenlabs" && !body.voice_id) {
+    msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return;
+  }
   try {
     await api("/api/dashboard/tts", {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({voice_id: v, model: $("#tts-model").value}),
+      body: JSON.stringify(body),
     });
     await loadTTS();
-    msg($("#tts-msg"), "Voice ID + model saved to config.yaml — applies on next bot restart.", "ok");
+    msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
 });
 

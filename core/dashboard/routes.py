@@ -568,14 +568,43 @@ async def set_session_mode(room: str, payload: SessionModePayload):
 
 # ── TTS settings (Settings tab — the config-editable arc's first panel) ──
 
-# The ElevenLabs API key NEVER rides config.yaml (it ships in the public
-# repo) and NEVER appears in any API response — .env only, on the appliance
-# only. The dashboard writes it via the key route and shows set/unset.
+# Two providers, one panel: ElevenLabs (voice_id + model) and Deepgram
+# Aura-2 (model name IS the voice: aura-2-<name>-en). API keys NEVER ride
+# config.yaml and NEVER appear in any API response — .env only, on the
+# appliance only. Key routes per provider; set/unset status only.
+
+_DEEPGRAM_VOICES = (
+    "aura-2-thalia-en", "aura-2-andromeda-en", "aura-2-helena-en",
+    "aura-2-apollo-en", "aura-2-arcas-en", "aura-2-aries-en",
+    "aura-2-asteria-en", "aura-2-athena-en", "aura-2-atlas-en",
+    "aura-2-aurora-en", "aura-2-callista-en", "aura-2-cora-en",
+    "aura-2-cordelia-en", "aura-2-delia-en", "aura-2-draco-en",
+    "aura-2-electra-en", "aura-2-harmonia-en", "aura-2-hera-en",
+    "aura-2-hermes-en", "aura-2-hyperion-en", "aura-2-iris-en",
+    "aura-2-janus-en", "aura-2-juno-en", "aura-2-jupiter-en",
+    "aura-2-luna-en", "aura-2-mars-en", "aura-2-minerva-en",
+    "aura-2-neptune-en", "aura-2-odysseus-en", "aura-2-ophelia-en",
+    "aura-2-orion-en", "aura-2-orpheus-en", "aura-2-pandora-en",
+    "aura-2-phoebe-en", "aura-2-pluto-en", "aura-2-saturn-en",
+    "aura-2-selene-en", "aura-2-theia-en", "aura-2-vesta-en",
+    "aura-2-zeus-en",
+)
 
 
 class TTSPayload(BaseModel):
-    voice_id: str = Field(min_length=8, max_length=64)
-    model: str = Field(pattern="^eleven_(flash_v2_5|v2)$")
+    provider: str = Field(default="elevenlabs", pattern="^(elevenlabs|deepgram)$")
+    voice_id: str | None = Field(default=None, min_length=8, max_length=64)
+    model: str | None = Field(default=None, pattern="^eleven_(flash_v2_5|v2)$")
+    deepgram_voice: str | None = Field(default=None)
+
+
+def _validate_tts_payload(p: TTSPayload) -> None:
+    if p.provider == "elevenlabs":
+        if not p.voice_id or not p.model:
+            raise HTTPException(status_code=422, detail="elevenlabs needs voice_id and model")
+    else:
+        if not p.deepgram_voice or p.deepgram_voice not in _DEEPGRAM_VOICES:
+            raise HTTPException(status_code=422, detail="deepgram_voice must be one of the Aura-2 voices (aura-2-thalia-en …)")
 
 
 class TTSKeyPayload(BaseModel):
@@ -584,40 +613,43 @@ class TTSKeyPayload(BaseModel):
 
 @router.get("/tts")
 async def get_tts():
-    """Current TTS config + API-key status. Never returns the key."""
+    """Current TTS config + key status per provider. Never returns keys."""
     import os as _os
     tts_cfg = config_store.read_section("tts") or {}
     return {
+        "provider": tts_cfg.get("provider") or "elevenlabs",
         "voice_id": tts_cfg.get("voice_id") or _os.getenv("LVI_TTS_VOICE_ID"),
         "model": tts_cfg.get("model") or "eleven_flash_v2_5",
-        "voice_source": "config" if tts_cfg.get("voice_id") else
-                        ("env" if _os.getenv("LVI_TTS_VOICE_ID") else "unset"),
-        "api_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
-        "note": "voice_id/model apply on next bot restart; api_key applies "
+        "deepgram_voice": tts_cfg.get("deepgram_voice") or "aura-2-thalia-en",
+        "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
+        "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
+        "note": "provider/voice/model apply on next bot restart; keys apply "
                 "on next bot restart (read at pipeline construction)",
     }
 
 
 @router.put("/tts", dependencies=GUARD)
 async def put_tts(payload: TTSPayload):
-    """Write voice_id + model to config.yaml (tts section). Applies on the
+    """Write provider + knobs to config.yaml (tts section). Applies on the
     next bot restart — same contract as every config edit."""
+    _validate_tts_payload(payload)
     current = dict(config_store.read_section("tts") or {})
-    current["voice_id"] = payload.voice_id
-    current["model"] = payload.model
+    current["provider"] = payload.provider
+    if payload.provider == "elevenlabs":
+        current["voice_id"] = payload.voice_id
+        current["model"] = payload.model
+    else:
+        current["deepgram_voice"] = payload.deepgram_voice
     try:
         config_store.write_section("tts", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    logger.info("dashboard: tts config saved (voice_id + model) — applies on next restart")
-    return {"ok": True, "voice_id": payload.voice_id, "model": payload.model}
+    logger.info(f"dashboard: tts config saved (provider={payload.provider}) — applies on next restart")
+    return {"ok": True, "provider": payload.provider}
 
 
-@router.put("/tts/key", dependencies=GUARD)
-async def put_tts_key(payload: TTSKeyPayload):
-    """Write the ElevenLabs API key to .env (appliance-side, gitignored).
-    Never echoes the key back; returns set/unset only. Applies on next bot
-    restart — the bot reads .env at pipeline construction."""
+async def _write_env_key(var: str, value: str) -> bool:
+    """Replace-or-append `var=value` in .env. Returns True if replaced."""
     import os as _os
     from pathlib import Path as _Path
     env_path = _Path(_os.getenv("LVI_ENV_FILE",
@@ -625,15 +657,30 @@ async def put_tts_key(payload: TTSKeyPayload):
     lines = env_path.read_text().splitlines() if env_path.is_file() else []
     out, replaced = [], False
     for ln in lines:
-        if ln.startswith("ELEVENLABS_API_KEY="):
-            out.append("ELEVENLABS_API_KEY=" + payload.api_key)
+        if ln.startswith(var + "="):
+            out.append(var + "=" + value)
             replaced = True
         else:
             out.append(ln)
     if not replaced:
-        out.append("ELEVENLABS_API_KEY=" + payload.api_key)
+        out.append(var + "=" + value)
     env_path.write_text("\n".join(out) + "\n")
+    return replaced
+
+
+@router.put("/tts/key/elevenlabs", dependencies=GUARD)
+async def put_tts_key_elevenlabs(payload: TTSKeyPayload):
+    """ElevenLabs API key → .env (appliance-side, gitignored, never echoed)."""
+    replaced = await _write_env_key("ELEVENLABS_API_KEY", payload.api_key)
     logger.info("dashboard: ELEVENLABS_API_KEY written to .env (value never logged)")
+    return {"ok": True, "api_key_set": True, "replaced": replaced}
+
+
+@router.put("/tts/key/deepgram", dependencies=GUARD)
+async def put_tts_key_deepgram(payload: TTSKeyPayload):
+    """Deepgram API key → .env (appliance-side, gitignored, never echoed)."""
+    replaced = await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
+    logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True, "replaced": replaced}
 
 

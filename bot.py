@@ -45,6 +45,12 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.runner.utils import create_transport
 from pipecat.runner.types import RunnerArguments
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+try:
+    from pipecat.services.deepgram.tts import DeepgramTTSService
+    _HAS_DEEPGRAM_TTS = True
+except ImportError:  # older pipecat without the Deepgram TTS service
+    DeepgramTTSService = None
+    _HAS_DEEPGRAM_TTS = False
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
@@ -58,21 +64,41 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
-    # TTS: ElevenLabs. Config precedence per house law: voice_id now lives
-    # in config.yaml (dashboard-editable, the owner's ask 2026-10-04 19:24) with
-    # the legacy LVI_TTS_VOICE_ID env as fallback; model in config.yaml;
-    # api_key stays env-side forever (secrets never ride config.yaml —
-    # the .env is gitignored, config.yaml is not).
-    tts = ElevenLabsTTSService(
-        api_key=os.environ["ELEVENLABS_API_KEY"],
-        voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
-        # Code default = the measured-good model. Do NOT default to eleven_v3:
-        # the websocket handshake rejects v3 with HTTP 400 (config.yaml:32-34,
-        # commit fb0cf94). A config.yaml without tts.model — the fresh-clone
-        # state — must land on a model that actually speaks.
-        model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
-    )
-    logger.info("tts backend: elevenlabs")
+    # TTS provider dispatch (the owner's ask 2026-10-04 19:41): tts.provider
+    # selects the engine; each provider's knobs live under its own config
+    # key. ElevenLabs stays the default (a config without tts.provider —
+    # the fresh-clone state — must land on a provider that speaks).
+    tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
+    if tts_provider == "deepgram":
+        if DeepgramTTSService is None:
+            raise RuntimeError("tts.provider=deepgram but this pipecat has no "
+                               "pipecat.services.deepgram.tts — upgrade pipecat "
+                               "or set tts.provider: elevenlabs")
+        # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
+        # Verified against developers.deepgram.com/docs/tts-models. Key is
+        # env-side forever (secrets never ride config.yaml).
+        tts = DeepgramTTSService(
+            api_key=os.environ["DEEPGRAM_API_KEY"],
+            voice=cfg_env("tts", "deepgram_voice", "LVI_TTS_VOICE",
+                          "aura-2-thalia-en"),
+        )
+        logger.info("tts backend: deepgram (aura-2)")
+    else:
+        # ElevenLabs. Config precedence per house law: voice_id lives in
+        # config.yaml (dashboard-editable) with the legacy LVI_TTS_VOICE_ID
+        # env as fallback; model in config.yaml; api_key stays env-side
+        # forever (secrets never ride config.yaml — the .env is gitignored,
+        # config.yaml is not).
+        tts = ElevenLabsTTSService(
+            api_key=os.environ["ELEVENLABS_API_KEY"],
+            voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
+            # Code default = the measured-good model. Do NOT default to eleven_v3:
+            # the websocket handshake rejects v3 with HTTP 400 (config.yaml:32-34,
+            # commit fb0cf94). A config.yaml without tts.model — the fresh-clone
+            # state — must land on a model that actually speaks.
+            model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
+        )
+        logger.info("tts backend: elevenlabs")
     gate = EchoGate()
     # Multi-node fix (Opus review H1): EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global

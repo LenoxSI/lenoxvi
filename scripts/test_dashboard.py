@@ -189,26 +189,43 @@ def main():
 
     # 9. TTS settings panel (Settings tab — config-editable arc)
     r = client.get("/api/dashboard/tts")
-    ok = r.status_code == 200 and "voice_id" in r.json() and "api_key_set" in r.json()
-    check("TTS GET returns config + key status", ok, f"status={r.status_code}")
+    ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_set" in r.json()
+    check("TTS GET returns provider config + key status", ok, f"status={r.status_code}")
     if ok:
         t = r.json()
-        check("TTS GET never leaks the key value",
+        check("TTS GET never leaks key values",
               "api_key" not in t and not any("sk_" in str(v) for v in t.values()),
               f"keys={list(t)}")
     r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_v2"})
-    check("TTS PUT (voice+model) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
+    check("TTS PUT (elevenlabs) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
     t = client.get("/api/dashboard/tts").json()
-    check("TTS round-trip: voice_id + model persisted",
+    check("TTS round-trip: elevenlabs voice_id + model persisted",
           t.get("voice_id") == "AbC123xyZw9876543210" and t.get("model") == "eleven_v2",
           f"t={t}")
     r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram", "deepgram_voice": "aura-2-zeus-en"})
+    check("TTS PUT (deepgram) ok", r.status_code == 200, f"status={r.status_code}")
+    t = client.get("/api/dashboard/tts").json()
+    check("TTS round-trip: deepgram voice persisted",
+          t.get("provider") == "deepgram" and t.get("deepgram_voice") == "aura-2-zeus-en",
+          f"t={t}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram", "deepgram_voice": "aura-2-nonexistent-en"})
+    check("TTS PUT rejects unknown Aura-2 voice", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_v3"})
     check("TTS PUT rejects eleven_v3 (the HTTP-400 model)",
           r.status_code == 422, f"status={r.status_code}")
-    r = client.put("/api/dashboard/tts", json={"voice_id": "short", "model": "eleven_v2"})
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "short", "model": "eleven_v2"})
     check("TTS PUT rejects too-short voice_id", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "deepgram_voice": "aura-2-zeus-en"})
+    check("TTS PUT elevenlabs-without-voice_id rejected (422)",
+          r.status_code == 422, f"status={r.status_code}")
 
     # 10. REAL soco discovery on the LAN (best effort — players may nap)
     r = client.post("/api/dashboard/zones/discover")
