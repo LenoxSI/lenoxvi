@@ -151,7 +151,7 @@ def main():
 
     # 5. config write round-trip on throwaway file
     before_text = cfg_test.read_text()
-    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Sonos Port"}})
+    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Dining Room"}})
     check("mapping PUT ok", r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
     after_text = cfg_test.read_text()
     check("config write changed the file", after_text != before_text)
@@ -159,7 +159,7 @@ def main():
           "# lenoxvi config" in after_text or "THE tuning surface" in after_text,
           )
     m = client.get("/api/dashboard/mapping").json()
-    check("mapping read-back after write", m["room_zones"] == {"bedroom": "Sonos Port"},
+    check("mapping read-back after write", m["room_zones"] == {"bedroom": "Dining Room"},
           f"m={m['room_zones']}")
     check("backup file created", (SCRATCH / "config.backup.yaml").is_file())
 
@@ -178,7 +178,7 @@ def main():
     # 8. REAL Sonos test clip on the REAL zone
     real_zones = m["zones"]
     # use the REAL configured zone (from the live config), not test_zone
-    real = [z for z in ("Sonos Port",) if z in real_zones]
+    real = [z for z in ("Dining Room", "Living Room") if z in real_zones]
     if real:
         r = client.post(f"/api/dashboard/zones/{real[0]}/test")
         ok = r.status_code == 200
@@ -198,11 +198,11 @@ def main():
 
     # 12. H5 guard: cross-origin mutation rejected, non-browser passes
     r = client.put("/api/dashboard/mapping",
-                   json={"room_zones": {"bedroom": "Sonos Port"}},
+                   json={"room_zones": {"bedroom": "Dining Room"}},
                    headers={"Origin": "https://evil.example"})
     check("guard: cross-origin mutation 403", r.status_code == 403, f"status={r.status_code}")
     r = client.put("/api/dashboard/mapping",
-                   json={"room_zones": {"bedroom": "Sonos Port"}})
+                   json={"room_zones": {"bedroom": "Dining Room"}})
     check("guard: no-Origin (curl) mutation passes", r.status_code == 200, f"status={r.status_code}")
     r = client.get("/api/dashboard/status", headers={"Origin": "https://evil.example"})
     check("guard: cross-origin READ stays open", r.status_code == 200, f"status={r.status_code}")
@@ -211,10 +211,10 @@ def main():
     os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
     try:
         r = client.put("/api/dashboard/mapping",
-                       json={"room_zones": {"bedroom": "Sonos Port"}})
+                       json={"room_zones": {"bedroom": "Dining Room"}})
         check("guard: token mode, bare mutation 401", r.status_code == 401, f"status={r.status_code}")
         r = client.put("/api/dashboard/mapping",
-                       json={"room_zones": {"bedroom": "Sonos Port"}},
+                       json={"room_zones": {"bedroom": "Dining Room"}},
                        headers={"X-Dashboard-Token": "rig-secret"})
         check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
     finally:
