@@ -94,6 +94,25 @@ WiiM zones play as main media — music stops while she talks (tested on Pro).</
 </div><!-- /pane-zones -->
 
 <div id="pane-settings" class="tabpane hidden">
+<h2>TTS — ElevenLabs</h2>
+<p class="sub">Voice ID and model save to config.yaml; the API key goes to
+.env on the appliance (never displayed back). All apply on the next bot
+restart.</p>
+<div id="tts-msg"></div>
+<form class="inline" id="form-tts">
+  <label>API key <input type="password" id="tts-key" placeholder="paste key — set ✓ appears when saved" size="34" autocomplete="off"></label>
+  <span id="tts-key-state" class="muted"></span>
+  <button id="btn-tts-key">Save key</button>
+</form>
+<form class="inline" id="form-tts-cfg">
+  <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
+  <label>Model <select id="tts-model">
+    <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
+    <option value="eleven_v2">eleven_v2</option>
+  </select></label>
+  <button>Save</button>
+</form>
+
 <h2>Firmware</h2>
 <p class="sub">Push a firmware .bin — its version is read from the image
 itself; nodes pick it up over OTA on their next boot.</p>
@@ -389,6 +408,47 @@ document.querySelectorAll("#tabs button").forEach((b) => {
   });
 });
 
+// ── TTS panel (Settings) ──────────────────────────────────────
+async function loadTTS() {
+  try {
+    const t = await api("/api/dashboard/tts");
+    $("#tts-voice").value = t.voice_id || "";
+    $("#tts-model").value = t.model || "eleven_flash_v2_5";
+    $("#tts-key-state").textContent = t.api_key_set ? "key set ✓" : "no key";
+    $("#tts-key-state").className = t.api_key_set ? "ok" : "muted";
+  } catch (e) { msg($("#tts-msg"), "TTS load failed: " + e.message, "err"); }
+}
+
+$("#btn-tts-key").addEventListener("click", async () => {
+  const k = $("#tts-key").value.trim();
+  if (!k) { msg($("#tts-msg"), "Paste a key first.", "err"); return; }
+  try {
+    await api("/api/dashboard/tts/key", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({api_key: k}),
+    });
+    $("#tts-key").value = "";
+    await loadTTS();
+    msg($("#tts-msg"), "API key saved to .env — applies on next bot restart.", "ok");
+  } catch (e) { msg($("#tts-msg"), "Key save failed: " + e.message, "err"); }
+});
+
+$("#form-tts-cfg").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const v = $("#tts-voice").value.trim();
+  if (!v) { msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return; }
+  try {
+    await api("/api/dashboard/tts", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({voice_id: v, model: $("#tts-model").value}),
+    });
+    await loadTTS();
+    msg($("#tts-msg"), "Voice ID + model saved to config.yaml — applies on next bot restart.", "ok");
+  } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
+});
+
 $("#btn-discover").addEventListener("click", async () => {
   const b = $("#btn-discover");
   b.disabled = true; msg($("#discover-msg"), "Scanning LAN (a few seconds)…");
@@ -461,7 +521,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 
-loadStatus(); loadMapping(); loadNodes(); loadZones();
+loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS();
 setInterval(loadStatus, 5000);
 setInterval(loadNodes, 5000);
 </script>

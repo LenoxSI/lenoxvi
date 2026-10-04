@@ -58,10 +58,14 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
-    # TTS: ElevenLabs (api key + voice_id in .env; model in config.yaml).
+    # TTS: ElevenLabs. Config precedence per house law: voice_id now lives
+    # in config.yaml (dashboard-editable, the owner's ask 2026-10-04 19:24) with
+    # the legacy LVI_TTS_VOICE_ID env as fallback; model in config.yaml;
+    # api_key stays env-side forever (secrets never ride config.yaml —
+    # the .env is gitignored, config.yaml is not).
     tts = ElevenLabsTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],
-        voice_id=os.getenv("LVI_TTS_VOICE_ID"),
+        voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
         # Code default = the measured-good model. Do NOT default to eleven_v3:
         # the websocket handshake rejects v3 with HTTP 400 (config.yaml:32-34,
         # commit fb0cf94). A config.yaml without tts.model — the fresh-clone

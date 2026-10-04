@@ -566,8 +566,78 @@ async def set_session_mode(room: str, payload: SessionModePayload):
     return {"ok": True, "room": room, "mode": payload.mode, "before": before}
 
 
-# ── firmware push (operator side of firmware_server.py) ─────────────
+# ── TTS settings (Settings tab — the config-editable arc's first panel) ──
 
+# The ElevenLabs API key NEVER rides config.yaml (it ships in the public
+# repo) and NEVER appears in any API response — .env only, on the appliance
+# only. The dashboard writes it via the key route and shows set/unset.
+
+
+class TTSPayload(BaseModel):
+    voice_id: str = Field(min_length=8, max_length=64)
+    model: str = Field(pattern="^eleven_(flash_v2_5|v2)$")
+
+
+class TTSKeyPayload(BaseModel):
+    api_key: str = Field(min_length=8, max_length=256)
+
+
+@router.get("/tts")
+async def get_tts():
+    """Current TTS config + API-key status. Never returns the key."""
+    import os as _os
+    tts_cfg = config_store.read_section("tts") or {}
+    return {
+        "voice_id": tts_cfg.get("voice_id") or _os.getenv("LVI_TTS_VOICE_ID"),
+        "model": tts_cfg.get("model") or "eleven_flash_v2_5",
+        "voice_source": "config" if tts_cfg.get("voice_id") else
+                        ("env" if _os.getenv("LVI_TTS_VOICE_ID") else "unset"),
+        "api_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
+        "note": "voice_id/model apply on next bot restart; api_key applies "
+                "on next bot restart (read at pipeline construction)",
+    }
+
+
+@router.put("/tts", dependencies=GUARD)
+async def put_tts(payload: TTSPayload):
+    """Write voice_id + model to config.yaml (tts section). Applies on the
+    next bot restart — same contract as every config edit."""
+    current = dict(config_store.read_section("tts") or {})
+    current["voice_id"] = payload.voice_id
+    current["model"] = payload.model
+    try:
+        config_store.write_section("tts", current)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    logger.info("dashboard: tts config saved (voice_id + model) — applies on next restart")
+    return {"ok": True, "voice_id": payload.voice_id, "model": payload.model}
+
+
+@router.put("/tts/key", dependencies=GUARD)
+async def put_tts_key(payload: TTSKeyPayload):
+    """Write the ElevenLabs API key to .env (appliance-side, gitignored).
+    Never echoes the key back; returns set/unset only. Applies on next bot
+    restart — the bot reads .env at pipeline construction."""
+    import os as _os
+    from pathlib import Path as _Path
+    env_path = _Path(_os.getenv("LVI_ENV_FILE",
+                                _Path(__file__).resolve().parent.parent.parent / ".env"))
+    lines = env_path.read_text().splitlines() if env_path.is_file() else []
+    out, replaced = [], False
+    for ln in lines:
+        if ln.startswith("ELEVENLABS_API_KEY="):
+            out.append("ELEVENLABS_API_KEY=" + payload.api_key)
+            replaced = True
+        else:
+            out.append(ln)
+    if not replaced:
+        out.append("ELEVENLABS_API_KEY=" + payload.api_key)
+    env_path.write_text("\n".join(out) + "\n")
+    logger.info("dashboard: ELEVENLABS_API_KEY written to .env (value never logged)")
+    return {"ok": True, "api_key_set": True, "replaced": replaced}
+
+
+# ── firmware push (operator side of firmware_server.py) ─────────────
 
 @router.post("/firmware/upload", dependencies=GUARD)
 async def upload_firmware(file: UploadFile = File(...)):
