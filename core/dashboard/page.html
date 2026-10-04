@@ -102,7 +102,8 @@ restart.</p>
 <form class="inline" id="form-tts-cfg">
   <label>Provider <select id="tts-provider">
     <option value="elevenlabs">ElevenLabs</option>
-    <option value="deepgram">Deepgram (Aura-2)</option>
+    <option value="deepgram-flux">Deepgram Flux</option>
+    <option value="deepgram">Deepgram Aura-2</option>
   </select></label>
   <span id="tts-eleven-fields">
     <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
@@ -112,7 +113,10 @@ restart.</p>
     </select></label>
   </span>
   <span id="tts-deepgram-fields" style="display:none">
-    <label>Voice <select id="tts-dg-voice"></select></label>
+    <label>Aura-2 voice <select id="tts-dg-voice"></select></label>
+  </span>
+  <span id="tts-flux-fields" style="display:none">
+    <label>Flux voice <select id="tts-flux-voice"></select></label>
   </span>
   <button>Save</button>
 </form>
@@ -429,20 +433,31 @@ const DG_VOICES = ["aura-2-thalia-en","aura-2-andromeda-en","aura-2-helena-en",
   "aura-2-orpheus-en","aura-2-pandora-en","aura-2-phoebe-en","aura-2-pluto-en",
   "aura-2-saturn-en","aura-2-selene-en","aura-2-theia-en","aura-2-vesta-en",
   "aura-2-zeus-en"];
+const FLUX_VOICES = ["flux-hannah-en","flux-kit-en","flux-alexis-en","flux-cliff-en",
+  "flux-sienna-en","flux-cole-en","flux-brooke-en","flux-colin-en",
+  "flux-gemma-en","flux-haley-en","flux-heather-en","flux-miles-en",
+  "flux-sean-en","flux-bree-en","flux-brittany-en","flux-bruce-en",
+  "flux-conor-en","flux-donovan-en","flux-drew-en","flux-elise-en",
+  "flux-jack-en","flux-kai-en","flux-kelsey-en","flux-maeve-en",
+  "flux-marcelo-en","flux-marcus-en","flux-meena-en","flux-meghan-en",
+  "flux-naveen-en","flux-paige-en","flux-priya-en","flux-rufus-en",
+  "flux-sharon-en","flux-tanner-en","flux-wade-en","flux-wes-en"];
 
 function ttsFlipFields() {
   const p = $("#tts-provider").value;
   $("#tts-eleven-fields").style.display = p === "elevenlabs" ? "" : "none";
   $("#tts-deepgram-fields").style.display = p === "deepgram" ? "" : "none";
-  $("#tts-key").placeholder = p === "deepgram"
-    ? "paste Deepgram key" : "paste ElevenLabs key";
+  $("#tts-flux-fields").style.display = p === "deepgram-flux" ? "" : "none";
+  $("#tts-key").placeholder = p === "elevenlabs"
+    ? "paste ElevenLabs key"
+    : "paste Deepgram key (Flux and Aura-2 share it)";
   const ks = $("#tts-key-state");
-  if (p === "deepgram") {
-    ks.textContent = TTS_KEYS.deepgram ? "key set ✓" : "no key";
-    ks.className = TTS_KEYS.deepgram ? "ok" : "muted";
-  } else {
+  if (p === "elevenlabs") {
     ks.textContent = TTS_KEYS.elevenlabs ? "key set ✓" : "no key";
     ks.className = TTS_KEYS.elevenlabs ? "ok" : "muted";
+  } else {
+    ks.textContent = TTS_KEYS.deepgram ? "key set ✓" : "no key";
+    ks.className = TTS_KEYS.deepgram ? "ok" : "muted";
   }
 }
 
@@ -460,6 +475,11 @@ async function loadTTS() {
       dg.innerHTML = DG_VOICES.map(v => `<option value="${v}">${v}</option>`).join("");
     }
     dg.value = t.deepgram_voice || "aura-2-thalia-en";
+    const fx = $("#tts-flux-voice");
+    if (!fx.options.length) {
+      fx.innerHTML = FLUX_VOICES.map(v => `<option value="${v}">${v}</option>`).join("");
+    }
+    fx.value = t.deepgram_flux_voice || "flux-hannah-en";
     ttsFlipFields();
   } catch (e) { msg($("#tts-msg"), "TTS load failed: " + e.message, "err"); }
 }
@@ -471,14 +491,14 @@ $("#btn-tts-key").addEventListener("click", async () => {
   if (!k) { msg($("#tts-msg"), "Paste a key first.", "err"); return; }
   const p = $("#tts-provider").value;
   try {
-    await api(`/api/dashboard/tts/key/${p}`, {
+    await api(`/api/dashboard/tts/key/${p === "deepgram-flux" ? "deepgram" : p}`, {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({api_key: k}),
     });
     $("#tts-key").value = "";
     await loadTTS();
-    msg($("#tts-msg"), `${p === "deepgram" ? "Deepgram" : "ElevenLabs"} key saved to .env — applies on next bot restart.`, "ok");
+    msg($("#tts-msg"), `${p === "elevenlabs" ? "ElevenLabs" : "Deepgram"} key saved to .env — applies on next bot restart.`, "ok");
   } catch (e) { msg($("#tts-msg"), "Key save failed: " + e.message, "err"); }
 });
 
@@ -487,6 +507,8 @@ $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   const p = $("#tts-provider").value;
   const body = p === "deepgram"
     ? {provider: p, deepgram_voice: $("#tts-dg-voice").value}
+    : p === "deepgram-flux"
+    ? {provider: p, deepgram_flux_voice: $("#tts-flux-voice").value}
     : {provider: p, voice_id: $("#tts-voice").value.trim(), model: $("#tts-model").value};
   if (p === "elevenlabs" && !body.voice_id) {
     msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return;

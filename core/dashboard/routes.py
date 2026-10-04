@@ -590,21 +590,40 @@ _DEEPGRAM_VOICES = (
     "aura-2-zeus-en",
 )
 
+# Flux voices (developers.deepgram.com/docs/flux-tts/voices — 36-voice
+# catalog; format flux-<name>-en; same DEEPGRAM_API_KEY as Aura)
+_DEEPGRAM_FLUX_VOICES = (
+    "flux-hannah-en", "flux-kit-en", "flux-alexis-en", "flux-cliff-en",
+    "flux-sienna-en", "flux-cole-en", "flux-brooke-en", "flux-colin-en",
+    "flux-gemma-en", "flux-haley-en", "flux-heather-en", "flux-miles-en",
+    "flux-sean-en", "flux-bree-en", "flux-brittany-en", "flux-bruce-en",
+    "flux-conor-en", "flux-donovan-en", "flux-drew-en", "flux-elise-en",
+    "flux-jack-en", "flux-kai-en", "flux-kelsey-en", "flux-maeve-en",
+    "flux-marcelo-en", "flux-marcus-en", "flux-meena-en", "flux-meghan-en",
+    "flux-naveen-en", "flux-paige-en", "flux-priya-en", "flux-rufus-en",
+    "flux-sharon-en", "flux-tanner-en", "flux-wade-en", "flux-wes-en",
+)
+
 
 class TTSPayload(BaseModel):
-    provider: str = Field(default="elevenlabs", pattern="^(elevenlabs|deepgram)$")
+    provider: str = Field(default="elevenlabs",
+                          pattern="^(elevenlabs|deepgram|deepgram-flux)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
     model: str | None = Field(default=None, pattern="^eleven_(flash_v2_5|v2)$")
     deepgram_voice: str | None = Field(default=None)
+    deepgram_flux_voice: str | None = Field(default=None)
 
 
 def _validate_tts_payload(p: TTSPayload) -> None:
     if p.provider == "elevenlabs":
         if not p.voice_id or not p.model:
             raise HTTPException(status_code=422, detail="elevenlabs needs voice_id and model")
-    else:
+    elif p.provider == "deepgram":
         if not p.deepgram_voice or p.deepgram_voice not in _DEEPGRAM_VOICES:
             raise HTTPException(status_code=422, detail="deepgram_voice must be one of the Aura-2 voices (aura-2-thalia-en …)")
+    elif p.provider == "deepgram-flux":
+        if not p.deepgram_flux_voice or p.deepgram_flux_voice not in _DEEPGRAM_FLUX_VOICES:
+            raise HTTPException(status_code=422, detail="deepgram_flux_voice must be one of the Flux voices (flux-hannah-en …)")
 
 
 class TTSKeyPayload(BaseModel):
@@ -621,6 +640,7 @@ async def get_tts():
         "voice_id": tts_cfg.get("voice_id") or _os.getenv("LVI_TTS_VOICE_ID"),
         "model": tts_cfg.get("model") or "eleven_flash_v2_5",
         "deepgram_voice": tts_cfg.get("deepgram_voice") or "aura-2-thalia-en",
+        "deepgram_flux_voice": tts_cfg.get("deepgram_flux_voice") or "flux-hannah-en",
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         "note": "provider/voice/model apply on next bot restart; keys apply "
@@ -638,8 +658,10 @@ async def put_tts(payload: TTSPayload):
     if payload.provider == "elevenlabs":
         current["voice_id"] = payload.voice_id
         current["model"] = payload.model
-    else:
+    elif payload.provider == "deepgram":
         current["deepgram_voice"] = payload.deepgram_voice
+    else:
+        current["deepgram_flux_voice"] = payload.deepgram_flux_voice
     try:
         config_store.write_section("tts", current)
     except FileNotFoundError as e:

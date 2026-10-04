@@ -212,6 +212,16 @@ def main():
           t.get("provider") == "deepgram" and t.get("deepgram_voice") == "aura-2-zeus-en",
           f"t={t}")
     r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en"})
+    check("TTS PUT (deepgram-flux) ok", r.status_code == 200, f"status={r.status_code}")
+    t = client.get("/api/dashboard/tts").json()
+    check("TTS round-trip: flux voice persisted",
+          t.get("provider") == "deepgram-flux" and t.get("deepgram_flux_voice") == "flux-hannah-en",
+          f"t={t}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-notarealvoice-en"})
+    check("TTS PUT rejects unknown Flux voice", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram", "deepgram_voice": "aura-2-nonexistent-en"})
     check("TTS PUT rejects unknown Aura-2 voice", r.status_code == 422, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={

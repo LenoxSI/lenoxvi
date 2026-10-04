@@ -47,10 +47,12 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 try:
     from pipecat.services.deepgram.tts import DeepgramTTSService
-    _HAS_DEEPGRAM_TTS = True
-except ImportError:  # older pipecat without the Deepgram TTS service
+    from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
+    _DEEPGRAM_OK = True
+except ImportError:  # older pipecat without the Deepgram services
     DeepgramTTSService = None
-    _HAS_DEEPGRAM_TTS = False
+    DeepgramFluxTTSService = None
+    _DEEPGRAM_OK = False
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
@@ -70,19 +72,38 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # the fresh-clone state — must land on a provider that speaks).
     tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
     if tts_provider == "deepgram":
+        # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
+        # Verified against developers.deepgram.com/docs/tts-models. Key is
+        # env-side forever (secrets never ride config.yaml).
         if DeepgramTTSService is None:
             raise RuntimeError("tts.provider=deepgram but this pipecat has no "
                                "pipecat.services.deepgram.tts — upgrade pipecat "
                                "or set tts.provider: elevenlabs")
-        # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
-        # Verified against developers.deepgram.com/docs/tts-models. Key is
-        # env-side forever (secrets never ride config.yaml).
         tts = DeepgramTTSService(
             api_key=os.environ["DEEPGRAM_API_KEY"],
             voice=cfg_env("tts", "deepgram_voice", "LVI_TTS_VOICE",
                           "aura-2-thalia-en"),
         )
-        logger.info("tts backend: deepgram (aura-2)")
+        logger.info("tts backend: deepgram aura-2")
+    elif tts_provider == "deepgram-flux":
+        # Deepgram Flux (the owner's pick 2026-10-04: "i want flux, ill never use
+        # aura and the voice quality is lame") — the voice-agent-first
+        # surface: conversation-aware, cross-turn voice consistency, /v2/speak
+        # streaming. Same DEEPGRAM_API_KEY as Aura (one account, two model
+        # families). Voice format flux-<name>-en; catalog at
+        # developers.deepgram.com/docs/flux-tts/voices.
+        if DeepgramFluxTTSService is None:
+            raise RuntimeError("tts.provider=deepgram-flux but this pipecat "
+                               "has no pipecat.services.deepgram.flux.tts — "
+                               "upgrade pipecat or set tts.provider: elevenlabs")
+        tts = DeepgramFluxTTSService(
+            api_key=os.environ["DEEPGRAM_API_KEY"],
+            settings=DeepgramFluxTTSService.Settings(
+                voice=cfg_env("tts", "deepgram_flux_voice", "LVI_TTS_FLUX_VOICE",
+                              "flux-hannah-en"),
+            ),
+        )
+        logger.info("tts backend: deepgram flux")
     else:
         # ElevenLabs. Config precedence per house law: voice_id lives in
         # config.yaml (dashboard-editable) with the legacy LVI_TTS_VOICE_ID
