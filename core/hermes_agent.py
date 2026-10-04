@@ -277,6 +277,16 @@ class HermesAgent(FrameProcessor):
             headers={
                 "Authorization": f"Bearer {self._key}",
                 "Content-Type": "application/json",
+                # X-Hermes-Session-Key (2026-10-04): the api_server keys
+                # dashboard-visible session continuity on THIS header, not
+                # the body's `conversation` field — the label in the body
+                # alone left voice sessions invisible in the Hermes admin
+                # dash (the owner's audit need). With the header, sticky rooms
+                # merge into ONE long-lived dashboard session per room and
+                # fresh pipelines get one session per connection — both
+                # visible and auditable. Requires API_SERVER_KEY on the
+                # brain (present on this install).
+                "X-Hermes-Session-Key": self._conversation,
             },
         )
         with urllib.request.urlopen(req, timeout=120) as r:
