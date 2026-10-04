@@ -57,8 +57,8 @@ their node has connected at least once (firmware reports its room on connect).</
 <div id="node-msg"></div>
 
 <h2>Zones</h2>
-<p class="sub">Sonos S2 Port/Amp only for the audioClip path (tested); other models are
-your own experiment.</p>
+<p class="sub">Sonos zones use the audioClip overlay (tested on S2 Port/Amp);
+WiiM zones play as main media — music stops while she talks (tested on Pro).</p>
 <button id="btn-discover">Discover Sonos on LAN</button>
 <select id="disc-pick" style="display:none"></select>
 <span id="discover-msg" class="muted"></span>
@@ -364,10 +364,14 @@ $("#btn-discover").addEventListener("click", async () => {
     const r = await api("/api/dashboard/zones/discover", { method: "POST" });
     const pick = $("#disc-pick");
     const fill = f => {
-      // Prefill the Add-zone form from a discovered player.
-      $("#z-name").value = f.name.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
+      // Prefill the Add-zone form from a discovered player. Native name
+      // VERBATIM (2026-10-04 ruling: keys match the player's real name) —
+      // the old lowercase/underscore mangling here is what created the
+      // 'living_room' fossil in the first place.
+      $("#z-name").value = f.name;
       $("#z-ip").value = f.ip;
       $("#z-uid").value = f.uid;
+      $("#z-backend").value = "sonos";
     };
     if (r.found.length > 1) {
       // Multi-player households: the OLD code overwrote the form once per
