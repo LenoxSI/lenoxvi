@@ -31,6 +31,18 @@
   #statusbar { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px;
                background: #f2f2f7; border-radius: 8px; padding: 10px 14px; }
   #statusbar b { font-weight: 600; }
+  /* Tabs (2026-10-04): Zones holds everything operational; Settings gets
+     firmware now, brain/TTS/pipecat panels later (notes TODO). Tab state
+     is not persisted — the dashboard is an ops surface, always opens on
+     Zones where the live rig lives. */
+  #tabs { display: flex; gap: 4px; margin: 22px 0 0; border-bottom: 1px solid #d8d8dc; }
+  #tabs button { all: unset; cursor: pointer; padding: 8px 16px; font-size: 15px;
+                 color: #6b6b70; border-radius: 8px 8px 0 0; }
+  #tabs button:hover { color: #1c1c1e; background: #f2f2f7; }
+  #tabs button.active { color: #1c1c1e; font-weight: 600;
+                        border-bottom: 2px solid #1c1c1e; margin-bottom: -1px; }
+  .tabpane { margin-top: 0; }
+  .tabpane.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -40,6 +52,12 @@ Config edits save to config.yaml and apply on the next bot restart.</p>
 
 <div id="statusbar">Loading…</div>
 
+<div id="tabs">
+  <button type="button" data-tab="zones" class="active">Zones</button>
+  <button type="button" data-tab="settings">Settings</button>
+</div>
+
+<div id="pane-zones" class="tabpane">
 <h2>Room &rarr; zone mapping</h2>
 <p class="sub" id="mapping-help">Pick a Sonos zone for each mic room. Rooms appear here once
 their node has connected at least once (firmware reports its room on connect).</p>
@@ -73,7 +91,9 @@ WiiM zones play as main media — music stops while she talks (tested on Pro).</
   <select id="z-backend"><option value="sonos">Sonos (overlay)</option><option value="wiim">WiiM (interrupt)</option></select>
   <button>Add zone</button>
 </form>
+</div><!-- /pane-zones -->
 
+<div id="pane-settings" class="tabpane hidden">
 <h2>Firmware</h2>
 <p class="sub">Push a firmware .bin — its version is read from the image
 itself; nodes pick it up over OTA on their next boot.</p>
@@ -82,6 +102,7 @@ itself; nodes pick it up over OTA on their next boot.</p>
   <button>Push firmware</button>
 </form>
 <div id="fw-msg"></div>
+</div><!-- /pane-settings -->
 
 <script>
 "use strict";
@@ -356,6 +377,16 @@ async function loadZones() {
     renderZones();
   } catch (e) { msg($("#zone-msg"), "Zones load failed: " + e.message, "err"); }
 }
+
+// ── tabs ──────────────────────────────────────────────────────
+document.querySelectorAll("#tabs button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#tabs button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    document.querySelectorAll(".tabpane").forEach((p) => p.classList.add("hidden"));
+    $("#pane-" + b.dataset.tab).classList.remove("hidden");
+  });
+});
 
 $("#btn-discover").addEventListener("click", async () => {
   const b = $("#btn-discover");
