@@ -277,11 +277,18 @@ async def add_zone(payload: ZonePayload):
         raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
     if payload.backend == "wiim":
         # WiiM zones need no player_uid (HTTP API is UID-less) — but the
-        # form still sends one; accept and ignore it.
+        # form still sends one; accept and ignore it. Adding a zone to a
+        # backend IMPLIES enabling it: the 2026-10-04 bedroom test went
+        # silent because the wiim section was written without
+        # enabled: true and WiiMOutput constructed disabled (replies
+        # dropped before ever reaching the network).
         zones = _wiim_zones()
         zones[name] = {"ip": payload.ip.strip()}
+        merged = {**_wiim_cfg(), "enabled": True, "zones": zones}
+        if not merged.get("default_zone"):
+            merged["default_zone"] = name
         try:
-            config_store.write_section("wiim", {**_wiim_cfg(), "zones": zones})
+            config_store.write_section("wiim", merged)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
     else:
