@@ -60,6 +60,7 @@ their node has connected at least once (firmware reports its room on connect).</
 <p class="sub">Sonos S2 Port/Amp only for the audioClip path (tested); other models are
 your own experiment.</p>
 <button id="btn-discover">Discover Sonos on LAN</button>
+<select id="disc-pick" style="display:none"></select>
 <span id="discover-msg" class="muted"></span>
 <table id="zones"><thead><tr>
   <th>Name</th><th>IP</th><th>Player UID</th><th>Test</th><th></th>
@@ -335,17 +336,33 @@ $("#btn-discover").addEventListener("click", async () => {
   b.disabled = true; msg($("#discover-msg"), "Scanning LAN (a few seconds)…");
   try {
     const r = await api("/api/dashboard/zones/discover", { method: "POST" });
-    msg($("#discover-msg"), r.found.length
-      ? `${r.found.length} player(s) found — add the ones you want below.`
-      : "No players found on the LAN.");
-    r.found.forEach(f => {
+    const pick = $("#disc-pick");
+    const fill = f => {
+      // Prefill the Add-zone form from a discovered player.
       $("#z-name").value = f.name.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
       $("#z-ip").value = f.ip;
       $("#z-uid").value = f.uid;
-    });
-    if (r.found.length === 1) {
+    };
+    if (r.found.length > 1) {
+      // Multi-player households: the OLD code overwrote the form once per
+      // device, so the alphabetically-last player silently won — the user
+      // got the Port's UID in the form while trying to add the Amp
+      // (2026-10-03). A picker makes the choice explicit; selecting fills.
+      pick.innerHTML = r.found.map((f, i) =>
+        `<option value="${i}">${esc(f.name)} (${esc(f.model || "?")}${f.supported ? "" : " — untested model"}) — ${esc(f.ip)}</option>`).join("");
+      pick.style.display = "";
+      pick.onchange = () => fill(r.found[+pick.value]);
+      fill(r.found[0]);  // first device pre-selected (Living Room sorts first)
+      msg($("#discover-msg"),
+          `${r.found.length} players found — pick one, review the fields, then Add zone.`);
+    } else if (r.found.length === 1) {
+      pick.style.display = "none";
+      fill(r.found[0]);
       // single-player households: prefill, let the human confirm
       msg($("#discover-msg"), "1 player found and prefilled — check the fields, then Add zone.");
+    } else {
+      pick.style.display = "none";
+      msg($("#discover-msg"), "No players found on the LAN.");
     }
   } catch (e) { msg($("#discover-msg"), "Discovery failed: " + e.message, "err"); }
   b.disabled = false;
