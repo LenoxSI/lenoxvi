@@ -358,6 +358,62 @@ def main():
     check("clip server url_for works (quotes filenames)",
           _url.endswith("/probe.mp3") and _url.startswith("http://"), f"url={_url}")
 
+    # 9b4. Reply-time backend dispatch regression (Opus finding #6; the
+    # 2026-10-04 23:22 bedroom outage): bot.py must wire BOTH output
+    # backends into the pipeline UNCONDITIONALLY. The old build-time
+    # ternary picked one backend before the offer tee correlated the
+    # room, so a WiiM room could land on a Sonos-only pipeline and every
+    # reply died in a skip warning. Dispatch happens at SPEECH time:
+    # whichever backend owns the reply zone plays; the other must skip
+    # gracefully (warning + return, no network, no play).
+    import ast as _ast
+    _bot_src = (REPO_CORE.parent / "bot.py").read_text()
+    _tree = _ast.parse(_bot_src)
+    _pipes = [n for n in _ast.walk(_tree)
+              if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name)
+              and n.func.id == "Pipeline"]
+    check("bot.py: exactly one Pipeline construction", len(_pipes) == 1,
+          f"count={len(_pipes)}")
+    _wired, _conditional = [], []
+    for _n in _ast.walk(_pipes[0].args[0]):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+                and _n.func.id in ("SonosOutput", "WiiMOutput")):
+            _wired.append(_n.func.id)
+        elif isinstance(_n, _ast.IfExp):
+            for _sub in _ast.walk(_n):
+                if (isinstance(_sub, _ast.Call)
+                        and isinstance(_sub.func, _ast.Name)
+                        and _sub.func.id in ("SonosOutput", "WiiMOutput")):
+                    _conditional.append(_sub.func.id)
+    check("bot.py: BOTH output backends wired into the pipeline",
+          set(_wired) == {"SonosOutput", "WiiMOutput"},
+          f"wired={_wired} (dispatch must be reply-time, not build-time)")
+    check("bot.py: no build-time ternary picks the backend (23:22 outage shape)",
+          not _conditional, f"conditional={_conditional}")
+    # The skip mechanism, both directions, against the throwaway config
+    # (sonos zones: Dining Room/Living Room; wiim zone: Master Bedroom).
+    from loguru import logger as _lg
+    _cap = []
+    _sink = _lg.add(lambda m: _cap.append(str(m)), level="DEBUG")
+    try:
+        _so_skip = SonosOutput(echo_gate=None,
+                               zone_selector=lambda: "Master Bedroom", led=None)
+        _wo_skip = WiiMOutput(echo_gate=None,
+                              zone_selector=lambda: "Dining Room", led=None)
+        _asyncio.run(_so_skip._speak_to_sonos(b"\x00" * 48000))
+        _asyncio.run(_wo_skip._speak_to_wiim(b"\x00" * 48000))
+        _joined = "\n".join(_cap)
+        check("sonos_output skips a WiiM-owned zone at reply time (no play)",
+              "zone 'Master Bedroom' not in config zones" in _joined
+              and "sonos_output: playing clip" not in _joined,
+              f"skip-warning-seen={'not in config zones' in _joined}")
+        check("wiim_output skips a Sonos-owned zone at reply time (no play)",
+              "not in wiim zones" in _joined
+              and "wiim_output: playing clip" not in _joined,
+              f"skip-warning-seen={'not in wiim zones' in _joined}")
+    finally:
+        _lg.remove(_sink)
+
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")
     check("tuning GET shape — six knobs",
