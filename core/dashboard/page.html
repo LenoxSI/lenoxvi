@@ -541,12 +541,25 @@ $("#btn-restart").addEventListener("click", async () => {
   if (!confirm("Restart the bot? Config changes apply on restart.")) return;
   b.disabled = true;
   msg($("#restart-msg"), "Restarting…", "muted");
-  try {
-    await api("/api/dashboard/restart", {method: "POST"});
-  } catch (e) { /* process death can race the response — poll anyway */ }
+  // Two attempts: a fetch can die transiently (2026-10-04: a real click's
+  // POST vanished browser-side while GETs worked seconds apart). A thrown
+  // fetch is EITHER the process-death race (restart fired, response lost)
+  // OR a genuine failure — the uptime poll below decides which; this just
+  // makes sure a blip doesn't cancel a restart that never happened.
+  let postErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await api("/api/dashboard/restart", {method: "POST"});
+      postErr = null;
+      break;
+    } catch (e) {
+      postErr = e.message;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
   // Poll until the bot is back and uptime is young again.
   let up = 0;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 45; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
       const s = await api("/api/dashboard/status");
@@ -557,7 +570,9 @@ $("#btn-restart").addEventListener("click", async () => {
     msg($("#restart-msg"), "Bot is back — reloading panels…", "ok");
     loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS();
   } else {
-    msg($("#restart-msg"), "Bot didn't return within 2 minutes — check the console.", "err");
+    msg($("#restart-msg"),
+        (postErr ? `restart request failed (${postErr}) — ` : "") +
+        "uptime never reset within 90s; the old bot process is still running. Ping Willow with this message.", "err");
   }
   b.disabled = false;
 });
