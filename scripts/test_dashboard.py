@@ -417,6 +417,18 @@ def main():
                         and isinstance(_sub.func, _ast.Name)
                         and _sub.func.id in ("SonosOutput", "WiiMOutput")):
                     _conditional.append(_sub.func.id)
+    # B3 (design note): the backends can be hoisted to variables before
+    # the Pipeline (the interrupt closure needs the objects) — accept the
+    # hoisted form when BOTH constructors run unconditionally at module
+    # scope of run_bot, no ternary anywhere.
+    if set(_wired) != {"SonosOutput", "WiiMOutput"}:
+        _hoisted = []
+        for _n in _ast.walk(_tree):
+            if (isinstance(_n, _ast.Assign) and isinstance(_n.value, _ast.Call)
+                    and isinstance(_n.value.func, _ast.Name)
+                    and _n.value.func.id in ("SonosOutput", "WiiMOutput")):
+                _hoisted.append(_n.value.func.id)
+        _wired = _hoisted
     check("bot.py: BOTH output backends wired into the pipeline",
           set(_wired) == {"SonosOutput", "WiiMOutput"},
           f"wired={_wired} (dispatch must be reply-time, not build-time)")
