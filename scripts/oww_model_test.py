@@ -9,7 +9,7 @@ import time
 
 import numpy as np
 
-MODEL = "Hey_Willow_trial21_96x2_85000_20260621_163001.onnx"
+MODEL = "Hey_Willow_1-0.onnx"
 
 
 def main():

@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-WAKE_MODEL = "Hey_Willow_trial21_96x2_85000_20260621_163001.onnx"
+WAKE_MODEL = "Hey_Willow_1-0.onnx"
 WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
 AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
 

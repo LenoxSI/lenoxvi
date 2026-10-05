@@ -15,7 +15,7 @@ wake:
                          # but scores below real speech risk false wakes.
   awake_timeout: 15.0    # seconds of no user/bot activity before the gate
                          # closes and the mic stops feeding STT
-  # model: <your-wake-word.onnx>   # repo-root .onnx; see README (wake-word
+  # model: Hey_Willow_1-0.onnx      # repo-root .onnx; see README (wake-word
   #                                # training is beyond this template's scope)
 
 # ── Voice activity detection (Silero, via bot.py) ───────────────────────
