@@ -465,13 +465,9 @@ def main():
             check("oww: real model upload accepted",
                   _r_up.status_code == 200 and _r_up.json().get("name") == prod.name,
                   f"status={_r_up.status_code}")
-        # (c) delete blocks the ACTIVE file (path-exact) but a same-named
-        # spare in another source dir stays deletable
-        _oww_cur = client.get("/api/dashboard/oww/models").json().get("current")
-        _r_del = client.delete(f"/api/dashboard/oww/models/{_oww_cur}?source=models")
-        check("oww: deleting the active model is blocked (409)",
-              _r_del.status_code == 409, f"status={_r_del.status_code}")
-        # (d) select merges into wake section (threshold survives)
+        # (d) select merges into wake section (threshold survives) — run
+        # FIRST so the uploaded models/ copy becomes the ACTIVE file
+        prod = Path("Hey_Willow_1-0.onnx")
         if prod.is_file():
             _r_sel = client.put("/api/dashboard/oww/select",
                             json={"model": prod.name})
@@ -480,6 +476,26 @@ def main():
             check("oww: select writes wake.model and preserves threshold",
                   _r_sel.status_code == 200 and "model" in _wake_after and "threshold" in _wake_after,
                   f"status={_r_sel.status_code} wake={_wake_after}")
+        # (c) delete blocks the ACTIVE file (path-exact)
+        _oww = client.get("/api/dashboard/oww/models").json()
+        _active_row = next((m for m in _oww["models"] if m["selected"]), None)
+        if _active_row:
+            _r_del = client.delete(
+                f"/api/dashboard/oww/models/{_active_row['name']}?source={_active_row['source']}")
+            check("oww: deleting the active model is blocked (409)",
+                  _r_del.status_code == 409, f"status={_r_del.status_code}")
+        # (e) a NON-active model is deletable — upload a distinct-name
+        # spare from the prod bytes, then delete it (200). Never touches
+        # the real root copy: a suite must not delete production files
+        # (design note loaded-gun rule — and the dev host's root copy is
+        # the ONLY local model copy).
+        if prod.is_file():
+            _r_sp = client.post("/api/dashboard/oww/models",
+                            files={"file": ("zz_suite_probe.onnx", prod.read_bytes(), "application/octet-stream")})
+            _r_spdel = client.delete("/api/dashboard/oww/models/zz_suite_probe.onnx?source=models")
+            check("oww: non-active spare uploads and deletes cleanly",
+                  _r_sp.status_code == 200 and _r_spdel.status_code == 200,
+                  f"upload={_r_sp.status_code} delete={_r_spdel.status_code}")
     finally:
         os.environ.pop("LVI_MODELS_DIR", None)
         shutil.rmtree(models_dir, ignore_errors=True)
