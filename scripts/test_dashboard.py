@@ -588,6 +588,7 @@ def main():
     if True:  # scope block (fake player layers live and die together)
         import types as _types
         from types import SimpleNamespace as _NS
+        from echo_gate import EchoGate  # noqa: E402
         from pipecat.frames.frames import (  # noqa: E402
             TTSStartedFrame as _TTSStartedFrame,
             TTSAudioRawFrame as _TTSAudioRawFrame,
