@@ -237,6 +237,17 @@ def main():
     check("TTS PUT elevenlabs-without-voice_id rejected (422)",
           r.status_code == 422, f"status={r.status_code}")
 
+    # 9b. Bot restart route (override lane — the suite must NEVER restart
+    # the real bot; LVI_RESTART_COMMAND points at a benign stand-in)
+    os.environ["LVI_RESTART_COMMAND"] = "true"  # /usr/bin/true, rc=0
+    try:
+        r = client.post("/api/dashboard/restart")
+        ok = r.status_code == 200 and r.json().get("override") is True
+        check("restart route returns via override lane (no real restart)",
+              ok, f"status={r.status_code} body={r.text[:120]}")
+    finally:
+        del os.environ["LVI_RESTART_COMMAND"]
+
     # 10. REAL soco discovery on the LAN (best effort — players may nap)
     r = client.post("/api/dashboard/zones/discover")
     if r.status_code == 200:

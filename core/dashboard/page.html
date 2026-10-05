@@ -126,6 +126,13 @@ restart.</p>
   <button type="button" id="btn-tts-key">Save key</button>
 </form>
 
+<h2>Bot control</h2>
+<p class="sub">Applies pending config (TTS provider/voice, session modes, zone
+changes) by restarting the bot. The dashboard pauses ~30s while it comes
+back — the mic node reconnects on its own.</p>
+<button type="button" id="btn-restart">Restart bot</button>
+<span id="restart-msg" class="muted"></span>
+
 <h2>Firmware</h2>
 <p class="sub">Push a firmware .bin — its version is read from the image
 itself; nodes pick it up over OTA on their next boot.</p>
@@ -526,6 +533,33 @@ $("#form-tts-cfg").addEventListener("submit", async (ev) => {
     await loadTTS();
     msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
+});
+
+// ── bot restart (Settings) ────────────────────────────────────
+$("#btn-restart").addEventListener("click", async () => {
+  const b = $("#btn-restart");
+  if (!confirm("Restart the bot? Config changes apply on restart.")) return;
+  b.disabled = true;
+  msg($("#restart-msg"), "Restarting…", "muted");
+  try {
+    await api("/api/dashboard/restart", {method: "POST"});
+  } catch (e) { /* process death can race the response — poll anyway */ }
+  // Poll until the bot is back and uptime is young again.
+  let up = 0;
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const s = await api("/api/dashboard/status");
+      if (s.uptime_secs != null && s.uptime_secs < 30) { up = 1; break; }
+    } catch (e) { /* still down */ }
+  }
+  if (up) {
+    msg($("#restart-msg"), "Bot is back — reloading panels…", "ok");
+    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS();
+  } else {
+    msg($("#restart-msg"), "Bot didn't return within 2 minutes — check the console.", "err");
+  }
+  b.disabled = false;
 });
 
 $("#btn-discover").addEventListener("click", async () => {

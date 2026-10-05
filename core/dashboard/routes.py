@@ -12,9 +12,11 @@ the LAN can read status and edit mappings — accepted risk.
 import asyncio
 import json
 import re
+import subprocess
 import time
 import urllib.parse
 from pathlib import Path
+from os import getenv as _getenv
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -704,6 +706,44 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
     replaced = await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
     logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True, "replaced": replaced}
+
+
+# ── bot control (Settings) ─────────────────────────────────────────────
+
+# Restart-from-the-dashboard problem: the dashboard LIVES in the bot
+# process, so a plain restart would kill the HTTP response mid-flight.
+# Resolution: hand the restart to a DETACHED systemd transient unit —
+# the user manager owns it, not us, so it fires 2s after the response
+# completes. LVI_RESTART_COMMAND overrides the real command for the
+# offline test rig (never restart the real bot from the suite).
+
+
+@router.post("/restart", dependencies=GUARD)
+async def restart_bot():
+    """Restart lenoxvi-bot from the dashboard (Settings → Bot control).
+
+    The response returns BEFORE the restart fires (2s window) — the
+    transient unit survives this process's death by design. Client polls
+    /status until uptime resets, then reloads panels.
+    """
+    override = _getenv("LVI_RESTART_COMMAND")
+    if override:
+        # Test/bench lane: run a benign stand-in instead of restarting
+        # the actual bot (the suite runs on the same host as prod).
+        proc = subprocess.run(override.split(), capture_output=True, timeout=10)
+        logger.info(f"dashboard: restart override executed ({override}) rc={proc.returncode}")
+        return {"ok": True, "restarting": False, "override": True}
+    unit = f"lenoxvi-dash-restart-{int(time.time() * 1000)}"
+    cmd = [
+        "systemd-run", "--user", f"--unit={unit}",
+        "bash", "-c", "sleep 2 && systemctl --user restart lenoxvi-bot",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if proc.returncode != 0:
+        logger.error(f"dashboard: restart scheduling failed: {proc.stderr.strip()}")
+        raise HTTPException(status_code=500, detail="restart scheduling failed (see bot log)")
+    logger.info(f"dashboard: bot restart scheduled via transient unit {unit} — fires in 2s")
+    return {"ok": True, "restarting": True}
 
 
 # ── firmware push (operator side of firmware_server.py) ─────────────
