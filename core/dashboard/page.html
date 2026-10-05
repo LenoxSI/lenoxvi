@@ -698,25 +698,25 @@ async function loadOWW() {
     const r = await api("/api/dashboard/oww/models");
     const sel = $("#oww-model");
     sel.innerHTML = r.models.length
-      ? r.models.map(m => `<option value="${esc(m.name)}"${m.selected ? " selected" : ""}>${esc(m.name)}</option>`).join("")
+      ? r.models.map(m => `<option value="${esc(m.path)}"${m.selected ? " selected" : ""}>${esc(m.name)}${m.source === "root" ? " (root)" : ""}</option>`).join("")
       : `<option value="">no models found</option>`;
     const tb = $("#oww-table tbody");
     tb.innerHTML = r.models.length ? "" : `<tr><td colspan="4" class="muted">No models yet — upload one.</td></tr>`;
     for (const m of r.models) {
       const tr = document.createElement("tr");
       tr.innerHTML =
-        `<td>${esc(m.name)}${m.selected ? ' <span class="ok">● active</span>' : ""}</td>` +
+        `<td>${esc(m.name)}${m.source === "root" ? ' <span class="muted">(root)</span>' : ""}${m.selected ? ' <span class="ok">● active</span>' : ""}</td>` +
         `<td class="muted">${(m.size / 1024).toFixed(0)} KB</td>` +
         `<td class="muted">${esc(m.source)}</td>` +
-        `<td class="row-actions"><button data-del="${esc(m.name)}"${m.selected ? " disabled title=\"Select another model first — the active one can't be deleted.\"" : ""}>Delete</button></td>`;
+        `<td class="row-actions"><button data-del="${esc(m.name)}" data-src="${esc(m.source)}"${m.selected ? " disabled title=\"Select another model first — the active one can't be deleted.\"" : ""}>Delete</button></td>`;
       tb.appendChild(tr);
     }
     tb.querySelectorAll("button[data-del]").forEach(b =>
       b.addEventListener("click", async () => {
-        if (!confirm(`Delete model '${b.dataset.del}'?`)) return;
+        if (!confirm(`Delete model '${b.dataset.del}' (${b.dataset.src})?`)) return;
         try {
-          await api(`/api/dashboard/oww/models/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
-          msg($("#oww-msg"), `Deleted '${b.dataset.del}'.`, "ok");
+          await api(`/api/dashboard/oww/models/${encodeURIComponent(b.dataset.del)}?source=${encodeURIComponent(b.dataset.src)}`, { method: "DELETE" });
+          msg($("#oww-msg"), `Deleted '${b.dataset.del}' (${b.dataset.src}).`, "ok");
           await loadOWW();
         } catch (e) { msg($("#oww-msg"), "Delete failed: " + e.message, "err"); }
       }));
@@ -738,8 +738,11 @@ $("#form-oww-upload").addEventListener("submit", async (ev) => {
 });
 
 $("#btn-oww-select").addEventListener("click", async () => {
-  const name = $("#oww-model").value;
-  if (!name) { msg($("#oww-msg"), "No model selected.", "err"); return; }
+  // dropdown values are full paths (disambiguates root vs models/); the
+  // select payload takes the basename and the route resolves models/-first
+  const path = $("#oww-model").value;
+  const name = path.split("/").pop();
+  if (!name || !name.endsWith(".onnx")) { msg($("#oww-msg"), "No model selected.", "err"); return; }
   try {
     await api("/api/dashboard/oww/select", {
       method: "PUT",

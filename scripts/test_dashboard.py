@@ -465,9 +465,10 @@ def main():
             check("oww: real model upload accepted",
                   _r_up.status_code == 200 and _r_up.json().get("name") == prod.name,
                   f"status={_r_up.status_code}")
-        # (c) delete blocks the active model
+        # (c) delete blocks the ACTIVE file (path-exact) but a same-named
+        # spare in another source dir stays deletable
         _oww_cur = client.get("/api/dashboard/oww/models").json().get("current")
-        _r_del = client.delete(f"/api/dashboard/oww/models/{_oww_cur}")
+        _r_del = client.delete(f"/api/dashboard/oww/models/{_oww_cur}?source=models")
         check("oww: deleting the active model is blocked (409)",
               _r_del.status_code == 409, f"status={_r_del.status_code}")
         # (d) select merges into wake section (threshold survives)

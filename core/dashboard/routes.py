@@ -869,12 +869,17 @@ def _oww_dir() -> Path:
     return d
 
 
-def _oww_current() -> str:
-    """The model the loader would resolve RIGHT NOW (config > env >
-    code default) — basenames compared, so paths resolve cleanly."""
+def _oww_active_path() -> Path:
+    """The model file the loader would resolve RIGHT NOW (config > env >
+    code default) as a full resolved path — path-exact, so two files
+    with the same basename (root vs models/) are distinct."""
     wake = config_store.read_section("wake") or {}
-    return os.path.basename(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
-                                        wake.get("model") or wake_word.WAKE_MODEL)))
+    return Path(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
+                            wake.get("model") or wake_word.WAKE_MODEL))).resolve()
+
+
+def _oww_current() -> str:
+    return _oww_active_path().name
 
 
 def _oww_validate(data: bytes) -> None:
@@ -908,8 +913,10 @@ def _oww_validate(data: bytes) -> None:
 @router.get("/oww/models")
 async def oww_list_models():
     """All wake-word models available to the bot: models/ dir + legacy
-    repo-root .onnx files, with size and selected marker."""
-    cur = _oww_current()
+    repo-root .onnx files, with size, source and the path-exact active
+    marker (a root file with the same basename as the active models/
+    file still shows as a distinct row — display all options)."""
+    active = _oww_active_path()
     out = []
     for d in (_oww_dir(), Path(".")):
         try:
@@ -917,12 +924,11 @@ async def oww_list_models():
         except OSError:
             continue
         for f in files:
-            if f.parent == Path(".") and f.name in {m["name"] for m in out}:
-                continue  # models/ wins over a same-named root file
             out.append({"name": f.name, "size": f.stat().st_size,
                         "source": "models" if f.parent != Path(".") else "root",
-                        "selected": f.name == cur})
-    return {"models": out, "current": cur}
+                        "path": str(f.resolve()),
+                        "selected": f.resolve() == active})
+    return {"models": out, "current": active.name}
 
 
 @router.post("/oww/models", dependencies=GUARD)
@@ -972,20 +978,27 @@ async def oww_select_model(payload: OWWModelPayload):
 
 
 @router.delete("/oww/models/{name}", dependencies=GUARD)
-async def oww_delete_model(name: str):
-    """Delete a stored model. HARD RULE: the model the loader would
-    resolve right now can never be deleted (no ghost references — a
-    restart can never wake-brick)."""
+async def oww_delete_model(name: str, source: str = ""):
+    """Delete a stored model. HARD RULE: the file the loader would
+    resolve RIGHT NOW (path-exact) can never be deleted — a same-named
+    spare (root vs models/) stays deletable. `source` disambiguates
+    same-basename copies when present (?source=root|models)."""
     if not re.match(r"^[A-Za-z0-9_.-]+\.onnx$", name):
         raise HTTPException(status_code=400, detail="bad model name")
-    if name == _oww_current():
-        raise HTTPException(status_code=409, detail="cannot delete the active model — select another first")
-    d = _oww_dir()
-    for base in (d / name, Path(".") / name):
+    active = _oww_active_path()
+    candidates = []
+    if source in ("", "models"):
+        candidates.append(_oww_dir() / name)
+    if source in ("", "root"):
+        candidates.append(Path(".") / name)
+    for base in candidates:
         if base.is_file():
+            if base.resolve() == active:
+                raise HTTPException(status_code=409,
+                                     detail="cannot delete the active model — select another first")
             base.unlink()
-            logger.info(f"dashboard: OWW model '{name}' deleted")
-            return {"ok": True, "deleted": name}
+            logger.info(f"dashboard: OWW model '{name}' ({base}) deleted")
+            return {"ok": True, "deleted": name, "path": str(base)}
     raise HTTPException(status_code=404, detail=f"model '{name}' not found")
 
 
