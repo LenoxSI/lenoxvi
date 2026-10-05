@@ -255,8 +255,8 @@ def main():
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_v3"})
-    check("TTS PUT rejects eleven_v3 (the HTTP-400 model)",
-          r.status_code == 422, f"status={r.status_code}")
+    check("TTS PUT accepts eleven_v3 (dialogue lane — the old 422 was a wrong-lane ban)",
+          r.status_code == 200, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs", "voice_id": "short", "model": "eleven_v2"})
     check("TTS PUT rejects too-short voice_id", r.status_code == 422, f"status={r.status_code}")
@@ -264,30 +264,29 @@ def main():
         "provider": "elevenlabs", "deepgram_voice": "aura-2-zeus-en"})
     check("TTS PUT elevenlabs-without-voice_id rejected (422)",
           r.status_code == 422, f"status={r.status_code}")
-    # v4 lane guards (2026-10-05): elevenlabs + v4 model must be rejected
-    # (wrong lane); elevenlabs-v4 + flash model must be rejected; a clean
-    # elevenlabs-v4 round-trip must write provider/model/voice_id and
-    # leave flux knobs untouched.
+    # ONE provider, model picks the lane (the owner 12:05): v3/v4 models are
+    # legal on 'elevenlabs' (bot.py routes them to Text-to-Dialogue);
+    # 'elevenlabs-v4' is gone. Round-trips must persist provider+model.
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
         "model": "eleven_v4_turbo"})
-    check("TTS PUT rejects elevenlabs + v4 model (wrong lane)",
-          r.status_code == 422, f"status={r.status_code}")
-    r = client.put("/api/dashboard/tts", json={
-        "provider": "elevenlabs-v4", "voice_id": "AbC123xyZw9876543210",
-        "model": "eleven_flash_v2_5"})
-    check("TTS PUT rejects elevenlabs-v4 + flash model (wrong lane)",
-          r.status_code == 422, f"status={r.status_code}")
-    r = client.put("/api/dashboard/tts", json={
-        "provider": "elevenlabs-v4", "voice_id": "AbC123xyZw9876543210",
-        "model": "eleven_v4_turbo"})
-    check("TTS PUT elevenlabs-v4 round-trip accepted",
+    check("TTS PUT accepts elevenlabs + eleven_v4_turbo (single provider)",
           r.status_code == 200, f"status={r.status_code}")
     if r.status_code == 200:
         t4 = client.get("/api/dashboard/tts").json()
-        check("TTS v4 round-trip persisted provider+model",
-              t4.get("provider") == "elevenlabs-v4" and t4.get("model") == "eleven_v4_turbo",
+        check("TTS v4 round-trip persisted model under provider=elevenlabs",
+              t4.get("provider") == "elevenlabs" and t4.get("model") == "eleven_v4_turbo",
               f"tts={t4.get('provider')}/{t4.get('model')}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs-v4", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_v4_turbo"})
+    check("TTS PUT rejects retired provider elevenlabs-v4 (422)",
+          r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_bogus_v9"})
+    check("TTS PUT rejects unknown model (422)",
+          r.status_code == 422, f"status={r.status_code}")
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
     client.put("/api/dashboard/tts", json={

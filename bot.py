@@ -47,10 +47,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 try:
     from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
-    _EL_DIALOGUE_OK = True
 except ImportError:  # older pipecat without the Text-to-Dialogue service
     ElevenLabsDialogueTTSService = None
-    _EL_DIALOGUE_OK = False
 try:
     from pipecat.services.deepgram.tts import DeepgramTTSService
     from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
@@ -77,29 +75,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # key. ElevenLabs stays the default (a config without tts.provider —
     # the fresh-clone state — must land on a provider that speaks).
     tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
-    if tts_provider == "elevenlabs-v4":
-        # Eleven v4 / v4 Turbo (2026-10-05): the ONLY lane that reaches
-        # eleven_v4* models — the standard Realtime TTS websocket rejects
-        # them (same wall v3 hit). Text-to-Dialogue WS via pipecat's
-        # dialogue service. One voice per connection (v4 Turbo); inline
-        # audio tags [laughs]/[excited] render; stability is the one
-        # voice knob (None = model default).
-        if not _EL_DIALOGUE_OK:
-            raise RuntimeError(
-                "tts.provider 'elevenlabs-v4' needs pipecat's "
-                "ElevenLabsDialogueTTSService (pipecat >= 1.10)")
-        tts = ElevenLabsDialogueTTSService(
-            api_key=os.environ["ELEVENLABS_API_KEY"],
-            settings=ElevenLabsDialogueTTSService.Settings(
-                # model guard: TDD lane accepts eleven_v3*/eleven_v4* only;
-                # a misconfig'd flash model must fail loud, not silently
-                # ride the wrong lane
-                model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v4_turbo"),
-                voice=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
-            ),
-        )
-        logger.info("tts backend: elevenlabs-v4 (text-to-dialogue)")
-    elif tts_provider == "deepgram":
+    if tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
         # Verified against developers.deepgram.com/docs/tts-models. Key is
         # env-side forever (secrets never ride config.yaml).
@@ -145,16 +121,34 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # env as fallback; model in config.yaml; api_key stays env-side
         # forever (secrets never ride config.yaml — the .env is gitignored,
         # config.yaml is not).
-        tts = ElevenLabsTTSService(
-            api_key=os.environ["ELEVENLABS_API_KEY"],
-            voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
-            # Code default = the measured-good model. Do NOT default to eleven_v3:
-            # the websocket handshake rejects v3 with HTTP 400 (config.yaml:32-34,
-            # commit fb0cf94). A config.yaml without tts.model — the fresh-clone
-            # state — must land on a model that actually speaks.
-            model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
-        )
-        logger.info("tts backend: elevenlabs")
+        # ONE provider, TWO lanes (the owner 12:05): the MODEL picks the lane —
+        # eleven_v3*/eleven_v4* models ride the Text-to-Dialogue websocket
+        # (the only lane that reaches them; the Realtime TTS WS rejects
+        # them with HTTP 400 — commit fb0cf94 for v3, ElevenLabs docs for
+        # v4); flash/v2 ride the Realtime TTS WS. The user just picks a
+        # model; the lane is an implementation detail.
+        el_model = cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_flash_v2_5")
+        if el_model.startswith(("eleven_v3", "eleven_v4")):
+            if ElevenLabsDialogueTTSService is None:
+                raise RuntimeError(
+                    f"tts.model {el_model!r} rides the Text-to-Dialogue "
+                    "lane, which needs pipecat's ElevenLabsDialogueTTSService "
+                    "(pipecat >= 1.10)")
+            tts = ElevenLabsDialogueTTSService(
+                api_key=os.environ["ELEVENLABS_API_KEY"],
+                settings=ElevenLabsDialogueTTSService.Settings(
+                    model=el_model,
+                    voice=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
+                ),
+            )
+            logger.info(f"tts backend: elevenlabs {el_model} (text-to-dialogue)")
+        else:
+            tts = ElevenLabsTTSService(
+                api_key=os.environ["ELEVENLABS_API_KEY"],
+                voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
+                model=el_model,
+            )
+            logger.info(f"tts backend: elevenlabs {el_model}")
     gate = EchoGate()
     # Multi-node fix (Opus review H1): EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global

@@ -615,10 +615,14 @@ _DEEPGRAM_FLUX_VOICES = (
 
 class TTSPayload(BaseModel):
     provider: str = Field(default="elevenlabs",
-                          pattern="^(elevenlabs|elevenlabs-v4|deepgram|deepgram-flux)$")
+                          pattern="^(elevenlabs|deepgram|deepgram-flux)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
+    # eleven_v3/even_v4 ride the Text-to-Dialogue lane (bot.py picks the
+    # lane by model prefix); flash/v2 ride the Realtime TTS WS. eleven_v3
+    # is now LEGAL — the old ban (commit fb0cf94) was really a wrong-lane
+    # ban; the dialogue lane reaches it.
     model: str | None = Field(default=None,
-                              pattern="^eleven_(flash_v2_5|v2|v4(_turbo)?)$")
+                              pattern=r"^eleven_(flash_v2_5|v2|v3(_conversational)?|v4(_turbo)?)$")
     deepgram_voice: str | None = Field(default=None)
     deepgram_flux_voice: str | None = Field(default=None)
     # Flux knobs: speed 0.5–1.5 in 0.05 steps; expressivity -2..2
@@ -632,15 +636,8 @@ def _validate_tts_payload(p: TTSPayload) -> None:
     if p.provider == "elevenlabs":
         if not p.voice_id or not p.model:
             raise HTTPException(status_code=422, detail="elevenlabs needs voice_id and model")
-        if p.model.startswith("eleven_v4"):
-            raise HTTPException(status_code=422,
-                                detail="eleven_v4 models ride the Text-to-Dialogue lane — pick provider 'elevenlabs-v4'")
-    elif p.provider == "elevenlabs-v4":
-        if not p.voice_id:
-            raise HTTPException(status_code=422, detail="elevenlabs-v4 needs voice_id")
-        if not p.model or not p.model.startswith("eleven_v4"):
-            raise HTTPException(status_code=422,
-                                detail="elevenlabs-v4 model must be eleven_v4 or eleven_v4_turbo")
+        # Lane picking is bot.py's job (model prefix -> WS lane); here we
+        # only require a known model from the pattern above.
     elif p.provider == "deepgram":
         if not p.deepgram_voice or p.deepgram_voice not in _DEEPGRAM_VOICES:
             raise HTTPException(status_code=422, detail="deepgram_voice must be one of the Aura-2 voices (aura-2-thalia-en …)")
@@ -689,9 +686,7 @@ async def put_tts(payload: TTSPayload):
     _validate_tts_payload(payload)
     current = dict(config_store.read_section("tts") or {})
     current["provider"] = payload.provider
-    if payload.provider in ("elevenlabs", "elevenlabs-v4"):
-        # Both ElevenLabs lanes: voice_id + model in config (v4 rides
-        # the TDD lane at construction but the SAME config keys).
+    if payload.provider == "elevenlabs":
         current["voice_id"] = payload.voice_id
         current["model"] = payload.model
     elif payload.provider == "deepgram":

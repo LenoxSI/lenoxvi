@@ -119,7 +119,6 @@ restart.</p>
 <form class="inline" id="form-tts-cfg">
   <label>Provider <select id="tts-provider">
     <option value="elevenlabs">ElevenLabs</option>
-    <option value="elevenlabs-v4">ElevenLabs v4 (dialogue)</option>
     <option value="deepgram-flux">Deepgram Flux</option>
     <option value="deepgram">Deepgram Aura-2</option>
   </select></label>
@@ -132,8 +131,9 @@ restart.</p>
   <form class="inline" id="form-tts-cfg3">
     <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
     <label>Model <select id="tts-model">
-      <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
       <option value="eleven_v2">eleven_v2</option>
+      <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
+      <option value="eleven_v3">eleven_v3</option>
       <option value="eleven_v4_turbo">eleven_v4_turbo</option>
       <option value="eleven_v4">eleven_v4</option>
     </select></label>
@@ -572,16 +572,14 @@ const FLUX_VOICES = ["flux-hannah-en","flux-kit-en","flux-alexis-en","flux-cliff
 
 function ttsFlipFields() {
   const p = $("#tts-provider").value;
-  // Both ElevenLabs lanes share the Voice ID + model form (cfg3); the
-  // v4 lane rides the Text-to-Dialogue websocket with the same voice_id.
-  $("#tts-eleven-fields").style.display = p === "elevenlabs" || p === "elevenlabs-v4" ? "" : "none";
+  $("#tts-eleven-fields").style.display = p === "elevenlabs" ? "" : "none";
   $("#tts-deepgram-fields").style.display = p === "deepgram" ? "" : "none";
   $("#tts-flux-fields").style.display = p === "deepgram-flux" ? "" : "none";
-  $("#tts-key").placeholder = p === "elevenlabs" || p === "elevenlabs-v4"
+  $("#tts-key").placeholder = p === "elevenlabs"
     ? "paste ElevenLabs key"
     : "paste Deepgram key (Flux and Aura-2 share it)";
   const ks = $("#tts-key-state");
-  if (p === "elevenlabs" || p === "elevenlabs-v4") {
+  if (p === "elevenlabs") {
     ks.textContent = TTS_KEYS.elevenlabs ? "key set ✓" : "no key";
     ks.className = TTS_KEYS.elevenlabs ? "ok" : "muted";
   } else {
@@ -682,23 +680,13 @@ $("#form-tts-cfg3").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const v = $("#tts-voice").value.trim();
   if (!v) { msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return; }
-  const p = $("#tts-provider").value;
-  const model = $("#tts-model").value;
-  // Lane guard (client-side mirror of the route's): v4 models only ride
-  // the elevenlabs-v4 provider, and flash/v2 only ride plain elevenlabs.
-  if (p === "elevenlabs" && model.startsWith("eleven_v4")) {
-    msg($("#tts-msg"), "eleven_v4 models need provider 'ElevenLabs v4 (dialogue)'.", "err");
-    return;
-  }
-  if (p === "elevenlabs-v4" && !model.startsWith("eleven_v4")) {
-    msg($("#tts-msg"), "Provider elevenlabs-v4 needs an eleven_v4 model.", "err");
-    return;
-  }
+  // The MODEL picks the lane (bot.py dispatches on prefix): flash/v2 ride
+  // the Realtime TTS WS; v3/v4 ride Text-to-Dialogue. One provider.
   try {
     await api("/api/dashboard/tts", {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({provider: p, voice_id: v, model}),
+      body: JSON.stringify({provider: "elevenlabs", voice_id: v, model: $("#tts-model").value}),
     });
     await loadTTS();
     msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
