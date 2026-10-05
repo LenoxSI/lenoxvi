@@ -579,6 +579,172 @@ def main():
     check("tuning write preserves wake.enabled (merge, not replace)",
           wake_after.get("enabled") is True, f"wake={wake_after}")
 
+    # 9b7. Load-anchored speech timers (Fix A, 2026-10-05): the v4
+    # dialogue lane's gen->load gap made generation-anchored timers fire
+    # early — end-of-speech LED flipped the ring to 'listening' mid-reply,
+    # echo gate reopened the mic, note_speech capped the LOCKED release.
+    # Both backends must re-anchor all three at clip-load/play time, and
+    # a STALE speak task (older epoch) must not stomp a newer turn.
+    if True:  # scope block (fake player layers live and die together)
+        import types as _types
+        from types import SimpleNamespace as _NS
+        from pipecat.frames.frames import (  # noqa: E402
+            TTSStartedFrame as _TTSStartedFrame,
+            TTSAudioRawFrame as _TTSAudioRawFrame,
+            TTSStoppedFrame as _TTSStoppedFrame,
+        )
+        from pipecat.processors.frame_processor import FrameDirection as _FrameDirection  # noqa: E402
+
+        _LOADS = []
+
+        class _FakeSw:
+            def __init__(self, ip, player_id=None):
+                pass
+
+            async def connect(self):
+                return
+
+            async def play_clip(self, url, volume=None):
+                await asyncio.sleep(0.25)  # the gen->load gap under test
+                _LOADS.append(time.monotonic())
+                return {"clipId": "fake-1"}
+
+            async def close(self):
+                return
+
+        _saved_sonos_ws = sys.modules.get("sonos_websocket")
+        sys.modules["sonos_websocket"] = _types.SimpleNamespace(SonosWebsocket=_FakeSw)
+
+        class _FakeLed:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, m):
+                self.sent.append((time.monotonic(), m))
+
+        class _FakeWakeGate:
+            def __init__(self):
+                self.calls = []
+
+            def note_speech(self, seconds):
+                self.calls.append((time.monotonic(), seconds))
+
+        _srv = _NS(url_for=lambda n: f"http://127.0.0.1:9/clips/{n}")
+        _RATE, _SECS = 24000, 0.8
+
+        async def _timer_probe(ctor, name):
+            led = _FakeLed()
+            gate = EchoGate()
+            wake = _FakeWakeGate()
+            out = ctor(echo_gate=gate, wake_gate=wake,
+                       zone_selector=lambda: "test", led=led,
+                       config_path=str(cfg_test))
+            out._enabled = True
+            out._zones = {"test": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+            out._clip_server = _srv
+            out.create_task = lambda coro, name=None, context=None: asyncio.create_task(coro)
+            _pcm = b"\x00\x00" * int(_RATE * _SECS)
+            _gen_at = time.monotonic()
+            for _f in (_TTSStartedFrame(), _TTSAudioRawFrame(_pcm, _RATE, 1),
+                       _TTSStoppedFrame()):
+                await out.process_frame(_f, _FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.6)  # let the speak task reach its play
+            _load = _LOADS[-1] if name == "sonos" else None
+            _wii_load = WIIM_PLAYED_AT[0] if name == "wiim" else None
+            return out, led, gate, wake, _gen_at, (_load or _wii_load)
+
+        import wiim_output as _wo_mod
+        WIIM_PLAYED_AT = [None]
+        _real_wiim_api = _wo_mod.wiim_api
+
+        def _slow_play_wiim(ip, cmd, timeout=4.0):
+            if cmd.startswith("setPlayerCmd:play:"):
+                time.sleep(0.25)
+                WIIM_PLAYED_AT[0] = time.monotonic()
+            return "OK"
+
+        _wo_mod.wiim_api = _slow_play_wiim
+        try:
+
+            async def _run():
+                _so, _sled, _sgate, _swake, _sgen, _sload = await _timer_probe(SonosOutput, "sonos")
+                if _sload is None:
+                    check("sonos: clip loaded on the fake player", False,
+                          "no load timestamp — every timing check below is meaningless")
+                    return
+                _speech_end = _sload + _SECS
+                _fire = _so._end_of_speech_timer
+                _fire_at = _fire.when() if _fire is not None else None
+                if _fire_at is None:
+                    _stops = [ts for ts, m in _sled.sent
+                              if m in ("bot-stopped-speaking", "purple", "oww-sleeping")]
+                    _fire_at = _stops[0] if _stops else None
+                check("sonos: end-of-speech LED anchors to clip load, not generation",
+                      _fire_at is not None and _fire_at >= _speech_end,
+                      f"fire=+{(_fire_at or 0) - _sgen:.2f}s speech_end=+{_speech_end - _sgen:.2f}s")
+                check("sonos: echo gate holds past real speech end",
+                      _sgate._blocked_until >= _speech_end,
+                      f"reopen=+{_sgate._blocked_until - _sgen:.2f}s speech_end=+{_speech_end - _sgen:.2f}s")
+                check("sonos: note_speech anchored at load (not generation)",
+                      _swake.calls and _swake.calls[-1][0] >= _sload - 0.05,
+                      f"calls={[f'+{c[0] - _sgen:.2f}s' for c in _swake.calls]} load=+{_sload - _sgen:.2f}s")
+                # Stale-task guard: an old-epoch speak task finishing late
+                # must NOT move the current timers (filler racing a reply).
+                # The entry-time echo block is unconditional on purpose —
+                # a stale clip still SOUNDS, so the mic must stay shut; only
+                # the LED/note_speech re-anchors are epoch-guarded.
+                _so._speech_epoch += 1  # a newer generation now exists
+                _epoch_before = _so._end_of_speech_timer
+                _pbefore = _swake.calls[-1][0] if _swake.calls else 0
+                _blocked_before = _sgate._blocked_until
+                await _so._speak_to_sonos(b"\x00\x00" * int(_RATE * 0.3),
+                                          epoch=_so._speech_epoch - 1)
+                check("sonos: stale speak task can't stomp newer turn's timers",
+                      _so._end_of_speech_timer is _epoch_before
+                      and _sgate._blocked_until >= _blocked_before
+                      and (not _swake.calls or _swake.calls[-1][0] == _pbefore),
+                      "stale epoch re-anchor happened")
+                # Fallback: a NEW generation whose speak task dies at the
+                # zone check — the generation-time schedule (LED + note_speech)
+                # must stand so the ring never strands cyan forever.
+                _so._zones = {}  # every speak task now dies pre-load
+                _pcm_small = b"\x00\x00" * int(_RATE * 0.3)
+                _gen2 = time.monotonic()
+                for _f in (_TTSStartedFrame(), _TTSAudioRawFrame(_pcm_small, _RATE, 1),
+                           _TTSStoppedFrame()):
+                    await _so.process_frame(_f, _FrameDirection.DOWNSTREAM)
+                await asyncio.sleep(0.05)  # let the doomed speak task die
+                _fallback_timer = _so._end_of_speech_timer
+                check("sonos: fallback schedule stands after speak-task death (ring never strands)",
+                      _fallback_timer is not None and _fallback_timer.when() >= _gen2 + 0.3,
+                      f"timer={_fallback_timer.when() if _fallback_timer else None} gen2=+{time.monotonic() - _gen2:.2f}s")
+                # —─ WiiMOutput: same three checks ──
+                _wo, _wled, _wgate, _wwake, _wgen, _wload = await _timer_probe(WiiMOutput, "wiim")
+                if _wload is None:
+                    check("wiim: clip played on the fake player", False,
+                          "no play timestamp — every timing check below is meaningless")
+                    return
+                _wspeech_end = _wload + 0.25 + _SECS + 0.35  # lead-in + speech + tail
+                _wfire = _wo._end_of_speech_timer
+                _wfire_at = _wfire.when() if _wfire is not None else None
+                check("wiim: end-of-speech LED anchors to clip load, not generation",
+                      _wfire_at is not None and _wfire_at >= _wspeech_end,
+                      f"fire=+{(_wfire_at or 0) - _wgen:.2f}s speech_end=+{_wspeech_end - _wgen:.2f}s")
+                check("wiim: echo gate holds past real speech end",
+                      _wgate._blocked_until >= _wspeech_end,
+                      f"reopen=+{_wgate._blocked_until - _wgen:.2f}s speech_end=+{_wspeech_end - _wgen:.2f}s")
+                check("wiim: note_speech anchored at load (not generation)",
+                      _wwake.calls and _wwake.calls[-1][0] >= _wload - 0.05,
+                      f"calls={[f'+{c[0] - _wgen:.2f}s' for c in _wwake.calls]} load=+{_wload - _wgen:.2f}s")
+
+            _asyncio.run(_run())
+        finally:
+            _wo_mod.wiim_api = _real_wiim_api
+            if _saved_sonos_ws is None:
+                sys.modules.pop("sonos_websocket", None)
+            else:
+                sys.modules["sonos_websocket"] = _saved_sonos_ws
+
     # 9d. Rig facts (Settings tab header) — status carries live rig facts
     r = client.get("/api/dashboard/status")
     s = r.json()
