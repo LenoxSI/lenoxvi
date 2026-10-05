@@ -60,6 +60,7 @@ def main():
 
     import dashboard  # noqa: E402  (registers nothing yet)
     from dashboard import registry  # noqa: E402
+    from dashboard import config_store  # noqa: E402
 
     dashboard.register_dashboard(FastAPI())
     check("register_dashboard mounts without error", True)
@@ -273,6 +274,53 @@ def main():
               ok, f"status={r.status_code} body={r.text[:120]}")
     finally:
         del os.environ["LVI_RESTART_COMMAND"]
+
+    # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
+    r = client.get("/api/dashboard/voice-tuning")
+    check("tuning GET shape — six knobs",
+          r.status_code == 200 and all(k in r.json() for k in
+              ("wake_threshold", "wake_awake_timeout", "vad_confidence",
+               "vad_min_volume", "lull_secs", "dedup_window")),
+          f"status={r.status_code} keys={list(r.json())}")
+    # Round-trip EVERY knob with a distinctive value
+    r = client.put("/api/dashboard/voice-tuning", json={
+        "wake_threshold": 0.42, "wake_awake_timeout": 12.0,
+        "vad_confidence": 0.65, "vad_min_volume": 0.55,
+        "lull_secs": 0.8, "dedup_window": 8.0})
+    check("tuning PUT (all six) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
+    t = client.get("/api/dashboard/voice-tuning").json()
+    check("tuning round-trip: all six persisted",
+          t["wake_threshold"] == 0.42 and t["wake_awake_timeout"] == 12.0 and
+          t["vad_confidence"] == 0.65 and t["vad_min_volume"] == 0.55 and
+          t["lull_secs"] == 0.8 and t["dedup_window"] == 8.0, f"t={t}")
+    # Partial update: one knob only — others must not move
+    r = client.put("/api/dashboard/voice-tuning", json={"wake_threshold": 0.5})
+    check("tuning PUT (single knob) ok", r.status_code == 200, f"status={r.status_code}")
+    t = client.get("/api/dashboard/voice-tuning").json()
+    check("tuning partial update leaves the other five untouched",
+          t["wake_threshold"] == 0.5 and t["lull_secs"] == 0.8 and
+          t["dedup_window"] == 8.0 and t["vad_confidence"] == 0.65, f"t={t}")
+    # Range rejection, one per knob
+    for knob, bad in [("wake_threshold", 0.9), ("wake_awake_timeout", 3.0),
+                      ("vad_confidence", 0.95), ("vad_min_volume", 1.5),
+                      ("lull_secs", 5.0), ("dedup_window", 60.0)]:
+        r = client.put("/api/dashboard/voice-tuning", json={knob: bad})
+        check(f"tuning PUT rejects {knob}={bad} (out of range)",
+              r.status_code == 422, f"status={r.status_code}")
+    # Empty payload rejected
+    r = client.put("/api/dashboard/voice-tuning", json={})
+    check("tuning PUT with no knobs rejected (422)", r.status_code == 422, f"status={r.status_code}")
+    # CRITICAL (the filler-clobber lesson): tuning writes MERGE into the
+    # brain section — max_tokens + fillers must survive untouched.
+    brain_after = config_store.read_section("brain") or {}
+    check("tuning write preserves brain.max_tokens (merge, not replace)",
+          brain_after.get("max_tokens") == 300, f"brain keys={sorted(brain_after)}")
+    check("tuning write preserves brain.fillers (merge, not replace)",
+          isinstance(brain_after.get("fillers"), list) and len(brain_after["fillers"]) == 2,
+          f"fillers={str(brain_after.get('fillers'))[:80]}")
+    wake_after = config_store.read_section("wake") or {}
+    check("tuning write preserves wake.enabled (merge, not replace)",
+          wake_after.get("enabled") is True, f"wake={wake_after}")
 
     # 10. REAL soco discovery on the LAN (best effort — players may nap)
     r = client.post("/api/dashboard/zones/discover")

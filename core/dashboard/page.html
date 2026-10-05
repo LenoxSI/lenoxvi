@@ -140,6 +140,23 @@ restart.</p>
   <span id="tts-key-state" class="muted"></span>
   <button type="button" id="btn-tts-key">Save key</button>
 </form>
+
+<h2>Voice Tuning</h2>
+<p class="sub">Ear-tuning knobs for wake, silence detection, and turn
+timing. Saves to config.yaml — applies on the next bot restart.</p>
+<div id="tuning-msg"></div>
+<div id="tuning-sliders">
+  <div class="tune-row"><label>Wake sensitivity <input type="range" id="t-wake_threshold" min="0.30" max="0.60" step="0.01" style="width:130px;vertical-align:middle" title="OWW score needed to wake (real Hey-Willow lands 0.84–1.00; TV audio fired 0.40–0.51)"> <span id="v-wake_threshold"></span></label></div>
+  <div class="tune-row"><label>Awake timeout (s) <input type="range" id="t-wake_awake_timeout" min="5" max="60" step="1" style="width:130px;vertical-align:middle" title="Seconds of silence before she stops listening"> <span id="v-wake_awake_timeout"></span></label></div>
+  <div class="tune-row"><label>VAD confidence <input type="range" id="t-vad_confidence" min="0.30" max="0.90" step="0.05" style="width:130px;vertical-align:middle" title="How sure Silero must be you're speaking"> <span id="v-vad_confidence"></span></label></div>
+  <div class="tune-row"><label>VAD min volume <input type="range" id="t-vad_min_volume" min="0.10" max="0.90" step="0.05" style="width:130px;vertical-align:middle" title="Quiet-speech floor — the ignores-the-TV knob"> <span id="v-vad_min_volume"></span></label></div>
+  <div class="tune-row"><label>Turn-end lull (s) <input type="range" id="t-lull_secs" min="0.2" max="2.0" step="0.1" style="width:130px;vertical-align:middle" title="Silence before your sentence flushes to the brain"> <span id="v-lull_secs"></span></label></div>
+  <div class="tune-row"><label>Echo dedup window (s) <input type="range" id="t-dedup_window" min="2" max="30" step="1" style="width:130px;vertical-align:middle" title="How long she suppresses re-hearing the same words off her own speakers"> <span id="v-dedup_window"></span></label></div>
+</div>
+<form class="inline" id="form-tuning">
+  <button>Save tuning</button>
+  <span class="muted">Values apply on next bot restart.</span>
+</form>
 </div><!-- /pane-voice -->
 
 <div id="pane-settings" class="tabpane hidden">
@@ -588,6 +605,41 @@ $("#form-tts-cfg3").addEventListener("submit", async (ev) => {
 // Top row (provider switch only). Deepgram rows keep their voice knobs
 // in their own stacked forms; a provider flip here commits just the
 // provider + that provider's already-saved voice.
+// ── Voice Tuning panel (Voice tab) ─────────────────────────────
+const TUNING_FIELDS = ["wake_threshold", "wake_awake_timeout", "vad_confidence",
+                       "vad_min_volume", "lull_secs", "dedup_window"];
+
+async function loadTuning() {
+  try {
+    const t = await api("/api/dashboard/voice-tuning");
+    for (const f of TUNING_FIELDS) {
+      const sl = $("#t-" + f);
+      if (t[f] != null) sl.value = String(t[f]);
+      $("#v-" + f).textContent = sl.value;
+    }
+  } catch (e) { msg($("#tuning-msg"), "Tuning load failed: " + e.message, "err"); }
+}
+
+TUNING_FIELDS.forEach((f) => {
+  $("#t-" + f).addEventListener("input", () => {
+    $("#v-" + f).textContent = $("#t-" + f).value;
+  });
+});
+
+$("#form-tuning").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const body = {};
+  for (const f of TUNING_FIELDS) body[f] = parseFloat($("#t-" + f).value);
+  try {
+    await api("/api/dashboard/voice-tuning", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    msg($("#tuning-msg"), "Tuning saved — applies on next bot restart.", "ok");
+  } catch (e) { msg($("#tuning-msg"), "Save failed: " + e.message, "err"); }
+});
+
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const p = $("#tts-provider").value;
@@ -640,7 +692,7 @@ $("#btn-restart").addEventListener("click", async () => {
   }
   if (up) {
     msg($("#restart-msg"), "Bot is back — reloading panels…", "ok");
-    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS();
+    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning();
   } else {
     msg($("#restart-msg"),
         (postErr ? `restart request failed (${postErr}) — ` : "") +
@@ -721,7 +773,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 
-loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS();
+loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning();
 setInterval(loadStatus, 5000);
 setInterval(loadNodes, 5000);
 </script>

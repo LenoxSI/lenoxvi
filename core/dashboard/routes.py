@@ -762,6 +762,77 @@ async def restart_bot():
     return {"ok": True, "restarting": True}
 
 
+# ── Voice Tuning (Voice tab — wake/VAD/turn knobs, all slider-set) ──────
+
+# Six ear-tuning knobs, each config-gated and read at pipeline
+# construction. Ranges are honest per knob's real behavior history:
+# wake threshold 0.30-0.60 (TV exploits fired 0.40-0.51; real wakes
+# 0.84-1.00), awake timeout, VAD confidence/min_volume, turn lull, echo
+# dedup. Writes are read-merge-write PER SECTION — never a blind section
+# replace (the 2026-10-04 filler-clobber lesson).
+
+
+class VoiceTuningPayload(BaseModel):
+    wake_threshold: float | None = Field(default=None, ge=0.30, le=0.60)
+    wake_awake_timeout: float | None = Field(default=None, ge=5.0, le=60.0)
+    vad_confidence: float | None = Field(default=None, ge=0.30, le=0.90)
+    vad_min_volume: float | None = Field(default=None, ge=0.10, le=0.90)
+    lull_secs: float | None = Field(default=None, ge=0.2, le=2.0)
+    dedup_window: float | None = Field(default=None, ge=2.0, le=30.0)
+
+
+_TUNING_TARGETS = {  # payload field -> (config section, key)
+    "wake_threshold": ("wake", "threshold"),
+    "wake_awake_timeout": ("wake", "awake_timeout"),
+    "vad_confidence": ("vad", "confidence"),
+    "vad_min_volume": ("vad", "min_volume"),
+    "lull_secs": ("brain", "lull_secs"),
+    "dedup_window": ("brain", "dedup_window"),
+}
+
+
+@router.get("/voice-tuning")
+async def get_voice_tuning():
+    """Current wake/VAD/turn knob values for the Voice Tuning panel."""
+    wake = config_store.read_section("wake") or {}
+    vad = config_store.read_section("vad") or {}
+    brain = config_store.read_section("brain") or {}
+    return {
+        "wake_threshold": wake.get("threshold"),
+        "wake_awake_timeout": wake.get("awake_timeout"),
+        "vad_confidence": vad.get("confidence"),
+        "vad_min_volume": vad.get("min_volume"),
+        "lull_secs": brain.get("lull_secs"),
+        "dedup_window": brain.get("dedup_window"),
+        "note": "applies on the next bot restart (read at pipeline construction)",
+    }
+
+
+@router.put("/voice-tuning", dependencies=GUARD)
+async def put_voice_tuning(payload: VoiceTuningPayload):
+    """Write the provided knobs; None fields are left untouched. Merges
+    into each target section (wake/vad/brain) — never replaces a section
+    wholesale, so brain.fillers/max_tokens etc. always survive."""
+    by_section: dict[str, dict] = {}
+    for field, (section, key) in _TUNING_TARGETS.items():
+        val = getattr(payload, field)
+        if val is not None:
+            by_section.setdefault(section, {})[key] = val
+    if not by_section:
+        raise HTTPException(status_code=422, detail="no knobs provided")
+    written: dict[str, float] = {}
+    for section, updates in by_section.items():
+        current = dict(config_store.read_section(section) or {})
+        current.update(updates)
+        try:
+            config_store.write_section(section, current)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        written.update({f"{section}.{k}": v for k, v in updates.items()})
+    logger.info(f"dashboard: voice-tuning saved {written} — applies on next restart")
+    return {"ok": True, "written": written}
+
+
 # ── firmware push (operator side of firmware_server.py) ─────────────
 
 @router.post("/firmware/upload", dependencies=GUARD)
