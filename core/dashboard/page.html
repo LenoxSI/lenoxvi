@@ -26,6 +26,8 @@
   .muted { color: #6b6b70; font-size: 13px; }
   .err { color: #d70015; font-size: 13px; margin: 6px 0; }
   .ok { color: #248a3d; font-size: 13px; margin: 6px 0; }
+  .pulse { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
   form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   form.inline input { padding: 5px 7px; }
   #statusbar { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px;
@@ -236,7 +238,12 @@ async function api(path, opts) {
   if (isMutation && _dashToken) {
     opts.headers = Object.assign({}, opts.headers, {"X-Dashboard-Token": _dashToken});
   }
-  const r = await fetch(path, opts);
+  let r;
+  try {
+    r = await fetch(path, opts);
+  } catch (e) {  // TypeError: network unreachable (bot down / restarting)
+    throw _net(e);
+  }
   if (r.status === 401 && isMutation) {
     // Token required/mismatched: prompt once, remember, retry once.
     const t = prompt("Dashboard token required (set LVI_DASHBOARD_TOKEN on the bot):");
@@ -249,6 +256,14 @@ async function api(path, opts) {
   if (!r.ok) throw new Error(body.detail || r.status);
   return body;
 }
+// Network-level fetch failures (bot down / mid-restart): flag them so
+// load polls render a quiet "reconnecting…" instead of red errors —
+// a restart ALWAYS means ~15-40s of unreachable, and that's expected,
+// not an error state (UI polish, 2026-10-05).
+const _net = (e) => {
+  e.network = true;
+  return e;
+};
 
 function fmtAgo(ts) {
   if (!ts) return "—";
@@ -262,6 +277,13 @@ function fmtAgo(ts) {
 function msg(el, text, cls) {
   el.textContent = text || "";
   el.className = cls || "muted";
+}
+// Load-poll failures: if it's a network-level failure (bot down /
+// restarting — always expected during a restart), show a quiet
+// "reconnecting…" instead of red error text.
+function msgLoad(el, e, what) {
+  if (e && e.network) { msg(el, "Bot restarting… reconnecting.", "muted pulse"); return; }
+  msg(el, what + " failed: " + (e ? e.message : "unknown"), "err");
 }
 
 // ── status strip ──────────────────────────────────────────────
@@ -285,7 +307,12 @@ async function loadStatus() {
     $("#rf-wake").textContent = s.wake_model || "—";
     $("#rf-stt").textContent = s.stt_model || "—";
     $("#rf-tts").textContent = s.tts_provider || "—";
-  } catch (e) { $("#statusbar").textContent = "status unavailable: " + e.message; }
+  } catch (e) {
+    // status strip: quiet during a restart (expected), red only on real errors
+    $("#statusbar").textContent = e.network
+      ? "Bot restarting… reconnecting."
+      : "status unavailable: " + e.message;
+  }
 }
 
 // ── mapping table ─────────────────────────────────────────────
@@ -331,7 +358,7 @@ async function loadMapping() {
           loadStatus();
         } catch (e) { msg($("#mapping-msg"), "Save failed: " + e.message, "err"); }
       }));
-  } catch (e) { msg($("#mapping-msg"), "Load failed: " + e.message, "err"); }
+  } catch (e) { msgLoad($("#mapping-msg"), e, "Load"); }
 }
 
 // ── nodes table ───────────────────────────────────────────────
@@ -497,7 +524,7 @@ async function loadZones() {
     const m = await api("/api/dashboard/mapping");
     zones = m.zones; zoneVols = m.zone_volumes || {}; clipVolume = m.clip_volume ?? 70;
     renderZones();
-  } catch (e) { msg($("#zone-msg"), "Zones load failed: " + e.message, "err"); }
+  } catch (e) { msgLoad($("#zone-msg"), e, "Zones load"); }
 }
 
 // ── tabs ──────────────────────────────────────────────────────
@@ -578,7 +605,7 @@ async function loadTTS() {
     $("#tts-flux-expressivity").disabled = t.deepgram_flux_expressivity == null;
     $("#tts-flux-expressivity-val").textContent = t.deepgram_flux_expressivity != null ? t.deepgram_flux_expressivity : 0;
     ttsFlipFields();
-  } catch (e) { msg($("#tts-msg"), "TTS load failed: " + e.message, "err"); }
+  } catch (e) { msgLoad($("#tts-msg"), e, "TTS load"); }
 }
 
 $("#tts-provider").addEventListener("change", ttsFlipFields);
@@ -668,7 +695,7 @@ async function loadTuning() {
       if (t[f] != null) sl.value = String(t[f]);
       $("#v-" + f).textContent = sl.value;
     }
-  } catch (e) { msg($("#tuning-msg"), "Tuning load failed: " + e.message, "err"); }
+  } catch (e) { msgLoad($("#tuning-msg"), e, "Tuning load"); }
 }
 
 TUNING_FIELDS.forEach((f) => {
@@ -720,7 +747,7 @@ async function loadOWW() {
           await loadOWW();
         } catch (e) { msg($("#oww-msg"), "Delete failed: " + e.message, "err"); }
       }));
-  } catch (e) { msg($("#oww-msg"), "Model list load failed: " + e.message, "err"); }
+  } catch (e) { msgLoad($("#oww-msg"), e, "Model list load"); }
 }
 
 $("#form-oww-upload").addEventListener("submit", async (ev) => {
