@@ -123,7 +123,7 @@ restart.</p>
 <form class="inline" id="form-tts-key">
   <label>API key <input type="password" id="tts-key" placeholder="paste key for the selected provider" size="34" autocomplete="off"></label>
   <span id="tts-key-state" class="muted"></span>
-  <button id="btn-tts-key">Save key</button>
+  <button type="button" id="btn-tts-key">Save key</button>
 </form>
 
 <h2>Firmware</h2>
@@ -501,6 +501,10 @@ $("#btn-tts-key").addEventListener("click", async () => {
     msg($("#tts-msg"), `${p === "elevenlabs" ? "ElevenLabs" : "Deepgram"} key saved to .env — applies on next bot restart.`, "ok");
   } catch (e) { msg($("#tts-msg"), "Key save failed: " + e.message, "err"); }
 });
+// Belt & suspenders (2026-10-04 key-save bug): the key form must NEVER
+// natively submit — the button is type="button" now, and any synthetic
+// submit (Enter key in the input) is also swallowed here.
+$("#form-tts-key").addEventListener("submit", (ev) => ev.preventDefault());
 
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
