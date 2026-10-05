@@ -34,6 +34,7 @@ _active_room = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire, M6)
+_fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -112,6 +113,24 @@ def gate():
     return _gate
 
 
+def note_firmware(pc_id: str, version: str) -> None:
+    """fw_push (1.1.2 connect-push): the node announced its RUNNING
+    firmware version on data-channel open. Stored on the room record so
+    the Nodes table shows what's actually flashing on the metal — the
+    OTA manifest only knows what's AVAILABLE. Survives rename via
+    relabel_room (the record moves, the fw field rides along)."""
+    if not version:
+        return
+    room = _room_by_pc.get(pc_id)
+    if not room or room == PROVISIONAL:
+        # Connect raced the offer tee (provisional window): hold the
+        # version keyed by pc_id; note_offer promotes it with the room.
+        _fw_by_pc[pc_id] = version
+        return
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec["fw"] = version
+
+
 def note_offer(pc_id, room):
     """The offer tee recorded a completed offer/response exchange.
 
@@ -135,6 +154,14 @@ def note_offer(pc_id, room):
             )
             rec["online"] = True
             rec["last_seen"] = time.time()
+        # fw_push raced the tee (connect window): carry the held version
+        # onto the now-known room record.
+        held_fw = _fw_by_pc.pop(pc_id, None)
+        if held_fw:
+            rec = _known_rooms.setdefault(
+                label, {"online": False, "first_seen": time.time()}
+            )
+            rec["fw"] = held_fw
     else:
         _room_by_pc[pc_id] = label
     _evict_other_sessions(pc_id, label)
@@ -259,6 +286,7 @@ def known_rooms():
                 "online": bool(rec.get("online")),
                 "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
+                "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
             }
         )
     return sorted(out, key=lambda r: r["room"])

@@ -85,7 +85,7 @@ their node has connected at least once (firmware reports its room on connect).</
 <p class="sub">Firmware 1.1.0+ required for restart / rename / Wi-Fi
 (config over the air). Older firmware: nodes show status only.</p>
 <table id="nodes"><thead><tr>
-  <th>Room</th><th>Status</th><th>Last seen</th><th>Session</th><th></th>
+  <th>Room</th><th>Status</th><th>FW</th><th>Last seen</th><th>Session</th><th></th>
 </tr></thead><tbody></tbody></table>
 <div id="node-msg"></div>
 
@@ -332,6 +332,7 @@ async function loadNodes() {
       tr.innerHTML =
         `<td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.room)}</td>` +
         `<td>${r.online ? "connected" : "offline"}</td>` +
+        `<td class="muted">${esc(r.fw || "—")}</td>` +
         `<td>${fmtAgo(r.last_seen)}</td>` +
         `<td><label class="session-toggle" title="Sticky rooms keep conversation memory across reconnects and bot restarts. Applies on next reconnect.">` +
         `<input type="checkbox" data-sticky="${esc(r.room)}"${sticky ? " checked" : ""}> sticky</label></td>` +

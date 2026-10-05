@@ -121,6 +121,18 @@ def on_message(message, pc_id: str) -> None:
         send_pong(pc_id)
         return
 
+    # fw_push (firmware 1.1.2 connect-push): the node announced its
+    # RUNNING version on data-channel open — store it for the Nodes
+    # table. No future to resolve (nothing requested it); no reply
+    # (the push is fire-and-forget by design).
+    if data.get("evt") == "cmd_result" and data.get("cmd") == "fw_push":
+        info = data.get("data") if isinstance(data.get("data"), dict) else {}
+        fw = info.get("fw") if isinstance(info, dict) else None
+        if fw:
+            registry.note_firmware(pc_id, str(fw))
+            logger.info(f"node_command: <- {pc_id[:24]}… fw_push: running {fw}")
+        return
+
     if data.get("evt") != "cmd_result":
         return  # legacy RTVI messages (LED state) — not ours
 

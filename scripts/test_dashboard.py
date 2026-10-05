@@ -414,6 +414,37 @@ def main():
     finally:
         _lg.remove(_sink)
 
+    # 9b5. fw_push (firmware 1.1.2 connect-push): a node announcing its
+    # RUNNING version on data-channel open lands in the room record and
+    # surfaces in known_rooms; the provisional-window race (push before
+    # the offer tee correlates the room) holds the version keyed by
+    # pc_id and promotes it with the room.
+    from dashboard import registry as _reg
+    from dashboard import node_command
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                    "cmd": "fw_push", "ok": True,
+                    "data": {"fw": "1.1.2"}}), "test-pc-fw")
+    check("fw_push stores the running version (direct room)",
+          any(r.get("fw") == "1.1.2" for r in _reg.known_rooms()),
+          f"rooms={_reg.known_rooms()}")
+    # Provisional-window race: push arrives before the offer correlates
+    # the room — version must ride along on promotion.
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                    "cmd": "fw_push", "ok": True,
+                    "data": {"fw": "1.1.3"}}), "test-pc-fw-race")
+    _reg.mark_connected("test-pc-fw-race")  # provisional (pre-tee)
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                    "cmd": "fw_push", "ok": True,
+                    "data": {"fw": "1.1.3"}}), "test-pc-fw-race")
+    _reg.note_offer("test-pc-fw-race", "fw-race-room")
+    check("fw_push survives the connect/tee race (held, promoted with room)",
+          any(r["room"] == "fw-race-room" and r.get("fw") == "1.1.3"
+              for r in _reg.known_rooms()),
+          f"rooms={_reg.known_rooms()}")
+
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")
     check("tuning GET shape — six knobs",
