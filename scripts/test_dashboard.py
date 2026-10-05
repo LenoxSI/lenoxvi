@@ -200,11 +200,11 @@ def main():
               f"keys={list(t)}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
-        "voice_id": "AbC123xyZw9876543210", "model": "eleven_v2"})
+        "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
     check("TTS PUT (elevenlabs) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
     t = client.get("/api/dashboard/tts").json()
     check("TTS round-trip: elevenlabs voice_id + model persisted",
-          t.get("voice_id") == "AbC123xyZw9876543210" and t.get("model") == "eleven_v2",
+          t.get("voice_id") == "AbC123xyZw9876543210" and t.get("model") == "eleven_flash_v2_5",
           f"t={t}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram", "deepgram_voice": "aura-2-zeus-en"})
@@ -252,14 +252,18 @@ def main():
     r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram", "deepgram_voice": "aura-2-nonexistent-en"})
     check("TTS PUT rejects unknown Aura-2 voice", r.status_code == 422, f"status={r.status_code}")
+    # ONE provider, model picks the lane (the owner 12:05 + trim 13:20): only
+    # flash_v2_5 and v4_turbo are in the menu — flash rides the Realtime
+    # TTS WS, v4_turbo rides Text-to-Dialogue. v2/v3/v4-regular retired.
     r = client.put("/api/dashboard/tts", json={
-        "provider": "elevenlabs",
-        "voice_id": "AbC123xyZw9876543210", "model": "eleven_v3"})
-    check("TTS PUT accepts eleven_v3 (dialogue lane — the old 422 was a wrong-lane ban)",
-          r.status_code == 200, f"status={r.status_code}")
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_v3"})
+    check("TTS PUT rejects retired eleven_v3 (422)",
+          r.status_code == 422, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs", "voice_id": "short", "model": "eleven_v2"})
-    check("TTS PUT rejects too-short voice_id", r.status_code == 422, f"status={r.status_code}")
+    check("TTS PUT rejects too-short voice_id (model also retired — 422 either way)",
+          r.status_code == 422, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs", "deepgram_voice": "aura-2-zeus-en"})
     check("TTS PUT elevenlabs-without-voice_id rejected (422)",

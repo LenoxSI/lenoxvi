@@ -617,12 +617,12 @@ class TTSPayload(BaseModel):
     provider: str = Field(default="elevenlabs",
                           pattern="^(elevenlabs|deepgram|deepgram-flux)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
-    # eleven_v3/even_v4 ride the Text-to-Dialogue lane (bot.py picks the
-    # lane by model prefix); flash/v2 ride the Realtime TTS WS. eleven_v3
-    # is now LEGAL — the old ban (commit fb0cf94) was really a wrong-lane
-    # ban; the dialogue lane reaches it.
+    # the owner's trim (2026-10-05 13:20): flash for reliability/speed, v4
+    # turbo for expressiveness — v2/v3/v4-regular have no use case in a
+    # voice assistant (v2 legacy, v3 superseded by v4, v4-regular is the
+    # slow non-Turbo bake).
     model: str | None = Field(default=None,
-                              pattern=r"^eleven_(flash_v2_5|v2|v3(_conversational)?|v4(_turbo)?)$")
+                              pattern=r"^eleven_(flash_v2_5|v4_turbo)$")
     deepgram_voice: str | None = Field(default=None)
     deepgram_flux_voice: str | None = Field(default=None)
     # Flux knobs: speed 0.5–1.5 in 0.05 steps; expressivity -2..2
