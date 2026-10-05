@@ -590,6 +590,7 @@ $("#btn-tts-key").addEventListener("click", async () => {
     $("#tts-key").value = "";
     await loadTTS();
     msg($("#tts-msg"), `${p === "elevenlabs" ? "ElevenLabs" : "Deepgram"} key saved to .env — applies on next bot restart.`, "ok");
+    await offerRestart($("#tts-msg"));
   } catch (e) { msg($("#tts-msg"), "Key save failed: " + e.message, "err"); }
 });
 // Belt & suspenders (2026-10-04 key-save bug): the key form must NEVER
@@ -612,6 +613,7 @@ $("#form-tts-cfg2").addEventListener("submit", async (ev) => {
     });
     await loadTTS();
     msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
+    await offerRestart($("#tts-msg"));
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
 });
 
@@ -629,6 +631,7 @@ $("#form-tts-cfg3").addEventListener("submit", async (ev) => {
     });
     await loadTTS();
     msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
+    await offerRestart($("#tts-msg"));
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
 });
 
@@ -667,6 +670,7 @@ $("#form-tuning").addEventListener("submit", async (ev) => {
       body: JSON.stringify(body),
     });
     msg($("#tuning-msg"), "Tuning saved — applies on next bot restart.", "ok");
+    await offerRestart($("#tuning-msg"));
   } catch (e) { msg($("#tuning-msg"), "Save failed: " + e.message, "err"); }
 });
 
@@ -686,15 +690,19 @@ $("#form-tts-cfg").addEventListener("submit", async (ev) => {
     });
     await loadTTS();
     msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
+    await offerRestart($("#tts-msg"));
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
 });
 
 // ── bot restart (Settings) ────────────────────────────────────
-$("#btn-restart").addEventListener("click", async () => {
+// Reusable restart lane — called by #btn-restart (Settings) and by the
+// post-save popup (Voice tab). `fb` is the feedback element; it must be
+// where the user is LOOKING, which for a save-triggered restart is the
+// save form's own msg span, not the hidden Settings one.
+async function restartBot(fb = $("#restart-msg")) {
   const b = $("#btn-restart");
-  if (!confirm("Restart the bot? Config changes apply on restart.")) return;
   b.disabled = true;
-  msg($("#restart-msg"), "Restarting…", "muted");
+  msg(fb, "Restarting…", "muted");
   // Two attempts: a fetch can die transiently (2026-10-04: a real click's
   // POST vanished browser-side while GETs worked seconds apart). A thrown
   // fetch is EITHER the process-death race (restart fired, response lost)
@@ -721,14 +729,27 @@ $("#btn-restart").addEventListener("click", async () => {
     } catch (e) { /* still down */ }
   }
   if (up) {
-    msg($("#restart-msg"), "Bot is back — reloading panels…", "ok");
+    msg(fb, "Bot is back — reloading panels…", "ok");
     loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning();
   } else {
-    msg($("#restart-msg"),
+    msg(fb,
         (postErr ? `restart request failed (${postErr}) — ` : "") +
         "uptime never reset within 90s; the old bot process is still running. Ping Willow with this message.", "err");
   }
   b.disabled = false;
+  return !!up;
+}
+
+// Post-save popup: save → "restart now?" → done, one flow (the owner
+// 2026-10-04 22:34). Cancel keeps the saved-values-apply-later behavior.
+async function offerRestart(fb) {
+  if (!confirm("Saved. Restart the bot now to apply?")) return;
+  await restartBot(fb);
+}
+
+$("#btn-restart").addEventListener("click", async () => {
+  if (!confirm("Restart the bot? Config changes apply on restart.")) return;
+  await restartBot();
 });
 
 $("#btn-discover").addEventListener("click", async () => {
