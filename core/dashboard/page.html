@@ -43,6 +43,16 @@
                         border-bottom: 2px solid #1c1c1e; margin-bottom: -1px; }
   .tabpane { margin-top: 0; }
   .tabpane.hidden { display: none; }
+  /* Voice Tuning (2026-10-04): label | slider | value grid — all rows
+     aligned, save button in a right rail beside the stack. */
+  #tuning-grid { display: grid; grid-template-columns: 190px 1fr 64px;
+                 column-gap: 10px; row-gap: 10px; align-items: center; }
+  #tuning-grid label { text-align: right; padding-right: 4px; }
+  #tuning-grid input[type="range"] { width: 100%; }
+  #tuning-grid .tune-val { text-align: right; font-variant-numeric: tabular-nums;
+                           color: #6b6b70; font-size: 13px; }
+  #tuning-rail { border-left: 1px solid #d8d8dc; padding-left: 18px;
+                 display: flex; align-items: center; }
 </style>
 </head>
 <body>
@@ -145,18 +155,22 @@ restart.</p>
 <p class="sub">Ear-tuning knobs for wake, silence detection, and turn
 timing. Saves to config.yaml — applies on the next bot restart.</p>
 <div id="tuning-msg"></div>
-<div id="tuning-sliders">
-  <div class="tune-row"><label>Wake sensitivity <input type="range" id="t-wake_threshold" min="0.30" max="0.60" step="0.01" style="width:130px;vertical-align:middle" title="OWW score needed to wake (real Hey-Willow lands 0.84–1.00; TV audio fired 0.40–0.51)"> <span id="v-wake_threshold"></span></label></div>
-  <div class="tune-row"><label>Awake timeout (s) <input type="range" id="t-wake_awake_timeout" min="5" max="60" step="1" style="width:130px;vertical-align:middle" title="Seconds of silence before she stops listening"> <span id="v-wake_awake_timeout"></span></label></div>
-  <div class="tune-row"><label>VAD confidence <input type="range" id="t-vad_confidence" min="0.30" max="0.90" step="0.05" style="width:130px;vertical-align:middle" title="How sure Silero must be you're speaking"> <span id="v-vad_confidence"></span></label></div>
-  <div class="tune-row"><label>VAD min volume <input type="range" id="t-vad_min_volume" min="0.10" max="0.90" step="0.05" style="width:130px;vertical-align:middle" title="Quiet-speech floor — the ignores-the-TV knob"> <span id="v-vad_min_volume"></span></label></div>
-  <div class="tune-row"><label>Turn-end lull (s) <input type="range" id="t-lull_secs" min="0.2" max="2.0" step="0.1" style="width:130px;vertical-align:middle" title="Silence before your sentence flushes to the brain"> <span id="v-lull_secs"></span></label></div>
-  <div class="tune-row"><label>Echo dedup window (s) <input type="range" id="t-dedup_window" min="2" max="30" step="1" style="width:130px;vertical-align:middle" title="How long she suppresses re-hearing the same words off her own speakers"> <span id="v-dedup_window"></span></label></div>
-</div>
-<form class="inline" id="form-tuning">
-  <button>Save tuning</button>
-  <span class="muted">Values apply on next bot restart.</span>
+<form id="form-tuning" style="margin:0">
+  <div style="display:flex; gap:20px; align-items:center;">
+    <div id="tuning-grid" style="flex:1;">
+    <label for="t-wake_threshold">Wake sensitivity</label><input type="range" id="t-wake_threshold" min="0.30" max="0.60" step="0.01" title="OWW score needed to wake (real Hey-Willow lands 0.84–1.00; TV audio fired 0.40–0.51)"><span class="tune-val" id="v-wake_threshold"></span>
+    <label for="t-wake_awake_timeout">Awake timeout (s)</label><input type="range" id="t-wake_awake_timeout" min="5" max="60" step="1" title="Seconds of silence before she stops listening"><span class="tune-val" id="v-wake_awake_timeout"></span>
+    <label for="t-vad_confidence">VAD confidence</label><input type="range" id="t-vad_confidence" min="0.30" max="0.90" step="0.05" title="How sure Silero must be you're speaking"><span class="tune-val" id="v-vad_confidence"></span>
+    <label for="t-vad_min_volume">VAD min volume</label><input type="range" id="t-vad_min_volume" min="0.10" max="0.90" step="0.05" title="Quiet-speech floor — the ignores-the-TV knob"><span class="tune-val" id="v-vad_min_volume"></span>
+    <label for="t-lull_secs">Turn-end lull (s)</label><input type="range" id="t-lull_secs" min="0.2" max="2.0" step="0.1" title="Silence before your sentence flushes to the brain"><span class="tune-val" id="v-lull_secs"></span>
+    <label for="t-dedup_window">Echo dedup window (s)</label><input type="range" id="t-dedup_window" min="2" max="30" step="1" title="How long she suppresses re-hearing the same words off her own speakers"><span class="tune-val" id="v-dedup_window"></span>
+  </div>
+  <div id="tuning-rail">
+    <button>Save tuning</button>
+  </div>
+  </div>
 </form>
+<span class="muted">Values apply on next bot restart.</span>
 </div><!-- /pane-voice -->
 
 <div id="pane-settings" class="tabpane hidden">
