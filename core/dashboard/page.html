@@ -45,6 +45,10 @@
   .tabpane.hidden { display: none; }
   /* Voice Tuning (2026-10-04): label | slider | value grid — all rows
      aligned, save button in a right rail beside the stack. */
+  #rigfacts { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px;
+             background: #f2f2f7; border-radius: 8px; padding: 10px 14px;
+             margin-bottom: 20px; }
+  #rigfacts b { font-weight: 600; }
   #tuning-grid { display: grid; grid-template-columns: 190px 1fr 64px;
                  column-gap: 10px; row-gap: 10px; align-items: center; }
   #tuning-grid label { text-align: right; padding-right: 4px; }
@@ -174,6 +178,13 @@ timing. Saves to config.yaml — applies on the next bot restart.</p>
 </div><!-- /pane-voice -->
 
 <div id="pane-settings" class="tabpane hidden">
+<div id="rigfacts">
+  <span>Version <b id="rf-version">…</b></span>
+  <span>Wake model <b id="rf-wake">…</b></span>
+  <span>STT model <b id="rf-stt">…</b></span>
+  <span>TTS <b id="rf-tts">…</b></span>
+</div>
+
 <h2>Bot control</h2>
 <p class="sub">Applies pending config (TTS provider/voice, session modes, zone
 changes) by restarting the bot. The dashboard pauses ~30s while it comes
@@ -252,6 +263,11 @@ async function loadStatus() {
       `<span>Active room <b>${esc(s.active_room || "—")}</b></span>` +
       `<span>Last wake <b>${wake}</b></span>` +
       `<span>Version <b>${esc(s.version || "unknown")}</b></span>`;
+    // Rig facts (Settings tab header) — same payload, live values.
+    $("#rf-version").textContent = s.version || "unknown";
+    $("#rf-wake").textContent = s.wake_model || "—";
+    $("#rf-stt").textContent = s.stt_model || "—";
+    $("#rf-tts").textContent = s.tts_provider || "—";
   } catch (e) { $("#statusbar").textContent = "status unavailable: " + e.message; }
 }
 

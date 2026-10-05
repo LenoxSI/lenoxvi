@@ -11,6 +11,7 @@ the LAN can read status and edit mappings — accepted risk.
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import time
@@ -23,7 +24,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from config import cfg
+from config import cfg, cfg_env
+
+import wake_word  # module-level import is light (pipecat frames only;
+                  # the OWW/torch load happens at filter construction)
 
 from . import config_store, node_command, registry
 from .guard import mutation_guard
@@ -58,9 +62,23 @@ class ZonePayload(BaseModel):
 @router.get("/status")
 async def status():
     boot = registry.boot_time()
+    wake_cfg = config_store.read_section("wake") or {}
+    stt_cfg = config_store.read_section("stt") or {}
+    tts_cfg = config_store.read_section("tts") or {}
     return {
         "uptime_secs": round(time.time() - boot, 1) if boot else None,
         "version": registry.version(),
+        # Rig facts (Settings tab header, read-only) — resolved through
+        # the SAME chains the consumers use, so the dashboard always
+        # shows what's actually constructed, never static text:
+        # config > env > code default.
+        "wake_model": os.path.basename(str(
+            cfg_env("wake", "model", "LVI_WAKE_MODEL",
+                    wake_cfg.get("model") or wake_word.WAKE_MODEL))),
+        "stt_model": cfg_env("stt", "model", "LVI_STT_MODEL",
+                             stt_cfg.get("model") or "large-v3-turbo"),
+        "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
+                                tts_cfg.get("provider") or "elevenlabs"),
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
         "rooms": registry.known_rooms(),

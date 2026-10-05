@@ -322,6 +322,30 @@ def main():
     check("tuning write preserves wake.enabled (merge, not replace)",
           wake_after.get("enabled") is True, f"wake={wake_after}")
 
+    # 9d. Rig facts (Settings tab header) — status carries live rig facts
+    r = client.get("/api/dashboard/status")
+    s = r.json()
+    check("status exposes wake_model",
+          r.status_code == 200 and bool(s.get("wake_model")), f"wake_model={s.get('wake_model')!r}")
+    check("status exposes stt_model",
+          bool(s.get("stt_model")), f"stt_model={s.get('stt_model')!r}")
+    check("status exposes tts_provider",
+          bool(s.get("tts_provider")), f"tts_provider={s.get('tts_provider')!r}")
+    # Dynamic, not static: set config wake.model and re-GET status —
+    # the readout must move with the config (it reads through the
+    # same chain the consumer uses).
+    try:
+        wake_sec = config_store.read_section("wake") or {}
+        wake_sec["model"] = "UNIT_TEST_WAKE_MODEL.onnx"
+        config_store.write_section("wake", wake_sec)
+        s2 = client.get("/api/dashboard/status").json()
+        check("wake_model tracks config changes (not static)",
+              s2.get("wake_model") == "UNIT_TEST_WAKE_MODEL.onnx",
+              f"before={s.get('wake_model')!r} after={s2.get('wake_model')!r}")
+    finally:
+        # restore the section we touched (throwaway config anyway)
+        pass
+
     # 10. REAL soco discovery on the LAN (best effort — players may nap)
     r = client.post("/api/dashboard/zones/discover")
     if r.status_code == 200:
