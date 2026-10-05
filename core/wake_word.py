@@ -194,6 +194,15 @@ class WakeWordFilter(FrameProcessor):
                     self._awake_echo_blocked = False
                     self._vad_fired = False
                     logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
+                    # Echo-gate rider (design note): a confirmed wake
+                    # means the human intends to speak — relax the duration
+                    # gate to a tail so their question isn't eaten (the
+                    # 17:49:08 double-wake). Text containment stays armed.
+                    if self._echo_gate is not None:
+                        try:
+                            self._echo_gate.relax()
+                        except Exception:
+                            pass
                     if self._on_wake:
                         try:
                             self._on_wake()
@@ -220,6 +229,15 @@ class WakeWordFilter(FrameProcessor):
                         logger.info(
                             f"wake_word: BARGE-IN (score {score:.2f}, "
                             f"2-frame confirm) -> AWAKE")
+                        # Echo-gate rider (030): same rule as a normal
+                        # wake — the human is talking on purpose; the
+                        # dead clip's duration gate must not eat their
+                        # next words.
+                        if self._echo_gate is not None:
+                            try:
+                                self._echo_gate.relax()
+                            except Exception:
+                                pass
                         if self._on_interrupt:
                             try:
                                 self._on_interrupt()

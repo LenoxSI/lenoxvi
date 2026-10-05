@@ -298,6 +298,14 @@ class WiiMOutput(FrameProcessor):
         plain setPlayerCmd:stop. Idempotent: no clip, nothing to do."""
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
         self._cancel_end_of_speech()
+        # Echo-gate rider (030): the clip is dead — its duration gate must
+        # not eat the interrupting question. relax() never extends a
+        # lapsed gate, and text containment stays armed.
+        if self._echo_gate is not None:
+            try:
+                self._echo_gate.relax()
+            except Exception:
+                pass
         zone_name = self._zone
         if self._zone_selector:
             try:

@@ -713,6 +713,14 @@ class SonosOutput(FrameProcessor):
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
         self._cancel_end_of_speech()
         self._clip_active_until = 0.0
+        # Echo-gate rider (030): the clip is dead — its duration gate must
+        # not eat the interrupting question. relax() never extends a
+        # lapsed gate, and text containment stays armed.
+        if self._echo_gate is not None:
+            try:
+                self._echo_gate.relax()
+            except Exception:
+                pass
         if not cid:
             return
         zone_name = self._zone
