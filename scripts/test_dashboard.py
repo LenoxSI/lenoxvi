@@ -1031,6 +1031,31 @@ def main():
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
+        # 9b9. Frame passthrough (the 17:09 "you wont wake" outage): the
+        # B3 _run_turn extraction lost process_frame's final push_frame —
+        # the agent ate EVERY frame, StartFrame never reached the sink,
+        # PipelineWorker killed the session at +20s, and the node rode a
+        # reconnect loop. Every processor MUST pass frames downstream.
+        async def _passthrough_probe():
+            _agent2 = _Agent(echo_gate=_EchoGate8(), room="suite-9b9",
+                             session_mode="fresh")
+            _seen2 = []
+
+            async def _sink(frame, direction=None):
+                _seen2.append(frame)
+
+            _agent2.push_frame = _sink
+            _frames2 = [_BotStart(), BotStoppedSpeakingFrame()]
+            for _f in _frames2:
+                await _agent2.process_frame(_f, _FD8.DOWNSTREAM)
+            return _frames2, _seen2
+
+        from pipecat.frames.frames import BotStoppedSpeakingFrame  # noqa: E402
+        _frames2, _seen2 = _asyncio.run(_passthrough_probe())
+        check("9b9 agent: every frame passes through (StartFrame must reach the sink)",
+              all(any(x is f for x in _seen2) for f in _frames2),
+              f"forwarded={sum(1 for f in _frames2 if any(x is f for x in _seen2))}/{len(_frames2)}")
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")

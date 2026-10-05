@@ -402,6 +402,12 @@ class HermesAgent(FrameProcessor):
                                 self._echo_texts.append(ack)
                                 self._echo_texts = self._echo_texts[-4:]
 
+        # EVERY frame passes through (B3 regression, 2026-10-05 17:09):
+        # this line was lost in the _run_turn extraction churn — the agent
+        # ate StartFrame, PipelineWorker timed out at +20s, and the node
+        # rode a reconnect loop ("you wont wake"). Non-negotiable.
+        await self.push_frame(frame, direction)
+
     async def _run_turn(self, text: str, epoch: int) -> None:
         """One turn as a background task (design note). Every await
         checks the epoch — a superseded turn discards its reply, skips
