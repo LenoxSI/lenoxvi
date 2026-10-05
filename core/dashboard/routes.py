@@ -614,6 +614,11 @@ class TTSPayload(BaseModel):
     model: str | None = Field(default=None, pattern="^eleven_(flash_v2_5|v2)$")
     deepgram_voice: str | None = Field(default=None)
     deepgram_flux_voice: str | None = Field(default=None)
+    # Flux knobs: speed 0.5–1.5 in 0.05 steps; expressivity -2..2
+    # (None/absent = Flux defaults). Pydantic validates range; the None
+    # default means "don't touch" on partial updates.
+    deepgram_flux_speed: float | None = Field(default=None, ge=0.5, le=1.5)
+    deepgram_flux_expressivity: int | None = Field(default=None, ge=-2, le=2)
 
 
 def _validate_tts_payload(p: TTSPayload) -> None:
@@ -626,6 +631,8 @@ def _validate_tts_payload(p: TTSPayload) -> None:
     elif p.provider == "deepgram-flux":
         if not p.deepgram_flux_voice or p.deepgram_flux_voice not in _DEEPGRAM_FLUX_VOICES:
             raise HTTPException(status_code=422, detail="deepgram_flux_voice must be one of the Flux voices (flux-hannah-en …)")
+        if p.deepgram_flux_speed is not None and abs(p.deepgram_flux_speed * 20 - round(p.deepgram_flux_speed * 20)) > 1e-9:
+            raise HTTPException(status_code=422, detail="speed must be 0.5–1.5 in 0.05 steps")
 
 
 class TTSKeyPayload(BaseModel):
@@ -643,6 +650,8 @@ async def get_tts():
         "model": tts_cfg.get("model") or "eleven_flash_v2_5",
         "deepgram_voice": tts_cfg.get("deepgram_voice") or "aura-2-thalia-en",
         "deepgram_flux_voice": tts_cfg.get("deepgram_flux_voice") or "flux-hannah-en",
+        "deepgram_flux_speed": tts_cfg.get("deepgram_flux_speed"),
+        "deepgram_flux_expressivity": tts_cfg.get("deepgram_flux_expressivity"),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         "note": "provider/voice/model apply on next bot restart; keys apply "
@@ -664,6 +673,13 @@ async def put_tts(payload: TTSPayload):
         current["deepgram_voice"] = payload.deepgram_voice
     else:
         current["deepgram_flux_voice"] = payload.deepgram_flux_voice
+        # Flux knobs ride along — None means "leave as-is" (partial update
+        # semantics: the panel always sends current values, but a bare
+        # API PUT of just provider+voice must not wipe tuned knobs).
+        if payload.deepgram_flux_speed is not None:
+            current["deepgram_flux_speed"] = payload.deepgram_flux_speed
+        if payload.deepgram_flux_expressivity is not None:
+            current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
     try:
         config_store.write_section("tts", current)
     except FileNotFoundError as e:

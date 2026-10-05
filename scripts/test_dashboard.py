@@ -219,6 +219,32 @@ def main():
           t.get("provider") == "deepgram-flux" and t.get("deepgram_flux_voice") == "flux-hannah-en",
           f"t={t}")
     r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en",
+        "deepgram_flux_speed": 1.1, "deepgram_flux_expressivity": 2})
+    check("TTS PUT (flux speed+expressivity) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
+    t = client.get("/api/dashboard/tts").json()
+    check("TTS round-trip: flux speed 1.1 + expressivity 2 persisted",
+          t.get("deepgram_flux_speed") == 1.1 and t.get("deepgram_flux_expressivity") == 2,
+          f"t={t}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en",
+        "deepgram_flux_speed": 0.87})
+    check("TTS PUT rejects off-step speed (0.87)", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en",
+        "deepgram_flux_speed": 1.7})
+    check("TTS PUT rejects out-of-range speed (1.7)", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en",
+        "deepgram_flux_expressivity": 3})
+    check("TTS PUT rejects out-of-range expressivity (3)", r.status_code == 422, f"status={r.status_code}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "deepgram-flux", "deepgram_flux_voice": "flux-hannah-en"})
+    t = client.get("/api/dashboard/tts").json()
+    check("TTS bare flux PUT keeps tuned knobs (partial-update semantics)",
+          t.get("deepgram_flux_speed") == 1.1 and t.get("deepgram_flux_expressivity") == 2,
+          f"t={t}")
+    r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram-flux", "deepgram_flux_voice": "flux-notarealvoice-en"})
     check("TTS PUT rejects unknown Flux voice", r.status_code == 422, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={

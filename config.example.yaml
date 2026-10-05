@@ -46,6 +46,8 @@ tts:
   model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
                              # the websocket handshake rejects v3 with HTTP 400
   # deepgram_flux_voice: flux-hannah-en   # used when provider: deepgram-flux
+  # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
+  # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
   # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
 
 # ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────

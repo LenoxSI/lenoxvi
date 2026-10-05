@@ -101,6 +101,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             settings=DeepgramFluxTTSService.Settings(
                 voice=cfg_env("tts", "deepgram_flux_voice", "LVI_TTS_FLUX_VOICE",
                               "flux-hannah-en"),
+                # Speed: 0.5–1.5 in 0.05 steps (None = Flux default).
+                # Expressivity: -2..2 calm→animated (None = default; fixed
+                # per connection). Both optional — absent config = defaults.
+                speed=(lambda v: float(v) if v not in (None, "") else None)(
+                    cfg("tts", "deepgram_flux_speed")),
+                expressivity=(lambda v: int(v) if v not in (None, "") else None)(
+                    cfg("tts", "deepgram_flux_expressivity")),
             ),
         )
         logger.info("tts backend: deepgram flux")
