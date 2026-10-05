@@ -923,13 +923,17 @@ def main():
             check("9b8 wake: two consecutive frames fire the interrupt, gate reopens",
                   len(_fired8) == 1 and _wf8._state is _TurnState.AWAKE,
                   f"fired={len(_fired8)} state={_wf8._state}")
-            # knob OFF = today's behavior: even two frames never fire
+            # knob OFF = today's behavior: even two frames never fire.
+            # NOTE: pinned on the instance — the suite copies the LIVE
+            # config.yaml (which carries barge_in: true on the owner's rig),
+            # so the config default can't be asserted hermetically here.
             async def _wake_probe_off():
                 fired = []
                 wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None,
                          on_interrupt=lambda: fired.append(time.monotonic()))
                 wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.99})
                 wf._name = "Hey_Willow"
+                wf._barge_in = False  # the OFF path, pinned hermetically
                 wf._frame_size = 2560
                 await wf.process_frame(_BotStart(), _FD8.DOWNSTREAM)
                 for _ in range(3):
