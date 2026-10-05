@@ -803,6 +803,222 @@ def main():
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
 
+    # 9b8. B3 epoch turns + wake-word barge-in (design note): turns
+    # run as background tasks (frame loop never blocks on the brain), a
+    # new question supersedes (old reply discarded, no history write,
+    # ack spoken), and "Hey Willow" twice-confirmed during LOCKED fires
+    # the interrupt + reopens the gate; backends stop their clips.
+    if True:  # scope block
+        import os as _os
+        _os.environ["LVI_HERMES_KEY"] = "suite-test-key-not-real"
+        _os.environ["LVI_SESSIONS"] = str(SCRATCH / "sessions-9b8.json")
+        from pipecat.frames.frames import (  # noqa: E402
+            TranscriptionFrame as _TF,
+            VADUserStartedSpeakingFrame as _VADStart,
+            BotStartedSpeakingFrame as _BotStart,
+            InputAudioRawFrame as _InputAudio,
+        )
+        from pipecat.processors.frame_processor import (  # noqa: E402
+            FrameDirection as _FD8,
+        )
+        import types as _types_module
+        from types import SimpleNamespace as _NS8
+        from echo_gate import EchoGate as _EchoGate8
+        from hermes_agent import HermesAgent as _Agent  # noqa: E402
+        from wake_word import TurnState as _TurnState, WakeWordFilter as _WF  # noqa: E402
+        _FD = _FD8
+
+        _SPOKEN8 = []
+
+        async def _agent_probe():
+            agent = _Agent(echo_gate=_EchoGate8(), room="suite-9b8",
+                           session_mode="fresh")
+            _calls = {"n": 0}
+
+            def fake_ask(text):
+                _calls["n"] += 1
+                if _calls["n"] == 1:
+                    time.sleep(2.0)  # the slow first turn
+                return f"reply to {text}"
+
+            agent._ask_hermes = fake_ask
+
+            async def fake_push(frame, direction=None):
+                t = getattr(frame, "text", None)
+                if t and ("reply to" in t or "switching" in t):
+                    _SPOKEN8.append(t)
+
+            agent.push_frame = fake_push
+
+            async def say(txt):
+                await agent.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await agent.process_frame(_TF(txt, "", 0, 0, 0), _FD8.DOWNSTREAM)
+
+            async def flush():
+                await agent.process_frame(_TF("", "", 0, 0, 0), _FD8.DOWNSTREAM)
+
+            lull = float(agent._lull_secs)
+            await say("whats the weather")
+            await asyncio.sleep(lull + 0.3)
+            t2 = asyncio.create_task(say("what time is it"))
+            _t_flush = time.monotonic()
+            await flush()
+            _block = time.monotonic() - _t_flush
+            await asyncio.sleep(lull + 0.3)
+            await flush()
+            await t2
+            await asyncio.sleep(0.3)
+            return agent, _block
+
+        try:
+            _agent, _block_time = _asyncio.run(_agent_probe())
+            check("9b8 turn: frame loop never blocks on the brain (was 2.5s)",
+                  _block_time < 0.5, f"blocked={_block_time:.2f}s")
+            check("9b8 turn: superseded reply never spoken (stale question dropped)",
+                  not any("weather" in s for s in _SPOKEN8),
+                  f"spoken={_SPOKEN8}")
+            check("9b8 turn: supersede ack spoken",
+                  any("switching" in s for s in _SPOKEN8), f"spoken={_SPOKEN8}")
+            check("9b8 turn: new turn's reply spoken",
+                  any("time is it" in s for s in _SPOKEN8), f"spoken={_SPOKEN8}")
+            _hist = [h.get("content", "") for h in _agent._history]
+            check("9b8 turn: no history write for the dead turn",
+                  not any("weather" in h for h in _hist) and
+                  any("time is it" in h for h in _hist), f"hist={_hist}")
+
+            # ── barge-in wake detection ──
+            async def _wake_probe():
+                fired = []
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None,
+                         on_interrupt=lambda: fired.append(time.monotonic()))
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.99})
+                wf._name = "Hey_Willow"
+                wf._barge_in = True  # the ON path; default-off tested below
+                wf._frame_size = 2560
+                await wf.process_frame(_BotStart(), _FD8.DOWNSTREAM)
+                # one over-threshold frame — must NOT fire
+                await wf.process_frame(
+                    _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+                one = len(fired)
+                # second consecutive frame — MUST fire
+                await wf.process_frame(
+                    _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+                return wf, fired, one
+
+            _wf8, _fired8, _one8 = _asyncio.run(_wake_probe())
+            check("9b8 wake: one over-threshold frame does NOT fire (2-frame confirm)",
+                  _one8 == 0, f"fired_after_one={_one8}")
+            check("9b8 wake: two consecutive frames fire the interrupt, gate reopens",
+                  len(_fired8) == 1 and _wf8._state is _TurnState.AWAKE,
+                  f"fired={len(_fired8)} state={_wf8._state}")
+            # knob OFF = today's behavior: even two frames never fire
+            async def _wake_probe_off():
+                fired = []
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None,
+                         on_interrupt=lambda: fired.append(time.monotonic()))
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.99})
+                wf._name = "Hey_Willow"
+                wf._frame_size = 2560
+                await wf.process_frame(_BotStart(), _FD8.DOWNSTREAM)
+                for _ in range(3):
+                    await wf.process_frame(
+                        _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+                return wf, fired
+
+            _wf8b, _fired8b = _asyncio.run(_wake_probe_off())
+            check("9b8 wake: barge_in default OFF never interrupts (bit-for-bit old)",
+                  not _fired8b and _wf8b._state is _TurnState.LOCKED,
+                  f"fired={len(_fired8b)} state={_wf8b._state}")
+            # ── backend clip stop (fake player layers, 9b7 pattern) ──
+            _CANCELS8 = []
+
+            class _FakeSw8:
+                def __init__(self, ip, player_id=None):
+                    pass
+
+                async def connect(self):
+                    return
+
+                async def play_clip(self, url, volume=None):
+                    await asyncio.sleep(0.05)
+                    return {"clipId": "clip-9b8"}
+
+                async def cancel_clip(self, cid):
+                    _CANCELS8.append(cid)
+
+                async def close(self):
+                    return
+
+            _saved_ws8 = sys.modules.get("sonos_websocket")
+            sys.modules["sonos_websocket"] = _types_module.SimpleNamespace(SonosWebsocket=_FakeSw8)
+            try:
+                from sonos_output import SonosOutput as _SO8
+                from wiim_output import WiiMOutput as _WO8
+                _srv8 = _NS8(url_for=lambda n: f"http://127.0.0.1:9/clips/{n}")
+
+                async def _stop_probe():
+                    so = _SO8(echo_gate=_EchoGate8(),
+                              zone_selector=lambda: "test", led=None,
+                              config_path=str(cfg_test))
+                    so._enabled = True
+                    so._zones = {"test": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                    so._clip_server = _srv8
+                    so.create_task = lambda coro, name=None, context=None: asyncio.create_task(coro)
+                    from pipecat.frames.frames import (  # noqa: E402
+                        TTSStartedFrame as _TS8, TTSAudioRawFrame as _TA8,
+                        TTSStoppedFrame as _TSt8,
+                    )
+                    for f in (_TS8(), _TA8(b"\x00\x00" * 12000, 24000, 1), _TSt8()):
+                        await so.process_frame(f, _FD8.DOWNSTREAM)
+                    await asyncio.sleep(0.2)
+                    return so
+
+                _so8 = _asyncio.run(_stop_probe())
+                _id8 = _so8._reply_clip_id
+                check("9b8 stop: reply clip id held before interrupt", _id8 is not None,
+                      f"id={_id8}")
+                if _id8 is not None:
+                    _asyncio.run(_so8.stop_current_clip())
+                    check("9b8 stop: sonos barge-in cancels the held clipId",
+                          "clip-9b8" in _CANCELS8, f"cancels={_CANCELS8}")
+                    check("9b8 stop: interrupt is idempotent (second call, no clip)",
+                          _so8._reply_clip_id is None, "clip id not cleared")
+                _WIIM_CMDS8 = []
+                _real_wiim8 = _wo_mod.wiim_api if "_wo_mod" in dir() else None
+
+                def _wiim_stop_capture(ip, cmd, timeout=4.0):
+                    _WIIM_CMDS8.append(cmd)
+                    return "OK"
+
+                import wiim_output as _wo8_mod
+                _saved_wiim_api8 = _wo8_mod.wiim_api
+                _wo8_mod.wiim_api = _wiim_stop_capture
+                try:
+                    async def _wiim_stop_probe():
+                        wo = _WO8(echo_gate=_EchoGate8(),
+                                  zone_selector=lambda: "test", led=None,
+                                  config_path=str(cfg_test))
+                        wo._enabled = True
+                        wo._zones = {"test": {"ip": "127.0.0.1"}}
+                        wo._clip_server = _srv8
+                        wo.create_task = lambda coro, name=None, context=None: asyncio.create_task(coro)
+                        await wo.stop_current_clip()
+                        return wo
+
+                    _wo8b = _asyncio.run(_wiim_stop_probe())
+                    check("9b8 stop: wiim barge-in sends setPlayerCmd:stop",
+                          any("setPlayerCmd:stop" in c for c in _WIIM_CMDS8),
+                          f"cmds={_WIIM_CMDS8}")
+                finally:
+                    _wo8_mod.wiim_api = _saved_wiim_api8
+            finally:
+                if _saved_ws8 is None:
+                    sys.modules.pop("sonos_websocket", None)
+                else:
+                    sys.modules["sonos_websocket"] = _saved_ws8
+        finally:
+            _os.environ.pop("LVI_HERMES_KEY", None)
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")
