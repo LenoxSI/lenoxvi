@@ -46,6 +46,12 @@ from pipecat.runner.utils import create_transport
 from pipecat.runner.types import RunnerArguments
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 try:
+    from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
+    _EL_DIALOGUE_OK = True
+except ImportError:  # older pipecat without the Text-to-Dialogue service
+    ElevenLabsDialogueTTSService = None
+    _EL_DIALOGUE_OK = False
+try:
     from pipecat.services.deepgram.tts import DeepgramTTSService
     from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
     _DEEPGRAM_OK = True
@@ -71,7 +77,29 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # key. ElevenLabs stays the default (a config without tts.provider —
     # the fresh-clone state — must land on a provider that speaks).
     tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
-    if tts_provider == "deepgram":
+    if tts_provider == "elevenlabs-v4":
+        # Eleven v4 / v4 Turbo (2026-10-05): the ONLY lane that reaches
+        # eleven_v4* models — the standard Realtime TTS websocket rejects
+        # them (same wall v3 hit). Text-to-Dialogue WS via pipecat's
+        # dialogue service. One voice per connection (v4 Turbo); inline
+        # audio tags [laughs]/[excited] render; stability is the one
+        # voice knob (None = model default).
+        if not _EL_DIALOGUE_OK:
+            raise RuntimeError(
+                "tts.provider 'elevenlabs-v4' needs pipecat's "
+                "ElevenLabsDialogueTTSService (pipecat >= 1.10)")
+        tts = ElevenLabsDialogueTTSService(
+            api_key=os.environ["ELEVENLABS_API_KEY"],
+            settings=ElevenLabsDialogueTTSService.Settings(
+                # model guard: TDD lane accepts eleven_v3*/eleven_v4* only;
+                # a misconfig'd flash model must fail loud, not silently
+                # ride the wrong lane
+                model=cfg_env("tts", "model", "LVI_TTS_MODEL", "eleven_v4_turbo"),
+                voice=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
+            ),
+        )
+        logger.info("tts backend: elevenlabs-v4 (text-to-dialogue)")
+    elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
         # Verified against developers.deepgram.com/docs/tts-models. Key is
         # env-side forever (secrets never ride config.yaml).
