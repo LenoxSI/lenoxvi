@@ -175,6 +175,23 @@ timing. Saves to config.yaml — applies on the next bot restart.</p>
   </div>
 </form>
 <span class="muted">Values apply on next bot restart.</span>
+
+<h2>Wake Word Model (OWW)</h2>
+<p class="sub">Upload .onnx wake-word models, select the active one, delete
+spares. Same-name upload replaces; selection applies on the next bot
+restart.</p>
+<div id="oww-msg"></div>
+<form class="inline" id="form-oww-select">
+  <label>Active model <select id="oww-model"></select></label>
+  <button type="button" id="btn-oww-select">Select</button>
+</form>
+<form class="inline" id="form-oww-upload">
+  <input type="file" id="oww-file" accept=".onnx">
+  <button>Upload model</button>
+</form>
+<table id="oww-table"><thead><tr>
+  <th>Model</th><th>Size</th><th>Source</th><th></th>
+</tr></thead><tbody></tbody></table>
 </div><!-- /pane-voice -->
 
 <div id="pane-settings" class="tabpane hidden">
@@ -675,6 +692,66 @@ $("#form-tuning").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#tuning-msg"), "Save failed: " + e.message, "err"); }
 });
 
+// ── Wake Word Model (OWW) panel (Voice tab) ──────────────────────
+async function loadOWW() {
+  try {
+    const r = await api("/api/dashboard/oww/models");
+    const sel = $("#oww-model");
+    sel.innerHTML = r.models.length
+      ? r.models.map(m => `<option value="${esc(m.name)}"${m.selected ? " selected" : ""}>${esc(m.name)}</option>`).join("")
+      : `<option value="">no models found</option>`;
+    const tb = $("#oww-table tbody");
+    tb.innerHTML = r.models.length ? "" : `<tr><td colspan="4" class="muted">No models yet — upload one.</td></tr>`;
+    for (const m of r.models) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${esc(m.name)}${m.selected ? ' <span class="ok">● active</span>' : ""}</td>` +
+        `<td class="muted">${(m.size / 1024).toFixed(0)} KB</td>` +
+        `<td class="muted">${esc(m.source)}</td>` +
+        `<td class="row-actions"><button data-del="${esc(m.name)}"${m.selected ? " disabled title=\"Select another model first — the active one can't be deleted.\"" : ""}>Delete</button></td>`;
+      tb.appendChild(tr);
+    }
+    tb.querySelectorAll("button[data-del]").forEach(b =>
+      b.addEventListener("click", async () => {
+        if (!confirm(`Delete model '${b.dataset.del}'?`)) return;
+        try {
+          await api(`/api/dashboard/oww/models/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
+          msg($("#oww-msg"), `Deleted '${b.dataset.del}'.`, "ok");
+          await loadOWW();
+        } catch (e) { msg($("#oww-msg"), "Delete failed: " + e.message, "err"); }
+      }));
+  } catch (e) { msg($("#oww-msg"), "Model list load failed: " + e.message, "err"); }
+}
+
+$("#form-oww-upload").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = $("#oww-file").files[0];
+  if (!f) { msg($("#oww-msg"), "Pick a .onnx model to upload.", "err"); return; }
+  msg($("#oww-msg"), `Uploading ${f.name} (validating…)…`);
+  try {
+    const fd = new FormData();
+    fd.append("file", f, f.name);
+    const r = await api("/api/dashboard/oww/models", { method: "POST", body: fd });
+    msg($("#oww-msg"), `Model '${r.name}' uploaded (${(r.size / 1024).toFixed(0)} KB). Select it to activate.`, "ok");
+    await loadOWW();
+  } catch (e) { msg($("#oww-msg"), "Upload failed: " + e.message, "err"); }
+});
+
+$("#btn-oww-select").addEventListener("click", async () => {
+  const name = $("#oww-model").value;
+  if (!name) { msg($("#oww-msg"), "No model selected.", "err"); return; }
+  try {
+    await api("/api/dashboard/oww/select", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({model: name}),
+    });
+    msg($("#oww-msg"), `Active model set to '${name}' — applies on next bot restart.`, "ok");
+    await offerRestart($("#oww-msg"));
+    await loadOWW();
+  } catch (e) { msg($("#oww-msg"), "Select failed: " + e.message, "err"); }
+});
+
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const p = $("#tts-provider").value;
@@ -731,7 +808,7 @@ async function restartBot(fb = $("#restart-msg")) {
   }
   if (up) {
     msg(fb, "Bot is back — reloading panels…", "ok");
-    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning();
+    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW();
   } else {
     msg(fb,
         (postErr ? `restart request failed (${postErr}) — ` : "") +
@@ -837,9 +914,10 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 
-loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning();
+loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW();
 setInterval(loadStatus, 5000);
 setInterval(loadNodes, 5000);
+setInterval(loadOWW, 15000);
 </script>
 </body>
 </html>

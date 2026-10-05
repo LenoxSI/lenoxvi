@@ -853,6 +853,135 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
     return {"ok": True, "written": written}
 
 
+# ── OWW models (Voice tab — one active wake model, process-wide) ─────
+
+
+class OWWModelPayload(BaseModel):
+    model: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+\.onnx$")
+
+
+def _oww_dir() -> Path:
+    # Repo-root .onnx files stay where they are (legacy root models keep
+    # working — the loader resolves wake.model by path); models/ is the
+    # dashboard-managed home. Both gitignored; neither ships in the repo.
+    d = Path(os.getenv("LVI_MODELS_DIR", "models"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _oww_current() -> str:
+    """The model the loader would resolve RIGHT NOW (config > env >
+    code default) — basenames compared, so paths resolve cleanly."""
+    wake = config_store.read_section("wake") or {}
+    return os.path.basename(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
+                                        wake.get("model") or wake_word.WAKE_MODEL)))
+
+
+def _oww_validate(data: bytes) -> None:
+    """Load-and-one-test-inference against the SAME library and shape the
+    pipeline feeds (loaded-gun rule, design note: a model that can't run
+    never lands on disk, so a restart can never wake-brick the bot)."""
+    import onnxruntime as ort
+    import io
+
+    try:
+        sess = ort.InferenceSession(data, providers=["CPUExecutionProvider"])
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"model failed to load: {e}")
+    inp = sess.get_inputs()[0]
+    # OWW (openWakeWord) feeds float32 [1, 1, 1280] (80ms chunks).
+    probe = np.zeros((1, 1, 1280), dtype=np.float32)
+    try:
+        sess.run(None, {inp.name: probe})
+    except Exception as e:
+        shape = tuple(inp.shape)
+        raise HTTPException(status_code=422, detail=f"test inference failed (input shape {shape}): {e}")
+
+
+@router.get("/oww/models")
+async def oww_list_models():
+    """All wake-word models available to the bot: models/ dir + legacy
+    repo-root .onnx files, with size and selected marker."""
+    cur = _oww_current()
+    out = []
+    for d in (_oww_dir(), Path(".")):
+        try:
+            files = sorted(d.glob("*.onnx")) if d.exists() else []
+        except OSError:
+            continue
+        for f in files:
+            if f.parent == Path(".") and f.name in {m["name"] for m in out}:
+                continue  # models/ wins over a same-named root file
+            out.append({"name": f.name, "size": f.stat().st_size,
+                        "source": "models" if f.parent != Path(".") else "root",
+                        "selected": f.name == cur})
+    return {"models": out, "current": cur}
+
+
+@router.post("/oww/models", dependencies=GUARD)
+async def oww_upload_model(file: UploadFile = File(...)):
+    """Upload a wake-word .onnx. Validates by loading + one test
+    inference BEFORE accepting (rejects corrupt/foreign models with
+    422). Same-name upload = intentional replace (retrain-and-push).
+    Atomic staged write — a rejected upload never clobbers a good model."""
+    name = file.filename or ""
+    if not re.match(r"^[A-Za-z0-9_.-]+\.onnx$", name):
+        raise HTTPException(status_code=400, detail="filename must be letters/digits/_-. and end .onnx")
+    data = await file.read()
+    if len(data) < 1024:
+        raise HTTPException(status_code=400, detail="file too small to be a wake-word model")
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="model too large (50MB cap)")
+    _oww_validate(data)
+    dest = _oww_dir() / name
+    tmp = _oww_dir() / (name + ".uploading")
+    with open(tmp, "wb") as f:
+        f.write(data)
+    tmp.replace(dest)  # validated: swap in atomically
+    logger.info(f"dashboard: OWW model '{name}' uploaded ({len(data)} bytes) — select it to use")
+    return {"ok": True, "name": name, "size": len(data)}
+
+
+@router.put("/oww/select", dependencies=GUARD)
+async def oww_select_model(payload: OWWModelPayload):
+    """Point wake.model at an uploaded model (applies on next restart).
+    Merges into the wake section — threshold/awake_timeout survive."""
+    name = payload.model
+    path = _oww_dir() / name
+    if not path.is_file():
+        # legacy root model? (pre-models-dir uploads / hand-copied files)
+        if (Path(".") / name).is_file():
+            path = Path(".") / name
+        else:
+            raise HTTPException(status_code=404, detail=f"model '{name}' not found")
+    current = dict(config_store.read_section("wake") or {})
+    current["model"] = str(path)
+    try:
+        config_store.write_section("wake", current)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    logger.info(f"dashboard: wake model set to '{path}' — applies on next restart")
+    return {"ok": True, "model": str(path), "note": "applies on next bot restart"}
+
+
+@router.delete("/oww/models/{name}", dependencies=GUARD)
+async def oww_delete_model(name: str):
+    """Delete a stored model. HARD RULE: the model the loader would
+    resolve right now can never be deleted (no ghost references — a
+    restart can never wake-brick)."""
+    if not re.match(r"^[A-Za-z0-9_.-]+\.onnx$", name):
+        raise HTTPException(status_code=400, detail="bad model name")
+    if name == _oww_current():
+        raise HTTPException(status_code=409, detail="cannot delete the active model — select another first")
+    d = _oww_dir()
+    for base in (d / name, Path(".") / name):
+        if base.is_file():
+            base.unlink()
+            logger.info(f"dashboard: OWW model '{name}' deleted")
+            return {"ok": True, "deleted": name}
+    raise HTTPException(status_code=404, detail=f"model '{name}' not found")
+
+
 # ── firmware push (operator side of firmware_server.py) ─────────────
 
 @router.post("/firmware/upload", dependencies=GUARD)

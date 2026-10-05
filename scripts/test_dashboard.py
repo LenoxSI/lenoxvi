@@ -443,6 +443,46 @@ def main():
               for r in _reg.known_rooms()),
           f"rooms={_reg.known_rooms()}")
 
+    # 9b6. OWW model panel (Voice tab): upload validates, select merges,
+    # delete blocks the active model.
+    tmpcfg = os.environ.get("LVI_CONFIG")
+    models_dir = os.path.join(os.path.dirname(tmpcfg) if tmpcfg else ".", "unit_test_models")
+    os.environ["LVI_MODELS_DIR"] = models_dir
+    Path(models_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        r = client.get("/api/dashboard/oww/models")
+        before = r.json().get("models", [])
+        # (a) upload rejects garbage bytes (422 — validation fires)
+        _r_bad = client.post("/api/dashboard/oww/models",
+                         files={"file": ("bad.onnx", b"\x00" * 4096, "application/octet-stream")})
+        check("oww: corrupt model rejected with 422",
+              _r_bad.status_code == 422, f"status={_r_bad.status_code}")
+        # (b) upload accepts the REAL production model bytes
+        prod = Path("Hey_Willow_1-0.onnx")
+        if prod.is_file():
+            _r_up = client.post("/api/dashboard/oww/models",
+                            files={"file": (prod.name, prod.read_bytes(), "application/octet-stream")})
+            check("oww: real model upload accepted",
+                  _r_up.status_code == 200 and _r_up.json().get("name") == prod.name,
+                  f"status={_r_up.status_code}")
+        # (c) delete blocks the active model
+        _oww_cur = client.get("/api/dashboard/oww/models").json().get("current")
+        _r_del = client.delete(f"/api/dashboard/oww/models/{_oww_cur}")
+        check("oww: deleting the active model is blocked (409)",
+              _r_del.status_code == 409, f"status={_r_del.status_code}")
+        # (d) select merges into wake section (threshold survives)
+        if prod.is_file():
+            _r_sel = client.put("/api/dashboard/oww/select",
+                            json={"model": prod.name})
+            _wake_after = __import__("yaml").safe_load(
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("wake") or {}
+            check("oww: select writes wake.model and preserves threshold",
+                  _r_sel.status_code == 200 and "model" in _wake_after and "threshold" in _wake_after,
+                  f"status={_r_sel.status_code} wake={_wake_after}")
+    finally:
+        os.environ.pop("LVI_MODELS_DIR", None)
+        shutil.rmtree(models_dir, ignore_errors=True)
+
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")
     check("tuning GET shape — six knobs",
