@@ -371,24 +371,12 @@ def _test_tone_pcm() -> bytes:
 
 
 async def _clip_server():
-    """Reuse the pipeline's shared clip server; start one only if the
-    pipeline hasn't (sonos disabled). Same port, same config — never a
-    second bind."""
-    from sonos_output import ClipServer, SonosOutput
-
-    shared = SonosOutput._shared_clip_server
-    if shared is not None and shared._runner is not None:
-        return shared
-    cs = cfg("clip_server") or {}
-    host_ip = cs.get("host_ip")
-    if not host_ip:
-        raise HTTPException(
-            status_code=400,
-            detail="clip_server.host_ip not set in config.yaml",
-        )
-    server = ClipServer(Path("clips"), host_ip, int(cs.get("port", 8765)))
-    await server.start()
-    return server
+    """The process-wide clip server singleton (Opus audit 2026-10-04,
+    finding 2): the same ONE server the output backends bind in their
+    setup() — never a second bind, never an orphan the next pipeline
+    can't reuse."""
+    from sonos_output import shared_clip_server
+    return await shared_clip_server()
 
 
 @router.post("/zones/{name}/test", dependencies=GUARD)
@@ -654,7 +642,14 @@ def _validate_tts_payload(p: TTSPayload) -> None:
 
 
 class TTSKeyPayload(BaseModel):
-    api_key: str = Field(min_length=8, max_length=256)
+    # Character-class pattern (Opus audit 2026-10-04, finding 1): no
+    # newlines/quotes/backslashes — a `\n` in the value let a key PUT
+    # smuggle a WHOLE extra env var into .env (e.g. LVI_RESTART_COMMAND),
+    # which the next restart would execute. Alphanumeric + _ . - only.
+    # Verified against the three real production keys before shipping:
+    # all pass (2026-10-04).
+    api_key: str = Field(min_length=8, max_length=256,
+                         pattern=r"^[A-Za-z0-9_.\-]+$")
 
 
 @router.get("/tts")
@@ -707,7 +702,13 @@ async def put_tts(payload: TTSPayload):
 
 
 async def _write_env_key(var: str, value: str) -> bool:
-    """Replace-or-append `var=value` in .env. Returns True if replaced."""
+    """Replace-or-append `var=value` in .env. Returns True if replaced.
+
+    Atomic write + 0600 (Opus audit 2026-10-04): write_text created a
+    missing .env as 0644, and a crash mid-write could truncate it.
+    TTSKeyPayload's character-class pattern is the upstream defense
+    against newline smuggling — this is the belt to that suspenders.
+    """
     import os as _os
     from pathlib import Path as _Path
     env_path = _Path(_os.getenv("LVI_ENV_FILE",
@@ -722,7 +723,10 @@ async def _write_env_key(var: str, value: str) -> bool:
             out.append(ln)
     if not replaced:
         out.append(var + "=" + value)
-    env_path.write_text("\n".join(out) + "\n")
+    tmp = env_path.with_suffix(".env.tmp")
+    tmp.write_text("\n".join(out) + "\n")
+    _os.chmod(tmp, 0o600)
+    _os.replace(tmp, env_path)  # atomic on the same filesystem
     return replaced
 
 
@@ -748,8 +752,13 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
 # process, so a plain restart would kill the HTTP response mid-flight.
 # Resolution: hand the restart to a DETACHED systemd transient unit —
 # the user manager owns it, not us, so it fires 2s after the response
-# completes. LVI_RESTART_COMMAND overrides the real command for the
-# offline test rig (never restart the real bot from the suite).
+# completes.
+#
+# LVI_RESTART_COMMAND is GONE from prod (Opus audit 2026-10-04, finding 1):
+# it was a generic "run this command" hook readable from .env, and the
+# newline-injection bug (since fixed at TTSKeyPayload) could have armed
+# it. The test suite now monkeypatches subprocess.run for this route
+# instead — see scripts/test_dashboard.py.
 
 
 @router.post("/restart", dependencies=GUARD)
@@ -760,13 +769,6 @@ async def restart_bot():
     transient unit survives this process's death by design. Client polls
     /status until uptime resets, then reloads panels.
     """
-    override = _getenv("LVI_RESTART_COMMAND")
-    if override:
-        # Test/bench lane: run a benign stand-in instead of restarting
-        # the actual bot (the suite runs on the same host as prod).
-        proc = subprocess.run(override.split(), capture_output=True, timeout=10)
-        logger.info(f"dashboard: restart override executed ({override}) rc={proc.returncode}")
-        return {"ok": True, "restarting": False, "override": True}
     unit = f"lenoxvi-dash-restart-{int(time.time() * 1000)}"
     cmd = [
         "systemd-run", "--user", f"--unit={unit}",

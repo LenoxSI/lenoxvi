@@ -91,8 +91,6 @@ _LIVE_WIIM_VOLUMES: dict = {}
 class WiiMOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's WiiM via play + vol snap/restore."""
 
-    _shared_clip_server = None  # class-level: ONE server for all pipelines
-
     def __init__(self, config_path: str | None = None, echo_gate=None,
                  zone_selector=None, wake_gate=None, led=None, **kwargs):
         super().__init__(**kwargs)
@@ -114,10 +112,9 @@ class WiiMOutput(FrameProcessor):
         self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
                               if isinstance(v, (int, float))}
         self._zones = dict(wiim.get("zones") or {})
-        cs = cfg("clip_server") or {}
-        self._host_ip = cs.get("host_ip")
-        if self._enabled and self._host_ip:
-            self._ensure_clip_server()
+        # Clip server: process-wide singleton in sonos_output (Opus audit
+        # 2026-10-04, finding 2) — bound in setup() via shared_clip_server().
+        self._clip_server = None
 
     async def setup(self, setup):
         """Pipecat lifecycle hook — the ONLY reliable place to start the
@@ -125,11 +122,12 @@ class WiiMOutput(FrameProcessor):
         can't await; without this the WiiM fetches a URL nobody serves
         and replies die silently (2026-10-04 bedroom outage: LEDs cycled,
         zero audio — nothing listening on 8765 because no SonosOutput
-        existed in the pipeline to start it)."""
+        existed in the pipeline to start it). Same singleton as Sonos —
+        one server, one port, all backends."""
         await super().setup(setup)
         if self._enabled:
-            if self._shared_clip_server is not None and not self._shared_clip_server._runner:
-                await self._shared_clip_server.start()
+            from sonos_output import shared_clip_server
+            self._clip_server = await shared_clip_server()
             logger.info(f"wiim_output: backend ready — zones {list(self._zones)}, "
                         f"default '{self._zone}', global vol {self._volume}")
 
@@ -137,21 +135,6 @@ class WiiMOutput(FrameProcessor):
         # Shared server: do NOT stop it — other pipelines may reference
         # it and process exit releases the port (same call as SonosOutput).
         await super().cleanup()
-
-    # ── clip server (shared, one per process; same pattern as SonosOutput) ──
-
-    def _ensure_clip_server(self):
-        cls = type(self)
-        if cls._shared_clip_server is None:
-            from sonos_output import ClipServer
-            from config import cfg
-            cs = cfg("clip_server") or {}
-            server = ClipServer(Path("clips"), self._host_ip, int(cs.get("port", 8765)))
-            cls._shared_clip_server = server
-
-    @classmethod
-    def shared_clip_server(cls):
-        return cls._shared_clip_server
 
     # ── volume resolution: live override > config per-zone > global ──
 
@@ -230,7 +213,10 @@ class WiiMOutput(FrameProcessor):
         except OSError as e:
             logger.error(f"wiim_output: clip write failed: {e}")
             return
-        url = self._shared_clip_server.url_for(clip_path.name)
+        if self._clip_server is None:
+            from sonos_output import shared_clip_server
+            self._clip_server = await shared_clip_server()
+        url = self._clip_server.url_for(clip_path.name)
         logger.info(f"wiim_output: playing clip {url} on '{zone_name}' ({ip}) at vol {vol}")
 
         # ── vol snapshot → set → play → confirm → restore ──

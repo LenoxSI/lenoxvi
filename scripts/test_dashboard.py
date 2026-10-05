@@ -23,6 +23,7 @@ import copy
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -264,16 +265,98 @@ def main():
     check("TTS PUT elevenlabs-without-voice_id rejected (422)",
           r.status_code == 422, f"status={r.status_code}")
 
-    # 9b. Bot restart route (override lane — the suite must NEVER restart
-    # the real bot; LVI_RESTART_COMMAND points at a benign stand-in)
-    os.environ["LVI_RESTART_COMMAND"] = "true"  # /usr/bin/true, rc=0
+    # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
+    # runs on the same host as prod). LVI_RESTART_COMMAND used to override
+    # the command, but that env hook was a prod code-exec lane (Opus
+    # audit 2026-10-04) and is now deleted. The suite monkeypatches
+    # subprocess.run IN THIS PROCESS so systemd-run never executes while
+    # the route's code is fully exercised.
+    real_run = subprocess.run
+    scheduled_cmds: list = []
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def _fake_run(cmd, *a, **kw):
+        scheduled_cmds.append(cmd)
+        return _FakeProc()
+
+    subprocess.run = _fake_run
     try:
         r = client.post("/api/dashboard/restart")
-        ok = r.status_code == 200 and r.json().get("override") is True
-        check("restart route returns via override lane (no real restart)",
-              ok, f"status={r.status_code} body={r.text[:120]}")
+        ok = (r.status_code == 200 and r.json().get("restarting") is True
+              and len(scheduled_cmds) == 1
+              and "lenoxvi-dash-restart-" in " ".join(scheduled_cmds[0])
+              and "systemctl --user restart lenoxvi-bot" in " ".join(scheduled_cmds[0]))
+        check("restart route schedules the real transient unit (monkeypatched, nothing executed)",
+              ok, f"status={r.status_code} scheduled={scheduled_cmds}")
     finally:
-        del os.environ["LVI_RESTART_COMMAND"]
+        subprocess.run = real_run
+
+    # 9b2. Key-route hardening (Opus audit finding 1): the character-class
+    # pattern must reject newline injection (the old code-exec lane) and
+    # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch
+    # .env so the suite never touches a real key file.
+    os.environ["LVI_ENV_FILE"] = str(SCRATCH / "test.env")
+    try:
+        r = client.put("/api/dashboard/tts/key/elevenlabs",
+                       json={"api_key": "validkey_0123456789abcdef"})
+        check("key route accepts well-formed key (200)",
+              r.status_code == 200 and r.json().get("api_key_set") is True,
+              f"status={r.status_code} body={r.text[:120]}")
+        env_txt = (SCRATCH / "test.env").read_text()
+        check("key route writes key to scratch .env",
+              "ELEVENLABS_API_KEY=validkey_0123456789abcdef" in env_txt,
+              f"env={env_txt[:200]}")
+        r = client.put("/api/dashboard/tts/key/elevenlabs",
+                       json={"api_key": "x\nLVI_RESTART_COMMAND=evil"})
+        check("key route REJECTS newline-injected key (422)",
+              r.status_code == 422, f"status={r.status_code} body={r.text[:160]}")
+        r = client.put("/api/dashboard/tts/key/deepgram",
+                       json={"api_key": "has space and 'quote'"})
+        check("key route REJECTS keys with spaces/quotes (422)",
+              r.status_code == 422, f"status={r.status_code}")
+        # The injected env var must NOT have landed in the file
+        env_txt = (SCRATCH / "test.env").read_text()
+        check("no LVI_RESTART_COMMAND line in written .env (injection dead)",
+              "LVI_RESTART_COMMAND" not in env_txt, f"env={env_txt[:200]}")
+    finally:
+        os.environ.pop("LVI_ENV_FILE", None)
+
+    # 9b3. Clip server singleton (Opus audit finding 2): SonosOutput and
+    # WiiMOutput must share ONE server. Two mixed-backend pipelines +
+    # the dashboard test-clip lane must all resolve to the same object
+    # with exactly ONE bind on the port. (Suite runs on port 8766 via
+    # LVI_CONFIG — the live bot owns 8765.)
+    import asyncio as _asyncio
+    from sonos_output import shared_clip_server as _scs
+    from wiim_output import WiiMOutput
+    from sonos_output import SonosOutput
+
+    async def _two_backends_one_server():
+        s1 = await _scs()
+        s2 = await _scs()  # second backend + dashboard lane
+        return s1, s2, s1 is s2
+
+    _s1, _s2, _same = _asyncio.run(_two_backends_one_server())
+    check("clip server singleton: mixed callers get the SAME object",
+          _same, f"s1={id(_s1)} s2={id(_s2)}")
+    check("clip server singleton: exactly one runner (one bind)",
+          _s1._runner is not None and _s1._runner is _s2._runner,
+          f"runner1={_s1._runner} runner2={_s2._runner}")
+    # Constructing both outputs must not create or bind anything new.
+    _n_before = id(_s1)
+    _so = SonosOutput(echo_gate=None, zone_selector=lambda: "test", led=None)
+    _wo = WiiMOutput(echo_gate=None, zone_selector=lambda: "test", led=None)
+    _s3 = _asyncio.run(_scs())
+    check("output construction does not spawn a second server",
+          _s3 is _s1 and id(_s3) == _n_before, f"s3={id(_s3)}")
+    # url_for must live on the shared server (was stranded mid-refactor).
+    _url = _s1.url_for("probe.mp3")
+    check("clip server url_for works (quotes filenames)",
+          _url.endswith("/probe.mp3") and _url.startswith("http://"), f"url={_url}")
 
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")

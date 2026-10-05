@@ -71,6 +71,43 @@ class ClipServer:
         return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
 
+# ── process-wide singleton (Opus audit 2026-10-04, finding 2) ──
+# SonosOutput and WiiMOutput each carried their OWN class-level
+# _shared_clip_server, so two backends active at once raced for one
+# port: the second pipeline's setup() died with EADDRINUSE, and the
+# dashboard's test-clip lane could bind 8765 out from under a
+# reconnecting node. ONE server per process, ALL callers share it.
+
+
+_SHARED_CLIP_SERVER: "ClipServer | None" = None
+_SHARED_CLIP_LOCK: asyncio.Lock | None = None
+
+
+async def shared_clip_server() -> "ClipServer":
+    """The ONE clip server for this process (creates + starts on first use).
+
+    Every caller — SonosOutput.setup, WiiMOutput.setup, and the
+    dashboard's test-clip route — goes through here. Never bind a second
+    server on the port; never leak an orphan server. Config read through
+    config.cfg() so the suite's throwaway config works unchanged.
+    """
+    global _SHARED_CLIP_SERVER, _SHARED_CLIP_LOCK
+    if _SHARED_CLIP_LOCK is None:
+        _SHARED_CLIP_LOCK = asyncio.Lock()
+    async with _SHARED_CLIP_LOCK:
+        if _SHARED_CLIP_SERVER is None:
+            from config import cfg
+            cs = cfg("clip_server") or {}
+            host_ip = cs.get("host_ip")
+            if not host_ip:
+                raise RuntimeError("clip_server.host_ip not set in config.yaml")
+            _SHARED_CLIP_SERVER = ClipServer(Path("clips"), host_ip,
+                                             int(cs.get("port", 8765)))
+        if _SHARED_CLIP_SERVER._runner is None:
+            await _SHARED_CLIP_SERVER.start()
+        return _SHARED_CLIP_SERVER
+
+
 def zone_volume_overrides(overrides: dict | None):
     """Set the live per-zone volume overrides (dashboard slider lane).
 
@@ -150,7 +187,6 @@ def _extract_clip_id(resp) -> str | None:
 class SonosOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
-    _shared_clip_server = None  # class-level: ONE server for all pipelines
     _prune_task_started = False  # ONE hourly prune loop per process
     _zones_audited = False  # ONE capability audit per process
     _audit_task = None  # keep a ref: a GC'd task dies mid-audit
@@ -232,21 +268,13 @@ class SonosOutput(FrameProcessor):
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
             asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
-        # The clip server binds clip_server.port; binding per-pipeline
-        # leaks the port when a pipeline is cancelled without cleanup()
-        # (idle-timeout cancel path), and the next session then dies with
-        # "[Errno 98] address already in use" (seen 2026-09-15 with the
-        # always-reconnecting ESP32 node). Bind ONCE, share across pipelines.
-        if SonosOutput._shared_clip_server is None:
-            SonosOutput._shared_clip_server = ClipServer(
-                Path("clips"),
-                # host_ip is REQUIRED config: it's the address Sonos players
-                # fetch clips from, so it can't default to a guess. A missing
-                # value fails the TCPSite bind loudly at startup.
-                cs.get("host_ip") or "<bot-host-ip>",
-                int(cs.get("port", 8765)),
-            )
-        self._clip_server = SonosOutput._shared_clip_server
+        # The clip server is a process-wide singleton (Opus audit
+        # 2026-10-04, finding 2): ONE server shared with WiiMOutput and
+        # the dashboard's test-clip lane. Constructing here only CREATES
+        # it if absent; binding happens in async setup() via
+        # shared_clip_server() — the constructor can't await. A missing
+        # host_ip raises there, loudly.
+        self._clip_server = None  # bound in setup() via shared_clip_server()
         self._pcm = bytearray()
         self._sample_rate = 24000
         self._channels = 1
@@ -284,8 +312,11 @@ class SonosOutput(FrameProcessor):
         # setup() is the guaranteed lifecycle hook in pipecat 1.11 —
         # FrameProcessor.start() is NOT auto-called for bare processors.
         await super().setup(setup)
-        if self._enabled and not self._clip_server._runner:
-            await self._clip_server.start()
+        # Singleton lane (Opus audit 2026-10-04, finding 2): one server
+        # per process, shared with WiiMOutput + the dashboard. Constructed
+        # and bound HERE (or reused if WiiM/setup already bound it) —
+        # never a second bind on the port.
+        self._clip_server = await shared_clip_server()
         # Eternal duck-holder: poll the wake gate, hold the audioClip
         # duck while she's listening (2026-09-30).
         self._start_duck_holder()
@@ -383,7 +414,8 @@ class SonosOutput(FrameProcessor):
         p = Path("clips") / "duck-silence.mp3"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(mp3)
-        self._duck_url = self._clip_server.url_for(p.name)
+        server = self._clip_server or await shared_clip_server()
+        self._duck_url = server.url_for(p.name)
         logger.info(f"sonos_output: duck-holder clip ready ({p})")
         return self._duck_url
 
@@ -606,7 +638,8 @@ class SonosOutput(FrameProcessor):
         clip_path = Path("clips") / filename
         clip_path.parent.mkdir(parents=True, exist_ok=True)
         clip_path.write_bytes(mp3)
-        url = self._clip_server.url_for(filename)
+        server = self._clip_server or await shared_clip_server()
+        url = server.url_for(filename)
         logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {volume}")
 
         from sonos_websocket import SonosWebsocket
