@@ -161,16 +161,6 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         mapped = (cfg("room_zones") or {}).get(room)
         return mapped  # None -> default zone fallback in the output backend
 
-    def _zone_backend(zone_name: str) -> str:
-        """Which output backend owns `zone_name`? 'wiim' if the zone lives
-        in the wiim: config, else 'sonos'. Zones are backend-tagged by
-        where they're configured — one namespace per backend, no
-        cross-backend lookups at reply time."""
-        from config import cfg
-        if zone_name and zone_name in (cfg("wiim", "zones") or {}):
-            return "wiim"
-        return "sonos"
-
     def _on_wake():
         dash_registry.note_wake(_pipeline_room())
 
@@ -225,17 +215,22 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 stt,
                 brain,
                 tts,
-                # reply in the wake room's zone when mapped; speaking LEDs
-                # fire from its real-time TTS frames on the direct wire.
-                # Per-zone backend dispatch (2026-10-04): a room mapped to
-                # a wiim zone gets the WiiM interrupt-no-restore backend;
-                # sonos zones keep the overlay path. Same frame contract,
-                # same LED semantics, same echo gate.
-                (WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
-                            wake_gate=wake_filter, led=led)
-                 if _zone_backend(_reply_zone() or "") == "wiim"
-                 else SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
-                                 wake_gate=wake_filter, led=led)),
+                # Per-zone backend dispatch (2026-10-04): BOTH output
+                # backends live in the pipeline; each reply is claimed by
+                # whichever backend owns the zone at SPEECH time (the
+                # other skips it — the same zone-ownership check that
+                # always ran at reply time). The old build-time ternary
+                # picked ONE backend when the pipeline was constructed,
+                # but the offer tee correlates the room in the same
+                # tick — a lost race there put a WiiM room on a
+                # Sonos-only pipeline and every reply died silently
+                # (bedroom outage 23:22, Opus audit finding #6). Building
+                # both removes the race: no build-time room knowledge
+                # is needed at all.
+                SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
+                            wake_gate=wake_filter, led=led),
+                WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
+                           wake_gate=wake_filter, led=led),
                 out,
             ]
         ),
