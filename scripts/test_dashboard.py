@@ -1057,6 +1057,60 @@ def main():
             check("9b9 agent: every frame passes through (StartFrame must reach the sink)",
                   all(any(x is f for x in _seen2) for f in _frames2),
                   f"forwarded={sum(1 for f in _frames2 if any(x is f for x in _seen2))}/{len(_frames2)}")
+
+            # 9b10. Echo-gate relax on confirmed wakes and barge-ins (the
+            # 17:49:08 double-wake): a wake during a sounding clip must
+            # shorten the gate's block to a tail so the follow-up question
+            # lands; stop_current_clip must do the same; a lapsed gate
+            # must never be extended. Text containment stays armed.
+            async def _relax_probe():
+                _g = _EchoGate8()
+                _g.block(10.0)
+                _wf_r = _WF(echo_gate=_g, on_wake=lambda: None,
+                            on_interrupt=lambda: None)
+                _wf_r._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.99})
+                _wf_r._name = "Hey_Willow"
+                _wf_r._barge_in = True
+                _wf_r._frame_size = 2560
+                _ai = _InputAudio(b"\x00" * 2560, 16000, 1)
+                # IDLE -> AWAKE wake: gate must relax
+                await _wf_r.process_frame(_ai, _FD8.DOWNSTREAM)
+                await _wf_r.process_frame(_ai, _FD8.DOWNSTREAM)
+                _after_wake = _g._blocked_until - time.monotonic()
+                # BARGE-IN wake during LOCKED: gate must relax again
+                await _wf_r.process_frame(_BotStart(), _FD8.DOWNSTREAM)
+                _g.block(10.0)  # a new clip started sounding
+                await _wf_r.process_frame(_ai, _FD8.DOWNSTREAM)
+                await _wf_r.process_frame(_ai, _FD8.DOWNSTREAM)
+                _after_barge = _g._blocked_until - time.monotonic()
+                # lapsed gate must never be extended by relax()
+                _g2 = _EchoGate8()
+                _g2.relax()  # no active block — must stay open
+                _lapsed = _g2.blocked()
+                return _after_wake, _after_barge, _lapsed
+
+            _aw, _ab, _lap = _asyncio.run(_relax_probe())
+            check("9b10 echo: normal wake relaxes the gate (follow-up lands)",
+                  _aw <= 0.6, f"remaining={_aw:.2f}s")
+            check("9b10 echo: barge-in interrupt relaxes the gate",
+                  _ab <= 0.6, f"remaining={_ab:.2f}s")
+            check("9b10 echo: relax never extends a lapsed gate",
+                  not _lap, "gate became blocked with no clip")
+            # stop_current_clip relaxes the gate (sonos backend)
+            async def _stop_relax_probe():
+                _g3 = _EchoGate8()
+                _g3.block(8.0)
+                _so_r = _SO8(echo_gate=_g3, zone_selector=lambda: "test",
+                             led=None, config_path=str(cfg_test))
+                _so_r._enabled = True
+                _so_r._zones = {"test": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                _so_r._clip_server = _NS8(url_for=lambda n: f"http://127.0.0.1:9/clips/{n}")
+                await _so_r.stop_current_clip()
+                return _g3._blocked_until - time.monotonic()
+
+            _stop_rem = _asyncio.run(_stop_relax_probe())
+            check("9b10 echo: stop_current_clip relaxes the gate",
+                  _stop_rem <= 0.6, f"remaining={_stop_rem:.2f}s")
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
