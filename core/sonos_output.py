@@ -286,6 +286,7 @@ class SonosOutput(FrameProcessor):
         self._sample_rate = 24000
         self._channels = 1
         self._clip_count = 0
+        self._speech_epoch = 0  # Fix A: generation stamp; load-anchored timers re-anchor only while current
         if not self._enabled:
             logger.info("sonos_output disabled in config.yaml")
         elif self._zone not in self._zones:
@@ -594,11 +595,18 @@ class SonosOutput(FrameProcessor):
             return self._zone_volumes[zone]
         return self._volume
 
-    async def _speak_to_sonos(self, pcm: bytes) -> None:
+    async def _speak_to_sonos(self, pcm: bytes, epoch: int | None = None) -> None:
+        # Unpadded speech duration (Fix A): every speech-window timer —
+        # echo gate, end-of-speech LED, wake-gate cap — uses this one
+        # number; the 8s duck-tail padding below extends the CLIP (and
+        # the duck window, which measures it again at load), not the
+        # speech window.
+        duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+        if epoch is None:
+            epoch = self._speech_epoch  # direct call (tests): act as current
         # Block echo handling for exactly as long as this clip will sound:
         # the mic will hear it off the zone speakers (no AEC by design).
         if self._echo_gate is not None:
-            duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
             self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
         # Duck-tail (M2, Opus review): pad 8s of silence onto the clip so
         # the duck outlives her speech — the holder refreshes its own
@@ -657,13 +665,36 @@ class SonosOutput(FrameProcessor):
             resp = await asyncio.wait_for(
                 sw.play_clip(url, volume=volume), timeout=5.0
             )
+            # ── Fix A (2026-10-05): LOAD-ANCHORED TIMERS ──
+            # Generation-anchored timers fired early on the v4 dialogue
+            # lane (measured 12:12:46 gen → 12:12:49.6 load, 3.4s gap):
+            # end-of-speech LED flipped the ring to listening, the echo
+            # gate reopened the mic, and note_speech capped the gate's
+            # LOCKED safety release — all BEFORE her last syllable. The
+            # clip is sounding NOW, so every speech-window timer anchors
+            # HERE. `duration` (method top) is the UNPADDED speech time.
+            # Stale-task guard: only re-anchor if this task's generation
+            # is still the current one (a filler can race a reply; the
+            # newer generation wins).
+            if epoch == self._speech_epoch:
+                if self._led:
+                    self._schedule_end_of_speech(duration + 0.5)  # load ~0.2s already spent; +margin
+                if self._echo_gate is not None:
+                    self._echo_gate.block(duration + 1.5)  # max-extend: covers both generations
+                if self._wake_gate is not None:
+                    try:
+                        self._wake_gate.note_speech(duration)
+                    except Exception:
+                        pass  # gate hint must never break the reply
             # M3 (Opus review): duck ownership starts HERE — the clip is
             # actually sounding on the player now, so this is the honest
             # start of the "reply owns the duck" window. (duration counts
             # the tail too, which is exactly what the player will play.)
-            clip_duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
-            self._clip_active_until = time.monotonic() + clip_duration + 0.7
+            clip_len = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
+            self._clip_active_until = time.monotonic() + clip_len + 0.7
             self._reply_clip_id = _extract_clip_id(resp)
+        except Exception as e:
+            logger.warning(f"sonos_output: play failed on {zone_name}: {e} — generation-anchored fallback timers stand")
         finally:
             try:
                 await asyncio.wait_for(sw.close(), timeout=2.0)
@@ -691,6 +722,15 @@ class SonosOutput(FrameProcessor):
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
+                # Fix A (2026-10-05): timers anchor at CLIP-LOAD time, set
+                # inside _speak_to_sonos when play_clip returns. This
+                # generation-time schedule is the FALLBACK: it only stands
+                # if the speak task dies before loading (encode/zone/write
+                # failure), so the ring never strands cyan forever. The
+                # epoch handoff lets the load site drop stale re-anchors:
+                # a filler racing a reply can't stomp the newer turn.
+                self._speech_epoch += 1
+                gen = self._speech_epoch
                 if self._led:
                     # TTSStopped = GENERATION end, not playback end. ElevenLabs
                     # bursts the whole clip through the pipeline in <1s while
@@ -712,9 +752,10 @@ class SonosOutput(FrameProcessor):
                 # Duck ownership (M3, Opus review): starts when the clip
                 # actually LOADS on the player (in _speak_to_sonos), not
                 # here at generation end — the encode/write/connect/load
-                # chain can exceed any margin set this early.
+                # chain can exceed any margin set this early. The load
+                # site re-anchors all speech timers (Fix A).
                 # Fire-and-forget: never block the pipeline on Sonos I/O
-                self.create_task(self._speak_to_sonos(pcm))
+                self.create_task(self._speak_to_sonos(pcm, epoch=gen))
             elif self._led:
                 # No clip to time (Sonos disabled): end immediately.
                 self._schedule_end_of_speech(0.0)

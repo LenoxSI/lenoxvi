@@ -115,6 +115,7 @@ class WiiMOutput(FrameProcessor):
         # Clip server: process-wide singleton in sonos_output (Opus audit
         # 2026-10-04, finding 2) — bound in setup() via shared_clip_server().
         self._clip_server = None
+        self._speech_epoch = 0  # Fix A: generation stamp; re-anchors only while current
 
     async def setup(self, setup):
         """Pipecat lifecycle hook — the ONLY reliable place to start the
@@ -148,11 +149,13 @@ class WiiMOutput(FrameProcessor):
 
     # ── reply playback ──────────────────────────────────────────────────
 
-    async def _speak_to_wiim(self, pcm: bytes) -> None:
+    async def _speak_to_wiim(self, pcm: bytes, epoch: int | None = None) -> None:
         """Interrupt-no-restore reply: snap vol → set voice vol → play clip →
         restore music vol. Echo gate blocks for the clip duration; the LED
         end-of-speech timer is set in process_frame (same timing basis as
         SonosOutput)."""
+        if epoch is None:
+            epoch = self._speech_epoch  # direct call (tests): act as current
         if not self._enabled:
             logger.warning("wiim_output: reply dropped — backend disabled in config")
             return
@@ -236,6 +239,25 @@ class WiiMOutput(FrameProcessor):
         except Exception as e:
             logger.error(f"wiim_output: play failed on {ip}: {e}")
             return
+        # ── Fix A (2026-10-05): LOAD-ANCHORED TIMERS ──
+        # Same disease as SonosOutput: generation-anchored timers fired
+        # early on the v4 dialogue lane. The play command just went out —
+        # re-anchor the LED + wake gate NOW (echo gate already re-blocks
+        # above, before the play call — its duration counts the pads).
+        if epoch == self._speech_epoch:
+            if self._led:
+                # clip = lead_in(0.25) + speech + tail(0.35); LED fires
+                # after the whole clip (incl. pads) has sounded + margin
+                self._schedule_end_of_speech(duration + 0.25 + 0.35 + 0.6)
+            if self._wake_gate is not None:
+                try:
+                    self._wake_gate.note_speech(duration)
+                except Exception:
+                    pass  # gate hint must never break the reply
+            if self._echo_gate is not None:
+                # max-extend over the entry-time block: the encode+play
+                # latency between entry and NOW ate into that window
+                self._echo_gate.block(duration + 1.5)
         # Restore the music volume after the clip sounds (interrupt-
         # no-restore RATIFIED: music doesn't come back; its volume does).
         try:
@@ -284,6 +306,12 @@ class WiiMOutput(FrameProcessor):
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
+                # Fix A (2026-10-05): load-anchored timers — the play call
+                # in _speak_to_wiim re-anchors LED + wake gate when the
+                # clip actually starts; this generation-time schedule is
+                # the fallback (task death). Epoch handoff = stale-guard.
+                self._speech_epoch += 1
+                gen = self._speech_epoch
                 if self._led:
                     duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
                     self._schedule_end_of_speech(duration + 0.6)
@@ -292,7 +320,7 @@ class WiiMOutput(FrameProcessor):
                         self._wake_gate.note_speech(len(pcm) / (2 * self._sample_rate * max(self._channels, 1)))
                     except Exception:
                         pass
-                self.create_task(self._speak_to_wiim(pcm))
+                self.create_task(self._speak_to_wiim(pcm, epoch=gen))
             elif self._led:
                 self._schedule_end_of_speech(0.0)
         elif isinstance(frame, CancelFrame):
