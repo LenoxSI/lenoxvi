@@ -285,6 +285,12 @@ function msgLoad(el, e, what) {
   if (e && e.network) { msg(el, "Bot restarting… reconnecting.", "muted pulse"); return; }
   msg(el, what + " failed: " + (e ? e.message : "unknown"), "err");
 }
+// Success-path cleanup: a loader that fetches fine clears any stale
+// "reconnecting…" left over from the restart window (the poll that
+// lands first wipes it — no residue, verified live 2026-10-05).
+function clearReconnect(el) {
+  if (el.classList.contains("pulse")) msg(el, "", "muted");
+}
 
 // ── status strip ──────────────────────────────────────────────
 async function loadStatus() {
@@ -319,6 +325,7 @@ async function loadStatus() {
 async function loadMapping() {
   try {
     const m = await api("/api/dashboard/mapping");
+    clearReconnect($("#mapping-msg"));
     zones = m.zones; mapping = m.room_zones; sonosNames = m.sonos_names || {};
     const tb = $("#mapping tbody"); tb.innerHTML = "";
     const rooms = [...new Set([
@@ -522,6 +529,7 @@ function renderZones() {
 async function loadZones() {
   try {
     const m = await api("/api/dashboard/mapping");
+    clearReconnect($("#zone-msg"));
     zones = m.zones; zoneVols = m.zone_volumes || {}; clipVolume = m.clip_volume ?? 70;
     renderZones();
   } catch (e) { msgLoad($("#zone-msg"), e, "Zones load"); }
@@ -582,6 +590,7 @@ let TTS_KEYS = {elevenlabs: false, deepgram: false};
 async function loadTTS() {
   try {
     const t = await api("/api/dashboard/tts");
+    clearReconnect($("#tts-msg"));
     TTS_KEYS = {elevenlabs: t.elevenlabs_key_set, deepgram: t.deepgram_key_set};
     $("#tts-provider").value = t.provider || "elevenlabs";
     $("#tts-voice").value = t.voice_id || "";
@@ -690,6 +699,7 @@ const TUNING_FIELDS = ["wake_threshold", "wake_awake_timeout", "vad_confidence",
 async function loadTuning() {
   try {
     const t = await api("/api/dashboard/voice-tuning");
+    clearReconnect($("#tuning-msg"));
     for (const f of TUNING_FIELDS) {
       const sl = $("#t-" + f);
       if (t[f] != null) sl.value = String(t[f]);
@@ -723,6 +733,7 @@ $("#form-tuning").addEventListener("submit", async (ev) => {
 async function loadOWW() {
   try {
     const r = await api("/api/dashboard/oww/models");
+    clearReconnect($("#oww-msg"));
     const sel = $("#oww-model");
     sel.innerHTML = r.models.length
       ? r.models.map(m => `<option value="${esc(m.path)}"${m.selected ? " selected" : ""}>${esc(m.name)}${m.source === "root" ? " (root)" : ""}</option>`).join("")
