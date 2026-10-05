@@ -818,9 +818,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   try {
     const fd = new FormData();
     fd.append("file", f, f.name);
-    const up = await api("/api/dashboard/firmware/upload", { method: "POST", body: fd });
-    const upj = await up.json();
-    if (!up.ok) throw new Error(upj.detail || up.status);
+    const upj = await api("/api/dashboard/firmware/upload", { method: "POST", body: fd });
     msg($("#fw-msg"), `Firmware ${upj.version} served — nodes pick it up on next boot.`, "ok");
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
