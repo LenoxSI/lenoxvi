@@ -6,6 +6,57 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [0.4.0] — 2026-10-04
+
+The config-editable dashboard release. The dashboard stops being
+read-only-plus-sliders and becomes the primary way to operate the rig:
+TTS provider/voice/model, Flux's speed + expressivity, and the six
+pipecat ear-tuning knobs all live in the GUI now, with a restart button
+and a save→apply flow that never forces a tab hop.
+
+### Added
+- **TTS settings panel** — provider, voice and model configurable from
+  the dashboard; ElevenLabs voice ID + model (eleven_flash_v2_5 / v2),
+  keys stored in `.env` via a dedicated key route (set/unset status
+  only — never echoed back, never in config.yaml), settings in
+  config.yaml
+- **Provider dropdown with three backends** — ElevenLabs, Deepgram
+  Aura-2 (40 cloud voices, model IS the voice), Deepgram Flux
+  (voice-agent-first, voices incl. rufus/hannah/bree); provider-aware
+  routes with 422 on unknown voices; per-clip sample-rate reset on
+  Sonos (24k↔16k chipmunk prevention)
+- **Flux speed + expressivity knobs** — sliders (0.5–1.5× in 0.05
+  steps; expressivity -2..2), server-side range validation, partial
+  updates preserve tuned values
+- **Voice Tuning panel** — the six ear-tuning knobs as sliders: wake
+  sensitivity (0.30–0.60), awake timeout (5–60s), VAD confidence
+  (0.30–0.90), VAD min volume (0.10–0.90), turn-end lull (0.2–2.0s),
+  echo dedup window (2–30s). Writes MERGE per section — brain.fillers,
+  max_tokens, wake.enabled can never be clobbered by a tuning save
+- **Restart bot button** — POST /api/dashboard/restart via a detached
+  systemd transient unit (survives the bot's own death); UI polls
+  uptime reset, auto-reloads panels; honest error surfaces (no silent
+  catch)
+- **Post-save "restart now?" popup** — every Voice-tab save offers a
+  one-click apply; cancel keeps apply-later
+- **Three-tab dashboard** — Zones (mapping/nodes/zones) / Voice (TTS
+  + tuning) / Settings (rig facts, bot control, firmware)
+- **Rig facts bar** atop Settings — Bot Version, TTS provider, STT
+  model, OWW model, all resolved through the same config > env >
+  default chains the consumers use (moves with the host, never static)
+- **Live version in statusbar** — git describe at boot, updates every
+  commit
+- **brain.max_tokens: 300** — guardrail against runaway brain replies
+  (config-gated, default 300)
+
+### Fixed
+- Key-save form natively submitted — page reloaded to Zones mid-save,
+  masking the 200 OK
+- Restart handler silently swallowed fetch errors — now retries once
+  and surfaces real failures
+- Statusbar selector lost its `#` — dumped raw template literal into
+  the header
+
 ## [0.3.5] — 2026-10-04
 
 The second-output-backend release. The WiiM Pro arrives and becomes a
