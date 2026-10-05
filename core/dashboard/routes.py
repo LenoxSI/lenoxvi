@@ -889,13 +889,20 @@ def _oww_validate(data: bytes) -> None:
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"model failed to load: {e}")
     inp = sess.get_inputs()[0]
-    # OWW (openWakeWord) feeds float32 [1, 1, 1280] (80ms chunks).
-    probe = np.zeros((1, 1, 1280), dtype=np.float32)
+    # Shape comes FROM THE MODEL (production model: [1, 16, 96] float32 —
+    # 16 frames x 96 mel bands). Derive each dim: -1/dynamic/None probes
+    # as 1; concrete dims probe at face value. No shape is hard-coded.
+    shape = []
+    for d in inp.shape:
+        if isinstance(d, int) and d > 0:
+            shape.append(d)
+        else:
+            shape.append(1)
+    probe = np.zeros(tuple(shape), dtype=np.float32)
     try:
         sess.run(None, {inp.name: probe})
     except Exception as e:
-        shape = tuple(inp.shape)
-        raise HTTPException(status_code=422, detail=f"test inference failed (input shape {shape}): {e}")
+        raise HTTPException(status_code=422, detail=f"test inference failed (input shape {tuple(inp.shape)}): {e}")
 
 
 @router.get("/oww/models")
