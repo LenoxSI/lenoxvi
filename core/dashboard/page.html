@@ -821,7 +821,7 @@ $("#form-tts-cfg").addEventListener("submit", async (ev) => {
 async function restartBot(fb = $("#restart-msg")) {
   const b = $("#btn-restart");
   b.disabled = true;
-  msg(fb, "Restarting…", "muted");
+  msg(fb, "Restarting…", "muted pulse");
   // Two attempts: a fetch can die transiently (2026-10-04: a real click's
   // POST vanished browser-side while GETs worked seconds apart). A thrown
   // fetch is EITHER the process-death race (restart fired, response lost)
@@ -846,6 +846,10 @@ async function restartBot(fb = $("#restart-msg")) {
       const s = await api("/api/dashboard/status");
       if (s.uptime_secs != null && s.uptime_secs < 30) { up = 1; break; }
     } catch (e) { /* still down */ }
+    // Live progress: the poll cadence IS the countdown (~2s ticks), so
+    // the user sees motion instead of a frozen "Restarting…" (polish,
+    // 2026-10-05 — same treatment as the load pollers).
+    msg(fb, `Restarting… ${Math.min(90, (i + 1) * 2)}s`, "muted pulse");
   }
   if (up) {
     msg(fb, "Bot is back — reloading panels…", "ok");
@@ -863,7 +867,13 @@ async function restartBot(fb = $("#restart-msg")) {
 // 2026-10-04 22:34). Cancel keeps the saved-values-apply-later behavior.
 async function offerRestart(fb) {
   if (!confirm("Saved. Restart the bot now to apply?")) return;
-  await restartBot(fb);
+  // Mirror the progress into the Settings restart-msg too — if the user
+  // wanders to Settings mid-restart, that section isn't silent (polish
+  // 2026-10-05); the save form's msg stays the primary display.
+  msg($("#restart-msg"), "Restarting… (from Voice tab)", "muted pulse");
+  const ok = await restartBot(fb);
+  // mirror the outcome: quiet clear on success, same error text on failure
+  msg($("#restart-msg"), ok ? "" : fb.textContent, ok ? "muted" : fb.className);
 }
 
 $("#btn-restart").addEventListener("click", async () => {
