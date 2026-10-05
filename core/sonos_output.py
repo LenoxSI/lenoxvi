@@ -267,7 +267,14 @@ class SonosOutput(FrameProcessor):
             logger.info(f"sonos_output: pruned {removed} clip(s) older than {retention_days}d")
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
-            asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
+            try:
+                asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
+            except RuntimeError:
+                # No event loop (sync/test context — exposed by the Opus
+                # audit suite 2026-10-04): construction must never crash
+                # the pipeline builder; pruning happens on next real loop.
+                SonosOutput._prune_task_started = False
+                logger.debug("sonos_output: no event loop at construction — prune task deferred")
         # The clip server is a process-wide singleton (Opus audit
         # 2026-10-04, finding 2): ONE server shared with WiiMOutput and
         # the dashboard's test-clip lane. Constructing here only CREATES
