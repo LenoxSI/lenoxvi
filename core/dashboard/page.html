@@ -54,7 +54,8 @@ Config edits save to config.yaml and apply on the next bot restart.</p>
 
 <div id="tabs">
   <button type="button" data-tab="zones" class="active">Zones</button>
-  <button type="button" data-tab="settings">Settings</button>
+  <button type="button" data-tab="voice" class="">Voice</button>
+  <button type="button" data-tab="settings" class="">Settings</button>
 </div>
 
 <div id="pane-zones" class="tabpane">
@@ -93,7 +94,7 @@ WiiM zones play as main media — music stops while she talks (tested on Pro).</
 </form>
 </div><!-- /pane-zones -->
 
-<div id="pane-settings" class="tabpane hidden">
+<div id="pane-voice" class="tabpane hidden">
 <h2>TTS</h2>
 <p class="sub">Provider, voice and model save to config.yaml; API keys go to
 .env on the appliance (never displayed back). All apply on the next bot
@@ -139,7 +140,9 @@ restart.</p>
   <span id="tts-key-state" class="muted"></span>
   <button type="button" id="btn-tts-key">Save key</button>
 </form>
+</div><!-- /pane-voice -->
 
+<div id="pane-settings" class="tabpane hidden">
 <h2>Bot control</h2>
 <p class="sub">Applies pending config (TTS provider/voice, session modes, zone
 changes) by restarting the bot. The dashboard pauses ~30s while it comes
