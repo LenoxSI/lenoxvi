@@ -219,12 +219,35 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     out = transport.output()
     led = LedSender(out)
+    # B3 barge-in (design note): the interrupt callback stops whichever
+    # output is sounding. The outputs are built in the pipeline list below,
+    # so the closure reaches them through this holder — set right after
+    # construction, before any audio can flow.
+    _outputs: list = []
+
+    async def _on_interrupt() -> None:
+        for o in _outputs:
+            try:
+                await o.stop_current_clip()
+            except Exception:
+                pass  # one backend's failure never blocks the other
+
     # Wake gate built once: the pipeline gets it conditionally, and
     # SonosOutput reads its state for the end-of-speech LED (purple vs
     # dark) and fires speaking LEDs from its real-time TTS frames.
-    wake_filter = (WakeWordFilter(echo_gate=gate, on_wake=_on_wake, led=led)
+    wake_filter = (WakeWordFilter(echo_gate=gate, on_wake=_on_wake, led=led,
+                                  on_interrupt=_on_interrupt)
                    if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true")
                    else None)
+
+    # B3 barge-in holder fill (design note): the interrupt callback's
+    # closure reaches the backends through _outputs — set BEFORE the
+    # pipeline task starts so the first interrupt can't race a None.
+    sonos_out = SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
+                            wake_gate=wake_filter, led=led)
+    wiim_out = WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
+                          wake_gate=wake_filter, led=led)
+    _outputs.extend([sonos_out, wiim_out])
 
     task = PipelineWorker(
         Pipeline(
@@ -249,15 +272,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 # (bedroom outage 23:22, Opus audit finding #6). Building
                 # both removes the race: no build-time room knowledge
                 # is needed at all.
-                SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
-                            wake_gate=wake_filter, led=led),
-                WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
-                           wake_gate=wake_filter, led=led),
+                sonos_out,
+                wiim_out,
                 out,
             ]
         ),
         params=PipelineParams(
-            allow_interruptions=False,  # no barge-in by design
+            allow_interruptions=False,  # no pipecat barge-in — ours is the wake gate (030)
         ),
         # Always-on ESP32 node: a quiet house is NOT a dead session. This is a
         # PipelineTask kwarg (NOT a PipelineParams field — putting it there

@@ -291,6 +291,28 @@ class WiiMOutput(FrameProcessor):
 
     # ── frame contract (same as SonosOutput) ─────────────────────────────
 
+    # ── B3 barge-in (design note) ────────────────────────────────────
+
+    async def stop_current_clip(self) -> None:
+        """Kill the sounding reply clip (wake-word barge-in). WiiM: a
+        plain setPlayerCmd:stop. Idempotent: no clip, nothing to do."""
+        self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
+        self._cancel_end_of_speech()
+        zone_name = self._zone
+        if self._zone_selector:
+            try:
+                zone_name = self._zone_selector() or self._zone
+            except Exception:
+                pass
+        zone = self._zones.get(zone_name)
+        if not zone:
+            return
+        try:
+            await asyncio.to_thread(wiim_api, zone["ip"], "setPlayerCmd:stop")
+            logger.info(f"wiim_output: barge-in stopped clip on '{zone_name}'")
+        except Exception as e:
+            logger.warning(f"wiim_output: barge-in stop failed: {e}")
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TTSStartedFrame):

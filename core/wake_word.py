@@ -63,7 +63,8 @@ class WakeWordFilter(FrameProcessor):
     _oww_lock = asyncio.Lock()  # serializes concurrent Model() inits (H2)
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
-                 echo_gate=None, on_wake=None, led=None, **kwargs):
+                 echo_gate=None, on_wake=None, led=None, on_interrupt=None,
+                 **kwargs):
         from config import cfg_env
 
         super().__init__(**kwargs)
@@ -72,6 +73,14 @@ class WakeWordFilter(FrameProcessor):
         # (2026-09-30 12:23: oww-sleeping sat 27s in the queue while the
         # node's ring held stale purple). None = no LED (tests/rig).
         self._led = led
+        # B3 wake-word barge-in (design note): fires on_interrupt when
+        # the wake score clears threshold TWICE consecutively during
+        # LOCKED. Default OFF (wake.barge_in config knob) — with the knob
+        # off, this filter is bit-for-bit the old behavior.
+        self._on_interrupt = on_interrupt
+        self._barge_in = str(cfg_env("wake", "barge_in", "LVI_BARGE_IN", "false")) \
+            .strip().lower() in (True, 1, "1", "true", "yes", "on")
+        self._interrupt_chain = 0
         # Optional sync callback fired on IDLE -> AWAKE. The dashboard's
         # room registry uses it to record which room's wake opened the
         # turn (room-aware reply routing); must be cheap and must never
@@ -193,6 +202,35 @@ class WakeWordFilter(FrameProcessor):
                     if self._led:
                         self._led.send("oww-awake")
                     break
+                elif (self._barge_in and self._state is TurnState.LOCKED
+                      and score >= self._threshold):
+                    # B3 wake-word barge-in (design note): "Hey Willow"
+                    # mid-speech kills her clip and reopens the mic. Two
+                    # consecutive over-threshold frames must clear (a
+                    # 160ms confirm — same discipline as the IDLE wake:
+                    # steady scores vs a decaying false positive). One
+                    # loud frame is never enough; her synthesized voice
+                    # scoring one stray high frame must not self-interrupt.
+                    self._interrupt_chain += 1
+                    if self._interrupt_chain >= 2:
+                        self._interrupt_chain = 0
+                        self._audio_buf.clear()
+                        self._state = TurnState.AWAKE
+                        self._last_activity = now
+                        logger.info(
+                            f"wake_word: BARGE-IN (score {score:.2f}, "
+                            f"2-frame confirm) -> AWAKE")
+                        if self._on_interrupt:
+                            try:
+                                self._on_interrupt()
+                            except Exception as e:  # never break the gate
+                                logger.debug(
+                                    f"wake_word: on_interrupt callback failed: {e}")
+                        if self._led:
+                            self._led.send("oww-awake")
+                        break
+                else:
+                    self._interrupt_chain = 0
 
             # Audio gating: only IDLE swallows downstream audio. LOCKED = bot
             # speaking (her voice can't re-trigger STT); echo-gate blocked =

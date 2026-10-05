@@ -701,6 +701,45 @@ class SonosOutput(FrameProcessor):
             except Exception:
                 pass
 
+    # ── B3 barge-in (design note) ────────────────────────────────────
+
+    async def stop_current_clip(self) -> None:
+        """Kill the sounding reply clip (wake-word barge-in). Idempotent:
+        no clip, nothing to do. Sonos audioClip API: cancel by clipId —
+        the duck-holder's proven path. The clip is replaced by SILENCE,
+        not stopped dead, so the duck never pops."""
+        cid = self._reply_clip_id
+        self._reply_clip_id = None
+        self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
+        self._cancel_end_of_speech()
+        self._clip_active_until = 0.0
+        if not cid:
+            return
+        zone_name = self._zone
+        if self._zone_selector:
+            try:
+                zone_name = self._zone_selector() or self._zone
+            except Exception:
+                pass
+        zone = self._zones.get(zone_name)
+        if not zone:
+            return
+        sw = None
+        try:
+            from sonos_websocket import SonosWebsocket
+            sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
+            await asyncio.wait_for(sw.connect(), timeout=5.0)
+            await asyncio.wait_for(sw.cancel_clip(cid), timeout=5.0)
+            logger.info(f"sonos_output: barge-in cancelled reply clip {cid}")
+        except Exception as e:
+            logger.warning(f"sonos_output: barge-in cancel failed: {e}")
+        finally:
+            if sw is not None:
+                try:
+                    await asyncio.wait_for(sw.close(), timeout=2.0)
+                except Exception:
+                    pass
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 

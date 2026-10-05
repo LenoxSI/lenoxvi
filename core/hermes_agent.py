@@ -206,6 +206,11 @@ class HermesAgent(FrameProcessor):
         self._last_user_text: str = ""
         self._last_user_time: float = 0.0
         self._dedup_window: float = float(cfg_env("brain", "dedup_window", "LVI_DEDUP_WINDOW", 10.0))
+        # B3 epoch turns (design note): one live turn per pipeline,
+        # spawned as a background task; a new question supersedes.
+        self._turn_task: asyncio.Task | None = None
+        self._turn_epoch: int = 0
+        self._turn_started: float = 0.0
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
@@ -362,76 +367,105 @@ class HermesAgent(FrameProcessor):
                     else:
                         self._last_user_text = text
                         self._last_user_time = now
-                        # Blocking HTTP in a thread: the event loop stays live;
-                        # this processor stalls until the reply lands.
-                        # Stream-and-ack: if the brain takes >3s, speak a filler
-                        # first so the house doesn't feel dead (tool-heavy turns
-                        # measured at 20-40s+ server-side, 2026-09-15).
-                        ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
-                        failed = False
-                        reply = None
-                        filler_spoken = False
-                        try:
-                            # Tiered fillers (option B, 2026-10-03): wait to
-                            # each tier's cumulative `after` mark; on timeout
-                            # speak ONE line from that tier's pool and keep
-                            # waiting. After the last tier she waits quietly —
-                            # tool-heavy turns measure 20-40s+ (2026-09-15)
-                            # and endless reassurance is its own annoyance.
-                            tiers = _filler_tiers()
-                            turn_start = time.monotonic()
-                            for i, (after, pool) in enumerate(tiers):
-                                remaining = turn_start + after - time.monotonic()
-                                if remaining > 0:
-                                    try:
-                                        reply = await asyncio.wait_for(
-                                            asyncio.shield(ask), timeout=remaining
-                                        )
-                                        break
-                                    except TimeoutError:
-                                        filler = _pick_filler(pool)
-                                        await self.push_frame(TTSSpeakFrame(text=filler))
-                                        self._echo_texts.append(filler)
-                                        filler_spoken = True
-                                        logger.info(
-                                            f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
-                                        )
-                            if reply is None:
-                                # every tier spent, brain still working — wait it out
-                                reply = await ask
-                        except Exception as e:
-                            # H3 (Opus review 2026-09-30): the brain can fail
-                            # at ANY point — fast, mid-tier, or after a filler —
-                            # and a sibling except clause does NOT catch
-                            # exceptions raised inside another handler, so ONE
-                            # broad catch guards the whole wait. This is the
-                            # last defense before user-facing silence (the
-                            # dead-rig case the survivability rule exists to
-                            # prevent); CancelledError is not an Exception
-                            # subclass, so session teardown still propagates.
-                            logger.error(
-                                f"hermes_agent: brain call failed"
-                                f"{' after filler' if filler_spoken else ''}: {e}"
-                            )
-                            reply = "Sorry — I can't reach my brain right now."
-                            failed = True
-                        reply = _strip_tags(reply)
-                        self._echo_texts.append(reply)
-                        self._echo_texts = self._echo_texts[-4:]
-                        # A failed call never reached the brain — don't write
-                        # the exchange into server-side history (Opus rider):
-                        # the next turn would see the brain "remember" an
-                        # outage reply it never produced.
-                        if not failed:
-                            self._history.append({"role": "user", "content": text})
-                            self._history.append({"role": "assistant", "content": reply})
-                            self._history = self._history[-self._max_history:]
-                            # Sticky rooms persist after every successful
-                            # turn (crash-safe stash — no teardown hook):
-                            # reconnects AND restarts restore from disk.
-                            if self._sticky and self._room:
-                                _session_stash.save(self._room, self._history)
-                        logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
-                        await self.push_frame(TTSSpeakFrame(text=reply))
+                        # ── B3 epoch turns (design note) ──
+                        # The brain call runs as a BACKGROUND task; the
+                        # frame loop returns immediately and never
+                        # blocks on a slow brain (the 12:12 collision
+                        # and the 09-30 stuck-LED class share this root
+                        # cause). A new question supersedes: old task
+                        # cancelled, its late reply discarded by the
+                        # epoch check at every await, no history write.
+                        superseded = False
+                        if self._turn_task is not None and not self._turn_task.done():
+                            superseded = True
+                            self._turn_task.cancel()
+                            try:
+                                await asyncio.shield(self._turn_task)
+                            except (asyncio.CancelledError, Exception):
+                                pass
+                            logger.info(
+                                f"hermes_agent: turn superseded after "
+                                f"{time.monotonic() - self._turn_started:.1f}s — "
+                                f"reply discarded, no history write")
+                        self._turn_epoch += 1
+                        epoch = self._turn_epoch
+                        self._turn_started = time.monotonic()
+                        self._turn_task = asyncio.create_task(
+                            self._run_turn(text, epoch))
+                        if superseded:
+                            from config import cfg_env as _cfg_env
+                            ack = str(_cfg_env("brain", "supersede_ack",
+                                               "LVI_SUPERSEDE_ACK",
+                                               "Hold on — switching.") or "")
+                            if ack:
+                                await self.push_frame(TTSSpeakFrame(text=ack))
+                                self._echo_texts.append(ack)
+                                self._echo_texts = self._echo_texts[-4:]
 
-        await self.push_frame(frame, direction)
+    async def _run_turn(self, text: str, epoch: int) -> None:
+        """One turn as a background task (design note). Every await
+        checks the epoch — a superseded turn discards its reply, skips
+        the history write, and dies quietly. CancelledError propagates
+        (task.cancel from the supersede path); everything else is the H3
+        broad-catch: the user never gets dead silence on a brain failure."""
+        filler_spoken = False
+        try:
+            ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
+            failed = False
+            reply = None
+            # Tiered fillers (option B, 2026-10-03): wait to each tier's
+            # cumulative `after` mark; on timeout speak ONE line from
+            # that tier's pool and keep waiting.
+            tiers = _filler_tiers()
+            turn_start = time.monotonic()
+            for i, (after, pool) in enumerate(tiers):
+                remaining = turn_start + after - time.monotonic()
+                if remaining > 0:
+                    try:
+                        reply = await asyncio.wait_for(
+                            asyncio.shield(ask), timeout=remaining
+                        )
+                        break
+                    except TimeoutError:
+                        if epoch != self._turn_epoch:
+                            ask.cancel()
+                            return  # superseded mid-filler — die quietly
+                        filler = _pick_filler(pool)
+                        await self.push_frame(TTSSpeakFrame(text=filler))
+                        self._echo_texts.append(filler)
+                        filler_spoken = True
+                        logger.info(
+                            f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
+                        )
+            if reply is None:
+                # every tier spent, brain still working — wait it out
+                reply = await ask
+            if epoch != self._turn_epoch:
+                return  # superseded while thinking — discard, no history
+            reply = _strip_tags(reply)
+            self._echo_texts.append(reply)
+            self._echo_texts = self._echo_texts[-4:]
+            # A failed call never reached the brain — don't write the
+            # exchange into server-side history (Opus rider).
+            if not failed:
+                self._history.append({"role": "user", "content": text})
+                self._history.append({"role": "assistant", "content": reply})
+                self._history = self._history[-self._max_history:]
+                # Sticky rooms persist after every successful turn.
+                if self._sticky and self._room:
+                    _session_stash.save(self._room, self._history)
+            logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
+            await self.push_frame(TTSSpeakFrame(text=reply))
+        except asyncio.CancelledError:
+            raise  # supersede path — die quietly, no user-facing output
+        except Exception as e:
+            # H3 (Opus review 2026-09-30): the brain can fail at ANY
+            # point; ONE broad catch guards the whole turn — the last
+            # defense before user-facing silence. A superseded turn that
+            # fails is still superseded: no history write either way.
+            logger.error(f"hermes_agent: brain call failed"
+                         f"{' after filler' if filler_spoken else ''}: {e}")
+            if epoch != self._turn_epoch:
+                return
+            await self.push_frame(
+                TTSSpeakFrame(text="Sorry — I can't reach my brain right now."))

@@ -10,6 +10,10 @@
 # ── Wake gate ──────────────────────────────────────────────────────────
 wake:
   enabled: true
+  barge_in: false       # B3 wake-word interrupt (design note): true =
+                        # "Hey <YourName>" mid-reply kills her clip and
+                        # reopens the mic (2-frame confirm). false =
+                        # today's behavior, bit-for-bit.
   threshold: 0.40        # OWW score needed to wake; real "Hey <YourName>"
                          # typically lands 0.84-1.00. Lower = more sensitive,
                          # but scores below real speech risk false wakes.
