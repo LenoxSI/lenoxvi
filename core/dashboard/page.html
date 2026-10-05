@@ -105,18 +105,21 @@ restart.</p>
     <option value="deepgram-flux">Deepgram Flux</option>
     <option value="deepgram">Deepgram Aura-2</option>
   </select></label>
-  <span id="tts-eleven-fields">
-    <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
-    <label>Model <select id="tts-model">
-      <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
-      <option value="eleven_v2">eleven_v2</option>
-    </select></label>
-  </span>
   <span id="tts-deepgram-fields" style="display:none">
     <label>Aura-2 voice <select id="tts-dg-voice"></select></label>
   </span>
   <button>Save</button>
 </form>
+<div id="tts-eleven-fields">
+  <form class="inline" id="form-tts-cfg3">
+    <label>Voice ID <input id="tts-voice" placeholder="ElevenLabs voice ID" size="26" autocomplete="off"></label>
+    <label>Model <select id="tts-model">
+      <option value="eleven_flash_v2_5">eleven_flash_v2_5</option>
+      <option value="eleven_v2">eleven_v2</option>
+    </select></label>
+    <button>Save</button>
+  </form>
+</div>
 <div id="tts-flux-fields" style="display:none">
   <form class="inline" id="form-tts-cfg2">
     <label>Flux voice <select id="tts-flux-voice"></select></label>
@@ -562,6 +565,26 @@ $("#form-tts-cfg2").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
 });
 
+// ElevenLabs row: own stacked form (Voice ID is REQUIRED for elevenlabs
+// saves — so this row's Save commits provider+voice+model together).
+$("#form-tts-cfg3").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const v = $("#tts-voice").value.trim();
+  if (!v) { msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return; }
+  try {
+    await api("/api/dashboard/tts", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({provider: "elevenlabs", voice_id: v, model: $("#tts-model").value}),
+    });
+    await loadTTS();
+    msg($("#tts-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
+  } catch (e) { msg($("#tts-msg"), "Save failed: " + e.message, "err"); }
+});
+
+// Top row (provider switch only). Deepgram rows keep their voice knobs
+// in their own stacked forms; a provider flip here commits just the
+// provider + that provider's already-saved voice.
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const p = $("#tts-provider").value;
@@ -570,9 +593,6 @@ $("#form-tts-cfg").addEventListener("submit", async (ev) => {
     : p === "deepgram-flux"
     ? {provider: p, deepgram_flux_voice: $("#tts-flux-voice").value}
     : {provider: p, voice_id: $("#tts-voice").value.trim(), model: $("#tts-model").value};
-  if (p === "elevenlabs" && !body.voice_id) {
-    msg($("#tts-msg"), "Voice ID can't be empty — TTS breaks with no voice.", "err"); return;
-  }
   try {
     await api("/api/dashboard/tts", {
       method: "PUT",
