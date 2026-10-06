@@ -1111,6 +1111,176 @@ def main():
             _stop_rem = _asyncio.run(_stop_relax_probe())
             check("9b10 echo: stop_current_clip relaxes the gate",
                   _stop_rem <= 0.6, f"remaining={_stop_rem:.2f}s")
+
+            # 9b11. Intelligence lane (design note): config round-trip
+            # preserves brain.fillers (merge law), lane dispatch shapes
+            # per kind, key fallback order + no-KeyError, key POST never
+            # echoes material, test probe ok/error paths.
+            import io as _io9
+            import json as json
+            import urllib.request as _urq9
+            from dashboard import routes as _routes9
+
+            # (a) PUT intelligence: kind+url+agent written, fillers SURVIVE
+            _r = client.put("/api/dashboard/intelligence", json={
+                "kind": "openclaw", "url": "http://127.0.0.1:18789/v1",
+                "agent": "suite-agent"})
+            check("9b11 PUT ok", _r.status_code == 200, _r.text[:120])
+            import yaml as _yaml9
+            _brain9 = _yaml9.safe_load(
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+            check("9b11 PUT writes kind/url/agent",
+                  _brain9.get("kind") == "openclaw"
+                  and _brain9.get("url") == "http://127.0.0.1:18789/v1"
+                  and _brain9.get("agent") == "suite-agent",
+                  str(_brain9)[:120])
+            check("9b11 PUT merge: fillers survive",
+                  "fillers" in _brain9, str(_brain9)[:160])
+            # GET round-trips
+            _g = client.get("/api/dashboard/intelligence").json()
+            check("9b11 GET returns kind/agent/key_set",
+                  _g.get("kind") == "openclaw" and _g.get("agent") == "suite-agent"
+                  and "key_set" in _g, str(_g)[:120])
+
+            # (b) invalid kind / agent / url -> 422
+            _bad = client.put("/api/dashboard/intelligence", json={"kind": "claude"})
+            check("9b11 retired kind 422s", _bad.status_code == 422, str(_bad.status_code))
+            _bad2 = client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw", "agent": "bad agent!"})
+            check("9b11 invalid agent 422s", _bad2.status_code == 422, str(_bad2.status_code))
+            _bad3 = client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw", "url": "ftp://nope"})
+            check("9b11 invalid url 422s", _bad3.status_code == 422, str(_bad3.status_code))
+
+            # (c) lane dispatch: monkeypatched urlopen captures the request
+            _cap9 = []
+
+            class _FakeResp9(_io9.BytesIO):
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+
+            def _fake_open9(req, timeout=None):
+                _cap9.append({"headers": {k.lower(): v for k, v in req.headers.items()},
+                              "body": json.loads(req.data.decode())})
+                return _FakeResp9(json.dumps({
+                    "choices": [{"message": {"role": "assistant", "content": "ok"},
+                                 "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode())
+
+            _saved_open9 = _urq9.urlopen
+            _saved_bk9 = _os.environ.get("LVI_BRAIN_KEY")
+            _saved_hk9 = _os.environ.get("LVI_HERMES_KEY")
+            try:
+                _os.environ["LVI_BRAIN_KEY"] = "suite-brain-key-not-real"
+                _os.environ["LVI_HERMES_KEY"] = "suite-hermes-key-not-real"
+                for mod_name in ("hermes_agent",):
+                    if mod_name in sys.modules:
+                        del sys.modules[mod_name]
+                import hermes_agent as _ha9
+                _urq9.urlopen = _fake_open9
+                # kind from the LVI_CONFIG we just PUT (openclaw)
+                _a9 = _ha9.HermesAgent(lull_secs=0.05, room="suite",
+                                       session_mode="sticky")
+                _a9._ask_hermes("hi")
+                _oc_body = _cap9[-1]["body"]
+                _oc_hdr = _cap9[-1]["headers"]
+                check("9b11 openclaw lane: model encodes agent, no conversation",
+                      _oc_body.get("model") == "openclaw/suite-agent"
+                      and "conversation" not in _oc_body, str(_oc_body)[:140])
+                check("9b11 openclaw lane: sticky session-key header",
+                      _oc_hdr.get("x-openclaw-session-key") == "voice-suite",
+                      str(_oc_hdr.get("x-openclaw-session-key")))
+                check("9b11 key precedence: LVI_BRAIN_KEY wins",
+                      _oc_hdr.get("authorization") == "Bearer suite-brain-key-not-real",
+                      str(_oc_hdr.get("authorization")))
+                # fresh: header absent
+                _a9f = _ha9.HermesAgent(lull_secs=0.05, room="suite",
+                                        session_mode="fresh")
+                _a9f._ask_hermes("hi")
+                check("9b11 openclaw lane: fresh sends no session header",
+                      "x-openclaw-session-key" not in _cap9[-1]["headers"], "")
+                # hermes round-trip: flip kind back, conversation field returns
+                client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
+                for mod_name in ("hermes_agent",):
+                    if mod_name in sys.modules:
+                        del sys.modules[mod_name]
+                import hermes_agent as _ha9b
+                _a9b = _ha9b.HermesAgent(lull_secs=0.05, room="suite",
+                                         session_mode="fresh")
+                _a9b._ask_hermes("hi")
+                _hm_body = _cap9[-1]["body"]
+                _hm_hdr = _cap9[-1]["headers"]
+                check("9b11 hermes round-trip: conversation field + Hermes header restored",
+                      _hm_body.get("conversation") and
+                      _hm_hdr.get("x-hermes-session-key") == _hm_body.get("conversation"),
+                      str(_hm_body)[:140])
+                # no key at all: construction survives, ask raises RuntimeError
+                _os.environ.pop("LVI_BRAIN_KEY", None)
+                _os.environ.pop("LVI_HERMES_KEY", None)
+                try:
+                    _a9c = _ha9b.HermesAgent(lull_secs=0.05, room="suite",
+                                             session_mode="fresh")
+                    try:
+                        _a9c._ask_hermes("hi")
+                        check("9b11 no-key: ask raises (not success)", False, "no raise")
+                    except RuntimeError as _e9:
+                        check("9b11 no-key: RuntimeError with a clear message",
+                              "no brain key" in str(_e9).lower(), str(_e9))
+                    except KeyError as _e9:
+                        check("9b11 no-key: RuntimeError with a clear message",
+                              False, f"KeyError brick: {_e9}")
+                except KeyError as _e9:
+                    check("9b11 no-key: construction survives", False,
+                          f"KeyError brick: {_e9}")
+            finally:
+                _urq9.urlopen = _saved_open9
+                for _k9, _v9 in (("LVI_BRAIN_KEY", _saved_bk9),
+                                 ("LVI_HERMES_KEY", _saved_hk9)):
+                    if _v9 is None:
+                        _os.environ.pop(_k9, None)
+                    else:
+                        _os.environ[_k9] = _v9
+
+            # (e) key POST: response carries no key material; _write_env_key
+            # monkeypatched so the real .env is NEVER touched
+            _saved_wek9 = _routes9._write_env_key
+            async def _fake_wek9(var, value):
+                return True
+            _routes9._write_env_key = _fake_wek9
+            try:
+                _kr = client.put("/api/dashboard/intelligence/key",
+                                 json={"api_key": "suite-keymaterial-12345"})
+                _kj = _kr.json()
+                check("9b11 key POST ok + never echoes material",
+                      _kr.status_code == 200 and _kj.get("key_set") is True
+                      and "suite-keymaterial-12345" not in _kr.text,
+                      _kr.text[:120])
+                _kbad = client.put("/api/dashboard/intelligence/key",
+                                   json={"api_key": "bad\nkey"})
+                check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
+            finally:
+                _routes9._write_env_key = _saved_wek9
+
+            # (f) test route: monkeypatched probe path — ok + error
+            _saved_probe9 = _routes9._intelligence_probe
+            _routes9._intelligence_probe = lambda cfg: {"ok": True,
+                                                             "latency_ms": 42,
+                                                             "model": "openclaw/suite-agent",
+                                                             "reply": "ok"}
+            try:
+                _tr = client.post("/api/dashboard/intelligence/test").json()
+                check("9b11 test route ok path", _tr.get("ok") is True
+                      and _tr.get("latency_ms") == 42, str(_tr)[:120])
+            finally:
+                _routes9._intelligence_probe = _saved_probe9
+            _routes9._intelligence_probe = lambda cfg: {"ok": False,
+                                                             "error": "unreachable: URLError"}
+            try:
+                _tr2 = client.post("/api/dashboard/intelligence/test").json()
+                check("9b11 test route error path", _tr2.get("ok") is False
+                      and "URLError" in _tr2.get("error", ""), str(_tr2)[:120])
+            finally:
+                _routes9._intelligence_probe = _saved_probe9
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 

@@ -59,6 +59,18 @@ class ZonePayload(BaseModel):
 # ── status ───────────────────────────────────────────────────────────
 
 
+def _intelligence_label() -> str:
+    """Rig-facts label for the Intelligence line: 'OpenClaw · <agent>'
+    or 'Hermes'. Resolved through the same cfg_env chain the agent uses."""
+    brain_cfg = config_store.read_section("brain") or {}
+    kind = str(cfg_env("brain", "kind", "LVI_BRAIN_KIND", brain_cfg.get("kind") or "hermes") or "hermes")
+    if kind == "openclaw":
+        agent = str(cfg_env("brain", "agent", "LVI_BRAIN_AGENT",
+                            brain_cfg.get("agent") or "") or "")
+        return f"OpenClaw · {agent}" if agent else "OpenClaw"
+    return "Hermes"
+
+
 @router.get("/status")
 async def status():
     boot = registry.boot_time()
@@ -79,6 +91,10 @@ async def status():
                              stt_cfg.get("model") or "large-v3-turbo"),
         "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
                                 tts_cfg.get("provider") or "elevenlabs"),
+        # Intelligence (design note): rig-facts label — same cfg_env chain
+        # the agent reads, so the dashboard shows what will actually be
+        # constructed. "brain" never appears in the UI.
+        "intelligence": _intelligence_label(),
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
         "rooms": registry.known_rooms(),
@@ -751,6 +767,139 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
     replaced = await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
     logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True, "replaced": replaced}
+
+
+# ── Intelligence (Settings — brain provider picker; "brain" never UI) ──
+
+
+class IntelligencePayload(BaseModel):
+    # hermes = today's api_server contract; openclaw = OpenClaw Gateway
+    # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
+    # conversation field). Claude / custom OpenAI-compatible endpoints
+    # are DESIGNED FOR (same envelope, URL+key+model) but not shipped —
+    # the pattern 422s them until their lanes exist (design note).
+    kind: str = Field(pattern="^(hermes|openclaw)$")
+    url: str | None = Field(default=None, max_length=200,
+                             pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+    agent: str | None = Field(default=None, min_length=1, max_length=64,
+                              pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+class IntelligenceKeyPayload(BaseModel):
+    # Same character-class law as TTSKeyPayload (Opus audit 2026-10-04
+    # finding 1): no newlines/quotes/backslashes — a `\n` in a key PUT
+    # must never smuggle a second env var into .env.
+    api_key: str = Field(min_length=8, max_length=256,
+                         pattern=r"^[A-Za-z0-9_.\-]+$")
+
+
+@router.get("/intelligence")
+async def get_intelligence():
+    """Current Intelligence config + key status. Never returns the key."""
+    import os as _os
+    brain_cfg = config_store.read_section("brain") or {}
+    kind = brain_cfg.get("kind") or "hermes"
+    return {
+        "kind": kind,
+        "url": brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
+        "agent": brain_cfg.get("agent"),
+        "key_set": bool(_os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY")),
+        "note": "applies on the next bot restart (read at pipeline construction)",
+    }
+
+
+@router.put("/intelligence", dependencies=GUARD)
+async def put_intelligence(payload: IntelligencePayload):
+    """Write kind (+ url/agent when provided) to config.yaml (brain
+    section) — read-merge-write, so fillers/max_tokens/lull always
+    survive. Applies on the next bot restart."""
+    current = dict(config_store.read_section("brain") or {})
+    current["kind"] = payload.kind
+    if payload.url is not None:
+        current["url"] = payload.url
+    if payload.agent is not None:
+        current["agent"] = payload.agent
+    if payload.kind == "openclaw" and not current.get("agent"):
+        raise HTTPException(status_code=422, detail="openclaw needs an agent id (brain.agent)")
+    try:
+        config_store.write_section("brain", current)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    logger.info(f"dashboard: intelligence config saved (kind={payload.kind}) — applies on next restart")
+    return {"ok": True, "kind": payload.kind}
+
+
+@router.put("/intelligence/key", dependencies=GUARD)
+async def put_intelligence_key(payload: IntelligenceKeyPayload):
+    """Intelligence API key → .env as LVI_BRAIN_KEY (never echoed; the
+    agent resolves LVI_BRAIN_KEY first, LVI_HERMES_KEY as fallback)."""
+    replaced = await _write_env_key("LVI_BRAIN_KEY", payload.api_key)
+    logger.info("dashboard: LVI_BRAIN_KEY written to .env (value never logged)")
+    return {"ok": True, "key_set": True, "replaced": replaced}
+
+
+def _intelligence_probe(brain_cfg: dict) -> dict:
+    """Synchronous connectivity probe run in a worker thread (event loop
+    must never block on urllib). Probes the SAVED config: health endpoint,
+    then one minimal chat completion through the exact request shape the
+    agent sends. No secrets in the returned error text."""
+    import os as _os
+    import urllib.request as _rq
+    import urllib.error as _ue
+    kind = brain_cfg.get("kind") or "hermes"
+    url = (brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "").rstrip("/")
+    key = _os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY") or ""
+    if not url:
+        return {"ok": False, "error": "no url configured"}
+    if not key:
+        return {"ok": False, "error": "no key set (save the key first)"}
+    t0 = time.monotonic()
+    try:
+        # health: no-auth liveness (OpenClaw /health; hermes api_server
+        # has none — a plain GET on the base URL 404s but proves reach)
+        _rq.urlopen(_rq.Request(url + "/health", method="GET"), timeout=5).read()
+    except _ue.HTTPError:
+        pass  # 404/401 on health still proves the endpoint is listening
+    except Exception as e:
+        return {"ok": False, "error": f"unreachable: {type(e).__name__}"}
+    if kind == "openclaw":
+        model = "openclaw/" + (brain_cfg.get("agent") or "")
+        body = {"model": model, "stream": False, "max_tokens": 16,
+                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
+    else:
+        model = brain_cfg.get("model") or "hermes-agent"
+        body = {"model": model, "stream": False, "max_tokens": 16,
+                "conversation": "dashboard-test",
+                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
+    req = _rq.Request(url + "/chat/completions",
+                      data=json.dumps(body).encode(),
+                      headers={"Authorization": f"Bearer {key}",
+                               "Content-Type": "application/json"})
+    try:
+        with _rq.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+        content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        latency = round((time.monotonic() - t0) * 1000)
+        return {"ok": True, "latency_ms": latency, "model": model,
+                "reply": (content or "")[:80]}
+    except _ue.HTTPError as e:
+        return {"ok": False, "error": f"gateway error: HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}"}
+
+
+@router.post("/intelligence/test", dependencies=GUARD)
+async def post_intelligence_test():
+    """Test the SAVED Intelligence config end-to-end (health + one
+    minimal chat completion). Runs the sync probe in a thread."""
+    brain_cfg = dict(config_store.read_section("brain") or {})
+    result = await asyncio.to_thread(_intelligence_probe, brain_cfg)
+    if result.get("ok"):
+        logger.info(f"dashboard: intelligence test ok "
+                    f"(latency {result.get('latency_ms')}ms)")
+    else:
+        logger.warning(f"dashboard: intelligence test failed: {result.get('error')}")
+    return result
 
 
 # ── bot control (Settings) ─────────────────────────────────────────────

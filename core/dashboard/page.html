@@ -202,7 +202,39 @@ restart.</p>
   <span>TTS <b id="rf-tts">…</b></span>
   <span>STT <b id="rf-stt">…</b></span>
   <span>OWW Model <b id="rf-wake">…</b></span>
+  <span>Intelligence <b id="rf-int">…</b></span>
 </div>
+
+<section id="sec-intelligence">
+<h2>Intelligence</h2>
+<p class="sub">Who answers the mic. Saves to config.yaml; the API key goes to
+.env on the appliance (never displayed back). Applies on the next bot
+restart. Sticky sessions keep memory per room; fresh starts each turn
+clean — the provider's own agent memory may still recall earlier facts.</p>
+<div id="int-msg"></div>
+<form class="inline" id="form-intelligence">
+  <label>Provider <select id="int-kind">
+    <option value="hermes">Hermes</option>
+    <option value="openclaw">OpenClaw</option>
+    <option value="claude" disabled title="coming soon">Claude</option>
+    <option value="custom" disabled title="coming soon">Custom OpenAI-compatible</option>
+  </select></label>
+  <span id="int-openclaw-fields" style="display:none">
+    <label>Gateway URL <input id="int-url" placeholder="http://192.0.2.186:18789/v1" size="30" autocomplete="off"></label>
+    <label>Agent <input id="int-agent" placeholder="lenoxvi-test" size="14" autocomplete="off"></label>
+  </span>
+  <button>Save</button>
+</form>
+<form class="inline" id="form-int-key">
+  <label>API key <input type="password" id="int-key" placeholder="paste the gateway/brain key" size="34" autocomplete="off"></label>
+  <span id="int-key-state" class="muted"></span>
+  <button type="button" id="btn-int-key">Save key</button>
+</form>
+<form class="inline" id="form-int-test">
+  <button type="button" id="btn-int-test">Test connection</button>
+  <span id="int-test-out" class="muted"></span>
+</form>
+</section>
 
 <h2>Bot control</h2>
 <p class="sub">Applies pending config (TTS provider/voice, session modes, zone
@@ -313,6 +345,7 @@ async function loadStatus() {
     $("#rf-wake").textContent = s.wake_model || "—";
     $("#rf-stt").textContent = s.stt_model || "—";
     $("#rf-tts").textContent = s.tts_provider || "—";
+    $("#rf-int").textContent = s.intelligence || "—";
   } catch (e) {
     // status strip: quiet during a restart (expected), red only on real errors
     $("#statusbar").textContent = e.network
@@ -795,6 +828,73 @@ $("#btn-oww-select").addEventListener("click", async () => {
   } catch (e) { msg($("#oww-msg"), "Select failed: " + e.message, "err"); }
 });
 
+// ── Intelligence (Settings — provider picker; "brain" never in the UI) ──
+function intFlipFields() {
+  $("#int-openclaw-fields").style.display =
+    $("#int-kind").value === "openclaw" ? "" : "none";
+}
+
+async function loadIntelligence() {
+  try {
+    const t = await api("/api/dashboard/intelligence");
+    clearReconnect($("#int-msg"));
+    $("#int-kind").value = t.kind || "hermes";
+    $("#int-url").value = t.url || "";
+    $("#int-agent").value = t.agent || "";
+    $("#int-key-state").textContent = t.key_set ? "key set ✓" : "no key set";
+    intFlipFields();
+  } catch (e) { msgLoad($("#int-msg"), e, "Intelligence load"); }
+}
+
+$("#int-kind").addEventListener("change", intFlipFields);
+
+$("#form-intelligence").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const body = {kind: $("#int-kind").value};
+  if (body.kind === "openclaw") {
+    body.url = $("#int-url").value.trim();
+    body.agent = $("#int-agent").value.trim();
+  }
+  try {
+    await api("/api/dashboard/intelligence", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    await loadIntelligence();
+    msg($("#int-msg"), "Saved to config.yaml — applies on next bot restart.", "ok");
+    await offerRestart($("#int-msg"));
+  } catch (e) { msg($("#int-msg"), "Save failed: " + e.message, "err"); }
+});
+
+$("#btn-int-key").addEventListener("click", async () => {
+  const k = $("#int-key").value.trim();
+  if (!k) { msg($("#int-msg"), "Paste a key first.", "err"); return; }
+  try {
+    await api("/api/dashboard/intelligence/key", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({api_key: k}),
+    });
+    $("#int-key").value = "";
+    $("#int-key-state").textContent = "key set ✓";
+    msg($("#int-msg"), "Key saved to .env — applies on next bot restart.", "ok");
+  } catch (e) { msg($("#int-msg"), "Key save failed: " + e.message, "err"); }
+});
+
+$("#btn-int-test").addEventListener("click", async () => {
+  const out = $("#int-test-out");
+  out.textContent = "testing…";
+  try {
+    const r = await api("/api/dashboard/intelligence/test", {method: "POST"});
+    if (r.ok) {
+      out.textContent = `✓ ${r.model || "?"} — ${r.latency_ms} ms — "${(r.reply || "").slice(0, 40)}"`;
+    } else {
+      out.textContent = "✗ " + (r.error || "failed");
+    }
+  } catch (e) { out.textContent = "✗ " + e.message; }
+});
+
 $("#form-tts-cfg").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const p = $("#tts-provider").value;
@@ -855,7 +955,7 @@ async function restartBot(fb = $("#restart-msg")) {
   }
   if (up) {
     msg(fb, "Bot is back — reloading panels…", "ok");
-    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW();
+    loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW(); loadIntelligence();
   } else {
     msg(fb,
         (postErr ? `restart request failed (${postErr}) — ` : "") +
@@ -967,7 +1067,7 @@ $("#form-fw").addEventListener("submit", async (ev) => {
   } catch (e) { msg($("#fw-msg"), "Firmware push failed: " + e.message, "err"); }
 });
 
-loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW();
+loadStatus(); loadMapping(); loadNodes(); loadZones(); loadTTS(); loadTuning(); loadOWW(); loadIntelligence();
 setInterval(loadStatus, 5000);
 setInterval(loadNodes, 5000);
 setInterval(loadOWW, 15000);
