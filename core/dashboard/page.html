@@ -285,7 +285,21 @@ async function api(path, opts) {
     }
   }
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.detail || r.status);
+  if (!r.ok) {
+    // Pydantic 422s arrive as detail: [{loc, msg, ...}] — an ARRAY of
+    // error objects. String-coercing it made "Save failed: [object
+    // Object]" (2026-10-05, the OpenClaw save). Render the fields.
+    let d = body.detail;
+    if (Array.isArray(d)) {
+      d = d.map(x => {
+        const loc = (x.loc || []).filter(l => l !== "body").join(".");
+        return (loc ? loc + ": " : "") + (x.msg || JSON.stringify(x));
+      }).join("; ");
+    } else if (d && typeof d === "object") {
+      d = d.msg || JSON.stringify(d);
+    }
+    throw new Error(d || r.status);
+  }
   return body;
 }
 // Network-level fetch failures (bot down / mid-restart): flag them so
