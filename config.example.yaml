@@ -56,7 +56,14 @@ tts:
 
 # ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 brain:
-  kind: hermes          # hermes | stub (stub = canned echo, bench only)
+  kind: hermes          # hermes | openclaw | stub (stub = canned echo, bench only).
+                        # openclaw = OpenClaw Gateway: model "openclaw/<agent>",
+                        # x-openclaw-session-key for sticky rooms, no Hermes-only
+                        # conversation field. Enable the endpoint first:
+                        # openclaw config set gateway.http.endpoints.chatCompletions.enabled true
+  # kind: openclaw
+  #   url: http://<openclaw-host>:18789/v1   # the Gateway (with /v1)
+  #   agent: <your-agent-id>                 # e.g. lenoxvi-test
   url: http://<brain-host>:8642/v1
   model: hermes-agent
   max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards

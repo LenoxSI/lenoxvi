@@ -13,7 +13,14 @@ turns mic nodes into a house-wide voice assistant with any LLM you want:
   - `wake_word.py` — openWakeWord gate + turn lock (IDLE/AWAKE/LOCKED;
     default awake window 15s, tunable via `wake.awake_timeout`)
   - `hermes_agent.py` — the real brain (Hermes API over LAN, bearer key);
-    **production runs this** (`brain.kind: hermes` in config.yaml)
+    **production runs this** (`brain.kind: hermes` in config.yaml).
+    `brain.kind: openclaw` answers instead from an OpenClaw Gateway
+    (`model: openclaw/<agent>`, sticky rooms via `x-openclaw-session-key`);
+    the API key lives in `.env` as `LVI_BRAIN_KEY` (falls back to
+    `LVI_HERMES_KEY`). Two honest boundaries with OpenClaw: the agent's
+    own memory files persist facts ACROSS our fresh sessions (fresh is
+    fresh from OUR side, not theirs), and GLM reasoning text can
+    intermittently merge into the reply (measured, logged, never stripped).
   - `brain_stub.py` — deterministic echo brain for bench/dev runs without
     the Hermes API (the code default when `brain.kind` is unset — a
     misconfigured deploy answers with canned lines)

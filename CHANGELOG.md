@@ -6,6 +6,25 @@ Rig-level versioning only — firmware carries its own `project(VERSION)` in its
 CMakeLists, bumped together with the server manifest on every OTA deploy
 (see notes notes/v2/016). The two version streams are independent.
 
+## [Unreleased]
+
+### Added — Intelligence lane (design note)
+- `brain.kind: openclaw` — voice turns answered by an OpenClaw Gateway
+  agent (`model: openclaw/<agent>`, sticky rooms via
+  `x-openclaw-session-key`, Hermes-only `conversation` field omitted).
+  Requires `gateway.http.endpoints.chatCompletions.enabled: true` on the
+  OpenClaw side (off by default, 2026.9.8).
+- Key resolution `LVI_BRAIN_KEY` → `LVI_HERMES_KEY` fallback; a missing key
+  no longer bricks construction (audit finding #4 class) — the turn fails
+  with a clear message and the dashboard reports it.
+- Dashboard "Intelligence" section (Settings): provider picker
+  (Hermes / OpenClaw; Claude + custom OpenAI-compatible designed-for),
+  per-kind fields, key set ✓, Test-connection button (health + one
+  minimal completion, latency), rig-facts line.
+- Reasoning-preamble meter: OpenClaw/GLM planning text can merge into
+  `content` (measured 2/8 spike calls) — logged with a counter, never
+  silently stripped.
+
 ## [0.4.0] — 2026-10-04
 
 The config-editable dashboard release. The dashboard stops being
