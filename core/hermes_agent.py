@@ -169,6 +169,10 @@ class _SessionStash:
 
 _session_stash = _SessionStash()
 
+# Reasoning-preamble meter (design note): [count] as a mutable cell so the
+# lane can count leaks without rebinding a module global per hit.
+_PREAMBLE_HITS = [0]
+
 
 class HermesAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
@@ -179,7 +183,25 @@ class HermesAgent(FrameProcessor):
         from config import cfg_env
 
         self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://<brain-host>:8642/v1")
-        self._key = os.environ["LVI_HERMES_KEY"]
+        # Intelligence lane (design note): brain.kind picks the request
+        # shape. hermes = today's api_server contract; openclaw = OpenClaw
+        # Gateway (model "openclaw/<agent>", x-openclaw-session-key, no
+        # `conversation` field). The UI calls this "Intelligence" — the
+        # word "brain" never reaches the dashboard.
+        self._kind = str(cfg_env("brain", "kind", "LVI_BRAIN_KIND", "hermes") or "hermes").lower()
+        self._agent = ""
+        if self._kind == "openclaw":
+            self._agent = str(cfg_env("brain", "agent", "LVI_BRAIN_AGENT", "") or "")
+        # Key resolution (design note): LVI_BRAIN_KEY first, LVI_HERMES_KEY
+        # fallback — zero migration for existing installs. Missing key is
+        # NOT a construction brick (audit finding #4 class, the provider-
+        # switch-without-key incident): the turn fails with a clear error
+        # and the dashboard Test button reports it.
+        self._key = os.getenv("LVI_BRAIN_KEY") or os.getenv("LVI_HERMES_KEY") or None
+        if not self._key and self._kind != "stub":
+            logger.warning(
+                "hermes_agent: no brain key set (LVI_BRAIN_KEY / LVI_HERMES_KEY) "
+                f"— kind={self._kind}; turns will fail until one is set")
         self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
         # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
         # brain request carried no max_tokens, so a runaway model loop
@@ -267,47 +289,79 @@ class HermesAgent(FrameProcessor):
     def _ask_hermes(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
-        Uses a server-side `conversation` name (session label for the dashboard)
-        plus a capped client-side history (continuity without token growth —
-        the conversation param does NOT chain context on /chat/completions,
-        verified live 2026-09-15: turn 2 didn't know turn 1's content).
-        Input-token growth on tool-heavy turns is the server-side agent loop
-        re-feeding context per step (measured: 13k no-tools vs 68k two-lights
-        with retry) — not client history.
+        Intelligence lane (design note): kind=openclaw reshapes the request —
+        model "openclaw/<agent>" addresses the agent, x-openclaw-session-key
+        carries sticky continuity, and the Hermes-only `conversation` field
+        is omitted. kind=hermes keeps today's contract (conversation +
+        X-Hermes-Session-Key). The messages array, output caps, client-side
+        history and fillers are shared — the lanes differ only in envelope.
         """
-        payload = json.dumps({
-            "model": self._model,
-            "stream": False,
-            "max_tokens": self._max_tokens,
-            "conversation": self._conversation,
-            "messages": [
-                {"role": "system", "content": VOICE_SYSTEM_PROMPT},
-                *self._history,
-                {"role": "user", "content": text},
-            ],
-        }).encode()
+        if not self._key:
+            raise RuntimeError("no brain key set (LVI_BRAIN_KEY / LVI_HERMES_KEY)")
+        headers = {"Authorization": f"Bearer {self._key}",
+                   "Content-Type": "application/json"}
+        if self._kind == "openclaw":
+            model = f"openclaw/{self._agent}" if self._agent else "openclaw"
+            payload = {
+                "model": model,
+                "stream": False,
+                "max_tokens": self._max_tokens,
+                "messages": [
+                    {"role": "system", "content": VOICE_SYSTEM_PROMPT},
+                    *self._history,
+                    {"role": "user", "content": text},
+                ],
+            }
+            # Sticky continuity rides the header (proven live 2026-10-05:
+            # seed/recall under the same key). Fresh sends nothing — and
+            # the agent's own memory files may still recall earlier facts
+            # (documented boundary, README row).
+            if self._sticky and self._room:
+                headers["x-openclaw-session-key"] = self._conversation
+        else:
+            payload = {
+                "model": self._model,
+                "stream": False,
+                "max_tokens": self._max_tokens,
+                "conversation": self._conversation,
+                "messages": [
+                    {"role": "system", "content": VOICE_SYSTEM_PROMPT},
+                    *self._history,
+                    {"role": "user", "content": text},
+                ],
+            }
+            # X-Hermes-Session-Key (2026-10-04): the api_server keys
+            # dashboard-visible session continuity on THIS header, not
+            # the body's `conversation` field — the label in the body
+            # alone left voice sessions invisible in the Hermes admin
+            # dash (the owner's audit need). With the header, sticky rooms
+            # merge into ONE long-lived dashboard session per room and
+            # fresh pipelines get one session per connection — both
+            # visible and auditable. Requires API_SERVER_KEY on the
+            # brain (present on this install).
+            headers["X-Hermes-Session-Key"] = self._conversation
         req = urllib.request.Request(
             f"{self._url}/chat/completions",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self._key}",
-                "Content-Type": "application/json",
-                # X-Hermes-Session-Key (2026-10-04): the api_server keys
-                # dashboard-visible session continuity on THIS header, not
-                # the body's `conversation` field — the label in the body
-                # alone left voice sessions invisible in the Hermes admin
-                # dash (the owner's audit need). With the header, sticky rooms
-                # merge into ONE long-lived dashboard session per room and
-                # fresh pipelines get one session per connection — both
-                # visible and auditable. Requires API_SERVER_KEY on the
-                # brain (present on this install).
-                "X-Hermes-Session-Key": self._conversation,
-            },
+            data=json.dumps(payload).encode(),
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=120) as r:
             data = json.loads(r.read())
         reply = data["choices"][0]["message"]["content"].strip()
         usage = data.get("usage", {})
+        # Reasoning-preamble meter (design note §5 layer 2): the OpenClaw agent
+        # on GLM 5.3 intermittently merges planning text into `content`
+        # (measured live 2026-10-05, 2 of 8 spike calls). A voice assistant
+        # speaks content verbatim — so MEASURE, never silently strip (no
+        # delimiter exists; a heuristic strip risks eating real answers).
+        # Data first, fix decided later (source suppression preferred).
+        if self._kind == "openclaw" and reply[:24].startswith((
+                "The user", "I need to", "I should", "Let me", "Okay, the user",
+                "The human", "Looking at", "First, I", "I'll ")):
+            _PREAMBLE_HITS[0] += 1
+            logger.warning(
+                "hermes_agent: openclaw reasoning preamble leaked into content "
+                f"({_PREAMBLE_HITS[0]} this process) — reply[:80]={reply[:80]!r}")
         # Client-side output cap (2026-10-04): Hermes's api_server IGNORES
         # the request's max_tokens (verified live: max_tokens:5 returned a
         # 360-char reply with finish_reason stop; api_server.py has zero
