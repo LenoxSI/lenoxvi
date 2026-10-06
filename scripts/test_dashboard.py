@@ -1117,7 +1117,6 @@ def main():
             # per kind, key fallback order + no-KeyError, key POST never
             # echoes material, test probe ok/error paths.
             import io as _io9
-            import json as json
             import urllib.request as _urq9
             from dashboard import routes as _routes9
 
