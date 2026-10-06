@@ -335,10 +335,20 @@ function fmtAgo(ts) {
 // the "net" owner marker for reconnect chatter (msgLoad).
 const _strip = () => $("#appmsg");
 
+// Origin labels for the strip — explicit map, boring and deterministic
+// (DOM-walking for the section h2 was fragile: forms wrap in divs that
+// don't contain their h2, and the id fallback read like debug output).
+const _OWNER = {
+  "tts-msg": "TTS", "int-msg": "Intelligence", "oww-msg": "Wake Word",
+  "tuning-msg": "Voice Tuning", "restart-msg": "Bot control",
+  "mapping-msg": "Room → zone mapping", "zone-msg": "Zones",
+  "node-msg": "Nodes", "discover-msg": "Discovery", "fw-msg": "Firmware",
+};
+
 function _ownerLabel(el) {
   if (!el || !el.id) return "";
-  if (el.dataset && el.dataset.msgOwner) return el.dataset.msgOwner;
-  const h2 = el.closest("section, div")?.querySelector("h2");
+  if (_OWNER[el.id]) return _OWNER[el.id];
+  const h2 = el.closest("section")?.querySelector("h2");
   return h2 ? h2.textContent.replace(/\s+/g, " ").trim() : el.id;
 }
 
