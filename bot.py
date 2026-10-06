@@ -192,8 +192,14 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     _room = _pipeline_room()
     _session_mode = (cfg("session_modes") or {}).get(_room, "fresh")
 
+    # Intelligence dispatch (design note): hermes AND openclaw both ride
+    # HermesAgent — the kind branch lives inside _ask_hermes (envelope
+    # only). The 20:56 "completely retarded" incident: this ternary only
+    # matched == "hermes", so kind: openclaw fell to the echo stub and
+    # the owner got canned answers while the suite stayed green (9b11 tested
+    # the agent directly, never the construction site).
     brain = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode)
-             if cfg_env("brain", "kind", "LVI_BRAIN", "stub") == "hermes"
+             if cfg_env("brain", "kind", "LVI_BRAIN_KIND", "hermes") in ("hermes", "openclaw")
              else StubBrain(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes

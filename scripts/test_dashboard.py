@@ -434,6 +434,24 @@ def main():
           f"wired={_wired} (dispatch must be reply-time, not build-time)")
     check("bot.py: no build-time ternary picks the backend (23:22 outage shape)",
           not _conditional, f"conditional={_conditional}")
+    # 9b11 rider (the 20:56 stub incident): the brain construction ternary
+    # must route BOTH live kinds (hermes, openclaw) to HermesAgent — a
+    # kind the ternary doesn't know falls to the echo stub silently while
+    # every agent-level suite check stays green. The dispatch is the
+    # wiring the suite never exercised; this AST check pins it.
+    _brain_exp = None
+    for _n in _ast.walk(_tree):
+        if isinstance(_n, _ast.Assign) and isinstance(_n.value, _ast.IfExp) \
+                and _n.targets and isinstance(_n.targets[0], _ast.Name) \
+                and _n.targets[0].id == "brain":
+            _brain_exp = _n.value
+    _routes_live_kinds = False
+    if _brain_exp is not None:
+        for _sub in _ast.walk(_brain_exp.test):
+            if isinstance(_sub, _ast.Constant) and _sub.value in ("hermes", "openclaw"):
+                _routes_live_kinds = True
+    check("bot.py: brain dispatch routes hermes AND openclaw to the real agent",
+          _routes_live_kinds, "construction ternary must accept both live kinds")
     # The skip mechanism, both directions, against the throwaway config
     # (sonos zones: Dining Room/Living Room; wiim zone: Master Bedroom).
     from loguru import logger as _lg
