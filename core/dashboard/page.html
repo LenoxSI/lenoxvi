@@ -33,6 +33,10 @@
   #statusbar { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13.5px;
                background: #f2f2f7; border-radius: 8px; padding: 10px 14px; }
   #statusbar b { font-weight: 600; }
+  /* Common message strip (the owner 2026-10-06): one place for every
+     section's status/error output — the per-section msg spans were
+     redundant and some sat on hidden tabs where nobody saw them. */
+  #appmsg { min-height: 20px; margin: 12px 0 0; font-size: 13.5px; }
   /* Tabs (2026-10-04): Zones holds everything operational; Settings gets
      firmware now, brain/TTS/pipecat panels later (notes TODO). Tab state
      is not persisted — the dashboard is an ops surface, always opens on
@@ -67,6 +71,8 @@
 Config edits save to config.yaml and apply on the next bot restart.</p>
 
 <div id="statusbar">Loading…</div>
+
+<div id="appmsg" class="muted" data-owner=""></div>
 
 <div id="tabs">
   <button type="button" data-tab="zones" class="active">Zones</button>
@@ -320,22 +326,61 @@ function fmtAgo(ts) {
   return Math.round(s/86400) + "d ago";
 }
 
-function msg(el, text, cls) {
-  el.textContent = text || "";
-  el.className = cls || "muted";
+// ── common message strip ──────────────────────────────────────
+// Every section's status/error output lands in ONE header strip
+// (#appmsg), labeled with its origin section (the owner 2026-10-06): the
+// per-section msg spans were redundant and some sat on hidden tabs
+// where nobody saw them. The passed element keeps two jobs: the
+// origin label (from a data-msg-owner attr, else its section h2) and
+// the "net" owner marker for reconnect chatter (msgLoad).
+const _strip = () => $("#appmsg");
+
+function _ownerLabel(el) {
+  if (!el || !el.id) return "";
+  if (el.dataset && el.dataset.msgOwner) return el.dataset.msgOwner;
+  const h2 = el.closest("section, div")?.querySelector("h2");
+  return h2 ? h2.textContent.replace(/\s+/g, " ").trim() : el.id;
 }
+
+function msg(el, text, cls) {
+  const strip = _strip();
+  const label = _ownerLabel(el);
+  strip.dataset.owner = label || "";
+  strip.className = cls || "muted";
+  strip.textContent = text ? (label ? label + " — " + text : text) : "";
+}
+
 // Load-poll failures: if it's a network-level failure (bot down /
 // restarting — always expected during a restart), show a quiet
-// "reconnecting…" instead of red error text.
+// "reconnecting…" instead of red error text. Network state is RIG
+// state, not a section's message — mark the owner "net" so a section
+// success can't sit there looking stale while the rig is down.
 function msgLoad(el, e, what) {
-  if (e && e.network) { msg(el, "Bot restarting… reconnecting.", "muted pulse"); return; }
+  if (e && e.network) {
+    const strip = _strip();
+    // A live restart countdown (section-owned pulse) outranks net
+    // chatter — polls fail BECAUSE the restart is happening; the
+    // countdown is the message that matters.
+    if (strip.classList.contains("pulse") &&
+        strip.dataset.owner && strip.dataset.owner !== "net") return;
+    strip.dataset.owner = "net";
+    strip.className = "muted pulse";
+    strip.textContent = "Bot restarting… reconnecting.";
+    return;
+  }
   msg(el, what + " failed: " + (e ? e.message : "unknown"), "err");
 }
-// Success-path cleanup: a loader that fetches fine clears any stale
-// "reconnecting…" left over from the restart window (the poll that
-// lands first wipes it — no residue, verified live 2026-10-05).
+// Success-path cleanup: a loader that fetches fine clears a stale
+// "reconnecting…" left over from the restart window — but only if the
+// strip still shows NET chatter; a live restart progress message must
+// survive a background poll landing (owner "restart" outranks "net").
 function clearReconnect(el) {
-  if (el.classList.contains("pulse")) msg(el, "", "muted");
+  const strip = _strip();
+  if (strip.dataset.owner === "net" && strip.classList.contains("pulse")) {
+    strip.className = "muted";
+    strip.textContent = "";
+    strip.dataset.owner = "";
+  }
 }
 
 // ── status strip ──────────────────────────────────────────────
@@ -983,13 +1028,9 @@ async function restartBot(fb = $("#restart-msg")) {
 // 2026-10-04 22:34). Cancel keeps the saved-values-apply-later behavior.
 async function offerRestart(fb) {
   if (!confirm("Saved. Restart the bot now to apply?")) return;
-  // Mirror the progress into the Settings restart-msg too — if the user
-  // wanders to Settings mid-restart, that section isn't silent (polish
-  // 2026-10-05); the save form's msg stays the primary display.
-  msg($("#restart-msg"), "Restarting… (from Voice tab)", "muted pulse");
-  const ok = await restartBot(fb);
-  // mirror the outcome: quiet clear on success, same error text on failure
-  msg($("#restart-msg"), ok ? "" : fb.textContent, ok ? "muted" : fb.className);
+  // One common strip (2026-10-06): the old mirror into #restart-msg is
+  // gone — every message lands in #appmsg regardless of active tab.
+  await restartBot(fb);
 }
 
 $("#btn-restart").addEventListener("click", async () => {
