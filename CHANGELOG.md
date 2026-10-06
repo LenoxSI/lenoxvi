@@ -8,6 +8,10 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-05 — Intelligence + turn-taking hardening
+
+Three feature arcs in one day, live-proven on the house rig.
+
 ### Added — Intelligence lane (design note)
 - `brain.kind: openclaw` — voice turns answered by an OpenClaw Gateway
   agent (`model: openclaw/<agent>`, sticky rooms via
@@ -24,6 +28,30 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 - Reasoning-preamble meter: OpenClaw/GLM planning text can merge into
   `content` (measured 2/8 spike calls) — logged with a counter, never
   silently stripped.
+
+### Added — Turn-taking (design note)
+- B3 epoch turns: wake-word speech runs as a background task with
+  generation epochs; a new wake **supersedes** — old reply discarded at
+  every await, no history write, spoken ack "Hold on — switching."
+- Wake-word barge-in: 2 consecutive OWW frames over threshold interrupt
+  the sounding clip (`wake.barge_in`, default false; live: true) — both
+  backends `stop_current_clip()` + `_speech_epoch` bump.
+- Fix A load-anchored timers: speech/duck timers anchor at clip-load
+  with epoch guard + generation-time fallback — the ring LED no longer
+  desyncs from the speaker on long brain calls.
+- Echo-gate relax: confirmed wake or barge-in relaxes the duration gate
+  to a ~0.5s tail; text containment stays armed.
+
+### Fixed
+- 84-minute deaf outage — `process_frame`'s final passthrough lost in B3
+  churn; suite gap closed with 9b9 (agent-eats-frames red line).
+- The 20:56 "stub-brain" incident — bot.py dispatch only knew
+  `== "hermes"`, so `kind: openclaw` fell to the echo dummy; regression
+  check added (construction dispatch AST).
+- Dashboard 422s render as `[object Object]` — Pydantic detail arrays now
+  stringify with fields; first hit: empty `agent` on Intelligence save.
+- API URL hidden for Hermes — provider-agnostic plumbing now shows for
+  every kind (public-flip: a stranger's Hermes lives at their URL).
 
 ## [0.4.0] — 2026-10-04
 
