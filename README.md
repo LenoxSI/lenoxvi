@@ -44,7 +44,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
   - `led_state.py` — node ring-LED state machine
   - `firmware_server.py` — `/firmware/*` OTA delivery for mic nodes
   - `dashboard/` — the operator surface (see below)
-- `scripts/` — ops & bench tests (each has a docstring header)
+- `scripts/` — ops & bench tests (each has a header comment explaining what it does)
   - `restart.sh` — systemd wrapper: restarts the bot unit on the
     appliance host (no flags)
   - `sync_host.sh` — bundle-based repo sync VM → host (no creds on hosts)
