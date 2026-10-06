@@ -219,8 +219,8 @@ clean — the provider's own agent memory may still recall earlier facts.</p>
     <option value="claude" disabled title="coming soon">Claude</option>
     <option value="custom" disabled title="coming soon">Custom OpenAI-compatible</option>
   </select></label>
+  <label>API URL <input id="int-url" placeholder="http://<brain-host>:8642/v1" size="30" autocomplete="off" title="Base URL of the chat endpoint; the lane appends /chat/completions — include /v1 where the provider uses it"></label>
   <span id="int-openclaw-fields" style="display:none">
-    <label>Gateway URL <input id="int-url" placeholder="http://192.0.2.186:18789/v1" size="30" autocomplete="off"></label>
     <label>Agent <input id="int-agent" placeholder="lenoxvi-test" size="14" autocomplete="off"></label>
   </span>
   <button>Save</button>
@@ -864,9 +864,9 @@ $("#int-kind").addEventListener("change", intFlipFields);
 
 $("#form-intelligence").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const body = {kind: $("#int-kind").value};
+  const body = {kind: $("#int-kind").value,
+                url: $("#int-url").value.trim()};
   if (body.kind === "openclaw") {
-    body.url = $("#int-url").value.trim();
     body.agent = $("#int-agent").value.trim();
   }
   try {
