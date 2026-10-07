@@ -1022,8 +1022,9 @@ function Tuning({ tuning, setMsg, setRebooting }) {
 }
 
 /* ── System: Intelligence ─────────────────────────────────── */
-function System({ intelligence, setMsg, setRebooting, reloadAll }) {
+function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   return (
+    <>
     <Section id="system" title="Intelligence"
       note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
@@ -1100,6 +1101,7 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
     </Section>
 
     <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
+    </>
   )
 }
 
@@ -1158,7 +1160,7 @@ export default function App() {
         <Overview status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
         <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
         <Voice tts={tts} tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
-        <System intelligence={intelligence} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
+        <System intelligence={intelligence} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
       </div>
     </div>
   )
