@@ -343,6 +343,7 @@ const _OWNER = {
   "tuning-msg": "Voice Tuning", "restart-msg": "Bot control",
   "mapping-msg": "Room → zone mapping", "zone-msg": "Zones",
   "node-msg": "Nodes", "discover-msg": "Discovery", "fw-msg": "Firmware",
+  "statusbar": "Status",
 };
 
 function _ownerLabel(el) {
@@ -416,10 +417,11 @@ async function loadStatus() {
     $("#rf-tts").textContent = s.tts_provider || "—";
     $("#rf-int").textContent = s.intelligence || "—";
   } catch (e) {
-    // status strip: quiet during a restart (expected), red only on real errors
-    $("#statusbar").textContent = e.network
-      ? "Bot restarting… reconnecting."
-      : "status unavailable: " + e.message;
+    // Reconnect messaging lives in the common strip (msgLoad's net path);
+    // the statusbar keeps its last-good rig facts instead of duplicating
+    // the message (screenshot 2026-10-07: two "restarting" lines, one
+    // screen). Real (non-network) errors route to the strip too.
+    if (!e.network) msg($("#statusbar"), "status unavailable: " + e.message, "err");
   }
 }
 
