@@ -876,20 +876,20 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
                   ? (tts?.elevenlabs_key_set ? 'key set ✓' : 'paste ElevenLabs key…')
                   : (tts?.deepgram_key_set ? 'key set ✓' : 'paste Deepgram key…')}
                 className={`${INPUT_CLS} w-[280px]`} />
-              <button className={BTN_DEFAULT} onClick={async () => {
-                const key = document.getElementById('tts-key').value.trim()
-                if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'TTS'); return }
-                const route = provider === 'elevenlabs'
-                  ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
-                try {
-                  await api(route, { method: 'PUT', json: { api_key: key } })
-                  setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'TTS')
-                  reloadAll()
-                } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
-              }}>Save key</button>
             </div>
           </Field>
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <button className={BTN_DEFAULT} onClick={async () => {
+              const key = document.getElementById('tts-key').value.trim()
+              if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'TTS'); return }
+              const route = provider === 'elevenlabs'
+                ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
+              try {
+                await api(route, { method: 'PUT', json: { api_key: key } })
+                setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'TTS')
+                reloadAll()
+              } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
+            }}>Save key</button>
             <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
           </div>
         </div>
@@ -999,48 +999,50 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
             <input id="int-key" type="password" placeholder={intelligence?.key_set ? 'key set ✓' : 'paste key…'}
               className={`${INPUT_CLS} w-[280px]`} />
             {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
-            <button className={BTN_DEFAULT} onClick={async () => {
-              const key = document.getElementById('int-key').value.trim()
-              if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
-              try {
-                await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { api_key: key } })
-                setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'Intelligence')
-                reloadAll()
-              } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
-            }}>Save key</button>
           </div>
         </Field>
-        <div className="flex gap-2 flex-wrap justify-end">
-          <button id="btn-int-test" className={BTN_DEFAULT}
-            onClick={async ev => {
-              const btn = ev.currentTarget
-              btn.disabled = true; btn.textContent = 'Testing…'
-              try {
-                const r = await api('/api/dashboard/intelligence/test', { method: 'POST', json: {} })
-                if (r.ok) {
-                  setMsg(`✓ ${r.model || '?'} — ${r.latency_ms ?? '?'} ms — "${(r.reply || '').slice(0, 40)}"`, 'ok', 'Intelligence')
-                } else {
-                  setMsg('Test failed: ' + (r.error || 'unknown'), 'err', 'Intelligence')
-                }
-              } catch (e) {
-                setMsg('Test failed: ' + e.message, 'err', 'Intelligence')
-              } finally {
-                btn.disabled = false; btn.textContent = 'Test connection'
-              }
-            }}>Test connection</button>
-          <button className={BTN_PRIMARY} onClick={async () => {
-            const kind = document.getElementById('int-kind').value
-            const url = document.getElementById('int-url').value.trim()
-            const agent = document.getElementById('int-agent').value.trim()
-            const body = { kind, url }
-            if (kind === 'openclaw') body.agent = agent
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <button className={BTN_DEFAULT} onClick={async () => {
+            const key = document.getElementById('int-key').value.trim()
+            if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
             try {
-              await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
-              setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
+              await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { api_key: key } })
+              setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'Intelligence')
               reloadAll()
-              offerRestart(setMsg, setRebooting)
-            } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
-          }}>Save</button>
+            } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
+          }}>Save key</button>
+          <div className="flex gap-2 flex-wrap">
+            <button id="btn-int-test" className={BTN_DEFAULT}
+              onClick={async ev => {
+                const btn = ev.currentTarget
+                btn.disabled = true; btn.textContent = 'Testing…'
+                try {
+                  const r = await api('/api/dashboard/intelligence/test', { method: 'POST', json: {} })
+                  if (r.ok) {
+                    setMsg(`✓ ${r.model || '?'} — ${r.latency_ms ?? '?'} ms — "${(r.reply || '').slice(0, 40)}"`, 'ok', 'Intelligence')
+                  } else {
+                    setMsg('Test failed: ' + (r.error || 'unknown'), 'err', 'Intelligence')
+                  }
+                } catch (e) {
+                  setMsg('Test failed: ' + e.message, 'err', 'Intelligence')
+                } finally {
+                  btn.disabled = false; btn.textContent = 'Test connection'
+                }
+              }}>Test connection</button>
+            <button className={BTN_PRIMARY} onClick={async () => {
+              const kind = document.getElementById('int-kind').value
+              const url = document.getElementById('int-url').value.trim()
+              const agent = document.getElementById('int-agent').value.trim()
+              const body = { kind, url }
+              if (kind === 'openclaw') body.agent = agent
+              try {
+                await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
+                setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
+                reloadAll()
+                offerRestart(setMsg, setRebooting)
+              } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
+            }}>Save</button>
+          </div>
         </div>
       </div>
     </Section>
