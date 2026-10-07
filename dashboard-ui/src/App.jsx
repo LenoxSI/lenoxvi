@@ -1049,7 +1049,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
         </Field>
         <Field label="API key">
           <div className="flex items-center gap-2 flex-wrap">
-            <input id="int-key" type="password" placeholder={intelligence?.key_set ? 'key set ✓' : 'paste key…'}
+            <input id="int-key" type="password" placeholder="paste key…"
               className={`${INPUT_CLS} w-[280px]`} />
             {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
           </div>
