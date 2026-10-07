@@ -840,8 +840,8 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
               <option value="elevenlabs">ElevenLabs</option>
-              <option value="deepgram">Aura</option>
-              <option value="deepgram-flux">Flux</option>
+              <option value="deepgram">Deepgram Aura</option>
+              <option value="deepgram-flux">Deepgram Flux</option>
             </select>
           </Field>
           <Field label="Model">
