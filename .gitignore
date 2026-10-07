@@ -17,6 +17,10 @@ node_modules/
 # agent-facing rule files — notes-backed, never GitHub
 AGENTS.md
 CLAUDE.md
+# brand design kit — PRIVATE (NAS master: the design kit).
+# Never GitHub, never in history (the owner, 2026-10-07). The React build bakes what
+# the page renders into dashboard-ui/dist; this folder stays local-only.
+design/
 # runtime config — template is config.example.yaml
 config.yaml
 config.backup.yaml
