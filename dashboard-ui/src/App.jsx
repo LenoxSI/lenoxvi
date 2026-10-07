@@ -638,7 +638,59 @@ function VolSlider({ name, initial, onCommit }) {
   )
 }
 
-/* ── OWW wake-word models ──────────────────────────────────── */
+/* ── Firmware push (operator side of firmware_server.py) ───── */
+function FirmwarePanel({ status, setMsg, reloadAll }) {
+  const [fwFile, setFwFile] = useState(null)
+  const [pushing, setPushing] = useState(false)
+
+  const push = async () => {
+    if (!fwFile) { setMsg('Pick a .bin to push.', 'err', 'Firmware'); return }
+    setPushing(true)
+    setMsg(`Uploading ${fwFile.name}…`, 'pulse', 'Firmware')
+    let upj = null
+    try {
+      const fd = new FormData()
+      fd.append('file', fwFile, fwFile.name)
+      upj = await api('/api/dashboard/firmware/upload', { method: 'POST', body: fd })
+      setMsg(`Firmware ${upj.version} served.`, 'ok', 'Firmware')
+    } catch (e) {
+      setMsg('Firmware push failed: ' + e.message, 'err', 'Firmware')
+      return
+    } finally { setPushing(false) }
+    // Seamless pickup (old page's proven pattern): nodes self-pick-up on
+    // their next OTA cycle, but that can be minutes away — offer to nudge
+    // each online node into its check right now (restart → boot → check).
+    const online = (status?.rooms || []).filter(n => n.online)
+    if (online.length && window.confirm(
+      `Restart ${online.length} node${online.length > 1 ? 's' : ''} now so it picks up ${upj.version}?\n\n` +
+      online.map(n => '• ' + n.room).join('\n') +
+      '\n\n(Otherwise each node grabs it on its next check.)')) {
+      setMsg('Restarting node(s)…', 'pulse', 'Firmware')
+      for (const n of online) {
+        try {
+          await api(`/api/dashboard/nodes/${encodeURIComponent(n.room)}/restart`, { method: 'POST' })
+        } catch (e) { setMsg(`Restart '${n.room}' failed: ${e.message}`, 'err', 'Firmware') }
+      }
+      setMsg(`Restart sent — ${online.map(n => n.room).join(', ')} reboots onto ${upj.version} (~15s).`, 'ok', 'Firmware')
+      await reloadAll()
+    }
+  }
+
+  return (
+    <Section title="Firmware"
+      note="Push a firmware .bin — its version is read from the image itself; nodes pick it up over OTA on their next boot. Firmware 1.1.0+ required for over-the-air config.">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="file" accept=".bin" className="text-[13px]"
+            onChange={e => setFwFile(e.target.files?.[0] || null)} />
+          <button className={BTN_PRIMARY} disabled={pushing || !fwFile} onClick={push}>
+            {pushing ? 'Uploading…' : 'Push firmware'}
+          </button>
+        </div>
+      </div>
+    </Section>
+  )
+}
 function OwwPanel({ setMsg, setRebooting, reloadAll }) {
   const [models, setModels] = useState([])
   const [sel, setSel] = useState('')
@@ -1046,6 +1098,8 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
         </div>
       </div>
     </Section>
+
+    <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
   )
 }
 
