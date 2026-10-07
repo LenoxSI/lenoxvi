@@ -745,7 +745,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
   return (
     <Section title="Wake word model"
       note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Active model">
           <select className={`${INPUT_CLS} w-[260px]`} value={sel}
             onChange={e => setSel(e.target.value)}>
@@ -888,7 +888,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
     <>
       <Section id="voice" title="TTS"
         note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram Aura: aura-2 voices. Deepgram Flux: flux voices. API keys never render back after save.">
-        <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
+        <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
           <Field label="Provider">
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
@@ -1030,7 +1030,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
     <>
     <Section id="system" title="Intelligence"
       note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Provider">
           <select id="int-kind" defaultValue={intelligence?.kind || 'hermes'}
             className={`${INPUT_CLS} w-[220px]`}>
