@@ -860,9 +860,10 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
 
   const saveTTS = async () => {
     const voice_id = document.getElementById('tts-voice')?.value.trim() || ''
-    const body = { provider, model }
+    const body = { provider }
     if (provider === 'elevenlabs') {
       if (!voice_id) { setMsg("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return }
+      body.model = model
       body.voice_id = voice_id
     } else if (provider === 'deepgram') {
       body.deepgram_voice = model
