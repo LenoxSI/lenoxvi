@@ -889,7 +889,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               }}>Save key</button>
             </div>
           </Field>
-          <div>
+          <div className="flex justify-end">
             <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
           </div>
         </div>
@@ -961,7 +961,7 @@ function Tuning({ tuning, setMsg, setRebooting }) {
             <span className="text-[12px] text-[var(--muted)]">{hint}</span>
           </div>
         ))}
-        <div>
+        <div className="flex justify-end">
           <button className={BTN_PRIMARY} onClick={save}>Save tuning</button>
         </div>
       </div>
@@ -1010,20 +1010,7 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
             }}>Save key</button>
           </div>
         </Field>
-        <div className="flex gap-2 flex-wrap">
-          <button className={BTN_PRIMARY} onClick={async () => {
-            const kind = document.getElementById('int-kind').value
-            const url = document.getElementById('int-url').value.trim()
-            const agent = document.getElementById('int-agent').value.trim()
-            const body = { kind, url }
-            if (kind === 'openclaw') body.agent = agent
-            try {
-              await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
-              setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
-              reloadAll()
-              offerRestart(setMsg, setRebooting)
-            } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
-          }}>Save</button>
+        <div className="flex gap-2 flex-wrap justify-end">
           <button id="btn-int-test" className={BTN_DEFAULT}
             onClick={async ev => {
               const btn = ev.currentTarget
@@ -1041,6 +1028,19 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
                 btn.disabled = false; btn.textContent = 'Test connection'
               }
             }}>Test connection</button>
+          <button className={BTN_PRIMARY} onClick={async () => {
+            const kind = document.getElementById('int-kind').value
+            const url = document.getElementById('int-url').value.trim()
+            const agent = document.getElementById('int-agent').value.trim()
+            const body = { kind, url }
+            if (kind === 'openclaw') body.agent = agent
+            try {
+              await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
+              setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
+              reloadAll()
+              offerRestart(setMsg, setRebooting)
+            } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
+          }}>Save</button>
         </div>
       </div>
     </Section>
