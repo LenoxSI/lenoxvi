@@ -246,7 +246,120 @@ function Stat({ label, children }) {
   )
 }
 
-/* ── Rooms: mapping selects + nodes + zones ────────────────── */
+/* ── node row actions ─────────────────────────────────────── */
+function NodeActions({ room, online, setMsg, reloadAll }) {
+  const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi'
+  const [renameVal, setRenameVal] = useState('')
+  const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
+  const [wifiPass, setWifiPass] = useState('')
+
+  const post = (verb, json) =>
+    api(`/api/dashboard/nodes/${encodeURIComponent(room)}/${verb}`, { method: 'POST', json })
+      .then(r => { setBusy(null); return r })
+      .catch(e => { setBusy(null); throw e })
+
+  const restart = async () => {
+    if (!window.confirm(`Restart node '${room}'? It reboots and reconnects (~15s).`)) return
+    setBusy('restart')
+    setMsg(`Restarting ${room}…`, 'pulse', 'Nodes')
+    try {
+      await post('restart')
+      setMsg(`Restart sent — ${room} reboots and reconnects (~15s).`, 'ok', 'Nodes')
+    } catch (e) { setMsg('Node restart failed: ' + e.message, 'err', 'Nodes') }
+  }
+
+  const rename = async () => {
+    if (!renameVal.trim()) { setMsg('New name required.', 'err', 'Nodes'); return }
+    if (!/^[A-Za-z0-9_-]+$/.test(renameVal)) {
+      setMsg('Name: letters, numbers, _ or - only (max 31).', 'err', 'Nodes'); return }
+    setBusy('rename')
+    setMsg(`Renaming ${room} to ${renameVal}…`, 'pulse', 'Nodes')
+    try {
+      await post('name', { name: renameVal })
+      setMsg(`Renamed to '${renameVal}' — hostname follows on the router.`, 'ok', 'Nodes')
+      setRenameVal('')
+      await reloadAll()
+    } catch (e) { setMsg('Rename failed: ' + e.message, 'err', 'Nodes') }
+  }
+
+  const scanForWifi = async () => {
+    setBusy('wifi')
+    setMsg(`Scanning networks from ${room}…`, 'pulse', 'Nodes')
+    let nets = []
+    try {
+      const r = await post('scan')
+      nets = Object.entries(r.data || {}).sort((a, c) => c[1] - a[1])
+      setWifiStage({ nets })
+      setMsg(`Scan complete — pick a network for ${room}.`, 'ok', 'Nodes')
+    } catch (e) { setMsg('Scan failed: ' + e.message, 'err', 'Nodes') }
+  }
+
+  const applyWifi = async () => {
+    if (!wifiStage?.ssid) { setMsg('Pick a network first.', 'err', 'Nodes'); return }
+    if (!wifiPass) { setMsg('Wi-Fi password required.', 'err', 'Nodes'); return }
+    setBusy('wifi')
+    setMsg(`Applying Wi-Fi to ${room}…`, 'pulse', 'Nodes')
+    try {
+      await post('wifi', { ssid: wifiStage.ssid, password: wifiPass })
+      setMsg(`Wi-Fi applying — ${room} disconnects, reconnects with new creds; a bad password auto-rolls back.`, 'ok', 'Nodes')
+      setWifiStage(null); setWifiPass('')
+      await reloadAll()
+    } catch (e) { setMsg('Wi-Fi set failed: ' + e.message, 'err', 'Nodes') }
+  }
+
+  return (
+    <div className="grid gap-2 justify-items-end">
+      <div className="flex gap-2 flex-wrap justify-end">
+        <button className={BTN_DEFAULT} disabled={!online || busy}
+          onClick={restart} title="Reboot the node (~15s reconnect).">
+          {busy === 'restart' ? 'Restarting…' : 'Restart'}
+        </button>
+        {online && (
+          <>
+            <button className={BTN_DEFAULT} disabled={busy}
+              onClick={() => { setRenameVal(room); setBusy('rename') }}
+              title="Rename the node (letters, numbers, _ or -).">
+              Rename
+            </button>
+            <button className={BTN_DEFAULT} disabled={busy}
+              onClick={scanForWifi}
+              title="Scan networks from the node, then set new Wi-Fi creds.">
+              {busy === 'wifi' && !wifiStage ? 'Scanning…' : 'Wi-Fi…'}
+            </button>
+          </>
+        )}
+      </div>
+      {busy === 'rename' && (
+        <div className="flex gap-2 flex-wrap justify-end">
+          <input className={`${INPUT_CLS} w-[160px] font-mono`} value={renameVal}
+            onChange={e => setRenameVal(e.target.value)}
+            placeholder="new-name" aria-label={`New name for ${room}`} />
+          <button className={BTN_PRIMARY} onClick={rename}>Save name</button>
+          <button className={BTN_DEFAULT} onClick={() => { setBusy(null); setRenameVal('') }}>Cancel</button>
+        </div>
+      )}
+      {busy === 'wifi' && wifiStage?.nets && (
+        <div className="grid gap-2 justify-items-end">
+          <select className={`${INPUT_CLS} w-[240px]`}
+            onChange={e => setWifiStage({ ...wifiStage, ssid: e.target.value })}
+            aria-label={`Network for ${room}`}>
+            <option value="">pick a network…</option>
+            {wifiStage.nets.map(([ssid, rssi]) => (
+              <option key={ssid} value={ssid}>{ssid} ({rssi})</option>
+            ))}
+          </select>
+          <div className="flex gap-2 flex-wrap justify-end">
+            <input type="password" className={`${INPUT_CLS} w-[200px]`} value={wifiPass}
+              onChange={e => setWifiPass(e.target.value)}
+              placeholder="Wi-Fi password" aria-label={`Password for ${room}`} />
+            <button className={BTN_PRIMARY} onClick={applyWifi}>Apply</button>
+            <button className={BTN_DEFAULT} onClick={() => { setBusy(null); setWifiStage(null) }}>Cancel</button>
+          </div>
+      </div>
+      )}
+    </div>
+  )
+}
 function Rooms({ status, mapping, setMsg, reloadAll }) {
   const [mapDraft, setMapDraft] = useState(null)
   // Bug-class fix (2026-10-07 #3): the 5s poll refetches mapping and
@@ -337,6 +450,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                 <th className="text-left px-4 py-2">Last seen</th>
                 <th className="text-left px-4 py-2">Firmware</th>
                 <th className="text-left px-4 py-2">Session</th>
+                <th className="text-right px-4 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -361,6 +475,9 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         {pendingMode[r.room] || status?.session_modes?.[r.room] || 'fresh'}
                       </span>
                     </div>
+                  </td>
+                  <td className="px-4 py-2">
+                    <NodeActions room={r.room} online={r.online} setMsg={setMsg} reloadAll={reloadAll} />
                   </td>
                 </tr>
               ))}
