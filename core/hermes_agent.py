@@ -23,6 +23,14 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+# Supersede-ack rate limit (2026-10-07, the a kid session): consecutive
+# supersedes in a two-person conversation said "Hold on — switching."
+# three times in ten seconds. One ack per wake window: after speaking it,
+# further supersedes inside this gap stay silent (the turn still
+# switches — only the announcement is muted). Re-armed on every fresh
+# turn. Config: brain.supersede_ack_gap / LVI_SUPERSEDE_ACK_GAP.
+ACK_GAP = float(os.getenv("LVI_SUPERSEDE_ACK_GAP", "45"))
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -247,6 +255,15 @@ class HermesAgent(FrameProcessor):
         self._turn_task: asyncio.Task | None = None
         self._turn_epoch: int = 0
         self._turn_started: float = 0.0
+        # Supersede-ack rate limit (2026-10-07, the a kid session): the ack
+        # ("Hold on — switching.") is useful for one deliberate interrupt,
+        # but in a two-person conversation consecutive utterances supersede
+        # repeatedly and she says it three times in ten seconds — sounds
+        # broken. Once per wake window is plenty: the state flip from the
+        # old turn dying still tells the user something changed. Reset on
+        # a fresh turn start after a quiet gap (no live turn at supersede
+        # time = the window rolled over).
+        self._supersede_ack_ts: float = 0.0
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
@@ -465,10 +482,20 @@ class HermesAgent(FrameProcessor):
                             ack = str(_cfg_env("brain", "supersede_ack",
                                                "LVI_SUPERSEDE_ACK",
                                                "Hold on — switching.") or "")
-                            if ack:
+                            now_ack = time.monotonic()
+                            if ack and (now_ack - self._supersede_ack_ts) >= ACK_GAP:
+                                self._supersede_ack_ts = now_ack
                                 await self.push_frame(TTSSpeakFrame(text=ack))
                                 self._echo_texts.append(ack)
                                 self._echo_texts = self._echo_texts[-4:]
+                            # else: silent supersede — the turn still
+                            # switches; only the announcement is rate-
+                            # limited (or the ack is disabled via config).
+                        else:
+                            # Fresh turn (no live task to supersede) → new
+                            # conversational turn: re-arm so a deliberate
+                            # interrupt here still gets its announcement.
+                            self._supersede_ack_ts = 0.0
 
         # EVERY frame passes through (B3 regression, 2026-10-05 17:09):
         # this line was lost in the _run_turn extraction churn — the agent
