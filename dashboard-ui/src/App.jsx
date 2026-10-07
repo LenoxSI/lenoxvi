@@ -128,12 +128,12 @@ const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]
 const BTN_PRIMARY = `${BTN} bg-[var(--accent)] text-[var(--accent-foreground)]`
 const BTN_DANGER = `${BTN} bg-transparent border border-[var(--danger)] text-[var(--danger)]`
 
+// One logo — dark is the only theme (index.css, no light variant
+// exists in this app), so one img, sized to the header.
 function Wordmark() {
   return (
-    <span className="wm">
-      <img className="wm-dark" src="/lenoxvi-horizontal-on-dark.svg" alt="LenoxVI" />
-      <img className="wm-light" src="/lenoxvi-horizontal-on-light.svg" alt="LenoxVI" />
-    </span>
+    <img src="/lenoxvi-horizontal-on-dark.svg" alt="LenoxVI"
+      className="h-[34px] w-auto" />
   )
 }
 
