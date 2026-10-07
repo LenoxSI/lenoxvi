@@ -1207,7 +1207,7 @@ def main():
                 check("9b11 openclaw lane: sticky session-key header",
                       _oc_hdr.get("x-openclaw-session-key") == "voice-suite",
                       str(_oc_hdr.get("x-openclaw-session-key")))
-                check("9b11 key precedence: LVI_BRAIN_KEY wins",
+                check("9b11 openclaw lane: LVI_BRAIN_KEY wins",
                       _oc_hdr.get("authorization") == "Bearer suite-brain-key-not-real",
                       str(_oc_hdr.get("authorization")))
                 # fresh: header absent
@@ -1231,6 +1231,13 @@ def main():
                       _hm_body.get("conversation") and
                       _hm_hdr.get("x-hermes-session-key") == _hm_body.get("conversation"),
                       str(_hm_body)[:140])
+                # Bug-7 law (2026-10-07): keys are KIND-AWARE — the hermes
+                # lane must auth with LVI_HERMES_KEY even when LVI_BRAIN_KEY
+                # (the OpenClaw token on the real rig) is also set. A kind
+                # flip must never cross the tokens.
+                check("9b11 hermes lane: kind-aware key (LVI_HERMES_KEY wins on hermes)",
+                      _hm_hdr.get("authorization") == "Bearer suite-hermes-key-not-real",
+                      str(_hm_hdr.get("authorization")))
                 # no key at all: construction survives, ask raises RuntimeError
                 _os.environ.pop("LVI_BRAIN_KEY", None)
                 _os.environ.pop("LVI_HERMES_KEY", None)
