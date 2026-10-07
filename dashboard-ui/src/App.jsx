@@ -231,14 +231,14 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
               </tr>
             </thead>
             <tbody>
-              {(mapping || []).map(m => (
-                <tr key={m.room} className="border-t border-[var(--separator)]">
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(m.room)}</td>
-                  <td className="px-4 py-2">{esc(m.zone)}</td>
-                  <td className="px-4 py-2">{m.volume != null ? esc(m.volume) : '—'}</td>
+              {Object.entries(mapping?.room_zones || {}).map(([room, zone]) => (
+                <tr key={room} className="border-t border-[var(--separator)]">
+                  <td className="px-4 py-2 font-mono text-[13px]">{esc(room)}</td>
+                  <td className="px-4 py-2">{esc(zone)}</td>
+                  <td className="px-4 py-2">{esc(mapping?.zone_volumes?.[zone] ?? mapping?.clip_volume ?? '—')}</td>
                 </tr>
               ))}
-              {(!mapping || mapping.length === 0) &&
+              {Object.keys(mapping?.room_zones || {}).length === 0 &&
                 <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="3">No rooms mapped yet.</td></tr>}
             </tbody>
           </table>
@@ -478,8 +478,7 @@ export default function App() {
   const reloadAll = async () => {
     const jobs = [
       api('/api/dashboard/status').then(setStatus).catch(e => { if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status') }),
-      api('/api/dashboard/mapping').then(setMapping).catch(() => {}),
-      api('/api/dashboard/zones').then(setZones).catch(() => {}),
+      api('/api/dashboard/mapping').then(m => { setMapping(m); setZones(m.zones || []) }).catch(() => {}),
       api('/api/dashboard/tts').then(setTts).catch(() => {}),
       api('/api/dashboard/intelligence').then(setIntelligence).catch(() => {}),
     ]
