@@ -253,10 +253,12 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
   const [wifiPass, setWifiPass] = useState('')
 
+  // Raw POST — callers own the busy lifecycle (the wifi flow is
+  // two-stage: busy must STAY 'wifi' after a successful scan; a
+  // helper that auto-cleared busy killed the SSID form — caught
+  // live 2026-10-07, "scan complete but no list").
   const post = (verb, json) =>
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/${verb}`, { method: 'POST', json })
-      .then(r => { setBusy(null); return r })
-      .catch(e => { setBusy(null); throw e })
 
   const restart = async () => {
     if (!window.confirm(`Restart node '${room}'? It reboots and reconnects (~15s).`)) return
@@ -266,6 +268,7 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
       await post('restart')
       setMsg(`Restart sent — ${room} reboots and reconnects (~15s).`, 'ok', 'Nodes')
     } catch (e) { setMsg('Node restart failed: ' + e.message, 'err', 'Nodes') }
+    finally { setBusy(null) }
   }
 
   const rename = async () => {
@@ -278,33 +281,41 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
       await post('name', { name: renameVal })
       setMsg(`Renamed to '${renameVal}' — hostname follows on the router.`, 'ok', 'Nodes')
       setRenameVal('')
+      setBusy(null)
       await reloadAll()
-    } catch (e) { setMsg('Rename failed: ' + e.message, 'err', 'Nodes') }
+    } catch (e) { setMsg('Rename failed: ' + e.message, 'err', 'Nodes') }  // form stays open to retry
   }
 
   const scanForWifi = async () => {
     setBusy('wifi')
+    setWifiStage(null)
+    setWifiPass('')
     setMsg(`Scanning networks from ${room}…`, 'pulse', 'Nodes')
-    let nets = []
     try {
       const r = await post('scan')
-      nets = Object.entries(r.data || {}).sort((a, c) => c[1] - a[1])
+      const nets = Object.entries(r.data || {}).sort((a, c) => c[1] - a[1])
+      if (!nets.length) {
+        setBusy(null)
+        setMsg(`Scan complete, but ${room} saw no networks.`, 'err', 'Nodes')
+        return
+      }
+      // busy stays 'wifi' — the SSID form is gated on it.
       setWifiStage({ nets })
       setMsg(`Scan complete — pick a network for ${room}.`, 'ok', 'Nodes')
-    } catch (e) { setMsg('Scan failed: ' + e.message, 'err', 'Nodes') }
+    } catch (e) { setBusy(null); setMsg('Scan failed: ' + e.message, 'err', 'Nodes') }
   }
 
   const applyWifi = async () => {
     if (!wifiStage?.ssid) { setMsg('Pick a network first.', 'err', 'Nodes'); return }
     if (!wifiPass) { setMsg('Wi-Fi password required.', 'err', 'Nodes'); return }
-    setBusy('wifi')
     setMsg(`Applying Wi-Fi to ${room}…`, 'pulse', 'Nodes')
     try {
       await post('wifi', { ssid: wifiStage.ssid, password: wifiPass })
       setMsg(`Wi-Fi applying — ${room} disconnects, reconnects with new creds; a bad password auto-rolls back.`, 'ok', 'Nodes')
       setWifiStage(null); setWifiPass('')
+      setBusy(null)
       await reloadAll()
-    } catch (e) { setMsg('Wi-Fi set failed: ' + e.message, 'err', 'Nodes') }
+    } catch (e) { setMsg('Wi-Fi set failed: ' + e.message, 'err', 'Nodes') }  // form stays open to retry
   }
 
   return (
