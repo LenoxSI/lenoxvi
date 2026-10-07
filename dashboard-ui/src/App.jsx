@@ -167,6 +167,20 @@ function Field({ label, children }) {
   )
 }
 
+// Switch-style toggle (session mode). Controlled: `checked` comes from
+// pending state (optimistic) or server status; parent owns the POST.
+function Switch({ checked, onChange, title }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} title={title}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-[20px] w-[36px] shrink-0 rounded-full border cursor-pointer transition-colors
+        ${checked ? 'bg-[var(--accent)] border-[var(--accent)]' : 'bg-[var(--default)] border-[var(--separator)]'}`}>
+      <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all
+        ${checked ? 'left-[19px]' : 'left-[3px]'}`} />
+    </button>
+  )
+}
+
 /* ── rail ──────────────────────────────────────────────────── */
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
@@ -235,10 +249,31 @@ function Stat({ label, children }) {
 /* ── Rooms: mapping selects + nodes + zones ────────────────── */
 function Rooms({ status, mapping, setMsg, reloadAll }) {
   const [mapDraft, setMapDraft] = useState(null)
+  // Bug-class fix (2026-10-07 #3): the 5s poll refetches mapping and
+  // used to clobber unsaved select edits — dirty holds user drafts.
+  const [mapDirty, setMapDirty] = useState(false)
+  // Session-mode switches: optimistic pending until status confirms.
+  const [pendingMode, setPendingMode] = useState({})
 
   useEffect(() => {
-    if (mapping) setMapDraft(mapping.room_zones || {})
-  }, [mapping])
+    if (mapping && !mapDirty) setMapDraft(mapping.room_zones || {})
+  }, [mapping, mapDirty])
+
+  const toggleMode = async (room, sticky) => {
+    setPendingMode(p => ({ ...p, [room]: sticky ? 'sticky' : 'fresh' }))
+    try {
+      const r = await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/session-mode`, {
+        method: 'POST', json: { mode: sticky ? 'sticky' : 'fresh' } })
+      setMsg(`${room}: session ${r.mode}` +
+        (r.mode === 'sticky' ? ' — memory kept across reconnects (applies on next reconnect).'
+                             : ' — memory clears each reconnect (applies on next reconnect).'), 'ok', 'Nodes')
+      await reloadAll()
+    } catch (e) {
+      setMsg('Session mode save failed: ' + e.message, 'err', 'Nodes')
+    } finally {
+      setPendingMode(p => { const n = { ...p }; delete n[room]; return n })
+    }
+  }
 
   const zoneNames = Object.keys(mapping?.zones || {})
   const saveMapping = async room => {
@@ -249,6 +284,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     const body = { ...(mapping?.room_zones || {}), [room]: zone }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
+      setMapDirty(false)
       setMsg(`${room} → ${zone} saved — applies on next bot restart.`, 'ok', 'Room → zone mapping')
       reloadAll()
     } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
@@ -273,7 +309,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(room)}</td>
                   <td className="px-4 py-2">
                     <select value={mapDraft?.[room] ?? zone}
-                      onChange={e => setMapDraft({ ...mapDraft, [room]: e.target.value })}
+                      onChange={e => { setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
                       className={`${INPUT_CLS} w-[200px]`}>
                       {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>
@@ -315,7 +351,17 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                   </td>
                   <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(r.fw) || '—'}</td>
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(status?.session_modes?.[r.room]) || 'fresh'}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={pendingMode[r.room] === 'sticky' || (!pendingMode[r.room] && (status?.session_modes?.[r.room] === 'sticky'))}
+                        onChange={sticky => toggleMode(r.room, sticky)}
+                        title="Sticky keeps conversation memory across reconnects and bot restarts; fresh clears it (privacy default)." />
+                      <span className="text-[13px] text-[var(--muted)]">
+                        {pendingMode[r.room] || status?.session_modes?.[r.room] || 'fresh'}
+                      </span>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -374,8 +420,17 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
 
   return (
     <Section title="Zones"
-      note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks. Volume sliders are live — the next clip in that zone plays at the set level, no restart."
-      action={<button className={BTN_DEFAULT} onClick={discover}>Discover Sonos on LAN</button>}>
+      note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks. Volume sliders are live — the next clip in that zone plays at the set level, no restart.">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button className={BTN_DEFAULT} onClick={discover}>
+            {discovered?.scanning ? 'Scanning LAN…' : 'Discover Sonos on LAN'}
+          </button>
+          <span className="text-[13px] text-[var(--muted)]">
+            {discovered?.scanning ? 'A few seconds…' : 'Fills the add form below with a discovered player.'}
+          </span>
+        </div>
+      </div>
       <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
         <table className="w-full text-[14px]">
           <thead>
@@ -608,13 +663,19 @@ const TTS_MODELS = {
 function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
   const [model, setModel] = useState(null)
+  // Bug-class fix (2026-10-07 #3): the 5s poll refetches tts state and
+  // resyncing from server would clobber the user's in-progress provider
+  // selection. The server is the source of truth for the FIRST sync
+  // only; after that, drafts are local until saved.
+  const [ttsSynced, setTtsSynced] = useState(false)
 
   useEffect(() => {
-    if (tts) {
+    if (tts && !ttsSynced) {
       setProvider(tts.provider || 'elevenlabs')
       setModel(tts.model || TTS_MODELS[tts.provider]?.[0]?.[0] || 'eleven_flash_v2_5')
+      setTtsSynced(true)
     }
-  }, [tts])
+  }, [tts, ttsSynced])
 
   // bug 8 fix: switching provider resets the model menu to that
   // provider's own list — the old page's ttsFlipFields behavior.
@@ -651,14 +712,14 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   return (
     <>
       <Section id="voice" title="TTS"
-        note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram: aura-2 or flux voices. API keys never render back after save.">
+        note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram Aura: aura-2 voices. Deepgram Flux: flux voices. API keys never render back after save.">
         <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
           <Field label="Provider">
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
               <option value="elevenlabs">ElevenLabs</option>
-              <option value="deepgram">Deepgram</option>
-              <option value="deepgram-flux">Deepgram Flux</option>
+              <option value="deepgram">Aura</option>
+              <option value="deepgram-flux">Flux</option>
             </select>
           </Field>
           <Field label="Model">
@@ -735,16 +796,22 @@ const TUNING_FIELDS = [
 
 function Tuning({ tuning, setMsg, setRebooting }) {
   const [vals, setVals] = useState({})
+  // Same bug-class fix as TTS (#3): sync from server once; drafts are
+  // local until saved — the 5s poll must not clobber slider edits.
+  const [tuned, setTuned] = useState(false)
   useEffect(() => {
-    if (tuning) setVals({
-      wake_threshold: tuning.wake_threshold,
-      wake_awake_timeout: tuning.wake_awake_timeout,
-      vad_confidence: tuning.vad_confidence,
-      vad_min_volume: tuning.vad_min_volume,
-      lull_secs: tuning.lull_secs,
-      dedup_window: tuning.dedup_window,
-    })
-  }, [tuning])
+    if (tuning && !tuned) {
+      setVals({
+        wake_threshold: tuning.wake_threshold,
+        wake_awake_timeout: tuning.wake_awake_timeout,
+        vad_confidence: tuning.vad_confidence,
+        vad_min_volume: tuning.vad_min_volume,
+        lull_secs: tuning.lull_secs,
+        dedup_window: tuning.dedup_window,
+      })
+      setTuned(true)
+    }
+  }, [tuning, tuned])
 
   const save = async () => {
     const body = {}
