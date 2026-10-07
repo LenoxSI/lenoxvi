@@ -359,14 +359,14 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
               <option key={ssid} value={ssid}>{ssid} ({rssi})</option>
             ))}
           </select>
-          <div className="flex gap-2 flex-wrap justify-end">
-            <input type="password" className={`${INPUT_CLS} w-[200px]`} value={wifiPass}
-              onChange={e => setWifiPass(e.target.value)}
-              placeholder="Wi-Fi password" aria-label={`Password for ${room}`} />
+          <input type="password" className={`${INPUT_CLS} w-[240px]`} value={wifiPass}
+            onChange={e => setWifiPass(e.target.value)}
+            placeholder="Wi-Fi password" aria-label={`Password for ${room}`} />
+          <div className="flex gap-2 justify-end">
             <button className={BTN_PRIMARY} onClick={applyWifi}>Apply</button>
             <button className={BTN_DEFAULT} onClick={() => { setBusy(null); setWifiStage(null) }}>Cancel</button>
           </div>
-      </div>
+        </div>
       )}
     </div>
   )
