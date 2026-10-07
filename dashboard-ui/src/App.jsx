@@ -1001,19 +1001,21 @@ function Tuning({ tuning, setMsg, setRebooting }) {
   return (
     <Section title="Voice tuning"
       note="Wake, VAD, and turn-end knobs — the pipecat pipeline tunables. Applies on the next bot restart.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
-        {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
-          <div key={f} className="grid gap-1">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-[13px] font-medium">{label}</span>
-              <span className="font-mono text-[13px]">{vals[f] ?? '—'}</span>
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
+          {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
+            <div key={f} className="grid gap-1">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[13px] font-medium">{label}</span>
+                <span className="font-mono text-[13px]">{vals[f] ?? '—'}</span>
+              </div>
+              <input type="range" min={min} max={max} step={step} value={vals[f] ?? min}
+                onChange={e => setVals({ ...vals, [f]: e.target.value })}
+                className="accent-[var(--accent)]" aria-label={label} />
+              <span className="text-[12px] text-[var(--muted)]">{hint}</span>
             </div>
-            <input type="range" min={min} max={max} step={step} value={vals[f] ?? min}
-              onChange={e => setVals({ ...vals, [f]: e.target.value })}
-              className="accent-[var(--accent)]" aria-label={label} />
-            <span className="text-[12px] text-[var(--muted)]">{hint}</span>
-          </div>
-        ))}
+          ))}
+        </div>
         <div className="flex justify-end">
           <button className={BTN_PRIMARY} onClick={save}>Save tuning</button>
         </div>
