@@ -61,12 +61,29 @@ def register_dashboard(app) -> None:
     app.add_middleware(OfferTeeMiddleware)
     app.include_router(router)
 
-    page = (Path(__file__).parent / "page.html").read_text()
+    # HeroUI rebuild (2026-10-07, design note): FastAPI serves the
+    # prebuilt React app from dashboard-ui/dist — a fresh clone needs
+    # zero node toolchain (dist/ is committed; the build stays dev-side,
+    # npm run build in dashboard-ui/). The legacy page.html stays as a
+    # fallback for a bare clone without dist.
+    ui_index = Path(__file__).resolve().parents[2] / "dashboard-ui" / "dist" / "index.html"
+    legacy_page = (Path(__file__).parent / "page.html").read_text()
 
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import FileResponse, HTMLResponse
+    from fastapi.staticfiles import StaticFiles
 
     @app.get("/dashboard", include_in_schema=False)
     async def dashboard_page():
-        return HTMLResponse(page)
+        if ui_index.is_file():
+            return FileResponse(ui_index)
+        return HTMLResponse(legacy_page)
 
-    logger.info("dashboard: serving /dashboard (mapping, nodes, zones)")
+    ui_assets = ui_index.parent / "assets"
+    if ui_assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=ui_assets), name="ui-assets")
+        # favicon + wordmark SVGs live at dist root (base './' — served
+        # relative to /dashboard). Mount the dist root itself so ./favicon.svg
+        # and ./lenoxvi-horizontal-*.svg resolve at /dashboard and /dashboard/.
+        app.mount("/dashboard-assets", StaticFiles(directory=ui_index.parent), name="ui-root")
+
+    logger.info("dashboard: serving /dashboard (HeroUI build if present, legacy fallback)")
