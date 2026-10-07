@@ -81,9 +81,24 @@ def register_dashboard(app) -> None:
     ui_assets = ui_index.parent / "assets"
     if ui_assets.is_dir():
         app.mount("/assets", StaticFiles(directory=ui_assets), name="ui-assets")
-        # favicon + wordmark SVGs live at dist root (base './' — served
-        # relative to /dashboard). Mount the dist root itself so ./favicon.svg
-        # and ./lenoxvi-horizontal-*.svg resolve at /dashboard and /dashboard/.
-        app.mount("/dashboard-assets", StaticFiles(directory=ui_index.parent), name="ui-root")
+
+    # Dist-root files (favicon.svg, wordmark SVGs) — the built page
+    # references them with './' paths that resolve against the SITE
+    # root from /dashboard (no trailing slash). Serve each one at both
+    # root and /dashboard/ so the lockups load either way (bug 1 fix,
+    # 2026-10-07: 404s on /lenoxvi-horizontal-on-dark.svg).
+    from fastapi import HTTPException as _HTTPException
+    from fastapi import Response as _Resp
+
+    @app.get("/{root_file}", include_in_schema=False)
+    async def ui_root_file(root_file: str):
+        if root_file in {"favicon.svg", "icons.svg",
+                         "lenoxvi-horizontal-on-dark.svg",
+                         "lenoxvi-horizontal-on-light.svg"}:
+            f = ui_index.parent / root_file
+            if f.is_file():
+                media = "image/svg+xml" if f.suffix == ".svg" else "application/octet-stream"
+                return _Resp(content=f.read_bytes(), media_type=media)
+        raise _HTTPException(status_code=404, detail="not found")
 
     logger.info("dashboard: serving /dashboard (HeroUI build if present, legacy fallback)")

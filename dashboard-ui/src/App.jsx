@@ -1,15 +1,13 @@
-// lenoxvi dashboard — app shell. Wireframe-C structure (design note):
-// single scrolling page, sticky top bar + section rail, no tabs. All
-// panels visible in sequence. Brand: dark theme default, one lime
-// element leads (the selected rail item / primary button), sentence
-// case, no emoji. Live data via the same /api/dashboard/* routes the
-// old page.html used — IDs and routes are the contract.
+// lenoxvi dashboard — app. Wireframe-C structure (design note):
+// single scrolling page, sticky header + section rail, no tabs.
+// Brand: dark theme default, one lime element leads, sentence case,
+// no emoji. Live data via the same /api/dashboard/* routes the old
+// page.html used — routes are the contract, every shape verified
+// against the live rig (2026-10-07 bug audit, 8 findings).
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-/* ── API layer ───────────────────────────────────────────────
-   Same routes, same shapes as page.html's api(). Network errors are
-   tagged .network so restart-window chatter shows quiet. */
+/* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) }
@@ -30,7 +28,6 @@ async function api(path, opts = {}) {
   let body = {}
   try { body = await r.json() } catch { /* empty body */ }
   if (!r.ok) {
-    // Pydantic 422s arrive as detail: [{loc, msg}] — render fields.
     let msg = body.detail || r.statusText
     if (Array.isArray(msg)) {
       msg = msg.map(d => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join('; ')
@@ -42,9 +39,7 @@ async function api(path, opts = {}) {
   return body
 }
 
-/* ── common message strip (the 10-06 contract, React-native) ──
-   One strip in the sticky header. Owner label first: "Intelligence —
-   Saved to config.yaml…". Restart countdown outranks net chatter. */
+/* ── common message strip ──────────────────────────────────── */
 function useMsg() {
   const [state, setState] = useState({ text: '', cls: 'muted', owner: '' })
   const set = (text, cls = 'muted', owner = '') => setState({ text, cls, owner })
@@ -61,13 +56,13 @@ const MSG_CLASSES = {
 function AppMsg({ msg }) {
   const { text, cls, owner } = msg
   return (
-    <p aria-live="polite" className={`min-h-[22px] text-[13.5px] ${MSG_CLASSES[cls] || MSG_CLASSES.muted}`}>
+    <p aria-live="polite" className={`min-h-[22px] text-[13.5px] m-0 ${MSG_CLASSES[cls] || MSG_CLASSES.muted}`}>
       {text ? (owner ? `${owner} — ${text}` : text) : ''}
     </p>
   )
 }
 
-/* ── restart lane (same semantics as restartBot/offerRestart) ── */
+/* ── restart lane ──────────────────────────────────────────── */
 async function restartBot(setMsg, setRebooting) {
   setRebooting(true)
   setMsg('Restarting…', 'pulse', 'Bot control')
@@ -110,21 +105,34 @@ function offerRestart(setMsg, setRebooting) {
 /* ── shared bits ───────────────────────────────────────────── */
 const sec = s => s == null ? '—' :
   Math.floor(s / 86400) + 'd ' + new Date(s * 1000).toISOString().slice(11, 16) + 'h'
+
+// last_seen / last_wake times arrive as epoch SECONDS (registry
+// time.time()) — never ms, never ISO. Never treat a missing value as
+// epoch zero (bug 5: "20,713d ago" = new Date(seconds-as-ms) → 1970).
 const fmtAgo = t => {
   if (!t) return '—'
-  const s = (Date.now() - new Date(t).getTime()) / 1000
-  if (s < 60) return 'just now'
+  const ms = t > 1e12 ? t : t * 1000  // accept seconds or ms safely
+  const diff = Date.now() - ms
+  if (!isFinite(diff) || diff < 0) return '—'
+  const s = diff / 1000
+  if (s < 90) return 'just now'
   if (s < 3600) return Math.round(s / 60) + 'm ago'
   if (s < 86400) return Math.round(s / 3600) + 'h ago'
   return Math.round(s / 86400) + 'd ago'
 }
 const esc = s => String(s ?? '')
 
+const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
+const BTN = 'rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50'
+const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]`
+const BTN_PRIMARY = `${BTN} bg-[var(--accent)] text-[var(--accent-foreground)]`
+const BTN_DANGER = `${BTN} bg-transparent border border-[var(--danger)] text-[var(--danger)]`
+
 function Wordmark() {
   return (
     <span className="wm">
-      <img className="wm-dark" src="./lenoxvi-horizontal-on-dark.svg" alt="LenoxVI" />
-      <img className="wm-light" src="./lenoxvi-horizontal-on-light.svg" alt="LenoxVI" />
+      <img className="wm-dark" src="/lenoxvi-horizontal-on-dark.svg" alt="LenoxVI" />
+      <img className="wm-light" src="/lenoxvi-horizontal-on-light.svg" alt="LenoxVI" />
     </span>
   )
 }
@@ -139,7 +147,7 @@ function Section({ id, title, note, action, children }) {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div className="grid gap-1">
           <H2>{title}</H2>
-          {note ? <p className="text-[14px] leading-5 text-[var(--muted)] m-0 max-w-[640px]">{note}</p> : null}
+          {note ? <p className="text-[14px] leading-5 text-[var(--muted)] m-0 max-w-[680px]">{note}</p> : null}
         </div>
         {action}
       </div>
@@ -148,7 +156,18 @@ function Section({ id, title, note, action, children }) {
   )
 }
 
-/* ── rail + sticky bar (wireframe C) ────────────────────────── */
+function Field({ label, children }) {
+  return (
+    <div className="grid gap-1">
+      <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/* ── rail ──────────────────────────────────────────────────── */
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
   { id: 'rooms', label: 'Rooms' },
@@ -173,15 +192,13 @@ function useActiveSection() {
   return active
 }
 
-/* ── Overview section ──────────────────────────────────────── */
-function Overview({ status, msg, setMsg, setRebooting, rebooting }) {
+/* ── Overview ──────────────────────────────────────────────── */
+function Overview({ status, setMsg, setRebooting, rebooting }) {
   return (
     <Section id="overview" title="Overview"
       note="Mic-room → speaker-zone voice assistant. LAN-only; no login by design. Config edits save to config.yaml and apply on the next bot restart."
       action={
-        <button
-          className="rounded-full border border-[var(--danger)] text-[var(--danger)] px-3 py-1.5 text-[14px] font-medium bg-transparent cursor-pointer disabled:opacity-50"
-          disabled={rebooting}
+        <button className={BTN_DANGER} disabled={rebooting}
           onClick={() => {
             if (window.confirm('Restart the bot? Config changes apply on restart.')) {
               restartBot(setMsg, setRebooting)
@@ -215,8 +232,28 @@ function Stat({ label, children }) {
   )
 }
 
-/* ── Rooms section: mapping + nodes + zones ─────────────────── */
-function Rooms({ status, nodes, zones, mapping, reloadAll }) {
+/* ── Rooms: mapping selects + nodes + zones ────────────────── */
+function Rooms({ status, mapping, setMsg, reloadAll }) {
+  const [mapDraft, setMapDraft] = useState(null)
+
+  useEffect(() => {
+    if (mapping) setMapDraft(mapping.room_zones || {})
+  }, [mapping])
+
+  const zoneNames = Object.keys(mapping?.zones || {})
+  const saveMapping = async room => {
+    const zone = mapDraft?.[room]
+    if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
+    // PUT /mapping takes the FULL room_zones dict (MappingPayload) —
+    // a single {room, zone} pair 422s (route contract, routes.py:44).
+    const body = { ...(mapping?.room_zones || {}), [room]: zone }
+    try {
+      await api('/api/dashboard/mapping', { method: 'PUT', json: body })
+      setMsg(`${room} → ${zone} saved — applies on next bot restart.`, 'ok', 'Room → zone mapping')
+      reloadAll()
+    } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
+  }
+
   return (
     <>
       <Section id="rooms" title="Room → zone mapping"
@@ -227,15 +264,23 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
               <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
                 <th className="text-left px-4 py-2">Room (mic node)</th>
                 <th className="text-left px-4 py-2">Zone</th>
-                <th className="text-left px-4 py-2">Volume</th>
+                <th className="text-left px-4 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(mapping?.room_zones || {}).map(([room, zone]) => (
                 <tr key={room} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(room)}</td>
-                  <td className="px-4 py-2">{esc(zone)}</td>
-                  <td className="px-4 py-2">{esc(mapping?.zone_volumes?.[zone] ?? mapping?.clip_volume ?? '—')}</td>
+                  <td className="px-4 py-2">
+                    <select value={mapDraft?.[room] ?? zone}
+                      onChange={e => setMapDraft({ ...mapDraft, [room]: e.target.value })}
+                      className={`${INPUT_CLS} w-[200px]`}>
+                      {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button className={BTN_DEFAULT} onClick={() => saveMapping(room)}>Save</button>
+                  </td>
                 </tr>
               ))}
               {Object.keys(mapping?.room_zones || {}).length === 0 &&
@@ -254,6 +299,7 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
                 <th className="text-left px-4 py-2">Node</th>
                 <th className="text-left px-4 py-2">Status</th>
                 <th className="text-left px-4 py-2">Last seen</th>
+                <th className="text-left px-4 py-2">Firmware</th>
                 <th className="text-left px-4 py-2">Session</th>
               </tr>
             </thead>
@@ -267,8 +313,9 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
                       {r.online ? 'online' : 'offline'}
                     </span>
                   </td>
-                  <td className="px-4 py-2">{r.last_seen ? fmtAgo(r.last_seen) : '—'}</td>
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(r.session) || '—'}</td>
+                  <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">{esc(r.fw) || '—'}</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">{esc(status?.session_modes?.[r.room]) || 'fresh'}</td>
                 </tr>
               ))}
             </tbody>
@@ -276,129 +323,472 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
         </div>
       </Section>
 
-      <Section title="Zones"
-        note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks.">
-        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
-          <table className="w-full text-[14px]">
-            <thead>
-              <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
-                <th className="text-left px-4 py-2">Name</th>
-                <th className="text-left px-4 py-2">Backend</th>
-                <th className="text-left px-4 py-2">Volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(zones || {}).map(([name, z]) => (
-                <tr key={name} className="border-t border-[var(--separator)]">
-                  <td className="px-4 py-2">{esc(name)}</td>
-                  <td className="px-4 py-2">
-                    <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">
-                      {esc(z?.backend) || '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">{z?.volume != null ? esc(z.volume) : (mapping?.zone_volumes?.[name] ?? mapping?.clip_volume ?? '—')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Section>
+      <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
     </>
   )
 }
 
-/* ── Voice section: TTS card + tuning + OWW ────────────────── */
-function Voice({ tts, setMsg, setRebooting, reloadAll }) {
+/* Zones: sliders + test clip + discover + add */
+function ZoneList({ mapping, setMsg, reloadAll }) {
+  const [discovered, setDiscovered] = useState(null)
+  const [newZone, setNewZone] = useState({ name: '', backend: 'sonos', ip: '', player_uid: '' })
+  const zoneVols = mapping?.zone_volumes || {}
+  const clipVolume = mapping?.clip_volume ?? 70
+
+  const saveVolume = async (name, vol) => {
+    try {
+      const r = await api(`/api/dashboard/zones/${encodeURIComponent(name)}/volume`, {
+        method: 'PUT', json: { volume: vol } })
+      setMsg(`${name}: voice volume ${r.volume} — applies to the next clip, no restart.`, 'ok', 'Zones')
+      reloadAll()
+    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones') }
+  }
+
+  const discover = async () => {
+    setDiscovered({ scanning: true })
+    try {
+      const r = await api('/api/dashboard/zones/discover', { method: 'POST', json: {} })
+      setDiscovered(r)
+      setMsg(`Discovered ${Array.isArray(r.found) ? r.found.length : 0} Sonos players.`, 'ok', 'Zones')
+    } catch (e) { setDiscovered(null); setMsg('Discovery failed: ' + e.message, 'err', 'Zones') }
+  }
+
+  const addZone = async () => {
+    if (!newZone.name.trim()) { setMsg('Zone name required.', 'err', 'Zones'); return }
+    try {
+      await api('/api/dashboard/zones', { method: 'POST', json: {
+        name: newZone.name, backend: newZone.backend,
+        ip: newZone.ip, player_uid: newZone.player_uid } })
+      setMsg(`Zone ${newZone.name} added — applies on next bot restart.`, 'ok', 'Zones')
+      setNewZone({ name: '', backend: 'sonos', ip: '', player_uid: '' })
+      reloadAll()
+    } catch (e) { setMsg('Zone add failed: ' + e.message, 'err', 'Zones') }
+  }
+
+  const testClip = async name => {
+    try {
+      await api(`/api/dashboard/zones/${encodeURIComponent(name)}/test`, { method: 'POST', json: {} })
+      setMsg(`Test clip playing on ${name}.`, 'ok', 'Zones')
+    } catch (e) { setMsg('Test clip failed: ' + e.message, 'err', 'Zones') }
+  }
+
+  return (
+    <Section title="Zones"
+      note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks. Volume sliders are live — the next clip in that zone plays at the set level, no restart."
+      action={<button className={BTN_DEFAULT} onClick={discover}>Discover Sonos on LAN</button>}>
+      <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+        <table className="w-full text-[14px]">
+          <thead>
+            <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+              <th className="text-left px-4 py-2">Name</th>
+              <th className="text-left px-4 py-2">Backend</th>
+              <th className="text-left px-4 py-2">Volume</th>
+              <th className="text-left px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(mapping?.zones || {}).map(([name, z]) => (
+              <tr key={name} className="border-t border-[var(--separator)]">
+                <td className="px-4 py-2">{esc(name)}</td>
+                <td className="px-4 py-2">
+                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">
+                    {esc(z?.backend) || '—'}
+                  </span>
+                </td>
+                <td className="px-4 py-2">
+                  <VolSlider name={name} initial={zoneVols[name] ?? clipVolume} onCommit={saveVolume} />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <button className={BTN_DEFAULT} onClick={() => testClip(name)}>Play test clip</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {discovered && Array.isArray(discovered.found) && discovered.found.length > 0 && (
+        <div className="rounded-2xl bg-[var(--surface-secondary)] p-4 grid gap-2">
+          <span className="text-[12px] font-medium text-[var(--muted)]">Discovered on LAN</span>
+          {discovered.found.map(d => (
+            <div key={d.name || d.ip} className="flex items-center gap-4 flex-wrap text-[13px]">
+              <span>{esc(d.name)}</span>
+              <span className="font-mono text-[12px] text-[var(--muted)]">{esc(d.ip)}</span>
+              <button className={BTN_DEFAULT}
+                onClick={() => setNewZone(nz => ({ ...nz, name: d.name || '', ip: d.ip || '', player_uid: d.player_uid || '' }))}>
+                Fill into add form
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3 max-w-[680px]">
+        <Field label="Add a zone">
+          <input className={`${INPUT_CLS} w-[200px]`} placeholder="zone name"
+            value={newZone.name} onChange={e => setNewZone({ ...newZone, name: e.target.value })} />
+          <select className={`${INPUT_CLS} w-[130px]`} value={newZone.backend}
+            onChange={e => setNewZone({ ...newZone, backend: e.target.value })}>
+            <option value="sonos">sonos</option>
+            <option value="wiim">wiim</option>
+          </select>
+          <input className={`${INPUT_CLS} w-[150px] font-mono`} placeholder="ip"
+            value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
+          {newZone.backend === 'sonos' &&
+            <input className={`${INPUT_CLS} w-[220px] font-mono`} placeholder="RINCON_…"
+              value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />}
+          <button className={BTN_PRIMARY} onClick={addZone}>Add zone</button>
+        </Field>
+      </div>
+    </Section>
+  )
+}
+
+function VolSlider({ name, initial, onCommit }) {
+  const [val, setVal] = useState(initial)
+  useEffect(() => { setVal(initial) }, [initial])
+  return (
+    <div className="flex items-center gap-2">
+      <input type="range" min="0" max="100" value={val}
+        onChange={e => setVal(+e.target.value)}
+        onMouseUp={() => onCommit(name, val)}
+        onTouchEnd={() => onCommit(name, val)}
+        onKeyUp={() => onCommit(name, val)}
+        className="w-[140px] accent-[var(--accent)]"
+        aria-label={`${name} volume`} />
+      <span className="font-mono text-[12px] w-[30px] text-right">{val}</span>
+    </div>
+  )
+}
+
+/* ── OWW wake-word models ──────────────────────────────────── */
+function OwwPanel({ setMsg, setRebooting, reloadAll }) {
+  const [models, setModels] = useState([])
+  const [sel, setSel] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [newModel, setNewModel] = useState(null)
+
+  const load = async () => {
+    try {
+      const r = await api('/api/dashboard/oww/models')
+      setModels(r.models || [])
+      const active = (r.models || []).find(m => m.selected)
+      setSel(active?.path || '')
+    } catch (e) { setMsg('Model list load failed: ' + e.message, 'err', 'Wake word model') }
+  }
+  useEffect(() => { load() }, [])
+
+  const select = async () => {
+    const name = sel.split('/').pop()
+    if (!name || !name.endsWith('.onnx')) { setMsg('No model selected.', 'err', 'Wake word model'); return }
+    try {
+      await api('/api/dashboard/oww/select', { method: 'PUT', json: { model: name } })
+      setMsg(`Active model set to '${name}' — applies on next bot restart.`, 'ok', 'Wake word model')
+      await load()
+      offerRestart(setMsg, setRebooting)
+    } catch (e) { setMsg('Select failed: ' + e.message, 'err', 'Wake word model') }
+  }
+
+  const del = async (name, source) => {
+    if (!window.confirm(`Delete model '${name}' (${source})?`)) return
+    try {
+      await api(`/api/dashboard/oww/models/${encodeURIComponent(name)}?source=${encodeURIComponent(source)}`, { method: 'DELETE' })
+      setMsg(`Deleted '${name}' (${source}).`, 'ok', 'Wake word model')
+      await load()
+    } catch (e) { setMsg('Delete failed: ' + e.message, 'err', 'Wake word model') }
+  }
+
+  const upload = async () => {
+    const f = newModel
+    if (!f) { setMsg('No file selected.', 'err', 'Wake word model'); return }
+    const fd = new FormData()
+    fd.append('file', f, f.name)
+    setScanning(true)
+    try {
+      const r = await api('/api/dashboard/oww/models', { method: 'POST', body: fd })
+      setMsg(`Model '${r.name}' uploaded (${(r.size / 1024).toFixed(0)} KB). Select it to activate.`, 'ok', 'Wake word model')
+      setNewModel(null)
+      await load()
+    } catch (e) { setMsg('Upload failed: ' + e.message, 'err', 'Wake word model') }
+    finally { setScanning(false) }
+  }
+
+  return (
+    <Section title="Wake word model"
+      note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
+        <Field label="Active model">
+          <select className={`${INPUT_CLS} w-[260px]`} value={sel}
+            onChange={e => setSel(e.target.value)}>
+            {models.map(m => (
+              <option key={m.path} value={m.path}>
+                {esc(m.name)}{m.source === 'root' ? ' (root)' : ''}
+              </option>
+            ))}
+            {models.length === 0 && <option value="">no models found</option>}
+          </select>
+          <button className={BTN_DEFAULT} onClick={select}>Set active</button>
+        </Field>
+        <Field label="Upload model (.onnx)">
+          <input type="file" accept=".onnx" className="text-[13px]"
+            onChange={e => setNewModel(e.target.files?.[0] || null)} />
+          <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
+            {scanning ? 'Uploading…' : 'Upload'}
+          </button>
+        </Field>
+        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+          <table className="w-full text-[14px]">
+            <thead>
+              <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+                <th className="text-left px-4 py-2">Model</th>
+                <th className="text-left px-4 py-2">Source</th>
+                <th className="text-left px-4 py-2">Size</th>
+                <th className="text-left px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map(m => (
+                <tr key={m.path} className="border-t border-[var(--separator)]">
+                  <td className="px-4 py-2 font-mono text-[13px]">{esc(m.name)}</td>
+                  <td className="px-4 py-2">{esc(m.source)}</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">{((m.size || 0) / 1024).toFixed(0)} KB</td>
+                  <td className="px-4 py-2 text-right">
+                    <button className={BTN_DANGER} onClick={() => del(m.name, m.source)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+              {models.length === 0 &&
+                <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="4">No models yet — upload one.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Section>
+  )
+}
+const TTS_MODELS = {
+  elevenlabs: [
+    ['eleven_flash_v2_5', 'flash v2.5'],
+    ['eleven_v4_turbo', 'v4 turbo'],
+  ],
+  deepgram: [
+    ['aura-2-thalia-en', 'aura-2 thalia'],
+    ['aura-2-andromeda-en', 'aura-2 andromeda'],
+    ['aura-2-helena-en', 'aura-2 helena'],
+    ['aura-2-apollo-en', 'aura-2 apollo'],
+    ['aura-2-arcas-en', 'aura-2 arcas'],
+    ['aura-2-aries-en', 'aura-2 aries'],
+    ['aura-2-asteria-en', 'aura-2 asteria'],
+    ['aura-2-athena-en', 'aura-2 athena'],
+    ['aura-2-atlas-en', 'aura-2 atlas'],
+    ['aura-2-aurora-en', 'aura-2 aurora'],
+    ['aura-2-callista-en', 'aura-2 callista'],
+    ['aura-2-cora-en', 'aura-2 cora'],
+  ],
+  'deepgram-flux': [
+    ['flux-hannah-en', 'flux hannah'],
+    ['flux-kit-en', 'flux kit'],
+    ['flux-alexis-en', 'flux alexis'],
+    ['flux-cliff-en', 'flux cliff'],
+    ['flux-sienna-en', 'flux sienna'],
+    ['flux-cole-en', 'flux cole'],
+    ['flux-brooke-en', 'flux brooke'],
+    ['flux-colin-en', 'flux colin'],
+    ['flux-gemma-en', 'flux gemma'],
+    ['flux-haley-en', 'flux haley'],
+    ['flux-heather-en', 'flux heather'],
+    ['flux-miles-en', 'flux miles'],
+    ['flux-sean-en', 'flux sean'],
+    ['flux-bree-en', 'flux bree'],
+    ['flux-brittany-en', 'flux brittany'],
+    ['flux-bruce-en', 'flux bruce'],
+  ],
+}
+
+function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
+  const [provider, setProvider] = useState(null)
+  const [model, setModel] = useState(null)
+
+  useEffect(() => {
+    if (tts) {
+      setProvider(tts.provider || 'elevenlabs')
+      setModel(tts.model || TTS_MODELS[tts.provider]?.[0]?.[0] || 'eleven_flash_v2_5')
+    }
+  }, [tts])
+
+  // bug 8 fix: switching provider resets the model menu to that
+  // provider's own list — the old page's ttsFlipFields behavior.
+  const onProviderChange = p => {
+    setProvider(p)
+    setModel(TTS_MODELS[p]?.[0]?.[0] || '')
+  }
+
+  const saveTTS = async () => {
+    const voice_id = document.getElementById('tts-voice')?.value.trim() || ''
+    const body = { provider, model }
+    if (provider === 'elevenlabs') {
+      if (!voice_id) { setMsg("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return }
+      body.voice_id = voice_id
+    } else if (provider === 'deepgram') {
+      body.deepgram_voice = model
+    } else if (provider === 'deepgram-flux') {
+      body.deepgram_flux_voice = model
+      // Flux knobs ride along — keep live-tuned values (1.3 speed on
+      // this rig); omitting them is also fine (None = leave as-is).
+      const speed = parseFloat(document.getElementById('tts-flux-speed')?.value)
+      const expr = parseInt(document.getElementById('tts-flux-expressivity')?.value, 10)
+      if (isFinite(speed)) body.deepgram_flux_speed = speed
+      if (isFinite(expr)) body.deepgram_flux_expressivity = expr
+    }
+    try {
+      await api('/api/dashboard/tts', { method: 'PUT', json: body })
+      setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'TTS')
+      reloadAll()
+      offerRestart(setMsg, setRebooting)
+    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'TTS') }
+  }
+
   return (
     <>
       <Section id="voice" title="TTS"
-        note="One provider per install. Models: flash v2.5 (fast) or v4 turbo (expressive). Voice id is account data. API keys never render back after save.">
-        <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3 max-w-[640px]">
+        note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram: aura-2 or flux voices. API keys never render back after save.">
+        <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
           <Field label="Provider">
-            <select id="tts-provider" defaultValue={tts?.provider || 'elevenlabs'}
-              className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[220px]">
+            <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
+              onChange={e => onProviderChange(e.target.value)}>
               <option value="elevenlabs">ElevenLabs</option>
               <option value="deepgram">Deepgram</option>
               <option value="deepgram-flux">Deepgram Flux</option>
             </select>
           </Field>
           <Field label="Model">
-            <select id="tts-model" defaultValue={tts?.model || 'eleven_flash_v2_5'}
-              className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[220px]">
-              <option value="eleven_flash_v2_5">flash v2.5</option>
-              <option value="eleven_v4_turbo">v4 turbo</option>
+            <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
+              onChange={e => setModel(e.target.value)}>
+              {(TTS_MODELS[provider] || []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
             </select>
           </Field>
-          <Field label="Voice id">
-            <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="fq1S…"
-              className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[280px] font-mono" />
-          </Field>
+          {provider === 'elevenlabs' &&
+            <Field label="Voice id">
+              <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="fq1S…"
+                className={`${INPUT_CLS} w-[280px] font-mono`} />
+            </Field>}
+          {provider === 'deepgram-flux' && (
+            <>
+              <Field label="Flux speed (0.5 – 1.5, 0.05 steps)">
+                <input id="tts-flux-speed" type="number" min="0.5" max="1.5" step="0.05"
+                  defaultValue={tts?.deepgram_flux_speed ?? 1.0}
+                  className={`${INPUT_CLS} w-[120px] font-mono`} />
+              </Field>
+              <Field label="Flux expressivity (-2 – 2)">
+                <input id="tts-flux-expressivity" type="number" min="-2" max="2" step="1"
+                  defaultValue={tts?.deepgram_flux_expressivity ?? 1}
+                  className={`${INPUT_CLS} w-[120px] font-mono`} />
+              </Field>
+            </>
+          )}
           <Field label="API key">
             <div className="flex items-center gap-2 flex-wrap">
-              <input id="tts-key" type="password" placeholder={tts?.elevenlabs_key_set ? 'key set ✓' : 'paste key…'}
-                className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[280px]" />
-              {tts?.elevenlabs_key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
-              <SaveBtn onClick={async () => {
+              <input id="tts-key" type="password"
+                placeholder={provider === 'elevenlabs'
+                  ? (tts?.elevenlabs_key_set ? 'key set ✓' : 'paste ElevenLabs key…')
+                  : (tts?.deepgram_key_set ? 'key set ✓' : 'paste Deepgram key…')}
+                className={`${INPUT_CLS} w-[280px]`} />
+              <button className={BTN_DEFAULT} onClick={async () => {
                 const key = document.getElementById('tts-key').value.trim()
                 if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'TTS'); return }
+                const route = provider === 'elevenlabs'
+                  ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
                 try {
-                  await api('/api/dashboard/tts/key/elevenlabs', { method: 'PUT', json: { api_key: key } })
+                  await api(route, { method: 'PUT', json: { api_key: key } })
                   setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'TTS')
                   reloadAll()
                 } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
-              }}>Save key</SaveBtn>
+              }}>Save key</button>
             </div>
           </Field>
-          <SaveBtn primary onClick={async () => {
-            const provider = document.getElementById('tts-provider').value
-            const model = document.getElementById('tts-model').value
-            const voice_id = document.getElementById('tts-voice').value.trim()
-            if (provider === 'elevenlabs' && !voice_id) {
-              setMsg("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return
-            }
-            try {
-              await api('/api/dashboard/tts', { method: 'PUT', json: { provider, voice_id, model } })
-              setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'TTS')
-              reloadAll()
-              offerRestart(setMsg, setRebooting)
-            } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'TTS') }
-          }}>Save TTS</SaveBtn>
+          <div>
+            <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
+          </div>
         </div>
       </Section>
+
+      <Tuning tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} />
+      <OwwPanel setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
     </>
   )
 }
 
-function Field({ label, children }) {
+const TUNING_FIELDS = [
+  ['wake_threshold', 'Wake sensitivity', 0.30, 0.60, 0.01,
+    'OWW score needed to wake (real Hey-Willow lands 0.84–1.00; TV audio fired 0.40–0.51).'],
+  ['wake_awake_timeout', 'Awake timeout (s)', 5, 60, 1,
+    'Seconds of silence before she stops listening.'],
+  ['vad_confidence', 'VAD confidence', 0.30, 0.90, 0.05,
+    'How sure Silero must be you are speaking.'],
+  ['vad_min_volume', 'VAD min volume', 0.10, 0.90, 0.05,
+    'Quiet-speech floor — the ignores-the-TV knob.'],
+  ['lull_secs', 'Turn-end lull (s)', 0.2, 2.0, 0.1,
+    'Silence before your sentence flushes to the brain.'],
+  ['dedup_window', 'Echo dedup window (s)', 2, 30, 1,
+    'How long she suppresses re-hearing the same words off her own speakers.'],
+]
+
+function Tuning({ tuning, setMsg, setRebooting }) {
+  const [vals, setVals] = useState({})
+  useEffect(() => {
+    if (tuning) setVals({
+      wake_threshold: tuning.wake_threshold,
+      wake_awake_timeout: tuning.wake_awake_timeout,
+      vad_confidence: tuning.vad_confidence,
+      vad_min_volume: tuning.vad_min_volume,
+      lull_secs: tuning.lull_secs,
+      dedup_window: tuning.dedup_window,
+    })
+  }, [tuning])
+
+  const save = async () => {
+    const body = {}
+    for (const [f] of TUNING_FIELDS) body[f] = parseFloat(vals[f])
+    try {
+      await api('/api/dashboard/voice-tuning', { method: 'PUT', json: body })
+      setMsg('Tuning saved — applies on next bot restart.', 'ok', 'Voice tuning')
+      offerRestart(setMsg, setRebooting)
+    } catch (e) { setMsg('Tuning save failed: ' + e.message, 'err', 'Voice tuning') }
+  }
+
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[12px] font-medium text-[var(--muted)] min-w-[92px]">{label}</span>
-      {children}
-    </div>
+    <Section title="Voice tuning"
+      note="Wake, VAD, and turn-end knobs — the pipecat pipeline tunables. Applies on the next bot restart.">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
+        {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
+          <div key={f} className="grid gap-1">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[13px] font-medium">{label}</span>
+              <span className="font-mono text-[13px]">{vals[f] ?? '—'}</span>
+            </div>
+            <input type="range" min={min} max={max} step={step} value={vals[f] ?? min}
+              onChange={e => setVals({ ...vals, [f]: e.target.value })}
+              className="accent-[var(--accent)]" aria-label={label} />
+            <span className="text-[12px] text-[var(--muted)]">{hint}</span>
+          </div>
+        ))}
+        <div>
+          <button className={BTN_PRIMARY} onClick={save}>Save tuning</button>
+        </div>
+      </div>
+    </Section>
   )
 }
 
-function SaveBtn({ children, onClick, primary }) {
-  return (
-    <button onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer
-        ${primary
-          ? 'bg-[var(--accent)] text-[var(--accent-foreground)]'
-          : 'bg-[var(--default)] text-[var(--default-foreground)]'}`}>
-      {children}
-    </button>
-  )
-}
-
-/* ── System section: Intelligence + Firmware ───────────────── */
+/* ── System: Intelligence ─────────────────────────────────── */
 function System({ intelligence, setMsg, setRebooting, reloadAll }) {
   return (
     <Section id="system" title="Intelligence"
       note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3 max-w-[640px]">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4 max-w-[680px]">
         <Field label="Provider">
           <select id="int-kind" defaultValue={intelligence?.kind || 'hermes'}
-            className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[220px]">
+            className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
             <option value="claude" disabled>Claude — coming soon</option>
@@ -408,19 +798,19 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
         <Field label="API URL">
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<brain-host>:8642/v1"
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
-            className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[320px] font-mono" />
+            className={`${INPUT_CLS} w-[320px] font-mono`} />
         </Field>
         <Field label="Agent">
           <input id="int-agent" defaultValue={intelligence?.agent || ''} placeholder="lenoxvi-test"
             title="OpenClaw agent id — the model field becomes openclaw/<agent>."
-            className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[220px] font-mono" />
+            className={`${INPUT_CLS} w-[220px] font-mono`} />
         </Field>
         <Field label="API key">
           <div className="flex items-center gap-2 flex-wrap">
             <input id="int-key" type="password" placeholder={intelligence?.key_set ? 'key set ✓' : 'paste key…'}
-              className="rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2 w-[280px]" />
+              className={`${INPUT_CLS} w-[280px]`} />
             {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
-            <SaveBtn onClick={async () => {
+            <button className={BTN_DEFAULT} onClick={async () => {
               const key = document.getElementById('int-key').value.trim()
               if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
               try {
@@ -428,11 +818,11 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
                 setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'Intelligence')
                 reloadAll()
               } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
-            }}>Save key</SaveBtn>
+            }}>Save key</button>
           </div>
         </Field>
         <div className="flex gap-2 flex-wrap">
-          <SaveBtn primary onClick={async () => {
+          <button className={BTN_PRIMARY} onClick={async () => {
             const kind = document.getElementById('int-kind').value
             const url = document.getElementById('int-url').value.trim()
             const agent = document.getElementById('int-agent').value.trim()
@@ -444,10 +834,9 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
               reloadAll()
               offerRestart(setMsg, setRebooting)
             } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
-          }}>Save</SaveBtn>
-          <button id="btn-int-test"
-            className="rounded-full bg-[var(--default)] text-[var(--default-foreground)] px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50"
-            onClick={async (ev) => {
+          }}>Save</button>
+          <button id="btn-int-test" className={BTN_DEFAULT}
+            onClick={async ev => {
               const btn = ev.currentTarget
               btn.disabled = true; btn.textContent = 'Testing…'
               try {
@@ -468,8 +857,8 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
 export default function App() {
   const [status, setStatus] = useState(null)
   const [mapping, setMapping] = useState(null)
-  const [zones, setZones] = useState(null)
   const [tts, setTts] = useState(null)
+  const [tuning, setTuning] = useState(null)
   const [intelligence, setIntelligence] = useState(null)
   const [msg, setMsg] = useMsg()
   const [rebooting, setRebooting] = useState(false)
@@ -477,9 +866,12 @@ export default function App() {
 
   const reloadAll = async () => {
     const jobs = [
-      api('/api/dashboard/status').then(setStatus).catch(e => { if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status') }),
-      api('/api/dashboard/mapping').then(m => { setMapping(m); setZones(m.zones || []) }).catch(() => {}),
+      api('/api/dashboard/status').then(setStatus).catch(e => {
+        if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status')
+      }),
+      api('/api/dashboard/mapping').then(setMapping).catch(() => {}),
       api('/api/dashboard/tts').then(setTts).catch(() => {}),
+      api('/api/dashboard/voice-tuning').then(setTuning).catch(() => {}),
       api('/api/dashboard/intelligence').then(setIntelligence).catch(() => {}),
     ]
     await Promise.allSettled(jobs)
@@ -514,9 +906,9 @@ export default function App() {
           <AppMsg msg={msg} />
         </header>
 
-        <Overview status={status} msg={msg} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
-        <Rooms status={status} mapping={mapping} zones={zones} />
-        <Voice tts={tts} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
+        <Overview status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
+        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+        <Voice tts={tts} tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
         <System intelligence={intelligence} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
       </div>
     </div>
