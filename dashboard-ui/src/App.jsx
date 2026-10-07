@@ -549,16 +549,6 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
   return (
     <Section title="Zones"
       note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks. Volume sliders are live — the next clip in that zone plays at the set level, no restart.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <button className={BTN_DEFAULT} onClick={discover}>
-            {discovered?.scanning ? 'Scanning LAN…' : 'Discover Sonos on LAN'}
-          </button>
-          <span className="text-[13px] text-[var(--muted)]">
-            {discovered?.scanning ? 'A few seconds…' : 'Fills the add form below with a discovered player.'}
-          </span>
-        </div>
-      </div>
       <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
         <table className="w-full text-[14px]">
           <thead>
@@ -606,22 +596,26 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
         </div>
       )}
 
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3 max-w-[680px]">
-        <Field label="Add a zone">
-          <input className={`${INPUT_CLS} w-[200px]`} placeholder="zone name"
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input className={`${INPUT_CLS} w-[170px]`} placeholder="zone name"
             value={newZone.name} onChange={e => setNewZone({ ...newZone, name: e.target.value })} />
-          <select className={`${INPUT_CLS} w-[130px]`} value={newZone.backend}
+          <select className={`${INPUT_CLS} w-[110px]`} value={newZone.backend}
             onChange={e => setNewZone({ ...newZone, backend: e.target.value })}>
             <option value="sonos">sonos</option>
             <option value="wiim">wiim</option>
           </select>
           <input className={`${INPUT_CLS} w-[150px] font-mono`} placeholder="ip"
             value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
-          {newZone.backend === 'sonos' &&
-            <input className={`${INPUT_CLS} w-[220px] font-mono`} placeholder="RINCON_…"
-              value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />}
+          <input className={`${INPUT_CLS} w-[230px] font-mono`} placeholder="RINCON_… (sonos only)"
+            value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
+        </div>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <button className={BTN_DEFAULT} onClick={discover}>
+            {discovered?.scanning ? 'Scanning LAN…' : 'Discover Sonos on LAN'}
+          </button>
           <button className={BTN_PRIMARY} onClick={addZone}>Add zone</button>
-        </Field>
+        </div>
       </div>
     </Section>
   )
