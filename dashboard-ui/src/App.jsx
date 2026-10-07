@@ -439,7 +439,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     </select>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <button className={BTN_DEFAULT} onClick={() => saveMapping(room)}>Save</button>
+                    <button className={BTN_PRIMARY} onClick={() => saveMapping(room)}>Save</button>
                   </td>
                 </tr>
               ))}
