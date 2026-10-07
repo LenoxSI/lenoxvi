@@ -841,7 +841,11 @@ function System({ intelligence, setMsg, setRebooting, reloadAll }) {
               btn.disabled = true; btn.textContent = 'Testing…'
               try {
                 const r = await api('/api/dashboard/intelligence/test', { method: 'POST', json: {} })
-                setMsg(`✓ ${r.label || 'ok'} — ${r.latency_ms ?? '?'} ms`, 'ok', 'Intelligence')
+                if (r.ok) {
+                  setMsg(`✓ ${r.model || '?'} — ${r.latency_ms ?? '?'} ms — "${(r.reply || '').slice(0, 40)}"`, 'ok', 'Intelligence')
+                } else {
+                  setMsg('Test failed: ' + (r.error || 'unknown'), 'err', 'Intelligence')
+                }
               } catch (e) {
                 setMsg('Test failed: ' + e.message, 'err', 'Intelligence')
               } finally {

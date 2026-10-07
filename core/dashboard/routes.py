@@ -848,7 +848,14 @@ def _intelligence_probe(brain_cfg: dict) -> dict:
     import urllib.error as _ue
     kind = brain_cfg.get("kind") or "hermes"
     url = (brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "").rstrip("/")
-    key = _os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY") or ""
+    # Bug-7 law (2026-10-07): kind-aware key — same resolution order as
+    # hermes_agent (hermes → LVI_HERMES_KEY first; openclaw → LVI_BRAIN_KEY
+    # first). The old kind-blind pick sent the OpenClaw token to the
+    # Hermes api_server and 401'd live (the flip landmine's twin).
+    if kind == "hermes":
+        key = _os.getenv("LVI_HERMES_KEY") or _os.getenv("LVI_BRAIN_KEY") or ""
+    else:
+        key = _os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY") or ""
     if not url:
         return {"ok": False, "error": "no url configured"}
     if not key:
