@@ -288,15 +288,15 @@ function Rooms({ status, nodes, zones, mapping, reloadAll }) {
               </tr>
             </thead>
             <tbody>
-              {(zones || []).map(z => (
-                <tr key={z.name} className="border-t border-[var(--separator)]">
-                  <td className="px-4 py-2">{esc(z.name)}</td>
+              {Object.entries(zones || {}).map(([name, z]) => (
+                <tr key={name} className="border-t border-[var(--separator)]">
+                  <td className="px-4 py-2">{esc(name)}</td>
                   <td className="px-4 py-2">
                     <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">
-                      {esc(z.backend) || '—'}
+                      {esc(z?.backend) || '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-2">{z.volume != null ? esc(z.volume) : '—'}</td>
+                  <td className="px-4 py-2">{z?.volume != null ? esc(z.volume) : (mapping?.zone_volumes?.[name] ?? mapping?.clip_volume ?? '—')}</td>
                 </tr>
               ))}
             </tbody>
