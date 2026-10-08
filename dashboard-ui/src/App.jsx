@@ -230,7 +230,17 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
           {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
         </Stat>
         <Stat label="Version"><span className="font-mono text-[13px]">{esc(status?.version) || '…'}</span></Stat>
-        <Stat label="Intelligence"><span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--accent-soft)] text-[var(--success)]">{esc(status?.intelligence) || '—'}</span></Stat>
+        <Stat label="Intelligence">
+          {(() => {
+            const label = esc(status?.intelligence) || '—'
+            // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
+            // Inline styles — these are foreign brands, they don't earn design tokens.
+            const s = label.startsWith('OpenClaw')
+              ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
+              : { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
+            return <span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium" style={s}>{label}</span>
+          })()}
+        </Stat>
       </div>
     </Section>
   )
