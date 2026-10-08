@@ -1269,8 +1269,10 @@ def main():
             check("9b11b bare kind flip restores that kind's remembered URL",
                   _brain9c.get("url") == "http://127.0.0.1:18789/v1",
                   f"url={_brain9c.get('url')}")
-            # restore kind for later checks
-            client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
+            # restore kind for later checks: the lane probes below build
+            # HermesAgent against the LIVE throwaway config and expect
+            # openclaw (the kind the earlier (a) block left behind)
+            client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
 
             # (b) invalid kind / agent / url -> 422
             _bad = client.put("/api/dashboard/intelligence", json={"kind": "claude"})
