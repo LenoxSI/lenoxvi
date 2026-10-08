@@ -1032,13 +1032,24 @@ function Tuning({ tuning, setMsg, setRebooting }) {
 
 /* ── System: Intelligence ─────────────────────────────────── */
 function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
+  // Kind is UI state (2026-10-07): the agent input grays out for
+  // non-OpenClaw kinds, so the select must be controlled. Synced from
+  // the server exactly once (draft law); save still reads the DOM.
+  const [intKind, setIntKind] = useState('hermes')
+  const [intSynced, setIntSynced] = useState(false)
+  useEffect(() => {
+    if (intelligence && !intSynced) {
+      setIntKind(intelligence.kind || 'hermes')
+      setIntSynced(true)
+    }
+  }, [intelligence, intSynced])
   return (
     <>
     <Section id="system" title="Intelligence"
       note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Provider / API URL / agent">
-          <select id="int-kind" defaultValue={intelligence?.kind || 'hermes'}
+          <select id="int-kind" value={intKind} onChange={e => setIntKind(e.target.value)}
             className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
@@ -1051,7 +1062,10 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
           <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>
           <input id="int-agent" defaultValue={intelligence?.agent || ''} placeholder="lenoxvi-test"
-            title="OpenClaw agent id — the model field becomes openclaw/<agent>."
+            disabled={intKind !== 'openclaw'}
+            title={intKind === 'openclaw'
+              ? 'OpenClaw agent id — the model field becomes openclaw/<agent>.'
+              : 'OpenClaw only — the Hermes lane addresses by URL, no agent id.'}
             className={`${INPUT_CLS} w-[180px] font-mono`} />
         </Field>
         <Field label="API key">
