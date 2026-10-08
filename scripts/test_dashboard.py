@@ -1414,10 +1414,11 @@ def main():
                                    json={"api_key": "bad\nkey"})
                 check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
                 # 036 M-2 pin: the key save is KIND-AWARE — hermes writes
-                # LVI_HERMES_KEY, openclaw writes LVI_BRAIN_KEY (the variable
-                # each lane reads FIRST, per the bug-7 law). The old route
-                # always wrote LVI_BRAIN_KEY: a Hermes key save was silently
-                # ignored AND clobbered the OpenClaw token.
+                # LVI_HERMES_KEY, openclaw writes LVI_OPENCLAW_KEY (the
+                # variable each lane reads FIRST, per the bug-7 + naming
+                # laws). The old route always wrote LVI_BRAIN_KEY: a Hermes
+                # key save was silently ignored AND clobbered the OpenClaw
+                # token.
                 _wek_calls9 = []
                 async def _fake_wek_rec9(var, value):
                     _wek_calls9.append(var)
