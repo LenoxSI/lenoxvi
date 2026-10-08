@@ -696,6 +696,12 @@ class TTSPayload(BaseModel):
     # default means "don't touch" on partial updates.
     deepgram_flux_speed: float | None = Field(default=None, ge=0.5, le=1.5)
     deepgram_flux_expressivity: int | None = Field(default=None, ge=-2, le=2)
+    # ElevenLabs flash-v2.5 knobs (the owner 2026-10-07 22:49): speed 0.7–1.2,
+    # stability 0.0–1.0 (lower = expressive, higher = consistent). Absent
+    # = None = ElevenLabs defaults — never a made-up value. The v3/v4
+    # dialogue lane deliberately has no knobs (ElevenLabs guidance).
+    elevenlabs_speed: float | None = Field(default=None, ge=0.7, le=1.2)
+    elevenlabs_stability: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 def _validate_tts_payload(p: TTSPayload) -> None:
@@ -738,6 +744,8 @@ async def get_tts():
         "deepgram_flux_voice": tts_cfg.get("deepgram_flux_voice") or "flux-hannah-en",
         "deepgram_flux_speed": tts_cfg.get("deepgram_flux_speed"),
         "deepgram_flux_expressivity": tts_cfg.get("deepgram_flux_expressivity"),
+        "elevenlabs_speed": tts_cfg.get("elevenlabs_speed"),
+        "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         "note": "provider/voice/model apply on next bot restart; keys apply "
@@ -755,6 +763,12 @@ async def put_tts(payload: TTSPayload):
     if payload.provider == "elevenlabs":
         current["voice_id"] = payload.voice_id
         current["model"] = payload.model
+        # Flash-v2.5 knobs ride along with None = "leave as-is" — same
+        # partial-update law as the Flux pair.
+        if payload.elevenlabs_speed is not None:
+            current["elevenlabs_speed"] = payload.elevenlabs_speed
+        if payload.elevenlabs_stability is not None:
+            current["elevenlabs_stability"] = payload.elevenlabs_stability
     elif payload.provider == "deepgram":
         current["deepgram_voice"] = payload.deepgram_voice
     else:

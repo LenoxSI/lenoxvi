@@ -147,6 +147,18 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 api_key=os.environ["ELEVENLABS_API_KEY"],
                 voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
                 model=el_model,
+                # Flash v2.5 voice-shaping knobs (the owner 2026-10-07 22:49):
+                # speed 0.7–1.2, stability 0.0–1.0 (lower = expressive,
+                # higher = consistent). Absent config = None = ElevenLabs
+                # default — never a made-up value. The v3/v4 dialogue lane
+                # deliberately does NOT get these (ElevenLabs guidance: the
+                # model drives expressivity there).
+                settings=ElevenLabsTTSService.Settings(
+                    speed=(lambda v: float(v) if v not in (None, "") else None)(
+                        cfg("tts", "elevenlabs_speed")),
+                    stability=(lambda v: float(v) if v not in (None, "") else None)(
+                        cfg("tts", "elevenlabs_stability")),
+                ),
             )
             logger.info(f"tts backend: elevenlabs {el_model}")
     gate = EchoGate()

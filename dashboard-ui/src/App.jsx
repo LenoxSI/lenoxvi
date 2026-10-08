@@ -886,6 +886,10 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   // a drag in progress); committed on Save via the same DOM read.
   const [fluxSpeed, setFluxSpeed] = useState(1.0)
   const [fluxExpr, setFluxExpr] = useState(1)
+  // ElevenLabs flash-v2.5 knobs (2026-10-07): speed 0.7–1.2, stability
+  // 0.0–1.0. Same draft law — synced once, committed on Save.
+  const [elSpeed, setElSpeed] = useState(null)   // null = not set = ElevenLabs default
+  const [elStab, setElStab] = useState(null)
 
   useEffect(() => {
     if (tts && !ttsSynced) {
@@ -893,6 +897,8 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       setModel(tts.model || TTS_MODELS[tts.provider]?.[0]?.[0] || 'eleven_flash_v2_5')
       setFluxSpeed(parseFloat(tts?.deepgram_flux_speed ?? 1.0))
       setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
+      setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
+      setElStab(tts?.elevenlabs_stability != null ? parseFloat(tts.elevenlabs_stability) : null)
       setTtsSynced(true)
     }
   }, [tts, ttsSynced])
@@ -911,6 +917,9 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       if (!voice_id) { setMsg("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return }
       body.model = model
       body.voice_id = voice_id
+      // Flash-v2.5 knobs ride on save (null = leave as-is/defaults).
+      if (elSpeed != null) body.elevenlabs_speed = elSpeed
+      if (elStab != null) body.elevenlabs_stability = elStab
     } else if (provider === 'deepgram') {
       body.deepgram_voice = model
     } else if (provider === 'deepgram-flux') {
@@ -947,6 +956,20 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             {provider === 'elevenlabs' &&
               <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="Voice id (fq1S…)"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
+            {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
+              <>
+                <span className="text-[12px] font-medium text-[var(--muted)]">speed</span>
+                <input id="tts-el-speed" type="range" min="0.7" max="1.2" step="0.05"
+                  value={elSpeed ?? 1.0} onChange={e => setElSpeed(parseFloat(e.target.value))}
+                  className="w-[120px] accent-[var(--accent)]" aria-label="ElevenLabs speed" />
+                <span className="font-mono text-[12px] w-[36px] text-right">{(elSpeed ?? 1.0).toFixed(2)}</span>
+                <span className="text-[12px] font-medium text-[var(--muted)]">stability</span>
+                <input id="tts-el-stability" type="range" min="0" max="1" step="0.05"
+                  value={elStab ?? 0.5} onChange={e => setElStab(parseFloat(e.target.value))}
+                  className="w-[120px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
+                <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
+              </>
+            )}
             {provider === 'deepgram-flux' && (
               <>
                 <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed</span>
