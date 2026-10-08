@@ -230,7 +230,7 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
           {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
         </Stat>
         <Stat label="Version"><span className="font-mono text-[13px]">{esc(status?.version) || '…'}</span></Stat>
-        <Stat label="Intelligence"><span className="font-mono text-[13px]">{esc(status?.intelligence) || '—'}</span></Stat>
+        <Stat label="Intelligence"><span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--accent-soft)] text-[var(--success)]">{esc(status?.intelligence) || '—'}</span></Stat>
       </div>
     </Section>
   )
