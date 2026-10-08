@@ -942,7 +942,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   return (
     <>
       <Section id="voice" title="TTS"
-        note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram Aura: aura-2 voices. Deepgram Flux: flux voices. API keys never render back after save.">
+        note="">
         <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
           <Field label="Provider / model">
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
