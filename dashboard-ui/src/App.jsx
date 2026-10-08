@@ -956,20 +956,6 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             {provider === 'elevenlabs' &&
               <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="Voice id (fq1S…)"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
-            {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
-              <>
-                <span className="text-[12px] font-medium text-[var(--muted)]">speed</span>
-                <input id="tts-el-speed" type="range" min="0.7" max="1.2" step="0.05"
-                  value={elSpeed ?? 1.0} onChange={e => setElSpeed(parseFloat(e.target.value))}
-                  className="w-[120px] accent-[var(--accent)]" aria-label="ElevenLabs speed" />
-                <span className="font-mono text-[12px] w-[36px] text-right">{(elSpeed ?? 1.0).toFixed(2)}</span>
-                <span className="text-[12px] font-medium text-[var(--muted)]">stability</span>
-                <input id="tts-el-stability" type="range" min="0" max="1" step="0.05"
-                  value={elStab ?? 0.5} onChange={e => setElStab(parseFloat(e.target.value))}
-                  className="w-[120px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
-                <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
-              </>
-            )}
             {provider === 'deepgram-flux' && (
               <>
                 <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed</span>
@@ -985,6 +971,20 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               </>
             )}
           </Field>
+          {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
+            <Field label="Speed / stability (flash v2.5)">
+              <span className="text-[12px] font-medium text-[var(--muted)]">speed</span>
+              <input id="tts-el-speed" type="range" min="0.7" max="1.2" step="0.05"
+                value={elSpeed ?? 1.0} onChange={e => setElSpeed(parseFloat(e.target.value))}
+                className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs speed" />
+              <span className="font-mono text-[12px] w-[36px] text-right">{(elSpeed ?? 1.0).toFixed(2)}</span>
+              <span className="text-[12px] font-medium text-[var(--muted)]">stability</span>
+              <input id="tts-el-stability" type="range" min="0" max="1" step="0.05"
+                value={elStab ?? 0.5} onChange={e => setElStab(parseFloat(e.target.value))}
+                className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
+              <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
+            </Field>
+          )}
           <Field label="API key">
             <div className="flex items-center gap-2 flex-wrap flex-1">
               <input id="tts-key" type="password"
