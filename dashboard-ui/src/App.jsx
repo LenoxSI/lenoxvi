@@ -929,12 +929,12 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             )}
           </Field>
           <Field label="API key">
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap flex-1">
               <input id="tts-key" type="password"
                 placeholder={provider === 'elevenlabs'
                   ? (tts?.elevenlabs_key_set ? 'key set ✓' : 'paste ElevenLabs key…')
                   : (tts?.deepgram_key_set ? 'key set ✓' : 'paste Deepgram key…')}
-                className={`${INPUT_CLS} w-[280px]`} />
+                className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
             </div>
           </Field>
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1069,9 +1069,9 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} w-[180px] font-mono`} />
         </Field>
         <Field label="API key">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap flex-1">
             <input id="int-key" type="password" placeholder="paste key…"
-              className={`${INPUT_CLS} w-[280px]`} />
+              className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
             {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
           </div>
         </Field>
