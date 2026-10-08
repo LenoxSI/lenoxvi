@@ -232,13 +232,15 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
         <Stat label="Version"><span className="font-mono text-[13px]">{esc(status?.version) || '…'}</span></Stat>
         <Stat label="Intelligence">
           {(() => {
-            const label = esc(status?.intelligence) || '—'
             // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
             // Inline styles — these are foreign brands, they don't earn design tokens.
-            const s = label.startsWith('OpenClaw')
+            // Chip shows the brand only — the agent id lives in the Intelligence
+            // section (the owner 2026-10-08): strip " · <agent>" from the label.
+            const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
+            const s = brand === 'OpenClaw'
               ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
               : { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
-            return <span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium" style={s}>{label}</span>
+            return <span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium" style={s}>{brand}</span>
           })()}
         </Stat>
       </div>
