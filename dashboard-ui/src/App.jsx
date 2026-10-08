@@ -847,11 +847,18 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   // selection. The server is the source of truth for the FIRST sync
   // only; after that, drafts are local until saved.
   const [ttsSynced, setTtsSynced] = useState(false)
+  // Flux knobs are sliders (2026-10-07): controlled, synced from the
+  // server exactly ONCE (same draft law — the 5s poll must not clobber
+  // a drag in progress); committed on Save via the same DOM read.
+  const [fluxSpeed, setFluxSpeed] = useState(1.0)
+  const [fluxExpr, setFluxExpr] = useState(1)
 
   useEffect(() => {
     if (tts && !ttsSynced) {
       setProvider(tts.provider || 'elevenlabs')
       setModel(tts.model || TTS_MODELS[tts.provider]?.[0]?.[0] || 'eleven_flash_v2_5')
+      setFluxSpeed(parseFloat(tts?.deepgram_flux_speed ?? 1.0))
+      setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
       setTtsSynced(true)
     }
   }, [tts, ttsSynced])
@@ -874,12 +881,10 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       body.deepgram_voice = model
     } else if (provider === 'deepgram-flux') {
       body.deepgram_flux_voice = model
-      // Flux knobs ride along — keep live-tuned values (1.3 speed on
-      // this rig); omitting them is also fine (None = leave as-is).
-      const speed = parseFloat(document.getElementById('tts-flux-speed')?.value)
-      const expr = parseInt(document.getElementById('tts-flux-expressivity')?.value, 10)
-      if (isFinite(speed)) body.deepgram_flux_speed = speed
-      if (isFinite(expr)) body.deepgram_flux_expressivity = expr
+      // Flux sliders ride along — live-tuned values from the controlled
+      // state (committed on Save; omitting them is also fine = leave as-is).
+      body.deepgram_flux_speed = parseFloat(fluxSpeed)
+      body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
     }
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
@@ -905,24 +910,24 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               onChange={e => setModel(e.target.value)}>
               {(TTS_MODELS[provider] || []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
             </select>
+            {provider === 'elevenlabs' &&
+              <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="Voice id (fq1S…)"
+                className={`${INPUT_CLS} w-[260px] font-mono`} />}
             {provider === 'deepgram-flux' && (
               <>
-                <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed (0.5–1.5)</span>
-                <input id="tts-flux-speed" type="number" min="0.5" max="1.5" step="0.05"
-                  defaultValue={tts?.deepgram_flux_speed ?? 1.0}
-                  className={`${INPUT_CLS} w-[120px] font-mono`} />
-                <span className="text-[12px] font-medium text-[var(--muted)]">expressivity (−2–2)</span>
-                <input id="tts-flux-expressivity" type="number" min="-2" max="2" step="1"
-                  defaultValue={tts?.deepgram_flux_expressivity ?? 1}
-                  className={`${INPUT_CLS} w-[120px] font-mono`} />
+                <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed</span>
+                <input id="tts-flux-speed" type="range" min="0.5" max="1.5" step="0.05"
+                  value={fluxSpeed} onChange={e => setFluxSpeed(parseFloat(e.target.value))}
+                  className="w-[140px] accent-[var(--accent)]" aria-label="Flux speed" />
+                <span className="font-mono text-[12px] w-[36px] text-right">{fluxSpeed.toFixed(2)}</span>
+                <span className="text-[12px] font-medium text-[var(--muted)]">expressivity</span>
+                <input id="tts-flux-expressivity" type="range" min="-2" max="2" step="1"
+                  value={fluxExpr} onChange={e => setFluxExpr(parseInt(e.target.value, 10))}
+                  className="w-[140px] accent-[var(--accent)]" aria-label="Flux expressivity" />
+                <span className="font-mono text-[12px] w-[20px] text-right">{fluxExpr}</span>
               </>
             )}
           </Field>
-          {provider === 'elevenlabs' &&
-            <Field label="Voice id">
-              <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="fq1S…"
-                className={`${INPUT_CLS} w-[280px] font-mono`} />
-            </Field>}
           <Field label="API key">
             <div className="flex items-center gap-2 flex-wrap">
               <input id="tts-key" type="password"
