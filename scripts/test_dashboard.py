@@ -1172,6 +1172,23 @@ def main():
             check("9b11 GET returns kind/agent/key_set",
                   _g.get("kind") == "openclaw" and _g.get("agent") == "suite-agent"
                   and "key_set" in _g, str(_g)[:120])
+            # (a2) per-kind URL memory: PUT files url under the kind; GET
+            # returns the recall map; switching kinds keeps each URL.
+            _r2 = client.put("/api/dashboard/intelligence", json={
+                "kind": "hermes", "url": "http://127.0.0.1:8642/v1"})
+            check("9b11b switch to hermes ok", _r2.status_code == 200, _r2.text[:120])
+            _brain9b = _yaml9.safe_load(
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+            check("9b11b urls map holds both kinds",
+                  _brain9b.get("url") == "http://127.0.0.1:8642/v1"
+                  and _brain9b.get("urls", {}).get("openclaw") == "http://127.0.0.1:18789/v1"
+                  and _brain9b.get("urls", {}).get("hermes") == "http://127.0.0.1:8642/v1",
+                  str(_brain9b.get("urls"))[:160])
+            _g2 = client.get("/api/dashboard/intelligence").json()
+            check("9b11b GET returns urls map", _g2.get("urls", {}).get("openclaw")
+                  == "http://127.0.0.1:18789/v1", str(_g2.get("urls"))[:120])
+            # restore kind for later checks
+            client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
 
             # (b) invalid kind / agent / url -> 422
             _bad = client.put("/api/dashboard/intelligence", json={"kind": "claude"})

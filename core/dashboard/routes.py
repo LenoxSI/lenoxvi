@@ -845,6 +845,12 @@ class IntelligencePayload(BaseModel):
     kind: str = Field(pattern="^(hermes|openclaw)$")
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+    # Per-kind URL memory (2026-10-08): the two brains live at different
+    # addresses (api_server 8642 vs OpenClaw Gateway 18789). kind and url
+    # arrive together; the route files url under the kind being saved so
+    # the UI can offer the right one back on switch. `url` itself stays
+    # the live value the agent reads — this map is recall, not truth.
+    urls: dict[str, str] | None = Field(default=None)
     agent: str | None = Field(default=None, min_length=1, max_length=64,
                               pattern=r"^[A-Za-z0-9_.-]+$")
 
@@ -866,8 +872,11 @@ async def get_intelligence():
     return {
         "kind": kind,
         "url": brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
+        "urls": brain_cfg.get("urls") or {},
         "agent": brain_cfg.get("agent"),
         "key_set": bool(_os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY")),
+        "key_kind": ("os_brain_key" if _os.getenv("LVI_BRAIN_KEY")
+                     else "os_hermes_key" if _os.getenv("LVI_HERMES_KEY") else None),
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
@@ -881,6 +890,17 @@ async def put_intelligence(payload: IntelligencePayload):
     current["kind"] = payload.kind
     if payload.url is not None:
         current["url"] = payload.url
+        # File the URL under the kind being saved (per-kind recall map).
+        urls = dict(current.get("urls") or {})
+        urls[payload.kind] = payload.url
+        current["urls"] = urls
+    if payload.urls is not None:
+        # UI may send the full recall map (it knows both kinds' URLs).
+        merged = dict(current.get("urls") or {})
+        for k, v in payload.urls.items():
+            if k in ("hermes", "openclaw") and isinstance(v, str) and v:
+                merged[k] = v
+        current["urls"] = merged
     if payload.agent is not None:
         current["agent"] = payload.agent
     if payload.kind == "openclaw" and not current.get("agent"):

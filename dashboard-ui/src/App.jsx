@@ -1105,19 +1105,33 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // the server exactly once (draft law); save still reads the DOM.
   const [intKind, setIntKind] = useState('hermes')
   const [intSynced, setIntSynced] = useState(false)
+  // Per-kind URL memory (2026-10-08): the two brains live at different
+  // addresses. When the user flips the provider, swap the URL field to
+  // that kind's remembered URL (if any) so a Save can't point the
+  // OpenClaw lane at the Hermes api_server or vice versa.
+  const urlMemory = useRef({})   // {hermes: url, openclaw: url}
+  const urlTouched = useRef(false)  // true once the user edits the URL box
   useEffect(() => {
     if (intelligence && !intSynced) {
       setIntKind(intelligence.kind || 'hermes')
+      urlMemory.current = intelligence.urls || {}
       setIntSynced(true)
     }
   }, [intelligence, intSynced])
+  const switchKind = (kind) => {
+    setIntKind(kind)
+    if (urlTouched.current) return  // user is mid-edit; don't stomp their text
+    const remembered = urlMemory.current[kind]
+    const urlEl = document.getElementById('int-url')
+    if (urlEl && remembered) urlEl.value = remembered
+  }
   return (
     <>
     <Section id="system" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Provider / API URL / agent">
-          <select id="int-kind" value={intKind} onChange={e => setIntKind(e.target.value)}
+          <select id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
             className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
@@ -1126,6 +1140,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           </select>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<brain-host>:8642/v1"
+            onInput={() => { urlTouched.current = true }}
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
           <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>
@@ -1140,7 +1155,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           <div className="flex items-center gap-2 flex-wrap flex-1">
             <input id="int-key" type="password" placeholder="paste key…"
               className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
-            {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
+            {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓ ({intelligence.key_kind === 'os_brain_key' ? 'LVI_BRAIN_KEY' : 'LVI_HERMES_KEY'})</span> : null}
           </div>
         </Field>
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1177,6 +1192,10 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
               const agent = document.getElementById('int-agent').value.trim()
               const body = { kind, url }
               if (kind === 'openclaw') body.agent = agent
+              // Ship the full per-kind recall map so the backend files
+              // the other kind's URL too (swap-on-switch memory).
+              const mem = { ...urlMemory.current, [kind]: url }
+              if (mem.hermes || mem.openclaw) body.urls = mem
               try {
                 await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
                 setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
