@@ -177,6 +177,20 @@ def main():
                    json={"room_zones": {"bedroom": "nonexistent_zone"}})
     check("mapping PUT rejects unknown zone", r.status_code == 400, f"status={r.status_code}")
 
+    # 7b. mapping-wipe guards (2026-10-07 bug: the React UI sent a BARE
+    # merged dict — no room_zones wrapper — and Pydantic's default_factory
+    # silently turned it into {} and the route wiped all mappings; three
+    # real wipes hit production config before these guards existed).
+    r = client.put("/api/dashboard/mapping", json={"bedroom": "Dining Room"})
+    check("unwrapped mapping PUT 422s (extra=forbid)",
+          r.status_code == 422, f"status={r.status_code} body={r.text[:200]}")
+    r = client.put("/api/dashboard/mapping", json={"room_zones": {}})
+    check("empty mapping PUT refused (wipe guard)",
+          r.status_code == 400, f"status={r.status_code} body={r.text[:200]}")
+    m = client.get("/api/dashboard/mapping").json()
+    check("mapping survived the two rejected PUTs", m["room_zones"] == {"bedroom": "Dining Room"},
+          f"room_zones={m['room_zones']}")
+
     # 8. REAL Sonos test clip on the REAL zone
     real_zones = m["zones"]
     # use the REAL configured zone (from the live config), not test_zone
