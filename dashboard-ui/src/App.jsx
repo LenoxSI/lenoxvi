@@ -605,9 +605,9 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
             <option value="sonos">sonos</option>
             <option value="wiim">wiim</option>
           </select>
-          <input className={`${INPUT_CLS} w-[150px] font-mono`} placeholder="ip"
+          <input className={`${INPUT_CLS} w-[185px] font-mono`} placeholder="ip"
             value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
-          <input className={`${INPUT_CLS} w-[230px] font-mono`} placeholder="RINCON_… (sonos only)"
+          <input className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… (sonos only)"
             value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
         </div>
         <div className="flex items-center justify-between gap-4 flex-wrap">
