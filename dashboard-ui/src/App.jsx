@@ -894,15 +894,13 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       <Section id="voice" title="TTS"
         note="One provider per install. ElevenLabs: flash v2.5 (fast) or v4 turbo (expressive). Deepgram Aura: aura-2 voices. Deepgram Flux: flux voices. API keys never render back after save.">
         <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-          <Field label="Provider">
+          <Field label="Provider / model">
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
               <option value="elevenlabs">ElevenLabs</option>
               <option value="deepgram">Deepgram Aura</option>
               <option value="deepgram-flux">Deepgram Flux</option>
             </select>
-          </Field>
-          <Field label="Model">
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => setModel(e.target.value)}>
               {(TTS_MODELS[provider] || []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
