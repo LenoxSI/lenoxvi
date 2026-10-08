@@ -532,7 +532,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
     try {
       await api('/api/dashboard/zones', { method: 'POST', json: {
         name: newZone.name, backend: newZone.backend,
-        ip: newZone.ip, player_uid: newZone.player_uid } })
+        ip: newZone.ip,
+        player_uid: newZone.backend === 'sonos' ? newZone.player_uid : '' } })
       setMsg(`Zone ${newZone.name} added — applies on next bot restart.`, 'ok', 'Zones')
       setNewZone({ name: '', backend: 'sonos', ip: '', player_uid: '' })
       reloadAll()
@@ -608,6 +609,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
           <input className={`${INPUT_CLS} w-[185px] font-mono`} placeholder="ip"
             value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
           <input className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… (sonos only)"
+            disabled={newZone.backend !== 'sonos'}
+            title={newZone.backend === 'sonos' ? 'Sonos RINCON player UID' : 'Sonos only — not used by WiiM zones'}
             value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
         </div>
         <div className="flex items-center justify-between gap-4 flex-wrap">
