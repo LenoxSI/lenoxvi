@@ -785,7 +785,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     <Section title="Wake word model"
       note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Active model">
+        <Field label="Active model / upload">
           <select className={`${INPUT_CLS} w-[260px]`} value={sel}
             onChange={e => setSel(e.target.value)}>
             {models.map(m => (
@@ -796,8 +796,6 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
             {models.length === 0 && <option value="">no models found</option>}
           </select>
           <button className={BTN_DEFAULT} onClick={select}>Set active</button>
-        </Field>
-        <Field label="Upload model (.onnx)">
           <input type="file" accept=".onnx" className="text-[13px]"
             onChange={e => setNewModel(e.target.files?.[0] || null)} />
           <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
