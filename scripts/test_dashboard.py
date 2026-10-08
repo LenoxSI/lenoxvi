@@ -523,26 +523,18 @@ def main():
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
     # Flex .bin there would be OTA'd by an array node (cross-flash).
-    import io as _io5b
     def _fake_image5b(ver: str) -> bytes:
         head = bytearray(b"\x00" * 256)
         head[32:36] = b"\x32\x54\xcd\xab"          # esp_app_desc magic
         head[48:80] = ver.encode().ljust(32, b"\x00")  # version string
         return bytes(head) + b"\x00" * (1024 * 200)  # over the size floor
 
-    class _UpFile5b:
-        def __init__(self, content, name):
-            self._c, self.filename = _io5b.BytesIO(content), name
-        async def read(self, n=-1):
-            return self._c.read(n)
-
     _saved_updir5b = os.getcwd()
     os.chdir(SCRATCH)  # uploads are relative to cwd; keep them in scratch
     try:
         # (a) flex-declared upload → firmware/flex/
         _r = client.post("/api/dashboard/firmware/upload",
-                         files={"file": (_UpFile5b(_fake_image5b("1.9.9"),
-                                                   "flex.bin"),
+                         files={"file": ("flex.bin", _fake_image5b("1.9.9"),
                                          "application/octet-stream")},
                          data={"track": "flex"})
         _j = _r.json()
@@ -554,16 +546,14 @@ def main():
               _r.text[:120])
         # (b) unknown track → honest 400
         _rb = client.post("/api/dashboard/firmware/upload",
-                          files={"file": (_UpFile5b(_fake_image5b("1.9.8"),
-                                                    "x.bin"),
+                          files={"file": ("x.bin", _fake_image5b("1.9.8"),
                                           "application/octet-stream")},
                           data={"track": "warp"})
         check("9b5b unknown track 400s (never a silent wrong dir)",
               _rb.status_code == 400, str(_rb.status_code))
         # (c) default (no track field) stays array — legacy callers safe
         _rc = client.post("/api/dashboard/firmware/upload",
-                          files={"file": (_UpFile5b(_fake_image5b("1.9.7"),
-                                                    "arr.bin"),
+                          files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
         _jc = _rc.json()
         check("9b5b default upload stays on the array track",
