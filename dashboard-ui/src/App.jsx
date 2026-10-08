@@ -487,7 +487,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
       </Section>
 
       <Section title="Nodes"
-        note="Firmware 1.1.0+ required for restart / rename / Wi-Fi over the air. Older firmware shows status only.">
+        note="">
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-[14px]">
             <thead>
