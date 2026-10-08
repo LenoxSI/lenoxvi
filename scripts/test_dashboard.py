@@ -1353,7 +1353,10 @@ def main():
                     return True
                 _routes9._write_env_key = _fake_wek_rec9
                 try:
-                    # kind currently openclaw (restored earlier in 9b11)
+                    # explicit kinds — earlier 9b11 blocks leave kind=hermes
+                    # in the throwaway config, so set each kind before its save
+                    client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw"})
                     client.put("/api/dashboard/intelligence/key",
                                json={"api_key": "suite-keymaterial-12345"})
                     client.put("/api/dashboard/intelligence",
@@ -1366,7 +1369,7 @@ def main():
                 finally:
                     _routes9._write_env_key = _fake_wek9
                     client.put("/api/dashboard/intelligence",
-                               json={"kind": "openclaw"})
+                               json={"kind": "hermes"})
             finally:
                 _routes9._write_env_key = _saved_wek9
 
