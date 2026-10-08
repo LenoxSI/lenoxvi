@@ -22,7 +22,7 @@ from os import getenv as _getenv
 import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from config import cfg, cfg_env
 
@@ -42,6 +42,11 @@ GUARD = [Depends(mutation_guard)]
 
 
 class MappingPayload(BaseModel):
+    # extra='forbid': an unwrapped dict (pre-2026-10-07 React bug) must
+    # 422 LOUDLY, never silently become room_zones={} via the default
+    # factory — that default was a silent-wipe landmine (three real
+    # wipes shipped to config.yaml before this guard existed).
+    model_config = ConfigDict(extra="forbid")
     room_zones: dict[str, str] = Field(default_factory=dict)
 
 
@@ -183,6 +188,14 @@ async def get_mapping():
 
 @router.put("/mapping", dependencies=GUARD)
 async def put_mapping(payload: MappingPayload):
+    # Belt-and-suspenders: an explicit empty mapping is never a legal
+    # dashboard save (the UI always saves at least one row). Refuse it
+    # so no client bug can ever wipe all mappings in one request.
+    if not payload.room_zones:
+        raise HTTPException(
+            status_code=400,
+            detail="refusing to wipe all room mappings — send the full room_zones dict",
+        )
     zones = _all_zones()
     # Validate BEFORE writing: every mapped zone must exist (either backend).
     bad = {r: z for r, z in payload.room_zones.items() if z not in zones}

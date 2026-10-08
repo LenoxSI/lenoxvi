@@ -403,9 +403,11 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   const saveMapping = async room => {
     const zone = mapDraft?.[room]
     if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
-    // PUT /mapping takes the FULL room_zones dict (MappingPayload) —
-    // a single {room, zone} pair 422s (route contract, routes.py:44).
-    const body = { ...(mapping?.room_zones || {}), [room]: zone }
+    // PUT /mapping takes the FULL room_zones dict WRAPPED in a
+    // room_zones key (MappingPayload contract, routes.py) — a bare
+    // merged dict 422s (or worse: pre-forbid, silently wiped the
+    // mapping via Pydantic's default_factory). Never unwrapped.
+    const body = { room_zones: { ...(mapping?.room_zones || {}), [room]: zone } }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
