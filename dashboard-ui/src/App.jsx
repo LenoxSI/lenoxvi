@@ -5,7 +5,7 @@
 // page.html used — routes are the contract, every shape verified
 // against the live rig (2026-10-07 bug audit, 8 findings).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
@@ -253,14 +253,17 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
   const [wifiPass, setWifiPass] = useState('')
   const [muted, setMuted] = useState(false)  // confirmed from the node's ack, never optimistic
+  const [muteBusy, setMuteBusy] = useState(false)
 
   // Refresh the button from the NODE's truth on every mount (2026-10-07):
   // component state dies on page refresh, but the node remembers its mute
   // state — the button must re-derive it, or "Muted" un-highlights and the
   // UI lies about a muted mic. One GET per mount, NOT per 5s poll (that
   // would spam the data channel). Older firmware omits 'muted' = false.
+  const askedRef = useRef(false)
   useEffect(() => {
-    if (!online) return
+    if (!online || askedRef.current) return
+    askedRef.current = true
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
       .then(r => { if (r?.ok) setMuted(!!r?.data?.muted) })
       .catch(() => {})
@@ -274,15 +277,16 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/${verb}`, { method: 'POST', json })
 
   const toggleMute = async () => {
-    setBusy('mute')
+    if (muteBusy) return
+    setMuteBusy(true)
     setMsg(`Toggling mute on ${room}…`, 'pulse', 'Nodes')
     try {
       const r = await post('mute', { mute: !muted })
       const now = !!(r?.data?.muted)
       setMuted(now)
       setMsg(`${room}: mic ${now ? 'MUTED — the node hears nothing' : 'live'}.`, 'ok', 'Nodes')
-      setBusy(null)
-    } catch (e) { setBusy(null); setMsg('Mute failed: ' + e.message, 'err', 'Nodes') }
+    } catch (e) { setMsg('Mute failed: ' + e.message, 'err', 'Nodes') }
+    finally { setMuteBusy(false) }
   }
 
   const restart = async () => {
@@ -350,10 +354,10 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
           onClick={restart} title="Reboot the node (~15s reconnect).">
           {busy === 'restart' ? 'Restarting…' : 'Restart'}
         </button>
-        <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy}
+        <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy || muteBusy}
           onClick={toggleMute}
           title={muted ? 'Mic is muted — click to unmute.' : 'Mute the mic (software — the node stops hearing). Firmware 1.1.0+.'}>
-          {busy === 'mute' ? '…' : muted ? 'Muted' : 'Mute'}
+          {muteBusy ? '…' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
           <>
