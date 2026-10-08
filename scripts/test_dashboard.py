@@ -239,7 +239,10 @@ def main():
         check("M11 shared clip server is a true singleton",
               _again is _cs and _cs._runner is _first_runner,
               f"first={_first_runner is not None} again-identity={_again is _cs}")
-        _raw = ClipServer(Path(tempfile.mkdtemp()), "127.0.0.1", _cs._port)
+        # raw double-bind on the SAME interface + port as the singleton
+        # (127.0.0.1 vs the LAN IP are different interfaces — no conflict;
+        # the first suite run "passed" the bind for that wrong reason)
+        _raw = ClipServer(Path(tempfile.mkdtemp()), _cs._host_ip, _cs._port)
         try:
             await _raw.start()
             check("M11 raw double-bind raises (no silent second server)", False,
@@ -284,8 +287,13 @@ def main():
         importlib.reload(_cfg_mod)
     # M14: zone DELETE with a dangling room mapping does ONE atomic
     # multi-section write (zone gone + mapping cleaned, same pass).
-    client.post("/api/dashboard/zones", json={
-        "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9"})
+    # player_uid is required by ZonePayload even for wiim (route ignores
+    # it for the wiim backend) — the first run omitted it and 422'd.
+    _r_add14 = client.post("/api/dashboard/zones", json={
+        "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9",
+        "player_uid": "RINCON_M14PROBE"})
+    check("M14 probe zone add ok",
+          _r_add14.status_code == 200, f"status={_r_add14.status_code} body={_r_add14.text[:120]}")
     client.put("/api/dashboard/mapping", json={
         "room_zones": {"m14_probe_room": "m14_probe_zone"}})
     _del = client.delete("/api/dashboard/zones/m14_probe_zone")
