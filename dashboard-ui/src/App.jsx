@@ -585,7 +585,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
 
   return (
     <Section title="Zones"
-      note="Sonos zones use the audioClip overlay (tested on S2 Port/Amp). WiiM zones play as main media — music stops while she talks. Volume sliders are live — the next clip in that zone plays at the set level, no restart.">
+      note="Sonos zones use the audioClip overlay. WiiM zones play as main media — music stops while talking on WiiM.">
       <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
         <table className="w-full text-[14px]">
           <thead>
