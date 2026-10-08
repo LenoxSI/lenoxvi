@@ -14,15 +14,34 @@
 #      it up on its next boot/reconnect
 #
 # Usage:
-#   ./scripts/deploy_firmware.sh              # patch bump
+#   ./scripts/deploy_firmware.sh              # patch bump, array track
 #   ./scripts/deploy_firmware.sh minor        # 1.0.1 -> 1.1.0
 #   ./scripts/deploy_firmware.sh --version 1.2.0
+#   ./scripts/deploy_firmware.sh --track flex # flex track (any bump args
+#                                             # work the same; binary is
+#                                             # built with XVF_OTA_TRACK=flex
+#                                             # and ships to firmware/flex/)
+# Track law (design note/034a): the array node (XVF3800 mic-array board) is
+# track "node" — legacy URLs /firmware/version + /firmware/<bin>, manifest
+# in firmware/node/. The flex node (reSpeaker Flex) is track "flex" —
+# /firmware/flex/*, manifest in firmware/flex/. NEVER stage a flex build
+# into firmware/node/ or vice versa: the other node would cross-flash
+# itself and boot the wrong hardware config.
 set -euo pipefail
 
 FW_REPO="${FW_REPO:-$HOME/projects/lenoxvi-firmware}"
 LVI_LOCAL="${LVI_LOCAL:-$HOME/projects/lenoxvi}"
 LVI_HOST="${LVI_HOST:-lenoxvi}"
-LVI_REMOTE_DIR="projects/lenoxvi/firmware/node"
+
+TRACK="node"
+if [ "${1:-}" = "--track" ]; then
+  TRACK="$2"; shift 2
+fi
+case "$TRACK" in
+  node) LVI_REMOTE_DIR="projects/lenoxvi/firmware/node"; OTA_TRACK_ENV="" ;;
+  flex) LVI_REMOTE_DIR="projects/lenoxvi/firmware/flex"; OTA_TRACK_ENV="flex" ;;
+  *) echo "FATAL: unknown track '$TRACK' (node|flex)"; exit 1 ;;
+esac
 
 WIFI_SSID="${WIFI_SSID:?must be set (your WiFi network name)}"
 WIFI_PASSWORD="${WIFI_PASSWORD:?must be set}"
@@ -30,21 +49,21 @@ PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:?must be set (e.g. https://<b
 PIPECAT_ROOM="${PIPECAT_ROOM:-lenoxvi}"
 
 # ── 1. Build ────────────────────────────────────────────────────────────────
-echo "==> building firmware"
+echo "==> building firmware (track: $TRACK)"
 cd "$FW_REPO"
 export IDF_PYTHON_ENV_PATH="$HOME/.espressif/python_env/idf5.3_py3.12_env"
 source "$HOME/esp-idf/export.sh" >/dev/null
 LOG_DATACHANNEL_MESSAGES= WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
 PIPECAT_SMALLWEBRTC_URL="$PIPECAT_SMALLWEBRTC_URL" PIPECAT_ROOM="$PIPECAT_ROOM" \
-idf.py build
+XVF_OTA_TRACK="$OTA_TRACK_ENV" idf.py build
 
 BIN="$FW_REPO/build/node_esp32.bin"
 [ -f "$BIN" ] || { echo "FATAL: $BIN missing after build"; exit 1; }
 BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 
 # ── 2. Version bump ────────────────────────────────────────────────────────
-VFILE="$LVI_LOCAL/firmware/node/version.json"
-mkdir -p "$LVI_LOCAL/firmware/node"
+VFILE="$LVI_LOCAL/firmware/$TRACK/version.json"
+mkdir -p "$LVI_LOCAL/firmware/$TRACK"
 if [ -f "$VFILE" ]; then
   CUR=$(python3 -c "import json;print(json.load(open('$VFILE'))['version'])")
 else
