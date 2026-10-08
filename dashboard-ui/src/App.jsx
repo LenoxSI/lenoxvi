@@ -585,7 +585,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
 
   return (
     <Section title="Zones"
-      note="Sonos zones use the audioClip overlay. WiiM zones play as main media — music stops while talking on WiiM.">
+      note="">
       <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
         <table className="w-full text-[14px]">
           <thead>
