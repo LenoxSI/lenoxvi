@@ -20,7 +20,7 @@ from pathlib import Path
 from os import getenv as _getenv
 
 import numpy as np
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1257,16 +1257,29 @@ async def oww_delete_model(name: str, source: str = ""):
 # ── firmware push (operator side of firmware_server.py) ─────────────
 
 @router.post("/firmware/upload", dependencies=GUARD)
-async def upload_firmware(file: UploadFile = File(...)):
+async def upload_firmware(
+    file: UploadFile = File(...),
+    track: str = Form("node"),
+):
     """Upload a firmware .bin; version comes from the image's embedded
     ESP app descriptor (magic 0xABCD5432 at byte 24; version string at
     byte 48, NUL-padded — measured against the real image 2026-09-29,
     same string the node self-reports via get_info). Manifest written
     atomically in the same step: no typed-version mismatch is
-    possible (manual version entry removed 2026-09-29)."""
+    possible (manual version entry removed 2026-09-29).
+
+    Track-aware (036 H-B): the uploader declares which hardware line
+    the image is for (node=array, flex=reSpeaker Flex); the image and
+    manifest land in that track's directory ONLY. The old route staged
+    every upload into firmware/node/ — a Flex .bin there gets OTA'd by
+    an array node and kills it (cross-flash, AGENTS.md law). A wrong
+    track is an honest 400, not a silent dead node."""
+    if track not in ("node", "flex"):
+        raise HTTPException(status_code=400,
+                            detail=f"unknown track '{track}' (node|array flex)")
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
-    dest_dir = Path("firmware/node")
+    dest_dir = Path(f"firmware/{track}")
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / "node_esp32.bin"  # fixed served name (manifest points here)
     size = 0
@@ -1301,11 +1314,14 @@ async def upload_firmware(file: UploadFile = File(...)):
         )
     tmp.replace(dest)  # validated: swap in atomically
     manifest = {"version": version, "filename": "node_esp32.bin"}
-    mpath = Path("firmware/node/version.json")
+    mpath = Path(f"firmware/{track}/version.json")
     mtmp = mpath.with_suffix(".json.tmp")
     mtmp.write_text(json.dumps(manifest, indent=2))
     mtmp.replace(mpath)
-    return {"ok": True, "filename": dest.name, "size": size, "version": version}
+    logger.info(f"dashboard: firmware {version} served on track '{track}' "
+                f"({size} bytes) — nodes on this track pick it up on next check")
+    return {"ok": True, "filename": dest.name, "size": size, "version": version,
+            "track": track}
 
 
 class FirmwareVersionPayload(BaseModel):

@@ -692,17 +692,19 @@ function VolSlider({ name, initial, onCommit }) {
 function FirmwarePanel({ status, setMsg, reloadAll }) {
   const [fwFile, setFwFile] = useState(null)
   const [pushing, setPushing] = useState(false)
+  const [fwTrack, setFwTrack] = useState('node')  // 036 H-B: which hardware line the .bin is for
 
   const push = async () => {
     if (!fwFile) { setMsg('Pick a .bin to push.', 'err', 'Firmware'); return }
     setPushing(true)
-    setMsg(`Uploading ${fwFile.name}…`, 'pulse', 'Firmware')
+    setMsg(`Uploading ${fwFile.name} to the ${fwTrack === 'flex' ? 'flex' : 'array'} track…`, 'pulse', 'Firmware')
     let upj = null
     try {
       const fd = new FormData()
       fd.append('file', fwFile, fwFile.name)
+      fd.append('track', fwTrack)
       upj = await api('/api/dashboard/firmware/upload', { method: 'POST', body: fd })
-      setMsg(`Firmware ${upj.version} served.`, 'ok', 'Firmware')
+      setMsg(`Firmware ${upj.version} served (${fwTrack === 'flex' ? 'flex' : 'array'} track).`, 'ok', 'Firmware')
     } catch (e) {
       setMsg('Firmware push failed: ' + e.message, 'err', 'Firmware')
       return
@@ -731,6 +733,13 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
       note="Push a firmware .bin — nodes pick it up over OTA on their next boot.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[12px] font-medium text-[var(--muted)]">Track</span>
+          <select className={`${INPUT_CLS} w-[120px]`} value={fwTrack}
+            onChange={e => setFwTrack(e.target.value)}
+            title="Which hardware line this .bin is for — the image and manifest go to that track's directory only. Cross-flashing the other line kills its node.">
+            <option value="node">array (node)</option>
+            <option value="flex">flex</option>
+          </select>
           <input type="file" accept=".bin" className="text-[13px]"
             onChange={e => setFwFile(e.target.files?.[0] || null)} />
           <button className={BTN_PRIMARY} disabled={pushing || !fwFile} onClick={push}>
