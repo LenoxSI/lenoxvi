@@ -1037,7 +1037,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
     <Section id="system" title="Intelligence"
       note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Provider">
+        <Field label="Provider / API URL / agent">
           <select id="int-kind" defaultValue={intelligence?.kind || 'hermes'}
             className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
@@ -1045,16 +1045,14 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <option value="claude" disabled>Claude — coming soon</option>
             <option value="openai" disabled>Custom OpenAI-compatible — coming soon</option>
           </select>
-        </Field>
-        <Field label="API URL">
+          <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<brain-host>:8642/v1"
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
-            className={`${INPUT_CLS} w-[320px] font-mono`} />
-        </Field>
-        <Field label="Agent">
+            className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
+          <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>
           <input id="int-agent" defaultValue={intelligence?.agent || ''} placeholder="lenoxvi-test"
             title="OpenClaw agent id — the model field becomes openclaw/<agent>."
-            className={`${INPUT_CLS} w-[220px] font-mono`} />
+            className={`${INPUT_CLS} w-[180px] font-mono`} />
         </Field>
         <Field label="API key">
           <div className="flex items-center gap-2 flex-wrap">
