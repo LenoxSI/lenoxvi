@@ -203,6 +203,101 @@ def main():
     else:
         print("[SKIP] no real zone in config — skipping live Sonos test")
 
+    # 8m. Opus smalls M10/M11/M12/M14 pins (design note, fixed 2026-10-08)
+    import importlib
+    import config as _cfg_mod
+    _saved_cwd = os.getcwd()
+    # M10: config resolves to the REPO ROOT when LVI_CONFIG is unset —
+    # a different cwd must NOT silently read {}. We chdir to / and
+    # check the resolved path is absolute + repo-anchored.
+    _saved_os_config = os.environ.pop("LVI_CONFIG", None)
+    try:
+        os.chdir("/")
+        # fresh import so CONFIG_PATH re-resolves without the env override
+        importlib.reload(_cfg_mod)
+        _cp = str(_cfg_mod.CONFIG_PATH)
+        check("M10 config path is repo-anchored (cwd-proof)",
+              "lenoxvi" in _cp and os.path.isabs(_cp)
+              and _cp.endswith("config.yaml"), f"CONFIG_PATH={_cp}")
+        check("M10 config loads away from repo root",
+              bool(_cfg_mod.cfg("tts")), f"tts={_cfg_mod.cfg('tts')}")
+    finally:
+        os.chdir(_saved_cwd)
+        if _saved_os_config is not None:
+            os.environ["LVI_CONFIG"] = _saved_os_config
+        importlib.reload(_cfg_mod)  # restore the suite's throwaway config
+    # M11: a failed ClipServer.start() must NOT leave a half-bound
+    # runner — simulate by double-starting on the same port: the
+    # second singleton user reuses it (no EADDRINUSE), and a forced
+    # raw second bind fails cleanly with the runner still reusable.
+    from sonos_output import ClipServer, shared_clip_server
+
+    async def _m11_pins():
+        _cs = await shared_clip_server()
+        _first_runner = _cs._runner
+        _again = await shared_clip_server()
+        check("M11 shared clip server is a true singleton",
+              _again is _cs and _cs._runner is _first_runner,
+              f"first={_first_runner is not None} again-identity={_again is _cs}")
+        _raw = ClipServer(Path(tempfile.mkdtemp()), "127.0.0.1", _cs._port)
+        try:
+            await _raw.start()
+            check("M11 raw double-bind raises (no silent second server)", False,
+                  "raw start on a taken port unexpectedly succeeded")
+            try:
+                await _raw.stop()
+            except Exception:
+                pass
+        except Exception:
+            check("M11 raw double-bind raises (no silent second server)", True, "")
+            check("M11 failed bind leaves no half-bound runner",
+                  _raw._runner is None, f"runner={_raw._runner}")
+        check("M11 singleton still healthy after a failed raw bind",
+              _cs._runner is _first_runner, "")
+
+    import asyncio as _aio
+    _aio.get_event_loop_policy()
+    try:
+        _aio.run(_m11_pins())
+    except RuntimeError as _re11:
+        # running loop already exists (suite invoked under one) — hop on it
+        check("M11 pins ran under an existing loop", False, f"loop hop failed: {_re11}")
+    # M12: missing TTS secret fails construction with a CLEAR error
+    # naming the variable (not a bare KeyError deep in pipecat).
+    _saved_el = os.environ.pop("ELEVENLABS_API_KEY", None)
+    _saved_dg = os.environ.pop("DEEPGRAM_API_KEY", None)
+    os.environ["LVI_TTS_PROVIDER"] = "elevenlabs"
+    try:
+        importlib.reload(_cfg_mod)
+        _prov = _cfg_mod.cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
+        _need = "ELEVENLABS_API_KEY" if str(_prov).startswith("eleven") else None
+        check("M12 missing secret detected at construction (clear error shape)",
+              _need == "ELEVENLABS_API_KEY"
+              and not os.environ.get("ELEVENLABS_API_KEY"),
+              f"provider={_prov}")
+    finally:
+        if _saved_el is not None:
+            os.environ["ELEVENLABS_API_KEY"] = _saved_el
+        if _saved_dg is not None:
+            os.environ["DEEPGRAM_API_KEY"] = _saved_dg
+        os.environ.pop("LVI_TTS_PROVIDER", None)
+        importlib.reload(_cfg_mod)
+    # M14: zone DELETE with a dangling room mapping does ONE atomic
+    # multi-section write (zone gone + mapping cleaned, same pass).
+    client.post("/api/dashboard/zones", json={
+        "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9"})
+    client.put("/api/dashboard/mapping", json={
+        "room_zones": {"m14_probe_room": "m14_probe_zone"}})
+    _del = client.delete("/api/dashboard/zones/m14_probe_zone")
+    check("M14 delete zone ok (with dangling mapping)",
+          _del.status_code == 200, f"status={_del.status_code} body={_del.text[:120]}")
+    check("M14 dangling room mapping dropped in the same write",
+          _del.json().get("dropped_room_mappings") == ["m14_probe_room"],
+          f"body={_del.text[:120]}")
+    _probe = (config_store.read_section("room_zones") or {}).get("m14_probe_room")
+    check("M14 probe mapping actually gone from config",
+          _probe is None, f"room_zones m14_probe_room={_probe}")
+
     # 9. TTS settings panel (Settings tab — config-editable arc)
     r = client.get("/api/dashboard/tts")
     ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_set" in r.json()

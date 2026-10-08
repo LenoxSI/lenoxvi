@@ -50,12 +50,25 @@ class ClipServer:
 
     async def start(self):
         self._dir.mkdir(parents=True, exist_ok=True)
-        app = web.Application()
+        # M11 (design note, fixed 2026-10-08): a bind failure (EADDRINUSE —
+        # stale process, suite re-entry, port conflict) must NOT leave a
+        # half-constructed runner behind: on the NEXT start() the
+        # singleton's _runner would look "set up" while nothing listens,
+        # and every clip URL 404s. Clean up fully before raising, so a
+        # retry starts from zero.
+        runner = web.AppRunner(app := web.Application(), access_log=None)
         app.router.add_static("/", self._dir, show_index=False)
-        self._runner = web.AppRunner(app, access_log=None)
-        await self._runner.setup()
-        site = web.TCPSite(self._runner, self._host_ip, self._port)
-        await site.start()
+        try:
+            await runner.setup()
+            site = web.TCPSite(runner, self._host_ip, self._port)
+            await site.start()
+        except Exception:
+            try:
+                await runner.cleanup()
+            except Exception:
+                pass
+            raise
+        self._runner = runner  # set ONLY after a successful bind
         logger.info(f"clip server on http://{self._host_ip}:{self._port}/")
 
     async def stop(self):

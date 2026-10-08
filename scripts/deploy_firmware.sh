@@ -62,6 +62,16 @@ BIN="$FW_REPO/build/node_esp32.bin"
 BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 
 # ── 2. Version bump ────────────────────────────────────────────────────────
+# M9 (design note, fixed 2026-10-08): the .bin EMBEDS its own version
+# (esp_app_desc_t, project(VERSION) at build time) — the binary is the
+# truth, this script's counter is not. We read the bin's version and
+# GATE on it: refuse to ship a build whose embedded version disagrees
+# with the manifest we're about to write. Kills the note-016 class
+# (manifest/binary mismatch = the node re-flashes the same fw every
+# boot) and the botched-bake class (forgot to bump CMakeLists — the
+# script used to silently ship the old version under a new number).
+BIN_VER=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" "$BIN")
+echo "==> binary self-reports version: ${BIN_VER:-<none>}"
 VFILE="$LVI_LOCAL/firmware/$TRACK/version.json"
 mkdir -p "$LVI_LOCAL/firmware/$TRACK"
 if [ -f "$VFILE" ]; then
@@ -95,6 +105,20 @@ cat > "$VFILE" <<EOF
 }
 EOF
 echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
+
+# ── M9 gate: the bin's embedded version MUST equal the manifest's ──────────
+# A mismatch means CMakeLists wasn't bumped (botched bake) or the build
+# picked up a stale artifact. Shipping it re-flashes the same firmware
+# every boot (design note) or mislabels a deploy. Either way: STOP.
+if [ -z "$BIN_VER" ]; then
+  echo "FATAL: no embedded version found in $BIN — not an lenoxvi app image?"; exit 1
+fi
+if [ "$BIN_VER" != "$NEW" ]; then
+  echo "FATAL: binary says $BIN_VER, manifest says $NEW."
+  echo "  Bump project(VERSION) in $FW_REPO/CMakeLists.txt to $NEW and rebuild"
+  echo "  (or pass --version $BIN_VER to ship what was actually built)."
+  exit 1
+fi
 
 # ── 3. Ship to the appliance host ──────────────────────────────────────────────────
 echo "==> copying firmware + manifest to $LVI_HOST"

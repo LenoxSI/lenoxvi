@@ -64,6 +64,20 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
     from config import cfg, cfg_env
 
+    # M12 (design note, fixed 2026-10-08): secrets are checked ONCE at
+    # pipeline construction with a clear error naming the provider and
+    # the .env variable — not a bare KeyError per TTS request. Same
+    # fail-loud law as the intelligence key: construction survives,
+    # the missing secret says its name.
+    tts_provider = str(cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "elevenlabs")
+    _need_secret = ("ELEVENLABS_API_KEY" if tts_provider.startswith("eleven")
+                    else "DEEPGRAM_API_KEY" if tts_provider.startswith("deepgram")
+                    else None)
+    if _need_secret and not os.environ.get(_need_secret):
+        raise RuntimeError(
+            f"tts.provider is {tts_provider!r} but {_need_secret} is not set — "
+            f"add it to .env (see .env.example). No TTS can be constructed.")
+
     stt = LocalWhisperSTTService(
         model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
         device=cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),

@@ -21,7 +21,14 @@ from pathlib import Path
 
 import yaml
 
-CONFIG_PATH = os.getenv("LVI_CONFIG", "config.yaml")
+# M10 (design note, fixed 2026-10-08): config.yaml lives at the REPO ROOT,
+# next to bot.py — never relative to whatever cwd the process happens
+# to run from. A relative "config.yaml" silently resolved to {} when
+# anything ran from another directory (the suite caught it via its own
+# LVI_CONFIG override; production never did — but systemd cwd drift or
+# an accidental `python core/...` invocation would have tripped it).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = os.getenv("LVI_CONFIG", str(_REPO_ROOT / "config.yaml"))
 
 
 @lru_cache(maxsize=1)

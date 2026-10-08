@@ -361,20 +361,29 @@ async def delete_zone(name: str):
             raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
         zones = _wiim_zones()
         del zones[name]
-        config_store.write_section("wiim", {**_wiim_cfg(), "zones": zones})
+        # M14: ONE atomic multi-section write — the old back-to-back
+        # write_section pair was non-atomic (crash between them left a
+        # deleted zone with dangling room mappings) and churned two
+        # backups. Sections dict preserves every OTHER key untouched.
+        sections = {"wiim": {**_wiim_cfg(), "zones": zones}}
     else:
         if name not in _zones():
             raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
         zones = _zones()
         del zones[name]
-        config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
-    # rooms mapped to a deleted zone become dangling — drop them too
+        sections = {"sonos": {**dict(cfg("sonos") or {}), "zones": zones}}
+    # rooms mapped to a deleted zone become dangling — drop them in the
+    # SAME write (they're a separate section, same atomic pass)
     mapping = dict(config_store.read_section("room_zones") or {})
     dangling = [r for r, z in mapping.items() if z == name]
     if dangling:
         for r in dangling:
             del mapping[r]
-        config_store.write_section("room_zones", mapping)
+        sections["room_zones"] = mapping
+    try:
+        config_store.write_sections(sections)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {"ok": True, "dropped_room_mappings": dangling, "backend": backend}
 
 

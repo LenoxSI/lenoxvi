@@ -71,6 +71,34 @@ def write_section(section: str, value: dict) -> dict:
     return {"before": before, "after": dict(value)}
 
 
+def write_sections(sections: dict) -> dict:
+    """M14 (design note, fixed 2026-10-08): write MULTIPLE sections in ONE
+    atomic pass — one backup, one tmp write, one cache refresh. The
+    zone-delete flow used to do two write_section calls back-to-back; a
+    crash between them left config.yaml with the zone gone but its
+    dangling room mappings still pointing at it (and two backups deep
+    of history churn). Callers that need the before/after diff read the
+    sections first via read_sections.
+    """
+    p = _path()
+    if not p.is_file():
+        raise FileNotFoundError(
+            f"{p} not found — copy config.example.yaml to config.yaml first"
+        )
+    data = _YAML.load(p.read_text()) or {}
+    before = {k: dict(data.get(k) or {}) for k in sections}
+    for section, value in sections.items():
+        if value:
+            data[section] = value
+        else:
+            data[section] = {}
+    _atomic_write(p, data)
+    for section in sections:
+        logger.info(f"config_store: rewrote '{section}' via dashboard "
+                    f"({len(sections[section])} entries, multi-section write)")
+    return {"before": before, "after": {k: dict(v) for k, v in sections.items()}}
+
+
 def _atomic_write(p: Path, data) -> None:
     backup = p.with_name(p.stem + ".backup" + p.suffix)
     if p.exists():
