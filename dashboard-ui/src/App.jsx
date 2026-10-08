@@ -210,7 +210,7 @@ function useActiveSection() {
 function Overview({ status, setMsg, setRebooting, rebooting }) {
   return (
     <Section id="overview" title="Overview"
-      note="Mic-room → speaker-zone voice assistant. LAN-only; no login by design. Config edits save to config.yaml and apply on the next bot restart."
+      note=""
       action={
         <button className={BTN_DANGER} disabled={rebooting}
           onClick={() => {
