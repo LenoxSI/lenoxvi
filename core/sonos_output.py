@@ -16,8 +16,8 @@ client keeps its audio while Sonos gets the same reply.
 LED ring (2026-09-30): this processor is the REAL-TIME speaking signal —
 it sits directly downstream of TTS, so TTSStarted/TTSStopped frames
 reach it the moment speech starts/ends, even while HermesAgent is
-blocked on a brain call (the wake gate's speaking view rides upstream
-frames, which stall behind the brain). Speaking LEDs go out on the
+blocked on an intelligence call (the wake gate's speaking view rides upstream
+frames, which stall behind the intelligence). Speaking LEDs go out on the
 pipeline-free led_state wire.
 """
 
@@ -197,11 +197,11 @@ class SonosOutput(FrameProcessor):
         self._echo_gate = echo_gate
         # Direct LED wire + the wake gate's state (bot.py wires both).
         # Speaking LEDs fire HERE, from real-time TTS frames — this
-        # processor sits downstream of the brain, so TTSStarted/
+        # processor sits downstream of the intelligence, so TTSStarted/
         # TTSStopped reach it the moment speech starts/ends even while
-        # HermesAgent is blocked on a brain call. The old speaking signal
+        # HermesAgent is blocked on an intelligence call. The old speaking signal
         # (BotStartedSpeakingFrame at the wake gate) rides upstream frames
-        # and stalled behind the brain (2026-09-30 12:23 incident).
+        # and stalled behind the intelligence (2026-09-30 12:23 incident).
         self._wake_gate = wake_gate
         self._led = led
         # Duck holder (2026-09-30): the audioClip duck only held while a
@@ -212,7 +212,7 @@ class SonosOutput(FrameProcessor):
         # hold a SILENCE clip loaded on the reply zone: same duck, no
         # sound. Reply clips replace it; refresh keeps it alive; gate
         # close cancels it and the music unducks. Polls the gate's live
-        # state — no pipeline frames, so a blocked brain can't stall it.
+        # state — no pipeline frames, so a blocked intelligence can't stall it.
         self._duck_while_awake = True  # set from config below, once sonos cfg is parsed
         self._duck_task = None
         self._duck_holding = False
@@ -429,7 +429,7 @@ class SonosOutput(FrameProcessor):
 
     async def _duck_holder_loop(self) -> None:
         """Eternal per-pipeline duck state machine. Polls the wake gate's
-        live state every 0.5s (no pipeline frames — immune to brain
+        live state every 0.5s (no pipeline frames — immune to intelligence
         stalls): idle→awake = connect to the wake room's zone and load the
         30s silence clip (the audioClip duck); awake = refresh at 24s so
         it never lapses, but never while her SPEECH is sounding (a load
@@ -819,7 +819,7 @@ class SonosOutput(FrameProcessor):
     def _schedule_end_of_speech(self, delay: float) -> None:
         """End-of-speaking LED fires `delay` seconds from now (clip
         duration + load margin). Loop-native timer: no pipeline frames, no
-        processors — can't be stalled by a blocked brain."""
+        processors — can't be stalled by a blocked intelligence."""
         self._cancel_end_of_speech()
         try:
             self._end_of_speech_timer = asyncio.get_running_loop().call_later(
@@ -839,7 +839,7 @@ class SonosOutput(FrameProcessor):
             return
         # Honest end state = the gate's LIVE state at the moment speech
         # stops sounding: purple while the turn lives on, dark when the
-        # gate already timed out mid-brain-call.
+        # gate already timed out mid-intelligence-call.
         gate_state = getattr(self._wake_gate, "state", None)
         state_val = getattr(gate_state, "value", gate_state)
         self._led.send("bot-stopped-speaking"

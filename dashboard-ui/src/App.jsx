@@ -1049,7 +1049,7 @@ const TUNING_FIELDS = [
   ['vad_min_volume', 'VAD min volume', 0.10, 0.90, 0.05,
     'Quiet-speech floor — the ignores-the-TV knob.'],
   ['lull_secs', 'Turn-end lull (s)', 0.2, 2.0, 0.1,
-    'Silence before your sentence flushes to the brain.'],
+    'Silence before your sentence flushes to the intelligence.'],
   ['dedup_window', 'Echo dedup window (s)', 2, 30, 1,
     'How long she suppresses re-hearing the same words off her own speakers.'],
 ]
@@ -1116,7 +1116,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // the server exactly once (draft law); save still reads the DOM.
   const [intKind, setIntKind] = useState('hermes')
   const [intSynced, setIntSynced] = useState(false)
-  // Per-kind URL memory (2026-10-08, 036 M-3): the two brains live at
+  // Per-kind URL memory (2026-10-08, 036 M-3): the two lanes live at
   // different addresses. The field carries a PER-KIND DRAFT — switching
   // kinds files the current text under the outgoing kind and loads the
   // incoming kind's draft (or empty). The old urlTouched latch never
@@ -1154,7 +1154,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <option value="openai" disabled>Custom OpenAI-compatible — coming soon</option>
           </select>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
-          <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<brain-host>:8642/v1"
+          <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<intelligence-host>:8642/v1"
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
           <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>

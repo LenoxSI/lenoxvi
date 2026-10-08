@@ -3,12 +3,12 @@
 Why this exists (2026-09-30 12:23 incident): LED messages used to ride
 the pipecat pipeline as OutputTransportMessageFrames pushed by the wake
 gate. A pipecat processor stalls frames in BOTH directions while it
-works — HermesAgent blocks 3-40s on brain calls — so every LED message
-queued behind the brain and arrived as one burst when it returned. The
+works — HermesAgent blocks 3-40s on intelligence calls — so every LED message
+queued behind the intelligence and arrived as one burst when it returned. The
 node's ring held stale purple through the whole "On it." -> answer gap
 (30s): the gate logged LOCKED at 12:24:16.938 for speech that actually
 started 12:23:47.286, and the oww-sleeping sent at 12:23:49.394 never
-reached the node until the brain returned.
+reached the node until the intelligence returned.
 
 The fix: send straight to the WebRTC connection via the output
 transport's send_message (SmallWebRTCClient.send_message ->
@@ -29,10 +29,10 @@ Who sends what (state ownership):
     speaking — it sits directly downstream of TTS, so TTSStarted/
     TTSStopped frames reach it the instant speech begins/ends, even
     while HermesAgent is blocked upstream (the filler "On it." proved
-    it: TTS generated and Sonos played at 12:23:47 while the brain
+    it: TTS generated and Sonos played at 12:23:47 while the intelligence
     ground on until 12:24:16). End-of-speech maps to the GATE's actual
     state: purple when the turn continues, dark when the gate already
-    timed out mid-brain-call.
+    timed out mid-intelligence-call.
 """
 
 from loguru import logger

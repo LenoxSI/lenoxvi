@@ -54,8 +54,8 @@ tts:
   # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
   # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
 
-# ── Brain (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
-brain:
+# ── Intelligence (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
+intelligence:
   kind: hermes          # hermes | openclaw | stub (stub = canned echo, bench only).
                         # openclaw = OpenClaw Gateway: model "openclaw/<agent>",
                         # x-openclaw-session-key for sticky rooms, no Hermes-only
@@ -64,21 +64,21 @@ brain:
   # kind: openclaw
   #   url: http://<openclaw-host>:18789/v1   # the Gateway (with /v1)
   #   agent: <your-agent-id>                 # e.g. lenoxvi-test
-  url: http://<brain-host>:8642/v1
+  url: http://<intelligence-host>:8642/v1
   model: hermes-agent
   max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards
                         # against runaway replies (the 16k-token
                         # degenerate reply incident, 2026-10-04)
   zone: <room-name>    # conversation tag prefix: voice-<zone>-<id>
   lull_secs: 0.6        # silence after speech before the turn flushes to the
-                        # brain; lower = snappier but risks clipping slow talkers
+                        # intelligence; lower = snappier but risks clipping slow talkers
   dedup_window: 10.0    # same utterance re-heard within this window = echo,
                         # dropped (the lull-timer double-fire fix)
-  # Tiered fillers: one line per latency tier so a slow brain turn doesn't
+  # Tiered fillers: one line per latency tier so a slow intelligence turn doesn't
   # go silent after the first ack. `after` = seconds from turn start.
   # Keep each line <2s spoken, >=3 words (echo containment), never
   # command-shaped. A flat string list still works = single ack tier at
-  # brain.filler_after_secs (default 3.0).
+  # intelligence.filler_after_secs (default 3.0).
   fillers:
     - after: 3.0
       lines: ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]

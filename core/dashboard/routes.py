@@ -67,11 +67,11 @@ class ZonePayload(BaseModel):
 def _intelligence_label() -> str:
     """Rig-facts label for the Intelligence line: 'OpenClaw · <agent>'
     or 'Hermes'. Resolved through the same cfg_env chain the agent uses."""
-    brain_cfg = config_store.read_section("brain") or {}
-    kind = str(cfg_env("brain", "kind", "LVI_BRAIN_KIND", brain_cfg.get("kind") or "hermes") or "hermes")
+    intelligence_cfg = config_store.read_section("intelligence") or {}
+    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or "hermes") or "hermes")
     if kind == "openclaw":
-        agent = str(cfg_env("brain", "agent", "LVI_BRAIN_AGENT",
-                            brain_cfg.get("agent") or "") or "")
+        agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT",
+                            intelligence_cfg.get("agent") or "") or "")
         return f"OpenClaw · {agent}" if agent else "OpenClaw"
     return "Hermes"
 
@@ -98,7 +98,9 @@ async def status():
                                 tts_cfg.get("provider") or "elevenlabs"),
         # Intelligence (design note): rig-facts label — same cfg_env chain
         # the agent reads, so the dashboard shows what will actually be
-        # constructed. "brain" never appears in the UI.
+        # constructed. Config section, env vars, and UI all say
+        # "intelligence" since the 2026-10-08 sweep — one name,
+        # everywhere (the owner's naming law).
         "intelligence": _intelligence_label(),
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
@@ -833,7 +835,7 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
     return {"ok": True, "api_key_set": True, "replaced": replaced}
 
 
-# ── Intelligence (Settings — brain provider picker; "brain" never UI) ──
+# ── Intelligence (Settings — provider picker) ──
 
 
 class IntelligencePayload(BaseModel):
@@ -845,7 +847,7 @@ class IntelligencePayload(BaseModel):
     kind: str = Field(pattern="^(hermes|openclaw)$")
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
-    # Per-kind URL memory (2026-10-08): the two brains live at different
+    # Per-kind URL memory (2026-10-08): the two lanes live at different
     # addresses (api_server 8642 vs OpenClaw Gateway 18789). kind and url
     # arrive together; the route files url under the kind being saved so
     # the UI can offer the right one back on switch. `url` itself stays
@@ -867,8 +869,8 @@ class IntelligenceKeyPayload(BaseModel):
 async def get_intelligence():
     """Current Intelligence config + key status. Never returns the key."""
     import os as _os
-    brain_cfg = config_store.read_section("brain") or {}
-    kind = brain_cfg.get("kind") or "hermes"
+    intelligence_cfg = config_store.read_section("intelligence") or {}
+    kind = intelligence_cfg.get("kind") or "hermes"
     # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (a fallback turned a missing key into a silent
@@ -876,9 +878,9 @@ async def get_intelligence():
     _kv = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
     return {
         "kind": kind,
-        "url": brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
-        "urls": brain_cfg.get("urls") or {},
-        "agent": brain_cfg.get("agent"),
+        "url": intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
+        "urls": intelligence_cfg.get("urls") or {},
+        "agent": intelligence_cfg.get("agent"),
         "key_set": bool(_os.getenv(_kv)),
         "key_kind": _kv.lower() if _os.getenv(_kv) else None,
         "note": "applies on the next bot restart (read at pipeline construction)",
@@ -887,10 +889,10 @@ async def get_intelligence():
 
 @router.put("/intelligence", dependencies=GUARD)
 async def put_intelligence(payload: IntelligencePayload):
-    """Write kind (+ url/agent when provided) to config.yaml (brain
+    """Write kind (+ url/agent when provided) to config.yaml (intelligence
     section) — read-merge-write, so fillers/max_tokens/lull always
     survive. Applies on the next bot restart."""
-    current = dict(config_store.read_section("brain") or {})
+    current = dict(config_store.read_section("intelligence") or {})
     current["kind"] = payload.kind
     if payload.url is not None:
         current["url"] = payload.url
@@ -901,7 +903,7 @@ async def put_intelligence(payload: IntelligencePayload):
     else:
         # Bare kind flip (036 M-3): restore THAT kind's remembered URL
         # when one exists — keeping the old kind's URL would point the
-        # new lane at the wrong brain (api_server vs Gateway).
+        # new lane at the wrong intelligence (api_server vs Gateway).
         remembered = (current.get("urls") or {}).get(payload.kind)
         if remembered:
             current["url"] = remembered
@@ -915,9 +917,9 @@ async def put_intelligence(payload: IntelligencePayload):
     if payload.agent is not None:
         current["agent"] = payload.agent
     if payload.kind == "openclaw" and not current.get("agent"):
-        raise HTTPException(status_code=422, detail="openclaw needs an agent id (brain.agent)")
+        raise HTTPException(status_code=422, detail="openclaw needs an agent id (intelligence.agent)")
     try:
-        config_store.write_section("brain", current)
+        config_store.write_section("intelligence", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     logger.info(f"dashboard: intelligence config saved (kind={payload.kind}) — applies on next restart")
@@ -927,19 +929,19 @@ async def put_intelligence(payload: IntelligencePayload):
 @router.put("/intelligence/key", dependencies=GUARD)
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
     """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law +
-    the 2026-10-08 naming law: each brain's key names what it is):
+    the 2026-10-08 naming law: each intelligence's key names what it is):
     hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — writing the
     variable the agent reads FIRST for that kind. Never echoed. Legacy
     fallbacks (LVI_BRAIN_KEY generic slot, cross-kind) keep old installs
     working either way."""
-    kind = (config_store.read_section("brain") or {}).get("kind") or "hermes"
+    kind = (config_store.read_section("intelligence") or {}).get("kind") or "hermes"
     var = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
     replaced = await _write_env_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
     return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind}
 
 
-def _intelligence_probe(brain_cfg: dict) -> dict:
+def _intelligence_probe(intelligence_cfg: dict) -> dict:
     """Synchronous connectivity probe run in a worker thread (event loop
     must never block on urllib). Probes the SAVED config: health endpoint,
     then one minimal chat completion through the exact request shape the
@@ -947,16 +949,15 @@ def _intelligence_probe(brain_cfg: dict) -> dict:
     import os as _os
     import urllib.request as _rq
     import urllib.error as _ue
-    kind = brain_cfg.get("kind") or "hermes"
-    url = (brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "").rstrip("/")
-    # Bug-7 law (2026-10-07): kind-aware key — same resolution order as
-    # hermes_agent (hermes → LVI_HERMES_KEY first; openclaw → LVI_BRAIN_KEY
-    # first). The old kind-blind pick sent the OpenClaw token to the
-    # Hermes api_server and 401'd live (the flip landmine's twin).
-    if kind == "hermes":
-        key = _os.getenv("LVI_HERMES_KEY") or _os.getenv("LVI_BRAIN_KEY") or ""
-    else:
-        key = _os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY") or ""
+    kind = intelligence_cfg.get("kind") or "hermes"
+    url = (intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "").rstrip("/")
+    # Key law (strict, 2026-10-08): each kind reads EXACTLY ONE variable —
+    # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
+    # fallback anywhere (this probe previously read the now-DELETED
+    # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
+    # caught in the 2026-10-08 brain→intelligence sweep).
+    _kv = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
+    key = _os.getenv(_kv) or ""
     if not url:
         return {"ok": False, "error": "no url configured"}
     if not key:
@@ -971,11 +972,11 @@ def _intelligence_probe(brain_cfg: dict) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"unreachable: {type(e).__name__}"}
     if kind == "openclaw":
-        model = "openclaw/" + (brain_cfg.get("agent") or "")
+        model = "openclaw/" + (intelligence_cfg.get("agent") or "")
         body = {"model": model, "stream": False, "max_tokens": 16,
                 "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
     else:
-        model = brain_cfg.get("model") or "hermes-agent"
+        model = intelligence_cfg.get("model") or "hermes-agent"
         body = {"model": model, "stream": False, "max_tokens": 16,
                 "conversation": "dashboard-test",
                 "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
@@ -1000,8 +1001,8 @@ def _intelligence_probe(brain_cfg: dict) -> dict:
 async def post_intelligence_test():
     """Test the SAVED Intelligence config end-to-end (health + one
     minimal chat completion). Runs the sync probe in a thread."""
-    brain_cfg = dict(config_store.read_section("brain") or {})
-    result = await asyncio.to_thread(_intelligence_probe, brain_cfg)
+    intelligence_cfg = dict(config_store.read_section("intelligence") or {})
+    result = await asyncio.to_thread(_intelligence_probe, intelligence_cfg)
     if result.get("ok"):
         logger.info(f"dashboard: intelligence test ok "
                     f"(latency {result.get('latency_ms')}ms)")
@@ -1070,8 +1071,8 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
     "wake_awake_timeout": ("wake", "awake_timeout"),
     "vad_confidence": ("vad", "confidence"),
     "vad_min_volume": ("vad", "min_volume"),
-    "lull_secs": ("brain", "lull_secs"),
-    "dedup_window": ("brain", "dedup_window"),
+    "lull_secs": ("intelligence", "lull_secs"),
+    "dedup_window": ("intelligence", "dedup_window"),
 }
 
 
@@ -1080,14 +1081,14 @@ async def get_voice_tuning():
     """Current wake/VAD/turn knob values for the Voice Tuning panel."""
     wake = config_store.read_section("wake") or {}
     vad = config_store.read_section("vad") or {}
-    brain = config_store.read_section("brain") or {}
+    intelligence = config_store.read_section("intelligence") or {}
     return {
         "wake_threshold": wake.get("threshold"),
         "wake_awake_timeout": wake.get("awake_timeout"),
         "vad_confidence": vad.get("confidence"),
         "vad_min_volume": vad.get("min_volume"),
-        "lull_secs": brain.get("lull_secs"),
-        "dedup_window": brain.get("dedup_window"),
+        "lull_secs": intelligence.get("lull_secs"),
+        "dedup_window": intelligence.get("dedup_window"),
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
@@ -1095,8 +1096,8 @@ async def get_voice_tuning():
 @router.put("/voice-tuning", dependencies=GUARD)
 async def put_voice_tuning(payload: VoiceTuningPayload):
     """Write the provided knobs; None fields are left untouched. Merges
-    into each target section (wake/vad/brain) — never replaces a section
-    wholesale, so brain.fillers/max_tokens etc. always survive."""
+    into each target section (wake/vad/intelligence) — never replaces a section
+    wholesale, so intelligence.fillers/max_tokens etc. always survive."""
     by_section: dict[str, dict] = {}
     for field, (section, key) in _TUNING_TARGETS.items():
         val = getattr(payload, field)

@@ -1,7 +1,7 @@
-"""Static brain stub for lenoxvi (bench/dev echo brain).
+"""Static intelligence stub for lenoxvi (bench/dev echo intelligence).
 
-Deterministic echo brain for bench and dev runs without the Hermes API
-(production uses HermesAgent via config.yaml brain.kind: hermes; the stub
+Deterministic echo intelligence for bench and dev runs without the Hermes API
+(production uses HermesAgent via config.yaml intelligence.kind: hermes; the stub
 is the code-default fallback when kind is unset).
 
 Frame timing (pipecat 1.11, segmented STT + VADProcessor):
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class StubBrain(FrameProcessor):
+class StubIntelligence(FrameProcessor):
     """Buffers user speech and emits a TTSSpeakFrame after an end-of-turn lull."""
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 6, echo_gate=None, **kwargs):
@@ -44,15 +44,15 @@ class StubBrain(FrameProcessor):
     def _reply(self, text: str) -> str:
         t = text.lower()
         if any(w in t for w in ("hello", "hi", "hey")):
-            return ("Hey! Stub brain here: audio round trip works — local GPU "
+            return ("Hey! Stub intelligence here: audio round trip works — local GPU "
                     "STT heard you and ElevenLabs is speaking this reply.")
         if "your name" in t or "who are you" in t:
-            return ("I'm the lenoxvi stub brain — the bench stand-in while the "
-                    "Hermes brain is unset in config.")
+            return ("I'm the lenoxvi stub intelligence — the bench stand-in while the "
+                    "Hermes intelligence is unset in config.")
         if any(w in t for w in ("bye", "goodbye", "good night")):
-            return "Later! Set brain.kind: hermes in config.yaml for the real brain."
-        return (f"You said: {text.strip()}. I'm the stub brain — set "
-                "brain.kind: hermes for the real one.")
+            return "Later! Set intelligence.kind: hermes in config.yaml for the real intelligence."
+        return (f"You said: {text.strip()}. I'm the stub intelligence — set "
+                "intelligence.kind: hermes for the real one.")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -65,7 +65,7 @@ class StubBrain(FrameProcessor):
                 if self._echo_gate and self._echo_gate.blocked():
                     # the mic heard the bot's own reply off the speakers —
                     # drop it or the stub replies to itself forever
-                    logger.debug(f"stub-brain: echo-gate dropped [{frame.text.strip()}]")
+                    logger.debug(f"stub-intelligence: echo-gate dropped [{frame.text.strip()}]")
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()
@@ -85,7 +85,7 @@ class StubBrain(FrameProcessor):
             self._history.append({"role": "user", "content": text})
             self._history.append({"role": "assistant", "content": reply})
             self._history = self._history[-self._max_history:]
-            logger.info(f"stub-brain: [{text}] -> [{reply}]")
+            logger.info(f"stub-intelligence: [{text}] -> [{reply}]")
             await self.push_frame(TTSSpeakFrame(text=reply))
 
         await self.push_frame(frame, direction)

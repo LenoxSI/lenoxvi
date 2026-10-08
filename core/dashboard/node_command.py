@@ -8,7 +8,7 @@ connection gets its own pipeline + transport; the OUTPUT TRANSPORT's
 send_message delivers on THAT node's data channel directly — no
 pipeline, no queues (M6, Opus review 2026-10-01). The old queue_frame
 path entered at the pipeline source and queued behind HermesAgent:
-a restart/scan during a 40s brain call 504'd. Same direct wire the LED
+a restart/scan during a 40s intelligence call 504'd. Same direct wire the LED
 messages use (led_state.LedSender).
 
 Liveness contract (design note zombie fix, ASYMMETRIC — docstring
@@ -34,7 +34,7 @@ _pending_lock = asyncio.Lock()
 
 def _send(out, payload: dict) -> bool:
     """Direct data-channel send via the output transport (M6): no
-    pipeline, no queue_frame — a blocked brain can't stall commands.
+    pipeline, no queue_frame — a blocked intelligence can't stall commands.
     Schedules the async send on the running loop; never raises."""
     import asyncio
 

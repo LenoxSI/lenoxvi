@@ -1,8 +1,8 @@
-"""lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> brain -> TTS.
+"""lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
 
 Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord "Hey Willow") ->
-Silero VAD -> local faster-whisper STT -> brain (HermesAgent via config.yaml
-brain.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
+Silero VAD -> local faster-whisper STT -> intelligence (HermesAgent via config.yaml
+intelligence.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
 (voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.
 
 Run on the appliance host from the repo root:
@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-from brain_stub import StubBrain
+from intelligence_stub import StubIntelligence
 from echo_gate import EchoGate
 from hermes_agent import HermesAgent
 from sonos_output import SonosOutput
@@ -210,9 +210,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # matched == "hermes", so kind: openclaw fell to the echo stub and
     # the owner got canned answers while the suite stayed green (9b11 tested
     # the agent directly, never the construction site).
-    brain = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode)
-             if cfg_env("brain", "kind", "LVI_BRAIN_KIND", "hermes") in ("hermes", "openclaw")
-             else StubBrain(echo_gate=gate))
+    intelligence = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode)
+             if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
+             else StubIntelligence(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes
     # VADParams directly; defaults match the old hardcodes.
@@ -229,7 +229,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
     # behind a blocked processor — HermesAgent holds the queue 3-40s on
-    # brain calls and every LED message used to arrive as one late burst
+    # intelligence calls and every LED message used to arrive as one late burst
     # (2026-09-30 12:23: the ring held stale purple through the whole
     # "On it." -> answer gap). One output transport, shared by the pipeline
     # and the LED wire; per-pipeline LedSender = per-node targeting free.
@@ -276,7 +276,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 *([wake_filter] if wake_filter else []),
                 VADProcessor(vad_analyzer=vad_analyzer),
                 stt,
-                brain,
+                intelligence,
                 tts,
                 # Per-zone backend dispatch (2026-10-04): BOTH output
                 # backends live in the pipeline; each reply is claimed by
@@ -315,7 +315,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         registry.mark_connected(client.pc_id)
         # M6: register the OUTPUT TRANSPORT (direct data-channel wire),
         # not the pipeline task — node commands must not queue behind a
-        # blocked brain. Same wire LedSender uses.
+        # blocked intelligence. Same wire LedSender uses.
         registry.register_sender(client.pc_id, out)
         logger.info("client connected")
 

@@ -21,21 +21,22 @@ harness — the dashboard's job is operating the rig, not talking to it.
 
 ## Layout
 
-- `bot.py` — pipecat pipeline: transport, wake gate, VAD, STT, brain, TTS, speaker out
+- `bot.py` — pipecat pipeline: transport, wake gate, VAD, STT, intelligence, TTS, speaker out
 - `core/` — the pieces the pipeline wires together
   - `wake_word.py` — openWakeWord gate + turn lock (IDLE/AWAKE/LOCKED;
     default awake window 15s, tunable via `wake.awake_timeout`)
     + 2-frame wake-word barge-in (`wake.barge_in`)
-  - `hermes_agent.py` — the intelligence agent (`brain.kind`):
+  - `hermes_agent.py` — the intelligence agent (`intelligence.kind`):
     `hermes` (Hermes API over LAN, bearer key) — **production runs
     this**; `openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`,
-    sticky rooms via `x-openclaw-session-key`) — the second brain;
-    `stub` — deterministic echo brain for bench/dev runs (the code
-    default when `brain.kind` is unset — a misconfigured deploy
-    answers with canned lines). Key resolution `LVI_BRAIN_KEY` →
-    `LVI_HERMES_KEY` fallback; a missing key fails the turn with a
-    clear message instead of bricking construction.
-  - `brain_stub.py` — the stub brain's implementation (canned lines)
+    sticky rooms via `x-openclaw-session-key`) — the second intelligence;
+    `stub` — deterministic echo intelligence for bench/dev runs (the code
+    default when `intelligence.kind` is unset — a misconfigured deploy
+    answers with canned lines). Keys are strict per-kind (naming law,
+    2026-10-08): `hermes` reads `LVI_HERMES_KEY`, `openclaw` reads
+    `LVI_OPENCLAW_KEY` — no cross-kind fallback; a missing key fails the
+    turn with a clear message instead of bricking construction.
+  - `intelligence_stub.py` — the stub intelligence's implementation (canned lines)
   - `stt_local.py` — faster-whisper large-v3-turbo on the GPU
   - `sonos_output.py` / `wiim_output.py` — replies as Sonos / WiiM
     audio overlays (S2 only, vol ~70; WiiM `setPlayerCmd` stop path)
@@ -68,7 +69,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
     CTranslate2, restart policy, SIGKILL-after-10s on hung WebRTC)
 - `config.example.yaml` — **the tuning surface template**: every
   behavior knob in one file (wake threshold/timeout/model/barge-in,
-  VAD params, STT/TTS/brain settings, Sonos/WiiM zones, brain
+  VAD params, STT/TTS/intelligence settings, Sonos/WiiM zones, intelligence
   lull/dedup, session modes). Copy to `config.yaml` (gitignored,
   per-machine) and edit. Precedence: `config.yaml` > `LVI_*` env var >
   code default (`core/config.py`). Secrets stay in `.env`. Edit +
@@ -119,7 +120,7 @@ material), test-probe ok/error paths.
    host IP)
 3. `.env` from `.env.example` — the secrets:
    `ELEVENLABS_API_KEY`, `LVI_TTS_VOICE_ID`, `LVI_HERMES_KEY` (or
-   `LVI_BRAIN_KEY` for the OpenClaw lane), `DEEPGRAM_API_KEY` (optional
+   `LVI_OPENCLAW_KEY` for the OpenClaw lane), `DEEPGRAM_API_KEY` (optional
    alternative provider)
 4. Wake-word model: a trained `.onnx` at repo root (gitignored — train
    your own with [openWakeWord], or set `wake.enabled: false` in

@@ -1,14 +1,14 @@
-"""hermes_agent — lenoxvi's real brain: the Hermes agent over the LAN API.
+"""hermes_agent — lenoxvi's real intelligence: the Hermes agent over the LAN API.
 
-Replaces brain_stub.py in the pipeline (Phase 3). Same turn shape — buffers
+Replaces intelligence_stub.py in the pipeline (Phase 3). Same turn shape — buffers
 user speech, waits for the end-of-turn lull, then gets a reply — but the reply
 comes from the Hermes API server (OpenAI-compatible, bearer auth) instead of a
 canned echo. The agent keeps its full toolset + memory; our system prompt
 layers voice-appropriate instructions on top (short, spoken-word replies).
 
-Config (config.yaml `brain:` section; .env holds the key only):
-    brain.url / brain.model / brain.zone / brain.lull_secs /
-    brain.dedup_window / brain.fillers — see config.example.yaml
+Config (config.yaml `intelligence:` section; .env holds the key only):
+    intelligence.url / intelligence.model / intelligence.zone / intelligence.lull_secs /
+    intelligence.dedup_window / intelligence.fillers — see config.example.yaml
     LVI_HERMES_KEY (.env) — the API server's bearer key
 """
 
@@ -28,7 +28,7 @@ from pathlib import Path
 # three times in ten seconds. One ack per wake window: after speaking it,
 # further supersedes inside this gap stay silent (the turn still
 # switches — only the announcement is muted). Re-armed on every fresh
-# turn. Config: brain.supersede_ack_gap / LVI_SUPERSEDE_ACK_GAP.
+# turn. Config: intelligence.supersede_ack_gap / LVI_SUPERSEDE_ACK_GAP.
 ACK_GAP = float(os.getenv("LVI_SUPERSEDE_ACK_GAP", "45"))
 
 from loguru import logger
@@ -64,7 +64,7 @@ def _strip_tags(text: str) -> str:
 
 
 # Tiered fillers (option B, 2026-10-03): one spoken line per latency tier so
-# a slow brain turn doesn't go silent after the first ack. Tool-heavy turns
+# a slow intelligence turn doesn't go silent after the first ack. Tool-heavy turns
 # measure 20-40s+ server-side (2026-09-15); the old single-filler design
 # spent its only line at 3s and left the rest as dead air.
 # Tier contract (every line, any pool):
@@ -72,11 +72,11 @@ def _strip_tags(text: str) -> str:
 #   - >=3 words so echo containment can catch the Sonos echo (the
 #     2026-09-15 double-fire lesson; 2-word "On it." is grandfathered —
 #     the echo gate covers its own playback window)
-#   - never command-shaped: a leaked filler reaches the brain as USER text
-# Config shape (brain.fillers) — tiered list (preferred):
+#   - never command-shaped: a leaked filler reaches the intelligence as USER text
+# Config shape (intelligence.fillers) — tiered list (preferred):
 #     - after: 3.0    # seconds from turn start, cumulative
 #       lines: [...]
-# A flat string list still works = single ack tier at brain.filler_after_secs
+# A flat string list still works = single ack tier at intelligence.filler_after_secs
 # (legacy configs keep behaving exactly as before). This default is the
 # fallback when config has no fillers key.
 _DEFAULT_TIERS = [
@@ -94,10 +94,10 @@ def _filler_tiers() -> list[tuple[float, list[str]]]:
     """Normalized filler tiers [(after_secs, [lines...]), ...], sorted.
 
     Accepts the tiered dict shape or a legacy flat string list (one ack
-    tier at brain.filler_after_secs); falls back to _DEFAULT_TIERS.
+    tier at intelligence.filler_after_secs); falls back to _DEFAULT_TIERS.
     """
     from config import cfg, cfg_env
-    raw = cfg("brain", "fillers")
+    raw = cfg("intelligence", "fillers")
     tiers: list[tuple[float, list[str]]] = []
     if isinstance(raw, list) and raw and isinstance(raw[0], dict):
         for t in raw:
@@ -111,7 +111,7 @@ def _filler_tiers() -> list[tuple[float, list[str]]]:
         tiers.sort(key=lambda x: x[0])
     elif isinstance(raw, list) and raw and all(isinstance(x, str) for x in raw):
         # legacy flat pool -> one ack tier (timing knob: filler_after_secs)
-        after = float(cfg_env("brain", "filler_after_secs", "LVI_FILLER_AFTER_SECS", 3.0) or 3.0)
+        after = float(cfg_env("intelligence", "filler_after_secs", "LVI_FILLER_AFTER_SECS", 3.0) or 3.0)
         tiers.append((after, [x.strip() for x in raw if x.strip()]))
     return tiers or _DEFAULT_TIERS
 
@@ -128,7 +128,7 @@ def _pick_filler(pool: list[str]) -> str:
 
 
 # Standalone wake-phrase transcriptions (the wake word repeated after the
-# gate opened — observed live 2026-09-15: "Hey Linux." went to the brain).
+# gate opened — observed live 2026-09-15: "Hey Linux." went to the intelligence).
 # If the utterance is just the wake phrase, it's not a command: drop it.
 _WAKE_PHRASE_RE = re.compile(
     r"^\s*(hey|ok|okay|hi)?\s*,?\s*(willow|linux|yellow)\s*[.!?]?\s*$", re.IGNORECASE
@@ -190,16 +190,16 @@ class HermesAgent(FrameProcessor):
         super().__init__(**kwargs)
         from config import cfg_env
 
-        self._url = cfg_env("brain", "url", "LVI_HERMES_URL", "http://<brain-host>:8642/v1")
-        # Intelligence lane (design note): brain.kind picks the request
+        self._url = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://<intelligence-host>:8642/v1")
+        # Intelligence lane (design note): intelligence.kind picks the request
         # shape. hermes = today's api_server contract; openclaw = OpenClaw
         # Gateway (model "openclaw/<agent>", x-openclaw-session-key, no
         # `conversation` field). The UI calls this "Intelligence" — the
-        # word "brain" never reaches the dashboard.
-        self._kind = str(cfg_env("brain", "kind", "LVI_BRAIN_KIND", "hermes") or "hermes").lower()
+        # word "intelligence" never reaches the dashboard.
+        self._kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").lower()
         self._agent = ""
         if self._kind == "openclaw":
-            self._agent = str(cfg_env("brain", "agent", "LVI_BRAIN_AGENT", "") or "")
+            self._agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", "") or "")
         # Key resolution (design note): LVI_BRAIN_KEY first, LVI_HERMES_KEY
         # fallback — zero migration for existing installs. Missing key is
         # NOT a construction brick (audit finding #4 class, the provider-
@@ -212,28 +212,28 @@ class HermesAgent(FrameProcessor):
         # wrong-token 401 outage instead of one honest error line
         # (fail-loud law, same as the mapping-wipe fix). Future lanes
         # follow the naming law: LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a
-        # lane's key names its brain, and it reads only its own.
+        # lane's key names its intelligence, and it reads only its own.
         _KEY_VAR = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
         self._key_var = _KEY_VAR.get(self._kind)
         self._key = (os.getenv(self._key_var)
                      if self._key_var else None)
         if not self._key and self._kind != "stub":
             logger.warning(
-                f"hermes_agent: no brain key set ({self._key_var}) "
+                f"hermes_agent: no intelligence key set ({self._key_var}) "
                 f"— kind={self._kind}; turns will fail until it is set")
-        self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
+        self._model = cfg_env("intelligence", "model", "LVI_HERMES_MODEL", "hermes-agent")
         # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
-        # brain request carried no max_tokens, so a runaway model loop
+        # intelligence request carried no max_tokens, so a runaway model loop
         # could monologue until the context window died (measured: one
         # 16,145-token reply "degenerated into garbage" mid-session).
         # ~300 tokens ≈ 220 words ≈ 90s of speech — generous for sass,
         # impossible for a runaway. Honored by every OpenAI-compat
         # endpoint (Hermes, Anthropic, OpenClaw — forward-compatible
-        # with the brain.kind arc). Config-gated per house law.
-        self._max_tokens = int(cfg_env("brain", "max_tokens", "LVI_BRAIN_MAX_TOKENS", 300) or 300)
+        # with the intelligence.kind arc). Config-gated per house law.
+        self._max_tokens = int(cfg_env("intelligence", "max_tokens", "LVI_INTELLIGENCE_MAX_TOKENS", 300) or 300)
         # Turn-shape tunables — the knobs closest to conversation UX. Same
         # precedence as every other knob: config.yaml > LVI_* env > default.
-        self._lull_secs = float(cfg_env("brain", "lull_secs", "LVI_LULL_SECS", lull_secs))
+        self._lull_secs = float(cfg_env("intelligence", "lull_secs", "LVI_LULL_SECS", lull_secs))
         self._max_history = max_history
         self._echo_gate = echo_gate
         self._buffer: list[str] = []
@@ -246,7 +246,7 @@ class HermesAgent(FrameProcessor):
         # bot is still speaking a slow reply).
         self._last_user_text: str = ""
         self._last_user_time: float = 0.0
-        self._dedup_window: float = float(cfg_env("brain", "dedup_window", "LVI_DEDUP_WINDOW", 10.0))
+        self._dedup_window: float = float(cfg_env("intelligence", "dedup_window", "LVI_DEDUP_WINDOW", 10.0))
         # B3 epoch turns (design note): one live turn per pipeline,
         # spawned as a background task; a new question supersedes.
         self._turn_task: asyncio.Task | None = None
@@ -289,7 +289,7 @@ class HermesAgent(FrameProcessor):
             # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
             self._conversation = os.getenv(
                 "LVI_CONVERSATION",
-                f"voice-{cfg_env('brain', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
+                f"voice-{cfg_env('intelligence', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
             )
         logger.info(f"hermes_agent: conversation '{self._conversation}'"
                     f"{' (sticky)' if self._sticky and room else ''}")
@@ -326,8 +326,8 @@ class HermesAgent(FrameProcessor):
         """
         if not self._key:
             raise RuntimeError(
-                f"no brain key set ({self._key_var}) — set it in .env "
-                f"(a lane's key names its brain; no cross-kind fallback)")
+                f"no intelligence key set ({self._key_var}) — set it in .env "
+                f"(a lane's key names its intelligence; no cross-kind fallback)")
         headers = {"Authorization": f"Bearer {self._key}",
                    "Content-Type": "application/json"}
         if self._kind == "openclaw":
@@ -368,7 +368,7 @@ class HermesAgent(FrameProcessor):
             # merge into ONE long-lived dashboard session per room and
             # fresh pipelines get one session per connection — both
             # visible and auditable. Requires API_SERVER_KEY on the
-            # brain (present on this install).
+            # intelligence (present on this install).
             headers["X-Hermes-Session-Key"] = self._conversation
         req = urllib.request.Request(
             f"{self._url}/chat/completions",
@@ -396,7 +396,7 @@ class HermesAgent(FrameProcessor):
         # the request's max_tokens (verified live: max_tokens:5 returned a
         # 360-char reply with finish_reason stop; api_server.py has zero
         # references). Real OpenAI-compat endpoints honor the field, but
-        # our PRIMARY brain doesn't — so the client enforces too. Char
+        # our PRIMARY intelligence doesn't — so the client enforces too. Char
         # budget ≈ 4 chars/token × max_tokens; truncate at the last word
         # boundary so she never mid-words the speaker.
         char_cap = self._max_tokens * 4
@@ -452,9 +452,9 @@ class HermesAgent(FrameProcessor):
                         self._last_user_text = text
                         self._last_user_time = now
                         # ── B3 epoch turns (design note) ──
-                        # The brain call runs as a BACKGROUND task; the
+                        # The intelligence call runs as a BACKGROUND task; the
                         # frame loop returns immediately and never
-                        # blocks on a slow brain (the 12:12 collision
+                        # blocks on a slow intelligence (the 12:12 collision
                         # and the 09-30 stuck-LED class share this root
                         # cause). A new question supersedes: old task
                         # cancelled, its late reply discarded by the
@@ -478,7 +478,7 @@ class HermesAgent(FrameProcessor):
                             self._run_turn(text, epoch))
                         if superseded:
                             from config import cfg_env as _cfg_env
-                            ack = str(_cfg_env("brain", "supersede_ack",
+                            ack = str(_cfg_env("intelligence", "supersede_ack",
                                                "LVI_SUPERSEDE_ACK",
                                                "Hold on — switching.") or "")
                             now_ack = time.monotonic()
@@ -507,7 +507,7 @@ class HermesAgent(FrameProcessor):
         checks the epoch — a superseded turn discards its reply, skips
         the history write, and dies quietly. CancelledError propagates
         (task.cancel from the supersede path); everything else is the H3
-        broad-catch: the user never gets dead silence on a brain failure."""
+        broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
         try:
             ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
@@ -538,14 +538,14 @@ class HermesAgent(FrameProcessor):
                             f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
                         )
             if reply is None:
-                # every tier spent, brain still working — wait it out
+                # every tier spent, intelligence still working — wait it out
                 reply = await ask
             if epoch != self._turn_epoch:
                 return  # superseded while thinking — discard, no history
             reply = _strip_tags(reply)
             self._echo_texts.append(reply)
             self._echo_texts = self._echo_texts[-4:]
-            # A failed call never reached the brain — don't write the
+            # A failed call never reached the intelligence — don't write the
             # exchange into server-side history (Opus rider).
             if not failed:
                 self._history.append({"role": "user", "content": text})
@@ -559,13 +559,13 @@ class HermesAgent(FrameProcessor):
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
         except Exception as e:
-            # H3 (Opus review 2026-09-30): the brain can fail at ANY
+            # H3 (Opus review 2026-09-30): the intelligence can fail at ANY
             # point; ONE broad catch guards the whole turn — the last
             # defense before user-facing silence. A superseded turn that
             # fails is still superseded: no history write either way.
-            logger.error(f"hermes_agent: brain call failed"
+            logger.error(f"hermes_agent: intelligence call failed"
                          f"{' after filler' if filler_spoken else ''}: {e}")
             if epoch != self._turn_epoch:
                 return
             await self.push_frame(
-                TTSSpeakFrame(text="Sorry — I can't reach my brain right now."))
+                TTSSpeakFrame(text="Sorry — I can't reach my intelligence right now."))

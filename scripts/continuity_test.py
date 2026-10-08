@@ -14,12 +14,12 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-# URL from the same config surface the bot uses (config.yaml brain.url >
+# URL from the same config surface the bot uses (config.yaml intelligence.url >
 # LVI_HERMES_URL env), not env-only — .env is secrets-only by rule.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 from config import cfg_env
 
-URL = cfg_env("brain", "url", "LVI_HERMES_URL", "http://localhost:8642/v1") + "/chat/completions"
+URL = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://localhost:8642/v1") + "/chat/completions"
 KEY = os.environ["LVI_HERMES_KEY"]
 SYSTEM = ("You are the house voice assistant. Keep replies SHORT and "
           "conversational, no markdown.")

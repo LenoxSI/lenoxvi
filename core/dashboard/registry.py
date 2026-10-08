@@ -216,7 +216,7 @@ def sender_for_room(room: str):
     """(output_transport, pc_id) for the node currently connected in
     `room`, or (None, None). The output transport sends on that node's
     data channel DIRECTLY (send_message — no pipeline, M6 2026-10-01):
-    commands must not queue behind a blocked brain (same stall class
+    commands must not queue behind a blocked intelligence (same stall class
     as the LED fix, Opus review M6). LAST match wins: with eviction
     there's at most one, but if a stale mapping ever survives, the
     newest session is the one that can actually hear us."""
@@ -240,7 +240,7 @@ def register_sender(pc_id: str, out) -> None:
     """bot.py hands the OUTPUT TRANSPORT over at connect so node_command
     can send on that node's data channel without touching the pipeline
     (M6: queue_frame enters at the pipeline source and queues behind a
-    blocked HermesAgent — restart/scan 504'd during 40s brain calls)."""
+    blocked HermesAgent — restart/scan 504'd during 40s intelligence calls)."""
     _out_by_pc[pc_id] = out
 
 

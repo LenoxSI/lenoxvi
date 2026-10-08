@@ -448,7 +448,7 @@ def main():
           f"wired={_wired} (dispatch must be reply-time, not build-time)")
     check("bot.py: no build-time ternary picks the backend (23:22 outage shape)",
           not _conditional, f"conditional={_conditional}")
-    # 9b11 rider (the 20:56 stub incident): the brain construction ternary
+    # 9b11 rider (the 20:56 stub incident): the intelligence construction ternary
     # must route BOTH live kinds (hermes, openclaw) to HermesAgent — a
     # kind the ternary doesn't know falls to the echo stub silently while
     # every agent-level suite check stays green. The dispatch is the
@@ -457,14 +457,14 @@ def main():
     for _n in _ast.walk(_tree):
         if isinstance(_n, _ast.Assign) and isinstance(_n.value, _ast.IfExp) \
                 and _n.targets and isinstance(_n.targets[0], _ast.Name) \
-                and _n.targets[0].id == "brain":
+                and _n.targets[0].id == "intelligence":
             _brain_exp = _n.value
     _routes_live_kinds = False
     if _brain_exp is not None:
         for _sub in _ast.walk(_brain_exp.test):
             if isinstance(_sub, _ast.Constant) and _sub.value in ("hermes", "openclaw"):
                 _routes_live_kinds = True
-    check("bot.py: brain dispatch routes hermes AND openclaw to the real agent",
+    check("bot.py: intelligence dispatch routes hermes AND openclaw to the real agent",
           _routes_live_kinds, "construction ternary must accept both live kinds")
     # The skip mechanism, both directions, against the throwaway config
     # (sonos zones: Dining Room/Living Room; wiim zone: Master Bedroom).
@@ -656,11 +656,11 @@ def main():
     r = client.put("/api/dashboard/voice-tuning", json={})
     check("tuning PUT with no knobs rejected (422)", r.status_code == 422, f"status={r.status_code}")
     # CRITICAL (the filler-clobber lesson): tuning writes MERGE into the
-    # brain section — max_tokens + fillers must survive untouched.
-    brain_after = config_store.read_section("brain") or {}
-    check("tuning write preserves brain.max_tokens (merge, not replace)",
-          brain_after.get("max_tokens") == 300, f"brain keys={sorted(brain_after)}")
-    check("tuning write preserves brain.fillers (merge, not replace)",
+    # intelligence section — max_tokens + fillers must survive untouched.
+    brain_after = config_store.read_section("intelligence") or {}
+    check("tuning write preserves intelligence.max_tokens (merge, not replace)",
+          brain_after.get("max_tokens") == 300, f"intelligence keys={sorted(brain_after)}")
+    check("tuning write preserves intelligence.fillers (merge, not replace)",
           isinstance(brain_after.get("fillers"), list) and len(brain_after["fillers"]) == 2,
           f"fillers={str(brain_after.get('fillers'))[:80]}")
     wake_after = config_store.read_section("wake") or {}
@@ -892,7 +892,7 @@ def main():
         del os.environ["LVI_DASHBOARD_TOKEN"]
 
     # 9b8. B3 epoch turns + wake-word barge-in (design note): turns
-    # run as background tasks (frame loop never blocks on the brain), a
+    # run as background tasks (frame loop never blocks on the intelligence), a
     # new question supersedes (old reply discarded, no history write,
     # ack spoken), and "Hey Willow" twice-confirmed during LOCKED fires
     # the interrupt + reopens the gate; backends stop their clips.
@@ -960,7 +960,7 @@ def main():
 
         try:
             _agent, _block_time = _asyncio.run(_agent_probe())
-            check("9b8 turn: frame loop never blocks on the brain (was 2.5s)",
+            check("9b8 turn: frame loop never blocks on the intelligence (was 2.5s)",
                   _block_time < 0.5, f"blocked={_block_time:.2f}s")
             check("9b8 turn: superseded reply never spoken (stale question dropped)",
                   not any("weather" in s for s in _SPOKEN8),
@@ -1218,7 +1218,7 @@ def main():
                   _stop_rem <= 0.6, f"remaining={_stop_rem:.2f}s")
 
             # 9b11. Intelligence lane (design note): config round-trip
-            # preserves brain.fillers (merge law), lane dispatch shapes
+            # preserves intelligence.fillers (merge law), lane dispatch shapes
             # per kind, key fallback order + no-KeyError, key POST never
             # echoes material, test probe ok/error paths.
             import io as _io9
@@ -1232,7 +1232,7 @@ def main():
             check("9b11 PUT ok", _r.status_code == 200, _r.text[:120])
             import yaml as _yaml9
             _brain9 = _yaml9.safe_load(
-                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
             check("9b11 PUT writes kind/url/agent",
                   _brain9.get("kind") == "openclaw"
                   and _brain9.get("url") == "http://127.0.0.1:18789/v1"
@@ -1251,7 +1251,7 @@ def main():
                 "kind": "hermes", "url": "http://127.0.0.1:8642/v1"})
             check("9b11b switch to hermes ok", _r2.status_code == 200, _r2.text[:120])
             _brain9b = _yaml9.safe_load(
-                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
             check("9b11b urls map holds both kinds",
                   _brain9b.get("url") == "http://127.0.0.1:8642/v1"
                   and _brain9b.get("urls", {}).get("openclaw") == "http://127.0.0.1:18789/v1"
@@ -1262,10 +1262,10 @@ def main():
                   == "http://127.0.0.1:18789/v1", str(_g2.get("urls"))[:120])
             # Bare kind flip (036 M-3): no url in the payload — the route
             # must restore THAT kind's remembered URL, not keep the other
-            # kind's (which would point the lane at the wrong brain).
+            # kind's (which would point the lane at the wrong intelligence).
             _r3 = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
             _brain9c = _yaml9.safe_load(
-                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
             check("9b11b bare kind flip restores that kind's remembered URL",
                   _brain9c.get("url") == "http://127.0.0.1:18789/v1",
                   f"url={_brain9c.get('url')}")
@@ -1304,7 +1304,7 @@ def main():
             _saved_hk9 = _os.environ.get("LVI_HERMES_KEY")
             _saved_ok9 = _os.environ.get("LVI_OPENCLAW_KEY")
             try:
-                _os.environ["LVI_BRAIN_KEY"] = "suite-brain-key-not-real"
+                _os.environ["LVI_BRAIN_KEY"] = "suite-intelligence-key-not-real"
                 _os.environ["LVI_HERMES_KEY"] = "suite-hermes-key-not-real"
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 for mod_name in ("hermes_agent",):
@@ -1330,7 +1330,7 @@ def main():
                 # strict key law (2026-10-08): NO cross-kind fallback —
                 # without LVI_OPENCLAW_KEY the openclaw lane must fail with
                 # a clear error naming its OWN variable, never silently
-                # auth with another brain's token (tonight's 401 lesson).
+                # auth with another intelligence's token (tonight's 401 lesson).
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
                 for mod_name in ("hermes_agent",):
                     if mod_name in sys.modules:
@@ -1388,7 +1388,7 @@ def main():
                         check("9b11 no-key: ask raises (not success)", False, "no raise")
                     except RuntimeError as _e9:
                         check("9b11 no-key: RuntimeError with a clear message",
-                              "no brain key" in str(_e9).lower(), str(_e9))
+                              "no intelligence key" in str(_e9).lower(), str(_e9))
                     except KeyError as _e9:
                         check("9b11 no-key: RuntimeError with a clear message",
                               False, f"KeyError brick: {_e9}")

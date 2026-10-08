@@ -2,12 +2,12 @@
 
 Sits FIRST in the pipeline (before VAD/STT) and gates AUDIO, not
 transcriptions: in IDLE/LOCKED the audio never reaches STT, so the GPU
-doesn't transcribe chatter and nothing can reach the brain. The wake
+doesn't transcribe chatter and nothing can reach the intelligence. The wake
 listener itself always hears everything.
 
 Turn semantics (plan of record, 2026-09-15):
 - IDLE: audio feeds OWW only. "Hey Willow" (score >= threshold) -> AWAKE.
-- AWAKE: audio flows to VAD/STT (the brain works normally). Falls back to
+- AWAKE: audio flows to VAD/STT (the intelligence works normally). Falls back to
   IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity.
 - LOCKED: bot speaking. STT is gated; the wake listener is still fed
   (since 2026-09-19 — starving OWW mid-turn caused false rewakes) but its
@@ -69,7 +69,7 @@ class WakeWordFilter(FrameProcessor):
 
         super().__init__(**kwargs)
         # Direct LED wire (led_state.LedSender): wake/sleep notifications
-        # must NOT ride the pipeline — they stall behind a blocked brain
+        # must NOT ride the pipeline — they stall behind a blocked intelligence
         # (2026-09-30 12:23: oww-sleeping sat 27s in the queue while the
         # node's ring held stale purple). None = no LED (tests/rig).
         self._led = led
@@ -150,7 +150,7 @@ class WakeWordFilter(FrameProcessor):
     def state(self) -> "TurnState":
         """Current gate state — SonosOutput reads this at end-of-speech to
         pick the honest LED (purple while the turn lives, dark when the
-        gate already timed out mid-brain-call)."""
+        gate already timed out mid-intelligence-call)."""
         return self._state
 
     def note_speech(self, seconds: float) -> None:
@@ -335,7 +335,7 @@ class WakeWordFilter(FrameProcessor):
             logger.debug("wake_word: LOCKED (bot speaking)")
             # Speaking LED now fires from SonosOutput's real-time TTS
             # frames (led_state direct wire) — this frame itself arrives
-            # late when the brain stalls the pipeline, so the gate is the
+            # late when the intelligence stalls the pipeline, so the gate is the
             # wrong place to notify the ring.
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._state = TurnState.AWAKE
