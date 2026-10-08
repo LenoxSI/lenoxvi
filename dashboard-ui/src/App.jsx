@@ -226,7 +226,6 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
         <Stat label="Nodes online">
           {status ? `${status.rooms.filter(r => r.online).length}/${status.rooms.length}` : '—'}
         </Stat>
-        <Stat label="Active room">{esc(status?.active_room) || '—'}</Stat>
         <Stat label="Last wake">
           {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
         </Stat>
