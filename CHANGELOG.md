@@ -8,6 +8,81 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-07 — HeroUI dashboard + node two (Flex)
+
+The dashboard becomes a React app, and lenoxvi gets its second mic node.
+Both live-proven on the house rig the same day they shipped.
+
+### Added — HeroUI dashboard (replaces legacy page.html)
+- React + Vite + Tailwind v4 + HeroUI v3 single-page dashboard
+  (`dashboard-ui/`), built on the LenoxVI design kit; prebuilt `dist/`
+  committed so a fresh clone needs zero node toolchain. Wireframe-C
+  single page: Overview, Rooms, Nodes, Zones, Voice (TTS + tuning),
+  Wake word model, Intelligence, Firmware (design note).
+- Common message strip — every section's status/error/success renders
+  in one header area with explicit owner labels (no more int-msg debug
+  output in the strip).
+- Node row actions (inline forms, no `prompt()`): Restart (confirm-
+  gated), Rename (pattern-validated), Wi-Fi (scan → RSSI-sorted SSID
+  list → password → apply; auto-rollback on bad password). All
+  online-gated; firmware 1.1.0+ required.
+- Firmware upload panel ported (multipart POST, version read from the
+  image's ESP app descriptor, atomic manifest write, optional
+  per-node restart nudge) — the last legacy-page feature.
+- Zones: add-zone form with Sonos/WiiM backend pick, Discover Sonos
+  on LAN, per-zone volume sliders (live override — next clip, no
+  restart), per-row test + remove.
+- Statusbar duplicate-reconnect fix: last-good facts are kept during
+  restart countdown; NET chatter no longer duplicates the line.
+- Dashboard suite pins the new contracts (9b series through 9b11;
+  mapping-wipe guards included).
+
+### Fixed — dashboard correctness (audit + live finds)
+- Mapping wipe: the React save sent a BARE merged dict (no
+  `room_zones` wrapper) — Pydantic's `default_factory` silently
+  turned it into `{}` and the route wiped all mappings; three real
+  wipes hit production config (2 user saves, 1 test harness). Fix at
+  three layers: UI wraps the body; `MappingPayload` is
+  `extra="forbid"` (unwrapped = loud 422); the route refuses an
+  explicit empty `room_zones` (400). Suite pins both guards.
+- Room mappings are LIVE — the bot reads `room_zones` per reply and
+  the dashboard write clears the config cache in-process; the
+  "applies on next bot restart" message was stale copy. UI now says
+  the truth.
+- Kind-aware brain key resolution: the hermes lane auths with
+  `LVI_HERMES_KEY`, the openclaw lane with `LVI_BRAIN_KEY` — a kind
+  flip can no longer cross tokens (bug-7 landmine; suite 9b11 pins
+  both lanes). Same fix in the intelligence probe.
+- Intelligence test button renders the body's `ok` field, never the
+  HTTP status (the route answers 200 with `{ok: false}` on failure —
+  caught live when the strip said "✓ ok" while the backend logged
+  401).
+- Supersede ack rate-limited: one "Hold on — switching." per wake
+  window (`brain.supersede_ack_gap`, default 45s, re-armed on fresh
+  turns) — a two-person math session triple-fired it in 10s.
+- TTS provider switch sent a stale elevenlabs model string under
+  deepgram (the Pydantic pattern correctly 422'd it) — provider-
+  aware body restored; Flux speed/expressivity UI restored.
+
+### Added — node two: reSpeaker Flex (room-a)
+- Second mic node live end-to-end: wake score 1.00, whisper
+  transcription, brain reply, zone playback — multi-turn with
+  conversation memory, from across the room (2026-10-07 21:48).
+- New firmware track `flex-xvf3800` (private repo `lenoxvi-firmware`,
+  tagged `v1.0.0`): inthost XMOS image architecture — the XVF3800 is
+  the I2S clock master (formatBCE inthost v1.0.7), ESP32 on the
+  proven slave config. Stock Flex images + XIAO-as-master falsified
+  at 48k (no APLL on S3) and 16k (stable bus, garbage data).
+- Per-model OTA track: flex builds address `/firmware/flex/version`
+  (404 today = no update, safe); unset track stays byte-identical to
+  the legacy URL — cross-flashing is impossible.
+- Dashboard Firmware column self-identifies the node model (1.0.0 =
+  flex, 1.1.3 = array node).
+
+### Docs
+- README full rewrite: dashboard surface, WiiM backend, turn-taking,
+  Intelligence lanes (rides to this tag per "leave for next tag").
+
 ## [0.5.0] — 2026-10-05 — Intelligence + turn-taking hardening
 
 Three feature arcs in one day, live-proven on the house rig.
