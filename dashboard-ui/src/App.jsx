@@ -254,6 +254,18 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
   const [wifiPass, setWifiPass] = useState('')
   const [muted, setMuted] = useState(false)  // confirmed from the node's ack, never optimistic
 
+  // Refresh the button from the NODE's truth on every mount (2026-10-07):
+  // component state dies on page refresh, but the node remembers its mute
+  // state — the button must re-derive it, or "Muted" un-highlights and the
+  // UI lies about a muted mic. One GET per mount, NOT per 5s poll (that
+  // would spam the data channel). Older firmware omits 'muted' = false.
+  useEffect(() => {
+    if (!online) return
+    api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
+      .then(r => { if (r?.ok) setMuted(!!r?.data?.muted) })
+      .catch(() => {})
+  }, [room, online])
+
   // Raw POST — callers own the busy lifecycle (the wifi flow is
   // two-stage: busy must STAY 'wifi' after a successful scan; a
   // helper that auto-cleared busy killed the SSID form — caught

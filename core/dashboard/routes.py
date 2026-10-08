@@ -593,6 +593,23 @@ async def set_node_mute(room: str, payload: MutePayload):
     return reply  # {"ok": true, "data": {"muted": bool}}
 
 
+@router.get("/nodes/{room}/info", dependencies=GUARD)
+async def node_info(room: str):
+    """Live node state (2026-10-07): the dashboard refreshes its Mute
+    button from the node's OWN answer — get_info returns muted (flex
+    1.1.0+; older firmware omits the key = unmuted). Component state
+    dies on page refresh; the node's truth doesn't — this is the
+    source of truth for it. One round-trip per page load, not per poll."""
+    _room_online(room)
+    try:
+        reply = await node_command.request(room, "get_info", timeout=8.0)
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"info failed: {reply.get('data')}")
+    return reply  # {"ok": true, "data": {"name", "mac", "fw", "muted"?}}
+
+
 # ── session mode (fresh | sticky per node — dashboard checkbox) ──────
 
 
