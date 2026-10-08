@@ -156,11 +156,11 @@ function Section({ id, title, note, action, children }) {
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, children, right }) {
   return (
     <div className="grid gap-1">
       <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className={`flex items-center gap-2 flex-wrap${right ? ' justify-end' : ''}`}>
         {children}
       </div>
     </div>
@@ -785,7 +785,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     <Section title="Wake word model"
       note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Active model / upload">
+        <Field label="Active model / upload" right>
           <select className={`${INPUT_CLS} w-[260px]`} value={sel}
             onChange={e => setSel(e.target.value)}>
             {models.map(m => (
