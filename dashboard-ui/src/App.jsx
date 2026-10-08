@@ -1116,25 +1116,29 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // the server exactly once (draft law); save still reads the DOM.
   const [intKind, setIntKind] = useState('hermes')
   const [intSynced, setIntSynced] = useState(false)
-  // Per-kind URL memory (2026-10-08): the two brains live at different
-  // addresses. When the user flips the provider, swap the URL field to
-  // that kind's remembered URL (if any) so a Save can't point the
-  // OpenClaw lane at the Hermes api_server or vice versa.
-  const urlMemory = useRef({})   // {hermes: url, openclaw: url}
-  const urlTouched = useRef(false)  // true once the user edits the URL box
+  // Per-kind URL memory (2026-10-08, 036 M-3): the two brains live at
+  // different addresses. The field carries a PER-KIND DRAFT — switching
+  // kinds files the current text under the outgoing kind and loads the
+  // incoming kind's draft (or empty). The old urlTouched latch never
+  // reset, so one manual edit disabled swapping forever and a save
+  // filed the wrong URL under the kind.
+  const urlDrafts = useRef({})   // {hermes: url, openclaw: url}
   useEffect(() => {
     if (intelligence && !intSynced) {
       setIntKind(intelligence.kind || 'hermes')
-      urlMemory.current = intelligence.urls || {}
+      const d = { ...(intelligence.urls || {}) }
+      if (intelligence.url) d[intelligence.kind || 'hermes'] = intelligence.url
+      urlDrafts.current = d
       setIntSynced(true)
     }
   }, [intelligence, intSynced])
   const switchKind = (kind) => {
-    setIntKind(kind)
-    if (urlTouched.current) return  // user is mid-edit; don't stomp their text
-    const remembered = urlMemory.current[kind]
     const urlEl = document.getElementById('int-url')
-    if (urlEl && remembered) urlEl.value = remembered
+    if (urlEl) {
+      urlDrafts.current[intKind] = urlEl.value.trim()  // file the outgoing kind's draft
+      urlEl.value = urlDrafts.current[kind] || ''      // always swap — per-kind context
+    }
+    setIntKind(kind)
   }
   return (
     <>
@@ -1151,7 +1155,6 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           </select>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<brain-host>:8642/v1"
-            onInput={() => { urlTouched.current = true }}
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
           <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>
@@ -1205,7 +1208,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
               if (kind === 'openclaw') body.agent = agent
               // Ship the full per-kind recall map so the backend files
               // the other kind's URL too (swap-on-switch memory).
-              const mem = { ...urlMemory.current, [kind]: url }
+              const mem = { ...urlDrafts.current, [kind]: url }
               if (mem.hermes || mem.openclaw) body.urls = mem
               try {
                 await api('/api/dashboard/intelligence', { method: 'PUT', json: body })

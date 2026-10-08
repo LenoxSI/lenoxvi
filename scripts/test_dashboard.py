@@ -1260,8 +1260,17 @@ def main():
             _g2 = client.get("/api/dashboard/intelligence").json()
             check("9b11b GET returns urls map", _g2.get("urls", {}).get("openclaw")
                   == "http://127.0.0.1:18789/v1", str(_g2.get("urls"))[:120])
+            # Bare kind flip (036 M-3): no url in the payload — the route
+            # must restore THAT kind's remembered URL, not keep the other
+            # kind's (which would point the lane at the wrong brain).
+            _r3 = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
+            _brain9c = _yaml9.safe_load(
+                Path(os.environ["LVI_CONFIG"]).read_text()).get("brain") or {}
+            check("9b11b bare kind flip restores that kind's remembered URL",
+                  _brain9c.get("url") == "http://127.0.0.1:18789/v1",
+                  f"url={_brain9c.get('url')}")
             # restore kind for later checks
-            client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
+            client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
 
             # (b) invalid kind / agent / url -> 422
             _bad = client.put("/api/dashboard/intelligence", json={"kind": "claude"})

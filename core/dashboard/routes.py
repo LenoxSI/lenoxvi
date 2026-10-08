@@ -894,6 +894,13 @@ async def put_intelligence(payload: IntelligencePayload):
         urls = dict(current.get("urls") or {})
         urls[payload.kind] = payload.url
         current["urls"] = urls
+    else:
+        # Bare kind flip (036 M-3): restore THAT kind's remembered URL
+        # when one exists — keeping the old kind's URL would point the
+        # new lane at the wrong brain (api_server vs Gateway).
+        remembered = (current.get("urls") or {}).get(payload.kind)
+        if remembered:
+            current["url"] = remembered
     if payload.urls is not None:
         # UI may send the full recall map (it knows both kinds' URLs).
         merged = dict(current.get("urls") or {})
