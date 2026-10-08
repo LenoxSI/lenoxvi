@@ -411,7 +411,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
-      setMsg(`${room} → ${zone} saved — applies on next bot restart.`, 'ok', 'Room → zone mapping')
+      setMsg(`${room} → ${zone} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
       reloadAll()
     } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
   }
