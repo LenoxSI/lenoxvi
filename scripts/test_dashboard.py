@@ -977,6 +977,35 @@ def main():
             check("9b8 wake: barge_in default OFF never interrupts (bit-for-bit old)",
                   not _fired8b and _wf8b._state is _TurnState.LOCKED,
                   f"fired={len(_fired8b)} state={_wf8b._state}")
+
+            # ── 036 H-A pin: an ASYNC on_interrupt must actually run ──
+            # The production callback in bot.py is `async def`; the old
+            # suite's sync lambda masked the never-awaited coroutine bug
+            # (a bare call created it, nothing ran it, stop_current_clip
+            # never executed). This probe pins the real shape.
+            async def _wake_probe_async():
+                ran = []
+                async def _cb():
+                    ran.append("ran")
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None,
+                         on_interrupt=_cb)
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.99})
+                wf._name = "Hey_Willow"
+                wf._barge_in = True
+                wf._frame_size = 2560
+                await wf.process_frame(_BotStart(), _FD8.DOWNSTREAM)
+                await wf.process_frame(
+                    _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+                await wf.process_frame(
+                    _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+                await asyncio.sleep(0.05)  # let the scheduled task run
+                return wf, ran
+
+            _wf8c, _ran8c = _asyncio.run(_wake_probe_async())
+            check("9b8 wake: ASYNC on_interrupt coroutine actually runs (036 H-A)",
+                  len(_ran8c) == 1 and _wf8c._interrupt_task is not None
+                  and _wf8c._interrupt_task.done(),
+                  f"ran={len(_ran8c)} task={getattr(_wf8c, '_interrupt_task', 'missing')}")
             # ── backend clip stop (fake player layers, 9b7 pattern) ──
             _CANCELS8 = []
 

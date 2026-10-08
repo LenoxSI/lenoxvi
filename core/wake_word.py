@@ -78,6 +78,7 @@ class WakeWordFilter(FrameProcessor):
         # LOCKED. Default OFF (wake.barge_in config knob) — with the knob
         # off, this filter is bit-for-bit the old behavior.
         self._on_interrupt = on_interrupt
+        self._interrupt_task: asyncio.Task | None = None  # design note H-A: held ref so the task can't be GC'd
         self._barge_in = str(cfg_env("wake", "barge_in", "LVI_BARGE_IN", "false")) \
             .strip().lower() in (True, 1, "1", "true", "yes", "on")
         self._interrupt_chain = 0
@@ -239,8 +240,21 @@ class WakeWordFilter(FrameProcessor):
                             except Exception:
                                 pass
                         if self._on_interrupt:
+                            # B3 barge-in (design note H-A): bot.py's callback
+                            # is an async def — a bare call only created the
+                            # coroutine and never ran it (the same class as
+                            # the queue_frame trap). Schedule it on the
+                            # running loop and KEEP THE REFERENCE (a bare
+                            # fire-and-forget task can be GC'd mid-flight).
+                            # Don't await inline: a Sonos cancel can take
+                            # up to 7s and this is the audio hot path.
+                            # Sync callbacks (suite) still run inline.
                             try:
-                                self._on_interrupt()
+                                _result = self._on_interrupt()
+                                if asyncio.iscoroutine(_result):
+                                    self._interrupt_task = asyncio.get_running_loop().create_task(_result)
+                            except RuntimeError:
+                                pass  # no running loop (suite): nothing to schedule
                             except Exception as e:  # never break the gate
                                 logger.debug(
                                     f"wake_word: on_interrupt callback failed: {e}")
