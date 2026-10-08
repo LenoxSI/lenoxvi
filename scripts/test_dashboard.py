@@ -1342,6 +1342,31 @@ def main():
                 _kbad = client.put("/api/dashboard/intelligence/key",
                                    json={"api_key": "bad\nkey"})
                 check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
+                # 036 M-2 pin: the key save is KIND-AWARE — hermes writes
+                # LVI_HERMES_KEY, openclaw writes LVI_BRAIN_KEY (the variable
+                # each lane reads FIRST, per the bug-7 law). The old route
+                # always wrote LVI_BRAIN_KEY: a Hermes key save was silently
+                # ignored AND clobbered the OpenClaw token.
+                _wek_calls9 = []
+                async def _fake_wek_rec9(var, value):
+                    _wek_calls9.append(var)
+                    return True
+                _routes9._write_env_key = _fake_wek_rec9
+                try:
+                    # kind currently openclaw (restored earlier in 9b11)
+                    client.put("/api/dashboard/intelligence/key",
+                               json={"api_key": "suite-keymaterial-12345"})
+                    client.put("/api/dashboard/intelligence",
+                               json={"kind": "hermes"})
+                    client.put("/api/dashboard/intelligence/key",
+                               json={"api_key": "suite-keymaterial-12345"})
+                    check("9b11b key save is kind-aware (hermes→LVI_HERMES_KEY, openclaw→LVI_BRAIN_KEY)",
+                          _wek_calls9 == ["LVI_BRAIN_KEY", "LVI_HERMES_KEY"],
+                          f"calls={_wek_calls9}")
+                finally:
+                    _routes9._write_env_key = _fake_wek9
+                    client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw"})
             finally:
                 _routes9._write_env_key = _saved_wek9
 

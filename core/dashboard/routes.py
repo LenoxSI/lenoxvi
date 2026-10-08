@@ -915,11 +915,16 @@ async def put_intelligence(payload: IntelligencePayload):
 
 @router.put("/intelligence/key", dependencies=GUARD)
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
-    """Intelligence API key → .env as LVI_BRAIN_KEY (never echoed; the
-    agent resolves LVI_BRAIN_KEY first, LVI_HERMES_KEY as fallback)."""
-    replaced = await _write_env_key("LVI_BRAIN_KEY", payload.api_key)
-    logger.info("dashboard: LVI_BRAIN_KEY written to .env (value never logged)")
-    return {"ok": True, "key_set": True, "replaced": replaced}
+    """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law):
+    hermes → LVI_HERMES_KEY, openclaw → LVI_BRAIN_KEY — writing the variable
+    the agent actually reads FIRST for that kind. Never echoed. The agent's
+    cross-fallback (hermes falls back to LVI_BRAIN_KEY, openclaw to
+    LVI_HERMES_KEY) keeps legacy single-key installs working either way."""
+    kind = (config_store.read_section("brain") or {}).get("kind") or "hermes"
+    var = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_BRAIN_KEY"
+    replaced = await _write_env_key(var, payload.api_key)
+    logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
+    return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind}
 
 
 def _intelligence_probe(brain_cfg: dict) -> dict:
