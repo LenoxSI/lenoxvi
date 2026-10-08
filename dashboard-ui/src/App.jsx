@@ -905,26 +905,24 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               onChange={e => setModel(e.target.value)}>
               {(TTS_MODELS[provider] || []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
             </select>
+            {provider === 'deepgram-flux' && (
+              <>
+                <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed (0.5–1.5)</span>
+                <input id="tts-flux-speed" type="number" min="0.5" max="1.5" step="0.05"
+                  defaultValue={tts?.deepgram_flux_speed ?? 1.0}
+                  className={`${INPUT_CLS} w-[120px] font-mono`} />
+                <span className="text-[12px] font-medium text-[var(--muted)]">expressivity (−2–2)</span>
+                <input id="tts-flux-expressivity" type="number" min="-2" max="2" step="1"
+                  defaultValue={tts?.deepgram_flux_expressivity ?? 1}
+                  className={`${INPUT_CLS} w-[120px] font-mono`} />
+              </>
+            )}
           </Field>
           {provider === 'elevenlabs' &&
             <Field label="Voice id">
               <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="fq1S…"
                 className={`${INPUT_CLS} w-[280px] font-mono`} />
             </Field>}
-          {provider === 'deepgram-flux' && (
-            <>
-              <Field label="Flux speed (0.5 – 1.5, 0.05 steps)">
-                <input id="tts-flux-speed" type="number" min="0.5" max="1.5" step="0.05"
-                  defaultValue={tts?.deepgram_flux_speed ?? 1.0}
-                  className={`${INPUT_CLS} w-[120px] font-mono`} />
-              </Field>
-              <Field label="Flux expressivity (-2 – 2)">
-                <input id="tts-flux-expressivity" type="number" min="-2" max="2" step="1"
-                  defaultValue={tts?.deepgram_flux_expressivity ?? 1}
-                  className={`${INPUT_CLS} w-[120px] font-mono`} />
-              </Field>
-            </>
-          )}
           <Field label="API key">
             <div className="flex items-center gap-2 flex-wrap">
               <input id="tts-key" type="password"
