@@ -453,7 +453,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   return (
     <>
       <Section id="rooms" title="Room → zone mapping"
-        note="Pick a speaker zone for each mic room. Rooms appear once their node has connected at least once.">
+        note="">
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-[14px]">
             <thead>
@@ -717,7 +717,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
 
   return (
     <Section title="Firmware"
-      note="Push a firmware .bin — its version is read from the image itself; nodes pick it up over OTA on their next boot. Firmware 1.1.0+ required for over-the-air config.">
+      note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <input type="file" accept=".bin" className="text-[13px]"
