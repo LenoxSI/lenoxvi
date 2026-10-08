@@ -591,7 +591,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
               <span>{esc(d.name)}</span>
               <span className="font-mono text-[12px] text-[var(--muted)]">{esc(d.ip)}</span>
               <button className={BTN_DEFAULT}
-                onClick={() => setNewZone(nz => ({ ...nz, name: d.name || '', ip: d.ip || '', player_uid: d.player_uid || '' }))}>
+                onClick={() => setNewZone(nz => ({ ...nz, name: d.name || '', backend: 'sonos', ip: d.ip || '', player_uid: d.uid || '' }))}>
                 Fill into add form
               </button>
             </div>
