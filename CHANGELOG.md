@@ -8,6 +8,42 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-07 — Software mute + ElevenLabs voice shaping
+
+Node mute becomes a first-class control and the flash-v2.5 voice gets
+tunable character — both live-proven the night they shipped.
+
+### Added — software mic mute + per-model OTA
+- Dashboard **Mute button** (Nodes card, per row): zeroes the mic at
+  the node — same effect as the array board's physical button. The
+  flex board has no physical mute, so this is software: flex fw 1.1.0
+  adds the `set_mute` command (toggle or explicit) and reports
+  `muted` in `get_info`; the mic is silenced in the same place the
+  turn lock silences it. Button state is confirmed from the node's
+  ack, never optimistic, and re-derived from the node on every page
+  load (new `GET /nodes/{room}/info`) — a refresh can't lie about a
+  muted mic. Online-gated; firmware 1.1.0+.
+- **Per-model OTA tracks** (design note follow-up): `/firmware/{track}/
+  version` + `/firmware/{track}/{bin}` routes; the flex node reads
+  `/firmware/flex/version`, the array node's legacy URLs stay
+  byte-identical, and a track without a deployed manifest 404s = no
+  update (safe). First flex OTA shipped fw 1.1.0 over the air to
+  room-a — no bench, no cable.
+- **ElevenLabs flash-v2.5 speed + stability**: config keys
+  `tts.elevenlabs_speed` (0.7–1.2) and `tts.elevenlabs_stability`
+  (0.0–1.0) with dashboard sliders (draft law — synced once, local
+  until saved). Absent config = API defaults, never a made-up value.
+  The v3/v4 dialogue lane deliberately gets no knobs (ElevenLabs
+  guidance: the model drives expressivity there).
+
+### Fixed — dashboard
+- Discover's "Fill into add form" silently dropped the Sonos UID —
+  it read `d.player_uid` but the route returns `uid`. Now fills the
+  complete zone (name, backend, IP, RINCON) in one click.
+- Mute toggle double-fire race — rapid clicks during ack latency
+  could flip the node twice; dedicated `muteBusy` flag + ask-once
+  ref guard on the mount-time info fetch.
+
 ## [0.6.0] — 2026-10-07 — HeroUI dashboard + node two (Flex)
 
 The dashboard becomes a React app, and lenoxvi gets its second mic node.
