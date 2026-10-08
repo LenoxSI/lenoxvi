@@ -156,11 +156,11 @@ function Section({ id, title, note, action, children }) {
   )
 }
 
-function Field({ label, children, right }) {
+function Field({ label, children, right, between }) {
   return (
     <div className="grid gap-1">
       <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span>
-      <div className={`flex items-center gap-2 flex-wrap${right ? ' justify-end' : ''}`}>
+      <div className={`flex items-center gap-2 flex-wrap${right ? ' justify-end' : ''}${between ? ' justify-between' : ''}`}>
         {children}
       </div>
     </div>
@@ -785,22 +785,26 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     <Section title="Wake word model"
       note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Active model / upload" right>
-          <select className={`${INPUT_CLS} w-[260px]`} value={sel}
-            onChange={e => setSel(e.target.value)}>
-            {models.map(m => (
-              <option key={m.path} value={m.path}>
-                {esc(m.name)}{m.source === 'root' ? ' (root)' : ''}
-              </option>
-            ))}
-            {models.length === 0 && <option value="">no models found</option>}
-          </select>
-          <button className={BTN_DEFAULT} onClick={select}>Set active</button>
-          <input type="file" accept=".onnx" className="text-[13px]"
-            onChange={e => setNewModel(e.target.files?.[0] || null)} />
-          <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
-            {scanning ? 'Uploading…' : 'Upload'}
-          </button>
+        <Field label="Active model / upload" between>
+          <div className="flex items-center gap-2">
+            <select className={`${INPUT_CLS} w-[260px]`} value={sel}
+              onChange={e => setSel(e.target.value)}>
+              {models.map(m => (
+                <option key={m.path} value={m.path}>
+                  {esc(m.name)}{m.source === 'root' ? ' (root)' : ''}
+                </option>
+              ))}
+              {models.length === 0 && <option value="">no models found</option>}
+            </select>
+            <button className={BTN_DEFAULT} onClick={select}>Set active</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="file" accept=".onnx" className="text-[13px]"
+              onChange={e => setNewModel(e.target.files?.[0] || null)} />
+            <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
+              {scanning ? 'Uploading…' : 'Upload'}
+            </button>
+          </div>
         </Field>
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-[14px]">
