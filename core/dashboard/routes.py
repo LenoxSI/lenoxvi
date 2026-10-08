@@ -573,6 +573,26 @@ async def set_node_name(room: str, payload: NamePayload):
     return reply
 
 
+class MutePayload(BaseModel):
+    mute: bool = Field(default=True)  # default true — the button's primary action
+
+
+@router.post("/nodes/{room}/mute", dependencies=GUARD)
+async def set_node_mute(room: str, payload: MutePayload):
+    """Software mic mute (flex 1.1.0+, 2026-10-07): zeroes the mic at the
+    node — same effect as the array board's physical Mute button. The
+    node echoes its resulting state in the ack; older firmware answers
+    {ok: false, data: "unknown cmd"} (402-class), surfaced honestly."""
+    _room_online(room)
+    try:
+        reply = await node_command.request(room, "set_mute", {"mute": payload.mute})
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"mute failed: {reply.get('data')} (firmware 1.1.0+ required)")
+    return reply  # {"ok": true, "data": {"muted": bool}}
+
+
 # ── session mode (fresh | sticky per node — dashboard checkbox) ──────
 
 

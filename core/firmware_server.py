@@ -30,13 +30,36 @@ from loguru import logger
 FIRMWARE_DIR = Path(__file__).resolve().parent.parent / "firmware" / "node"
 VERSION_FILE = FIRMWARE_DIR / "version.json"
 
+# Per-model OTA tracks (design note/034a, 2026-10-07): the flex node
+# (reSpeaker Flex, fw 1.0.x) requests /firmware/flex/version — the array
+# node's legacy /firmware/version stays byte-identical. A track without
+# a deployed manifest 404s, which the node's OTA client treats as "no
+# update" (safe no-op). Track dirs live beside the array's:
+#   firmware/node/version.json          (array — legacy URL, unchanged)
+#   firmware/flex/version.json          (flex track)
+FIRMWARE_TRACKS = {
+    None: FIRMWARE_DIR,                    # legacy /firmware/version
+    "flex": FIRMWARE_DIR.parent / "flex",
+}
 
-def _read_manifest() -> dict:
-    """Return the served version manifest, or a clear error."""
-    if not VERSION_FILE.is_file():
-        raise HTTPException(status_code=404, detail="no version.json — run deploy_firmware.sh")
+
+def _track_dir(track: str | None) -> Path:
+    if track is None:
+        return FIRMWARE_DIR
+    d = FIRMWARE_TRACKS.get(track)
+    if d is None:
+        raise HTTPException(status_code=404, detail=f"unknown firmware track '{track}'")
+    return d
+
+
+def _read_manifest(track: str | None = None) -> dict:
+    """Return the served version manifest (per-track), or a clear error."""
+    version_file = _track_dir(track) / "version.json"
+    if not version_file.is_file():
+        raise HTTPException(status_code=404,
+                             detail=f"no version.json (track '{track or 'node'}') — run deploy_firmware.sh")
     try:
-        manifest = json.loads(VERSION_FILE.read_text())
+        manifest = json.loads(version_file.read_text())
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"bad version.json: {e}")
     if "version" not in manifest:
@@ -58,6 +81,26 @@ def register_firmware_routes(app) -> None:
         # currently dropped, not served to the node.
         filename = manifest.get("filename", "node_esp32.bin")
         return JSONResponse({"version": manifest["version"], "filename": filename})
+
+    @app.get("/firmware/{track}/version")
+    async def firmware_track_version(track: str):
+        # Per-model manifest (flex track; design note). Registered AFTER the
+        # legacy route in source but FastAPI matches by path shape — the
+        # literal /firmware/version above is also matched by this pattern,
+        # so the specific route must be declared first (it is).
+        manifest = _read_manifest(track)
+        filename = manifest.get("filename", "node_esp32.bin")
+        return JSONResponse({"version": manifest["version"], "filename": filename})
+
+    @app.get("/firmware/{track}/{filename}")
+    async def firmware_track_bin(track: str, filename: str):
+        d = _track_dir(track)
+        # Path traversal guard: only serve files that actually live in the dir
+        target = (d / filename).resolve()
+        if not str(target).startswith(str(d.resolve())) or not target.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        logger.info(f"firmware_server: serving {track}/{filename} ({target.stat().st_size} bytes)")
+        return FileResponse(target, media_type="application/octet-stream")
 
     @app.get("/firmware/{filename}")
     async def firmware_bin(filename: str):

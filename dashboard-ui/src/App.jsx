@@ -248,10 +248,11 @@ function Stat({ label, children }) {
 
 /* ── node row actions ─────────────────────────────────────── */
 function NodeActions({ room, online, setMsg, reloadAll }) {
-  const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi'
+  const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi' | 'mute'
   const [renameVal, setRenameVal] = useState('')
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
   const [wifiPass, setWifiPass] = useState('')
+  const [muted, setMuted] = useState(false)  // confirmed from the node's ack, never optimistic
 
   // Raw POST — callers own the busy lifecycle (the wifi flow is
   // two-stage: busy must STAY 'wifi' after a successful scan; a
@@ -259,6 +260,18 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
   // live 2026-10-07, "scan complete but no list").
   const post = (verb, json) =>
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/${verb}`, { method: 'POST', json })
+
+  const toggleMute = async () => {
+    setBusy('mute')
+    setMsg(`Toggling mute on ${room}…`, 'pulse', 'Nodes')
+    try {
+      const r = await post('mute', { mute: !muted })
+      const now = !!(r?.data?.muted)
+      setMuted(now)
+      setMsg(`${room}: mic ${now ? 'MUTED — the node hears nothing' : 'live'}.`, 'ok', 'Nodes')
+      setBusy(null)
+    } catch (e) { setBusy(null); setMsg('Mute failed: ' + e.message, 'err', 'Nodes') }
+  }
 
   const restart = async () => {
     if (!window.confirm(`Restart node '${room}'? It reboots and reconnects (~15s).`)) return
@@ -324,6 +337,11 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
         <button className={BTN_DEFAULT} disabled={!online || busy}
           onClick={restart} title="Reboot the node (~15s reconnect).">
           {busy === 'restart' ? 'Restarting…' : 'Restart'}
+        </button>
+        <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy}
+          onClick={toggleMute}
+          title={muted ? 'Mic is muted — click to unmute.' : 'Mute the mic (software — the node stops hearing). Firmware 1.1.0+.'}>
+          {busy === 'mute' ? '…' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
           <>
