@@ -1327,7 +1327,10 @@ def main():
                 check("9b11 openclaw lane: LVI_OPENCLAW_KEY wins (naming law 2026-10-08)",
                       _oc_hdr.get("authorization") == "Bearer suite-openclaw-key-not-real",
                       str(_oc_hdr.get("authorization")))
-                # legacy fallback: without LVI_OPENCLAW_KEY, LVI_BRAIN_KEY serves
+                # strict key law (2026-10-08): NO cross-kind fallback —
+                # without LVI_OPENCLAW_KEY the openclaw lane must fail with
+                # a clear error naming its OWN variable, never silently
+                # auth with another brain's token (tonight's 401 lesson).
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
                 for mod_name in ("hermes_agent",):
                     if mod_name in sys.modules:
@@ -1335,10 +1338,15 @@ def main():
                 import hermes_agent as _ha9_fb
                 _a9_fb = _ha9_fb.HermesAgent(lull_secs=0.05, room="suite",
                                              session_mode="fresh")
-                _a9_fb._ask_hermes("hi")
-                check("9b11 openclaw lane: legacy LVI_BRAIN_KEY still serves (fallback)",
-                      _cap9[-1]["headers"].get("authorization") == "Bearer suite-brain-key-not-real",
-                      str(_cap9[-1]["headers"].get("authorization")))
+                try:
+                    _a9_fb._ask_hermes("hi")
+                    _strict_ok9 = False
+                    _strict_err9 = "no error raised"
+                except RuntimeError as _e9:
+                    _strict_ok9 = "LVI_OPENCLAW_KEY" in str(_e9)
+                    _strict_err9 = str(_e9)[:80]
+                check("9b11 openclaw lane: missing LVI_OPENCLAW_KEY fails loud, names its own variable",
+                      _strict_ok9, _strict_err9)
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 # fresh: header absent
                 _a9f = _ha9.HermesAgent(lull_secs=0.05, room="suite",
@@ -1371,6 +1379,7 @@ def main():
                 # no key at all: construction survives, ask raises RuntimeError
                 _os.environ.pop("LVI_BRAIN_KEY", None)
                 _os.environ.pop("LVI_HERMES_KEY", None)
+                _os.environ.pop("LVI_OPENCLAW_KEY", None)
                 try:
                     _a9c = _ha9b.HermesAgent(lull_secs=0.05, room="suite",
                                              session_mode="fresh")

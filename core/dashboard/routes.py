@@ -869,25 +869,18 @@ async def get_intelligence():
     import os as _os
     brain_cfg = config_store.read_section("brain") or {}
     kind = brain_cfg.get("kind") or "hermes"
+    # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
+    # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
+    # fallback anywhere (a fallback turned a missing key into a silent
+    # wrong-token outage once). key_kind names the variable.
+    _kv = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
     return {
         "kind": kind,
         "url": brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
         "urls": brain_cfg.get("urls") or {},
         "agent": brain_cfg.get("agent"),
-        # Naming law (2026-10-08): key_set reflects the variables the
-        # ACTIVE kind actually resolves — hermes: LVI_HERMES_KEY (+legacy
-        # LVI_BRAIN_KEY); openclaw: LVI_OPENCLAW_KEY (+legacy LVI_BRAIN_KEY,
-        # LVI_HERMES_KEY). key_kind names the winner in resolution order.
-        "key_set": bool(_os.getenv("LVI_HERMES_KEY") or _os.getenv("LVI_BRAIN_KEY"))
-                   if kind == "hermes"
-                   else bool(_os.getenv("LVI_OPENCLAW_KEY") or _os.getenv("LVI_BRAIN_KEY")
-                             or _os.getenv("LVI_HERMES_KEY")),
-        "key_kind": ("os_hermes_key" if _os.getenv("LVI_HERMES_KEY")
-                     else "os_brain_key" if _os.getenv("LVI_BRAIN_KEY") else None)
-                    if kind == "hermes"
-                    else ("os_openclaw_key" if _os.getenv("LVI_OPENCLAW_KEY")
-                          else "os_brain_key" if _os.getenv("LVI_BRAIN_KEY")
-                          else "os_hermes_key" if _os.getenv("LVI_HERMES_KEY") else None),
+        "key_set": bool(_os.getenv(_kv)),
+        "key_kind": _kv.lower() if _os.getenv(_kv) else None,
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 

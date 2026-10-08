@@ -205,26 +205,22 @@ class HermesAgent(FrameProcessor):
         # NOT a construction brick (audit finding #4 class, the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
-        # Bug-7 law (2026-10-07): the key is KIND-AWARE. Resolution
-        # (renamed 2026-10-08, the owner's ruling — "each brain's key names
-        # what it is"): hermes → LVI_HERMES_KEY (with LVI_BRAIN_KEY legacy
-        # fallback); openclaw → LVI_OPENCLAW_KEY (LVI_BRAIN_KEY legacy
-        # fallback — the old generic-slot name — then LVI_HERMES_KEY,
-        # original note-032 order). Future lanes follow the law:
-        # LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a lane's key names its brain.
-        if self._kind == "hermes":
-            self._key = (os.getenv("LVI_HERMES_KEY")
-                         or os.getenv("LVI_BRAIN_KEY")
-                         or None)
-        else:
-            self._key = (os.getenv("LVI_OPENCLAW_KEY")
-                         or os.getenv("LVI_BRAIN_KEY")
-                         or os.getenv("LVI_HERMES_KEY")
-                         or None)
+        # Key law (bug-7 + naming law, strict 2026-10-08): each lane reads
+        # EXACTLY ONE variable — hermes → LVI_HERMES_KEY, openclaw →
+        # LVI_OPENCLAW_KEY. No cross-kind fallback: a fallback chain is
+        # what turned tonight's missing LVI_HERMES_KEY into a silent
+        # wrong-token 401 outage instead of one honest error line
+        # (fail-loud law, same as the mapping-wipe fix). Future lanes
+        # follow the naming law: LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a
+        # lane's key names its brain, and it reads only its own.
+        _KEY_VAR = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
+        self._key_var = _KEY_VAR.get(self._kind)
+        self._key = (os.getenv(self._key_var)
+                     if self._key_var else None)
         if not self._key and self._kind != "stub":
             logger.warning(
-                "hermes_agent: no brain key set (LVI_BRAIN_KEY / LVI_HERMES_KEY) "
-                f"— kind={self._kind}; turns will fail until one is set")
+                f"hermes_agent: no brain key set ({self._key_var}) "
+                f"— kind={self._kind}; turns will fail until it is set")
         self._model = cfg_env("brain", "model", "LVI_HERMES_MODEL", "hermes-agent")
         # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
         # brain request carried no max_tokens, so a runaway model loop
@@ -329,7 +325,9 @@ class HermesAgent(FrameProcessor):
         history and fillers are shared — the lanes differ only in envelope.
         """
         if not self._key:
-            raise RuntimeError("no brain key set (LVI_BRAIN_KEY / LVI_HERMES_KEY)")
+            raise RuntimeError(
+                f"no brain key set ({self._key_var}) — set it in .env "
+                f"(a lane's key names its brain; no cross-kind fallback)")
         headers = {"Authorization": f"Bearer {self._key}",
                    "Content-Type": "application/json"}
         if self._kind == "openclaw":
