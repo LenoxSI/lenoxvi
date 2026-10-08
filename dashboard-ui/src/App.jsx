@@ -783,7 +783,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
 
   return (
     <Section title="Wake word model"
-      note="One active model per process. Repo-root .onnx files keep working (legacy); models/ is canonical. Upload a new model, select it, restart to activate.">
+      note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Active model / upload" between>
           <div className="flex items-center gap-2">
@@ -1065,7 +1065,7 @@ function Tuning({ tuning, setMsg, setRebooting }) {
 
   return (
     <Section title="Voice tuning"
-      note="Wake, VAD, and turn-end knobs — the pipecat pipeline tunables. Applies on the next bot restart.">
+      note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
           {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
@@ -1105,7 +1105,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   return (
     <>
     <Section id="system" title="Intelligence"
-      note="Hermes runs this rig in production. OpenClaw answers from your own agent over the LAN. Claude and custom OpenAI-compatible endpoints are designed-for.">
+      note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Provider / API URL / agent">
           <select id="int-kind" value={intKind} onChange={e => setIntKind(e.target.value)}
