@@ -1169,7 +1169,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           <div className="flex items-center gap-2 flex-wrap flex-1">
             <input id="int-key" type="password" placeholder="paste key…"
               className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
-            {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓ ({intelligence.key_kind === 'os_brain_key' ? 'LVI_BRAIN_KEY' : 'LVI_HERMES_KEY'})</span> : null}
+            {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓ ({({os_hermes_key: 'LVI_HERMES_KEY', os_openclaw_key: 'LVI_OPENCLAW_KEY', os_brain_key: 'LVI_BRAIN_KEY'})[intelligence.key_kind] || intelligence.key_kind})</span> : null}
           </div>
         </Field>
         <div className="flex items-center justify-between gap-4 flex-wrap">

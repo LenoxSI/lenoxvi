@@ -205,19 +205,20 @@ class HermesAgent(FrameProcessor):
         # NOT a construction brick (audit finding #4 class, the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
-        # Bug-7 law (2026-10-07): the key is KIND-AWARE. LVI_BRAIN_KEY was
-        # the OpenClaw token on this rig; a kind flip to hermes that keeps
-        # LVI_BRAIN_KEY would auth the Hermes envelope with the wrong
-        # token (the stub-brain incident class). Resolution: hermes →
-        # LVI_HERMES_KEY (with LVI_BRAIN_KEY fallback for legacy installs
-        # that only ever set one key); openclaw → LVI_BRAIN_KEY then
-        # LVI_HERMES_KEY (original note-032 order, unchanged).
+        # Bug-7 law (2026-10-07): the key is KIND-AWARE. Resolution
+        # (renamed 2026-10-08, the owner's ruling — "each brain's key names
+        # what it is"): hermes → LVI_HERMES_KEY (with LVI_BRAIN_KEY legacy
+        # fallback); openclaw → LVI_OPENCLAW_KEY (LVI_BRAIN_KEY legacy
+        # fallback — the old generic-slot name — then LVI_HERMES_KEY,
+        # original note-032 order). Future lanes follow the law:
+        # LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a lane's key names its brain.
         if self._kind == "hermes":
             self._key = (os.getenv("LVI_HERMES_KEY")
                          or os.getenv("LVI_BRAIN_KEY")
                          or None)
         else:
-            self._key = (os.getenv("LVI_BRAIN_KEY")
+            self._key = (os.getenv("LVI_OPENCLAW_KEY")
+                         or os.getenv("LVI_BRAIN_KEY")
                          or os.getenv("LVI_HERMES_KEY")
                          or None)
         if not self._key and self._kind != "stub":

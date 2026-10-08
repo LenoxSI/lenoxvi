@@ -874,9 +874,20 @@ async def get_intelligence():
         "url": brain_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
         "urls": brain_cfg.get("urls") or {},
         "agent": brain_cfg.get("agent"),
-        "key_set": bool(_os.getenv("LVI_BRAIN_KEY") or _os.getenv("LVI_HERMES_KEY")),
-        "key_kind": ("os_brain_key" if _os.getenv("LVI_BRAIN_KEY")
-                     else "os_hermes_key" if _os.getenv("LVI_HERMES_KEY") else None),
+        # Naming law (2026-10-08): key_set reflects the variables the
+        # ACTIVE kind actually resolves — hermes: LVI_HERMES_KEY (+legacy
+        # LVI_BRAIN_KEY); openclaw: LVI_OPENCLAW_KEY (+legacy LVI_BRAIN_KEY,
+        # LVI_HERMES_KEY). key_kind names the winner in resolution order.
+        "key_set": bool(_os.getenv("LVI_HERMES_KEY") or _os.getenv("LVI_BRAIN_KEY"))
+                   if kind == "hermes"
+                   else bool(_os.getenv("LVI_OPENCLAW_KEY") or _os.getenv("LVI_BRAIN_KEY")
+                             or _os.getenv("LVI_HERMES_KEY")),
+        "key_kind": ("os_hermes_key" if _os.getenv("LVI_HERMES_KEY")
+                     else "os_brain_key" if _os.getenv("LVI_BRAIN_KEY") else None)
+                    if kind == "hermes"
+                    else ("os_openclaw_key" if _os.getenv("LVI_OPENCLAW_KEY")
+                          else "os_brain_key" if _os.getenv("LVI_BRAIN_KEY")
+                          else "os_hermes_key" if _os.getenv("LVI_HERMES_KEY") else None),
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
@@ -922,13 +933,14 @@ async def put_intelligence(payload: IntelligencePayload):
 
 @router.put("/intelligence/key", dependencies=GUARD)
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
-    """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law):
-    hermes → LVI_HERMES_KEY, openclaw → LVI_BRAIN_KEY — writing the variable
-    the agent actually reads FIRST for that kind. Never echoed. The agent's
-    cross-fallback (hermes falls back to LVI_BRAIN_KEY, openclaw to
-    LVI_HERMES_KEY) keeps legacy single-key installs working either way."""
+    """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law +
+    the 2026-10-08 naming law: each brain's key names what it is):
+    hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — writing the
+    variable the agent reads FIRST for that kind. Never echoed. Legacy
+    fallbacks (LVI_BRAIN_KEY generic slot, cross-kind) keep old installs
+    working either way."""
     kind = (config_store.read_section("brain") or {}).get("kind") or "hermes"
-    var = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_BRAIN_KEY"
+    var = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
     replaced = await _write_env_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
     return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind}

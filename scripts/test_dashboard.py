@@ -1302,9 +1302,11 @@ def main():
             _saved_open9 = _urq9.urlopen
             _saved_bk9 = _os.environ.get("LVI_BRAIN_KEY")
             _saved_hk9 = _os.environ.get("LVI_HERMES_KEY")
+            _saved_ok9 = _os.environ.get("LVI_OPENCLAW_KEY")
             try:
                 _os.environ["LVI_BRAIN_KEY"] = "suite-brain-key-not-real"
                 _os.environ["LVI_HERMES_KEY"] = "suite-hermes-key-not-real"
+                _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 for mod_name in ("hermes_agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
@@ -1322,9 +1324,22 @@ def main():
                 check("9b11 openclaw lane: sticky session-key header",
                       _oc_hdr.get("x-openclaw-session-key") == "voice-suite",
                       str(_oc_hdr.get("x-openclaw-session-key")))
-                check("9b11 openclaw lane: LVI_BRAIN_KEY wins",
-                      _oc_hdr.get("authorization") == "Bearer suite-brain-key-not-real",
+                check("9b11 openclaw lane: LVI_OPENCLAW_KEY wins (naming law 2026-10-08)",
+                      _oc_hdr.get("authorization") == "Bearer suite-openclaw-key-not-real",
                       str(_oc_hdr.get("authorization")))
+                # legacy fallback: without LVI_OPENCLAW_KEY, LVI_BRAIN_KEY serves
+                _os.environ.pop("LVI_OPENCLAW_KEY", None)
+                for mod_name in ("hermes_agent",):
+                    if mod_name in sys.modules:
+                        del sys.modules[mod_name]
+                import hermes_agent as _ha9_fb
+                _a9_fb = _ha9_fb.HermesAgent(lull_secs=0.05, room="suite",
+                                             session_mode="fresh")
+                _a9_fb._ask_hermes("hi")
+                check("9b11 openclaw lane: legacy LVI_BRAIN_KEY still serves (fallback)",
+                      _cap9[-1]["headers"].get("authorization") == "Bearer suite-brain-key-not-real",
+                      str(_cap9[-1]["headers"].get("authorization")))
+                _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 # fresh: header absent
                 _a9f = _ha9.HermesAgent(lull_secs=0.05, room="suite",
                                         session_mode="fresh")
@@ -1374,7 +1389,8 @@ def main():
             finally:
                 _urq9.urlopen = _saved_open9
                 for _k9, _v9 in (("LVI_BRAIN_KEY", _saved_bk9),
-                                 ("LVI_HERMES_KEY", _saved_hk9)):
+                                 ("LVI_HERMES_KEY", _saved_hk9),
+                                 ("LVI_OPENCLAW_KEY", _saved_ok9)):
                     if _v9 is None:
                         _os.environ.pop(_k9, None)
                     else:
@@ -1410,6 +1426,7 @@ def main():
                 try:
                     # explicit kinds — earlier 9b11 blocks leave kind=hermes
                     # in the throwaway config, so set each kind before its save
+                    # naming law (2026-10-08): openclaw → LVI_OPENCLAW_KEY
                     client.put("/api/dashboard/intelligence",
                                json={"kind": "openclaw"})
                     client.put("/api/dashboard/intelligence/key",
@@ -1418,8 +1435,8 @@ def main():
                                json={"kind": "hermes"})
                     client.put("/api/dashboard/intelligence/key",
                                json={"api_key": "suite-keymaterial-12345"})
-                    check("9b11b key save is kind-aware (hermes→LVI_HERMES_KEY, openclaw→LVI_BRAIN_KEY)",
-                          _wek_calls9 == ["LVI_BRAIN_KEY", "LVI_HERMES_KEY"],
+                    check("9b11b key save is kind-aware (hermes→LVI_HERMES_KEY, openclaw→LVI_OPENCLAW_KEY)",
+                          _wek_calls9 == ["LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"],
                           f"calls={_wek_calls9}")
                 finally:
                     _routes9._write_env_key = _fake_wek9
