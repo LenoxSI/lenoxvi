@@ -622,6 +622,24 @@ def main():
               for r in _reg.known_rooms()),
           f"rooms={_reg.known_rooms()}")
 
+    # 9b5c. The OTHER race order (fw=None bug, 2026-10-09): fw_push lands
+    # while pc_id has NO binding at all (no connect, no tee yet) — the
+    # version is held in _fw_by_pc; note_offer's NON-provisional branch
+    # must drain it too. Old code stranded the hold forever here.
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                    "cmd": "fw_push", "ok": True,
+                    "data": {"fw": "1.1.4"}}), "test-pc-fw-unknown")
+    check("fw_push held for an unbound pc_id",
+          _reg._fw_by_pc.get("test-pc-fw-unknown") == "1.1.4",
+          f"held={_reg._fw_by_pc}")
+    _reg.note_offer("test-pc-fw-unknown", "fw-unknown-room")
+    check("note_offer drains the fw hold (else-branch, the fw=None bug)",
+          _reg._fw_by_pc.get("test-pc-fw-unknown") is None
+          and any(r["room"] == "fw-unknown-room" and r.get("fw") == "1.1.4"
+                  for r in _reg.known_rooms()),
+          f"held={_reg._fw_by_pc} rooms={_reg.known_rooms()}")
+
     # 9b5b. Track-aware firmware upload (036 H-B): the image + manifest
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
