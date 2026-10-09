@@ -164,6 +164,19 @@ def note_offer(pc_id, room):
             rec["fw"] = held_fw
     else:
         _room_by_pc[pc_id] = label
+        # The OTHER race order (fw=None bug, 2026-10-09): fw_push landed
+        # while pc_id had NO entry at all (room=None — note_firmware held
+        # it in _fw_by_pc). This branch never drained the hold, so the
+        # version stranded in _fw_by_pc forever and the Nodes table showed
+        # fw=None until some LATER reconnect got luckier ordering. Drain
+        # here too — every path that binds pc_id→label must release the
+        # held version, not just the provisional promotion.
+        held_fw = _fw_by_pc.pop(pc_id, None)
+        if held_fw:
+            rec = _known_rooms.setdefault(
+                label, {"online": False, "first_seen": time.time()}
+            )
+            rec["fw"] = held_fw
     _evict_other_sessions(pc_id, label)
 
 
