@@ -444,6 +444,38 @@ def main():
     finally:
         subprocess.run = real_run
 
+    # 9b1m. Mute error honesty (2026-10-09, the lying-error incident):
+    # a node answering {ok: false, data: "unknown cmd"} to set_mute must
+    # 501 with the per-line TRUTH (array = physical button, flex needs
+    # 1.1.0+) — never the old lie "(firmware 1.1.0+ required)" that
+    # told a 1.1.3 array node to upgrade toward a feature it can't get.
+    from dashboard import routes as _routes_mut
+    from dashboard import registry as _reg_mut
+    _real_request = _routes_mut.node_command.request
+    # seed an online room so _room_online passes (the suite's
+    # connect/tee pattern — see the 9b5 fw_push pins)
+    _reg_mut.note_offer("suite-mute-pc", "suite-mute-probe")
+    _reg_mut.mark_connected("suite-mute-pc")
+
+    async def _fake_mute_request(room, cmd, args=None, timeout=12.0):
+        if cmd == "set_mute":
+            return {"ok": False, "data": "unknown cmd"}
+        return await _real_request(room, cmd, args, timeout)
+
+    _routes_mut.node_command.request = _fake_mute_request
+    try:
+        _r_mut = client.post("/api/dashboard/nodes/suite-mute-probe/mute",
+                             json={"mute": True})
+        _j_mut = _r_mut.json()
+        ok = (_r_mut.status_code == 501
+              and "physical mute button" in str(_j_mut.get("detail", ""))
+              and "1.1.0+ required" not in str(_j_mut.get("detail", "")))
+        check("mute: unknown-cmd 501s with the per-line truth (no firmware lie)",
+              ok, f"status={_r_mut.status_code} body={_r_mut.text[:140]}")
+    finally:
+        _routes_mut.node_command.request = _real_request
+        _reg_mut.mark_disconnected("suite-mute-pc")
+
     # 9b2. Key-route hardening (Opus audit finding 1): the character-class
     # pattern must reject newline injection (the old code-exec lane) and
     # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch

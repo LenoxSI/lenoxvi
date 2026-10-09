@@ -592,15 +592,30 @@ class MutePayload(BaseModel):
 async def set_node_mute(room: str, payload: MutePayload):
     """Software mic mute (flex 1.1.0+, 2026-10-07): zeroes the mic at the
     node — same effect as the array board's physical Mute button. The
-    node echoes its resulting state in the ack; older firmware answers
-    {ok: false, data: "unknown cmd"} (402-class), surfaced honestly."""
+    node echoes its resulting state in the ack.
+
+    Per-line truth (2026-10-09, the lying-error incident): set_mute is
+    implemented on the FLEX line only (flex cmd.cpp:210). The array
+    line (main) has no set_mute at ANY version — its node has a
+    PHYSICAL mute button instead. The old "(firmware 1.1.0+ required)"
+    suffix was written when flex 1.1.0 shipped and misread an array
+    node's honest 'unknown cmd' as an old-flex problem — a 1.1.3 array
+    node failed with 'upgrade your firmware' when no upgrade could
+    ever fix it. The message now tells the truth for both lines without
+    guessing which one is asking."""
     _room_online(room)
     try:
         reply = await node_command.request(room, "set_mute", {"mute": payload.mute})
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     if not reply.get("ok"):
-        raise HTTPException(status_code=502, detail=f"mute failed: {reply.get('data')} (firmware 1.1.0+ required)")
+        if "unknown cmd" in str(reply.get("data") or ""):
+            raise HTTPException(
+                status_code=501,
+                detail="this node's firmware has no software mute — array "
+                      "nodes use their physical mute button; flex nodes "
+                      "need firmware 1.1.0+")
+        raise HTTPException(status_code=502, detail=f"mute failed: {reply.get('data')}")
     return reply  # {"ok": true, "data": {"muted": bool}}
 
 
