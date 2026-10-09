@@ -367,7 +367,7 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
         </button>
         <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy || muteBusy}
           onClick={toggleMute}
-          title={muted ? 'Mic is muted — click to unmute.' : 'Mute the mic (software — the node stops hearing). Firmware 1.1.0+.'}>
+          title={muted ? 'Mic is muted — click to unmute.' : 'Software mute (flex nodes; array nodes use their physical mute button).'}>
           {muteBusy ? '…' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
