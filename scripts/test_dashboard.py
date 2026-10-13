@@ -92,9 +92,29 @@ def main():
         return {"sdp": "v=0 answer", "type": "answer", "pc_id": pc_id}
 
     dashboard.register_dashboard(app)
+    # Mirror the LIVE app (2026-10-13): pipecat's runner installs this
+    # app-wide RequestValidationError handler AFTER register_dashboard
+    # (pipecat/runner/run.py). It reads the body (multipart → "Stream
+    # consumed" 500) and logs errors with their `input` (key leak). The
+    # plain FastAPI suite app hid both — the dashboard's own route class
+    # must make it unreachable for dashboard routes.
+    from fastapi import Request as _PReq
+    from fastapi.exceptions import RequestValidationError as _PRVE
+    from fastapi.responses import JSONResponse as _PJR
+    from fastapi.encoders import jsonable_encoder as _pje
+    PIPECAT_HANDLER_HITS = []
+
+    @app.exception_handler(_PRVE)
+    async def _pipecat_like_validation_handler(request: _PReq, exc: _PRVE):
+        body = await request.body()  # pipecat does exactly this
+        PIPECAT_HANDLER_HITS.append((request.url.path, str(exc.errors())))
+        return _PJR(status_code=422, content=_pje({"detail": exc.errors()}))
+
     # H5: guard.py requires an IP-literal Host (public-DNS hosts are the
     # rebinding vector) — TestClient's default 'testserver' would 403.
-    client = TestClient(app, base_url="http://192.0.2.10")
+    # raise_server_exceptions=False: a handler crash must surface as the
+    # 500 the live app returns, not abort the suite.
+    client = TestClient(app, base_url="http://192.0.2.10", raise_server_exceptions=False)
 
     # 2. page
     r = client.get("/dashboard")
@@ -572,6 +592,31 @@ def main():
     check("M7 forbidden writes left config.yaml byte-identical",
           _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest() == _sha_m7, "")
 
+    # 2026-10-13 key-leak pin: a key PUT that fails validation must not
+    # put the key in the response OR any log line (pipecat's handler
+    # logged Pydantic's `input` = the full key to journald).
+    from loguru import logger as _lg_leak
+    _leak_lines = []
+    _sink_id = _lg_leak.add(lambda m: _leak_lines.append(str(m)), level="DEBUG")
+    try:
+        _rl = client.put("/api/dashboard/intelligence/key",
+                         json={"api_key": "suite-leak-key-98765"})  # no kind → 422
+        _rl2 = client.put("/api/dashboard/tts/key/elevenlabs",
+                          json={"api_key": "suite-leak-key-98765", "bogus": 1})
+    finally:
+        _lg_leak.remove(_sink_id)
+    check("422 on key routes never echoes the key in the response",
+          _rl.status_code == 422 and _rl2.status_code == 422
+          and "suite-leak-key-98765" not in _rl.text + _rl2.text,
+          f"{_rl.status_code}/{_rl2.status_code} {_rl.text[:100]}")
+    check("422 on key routes never writes the key to any log line",
+          not any("suite-leak-key-98765" in ln for ln in _leak_lines)
+          and any("dashboard: 422 on /api/dashboard/intelligence/key" in ln for ln in _leak_lines),
+          f"lines={len(_leak_lines)}")
+    check("dashboard 422s never reach pipecat's app-wide handler",
+          not [p for p, _ in PIPECAT_HANDLER_HITS if p.startswith("/api/dashboard")],
+          f"hits={[p for p, _ in PIPECAT_HANDLER_HITS][:5]}")
+
     # 9b2. Key-route hardening (Opus audit finding 1): the character-class
     # pattern must reject newline injection (the old code-exec lane) and
     # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch
@@ -810,8 +855,8 @@ def main():
         _rc = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
-        check("9b5b M2 upload without track 422s (no silent array default)",
-              _rc.status_code == 422, _rc.text[:120])
+        check("9b5b M2 upload without track 422s (no silent array default; not pipecat's Stream-consumed 500)",
+              _rc.status_code == 422 and "track" in _rc.text, f"{_rc.status_code} {_rc.text[:120]}")
         check("9b5b M2 track-less upload left both manifests untouched",
               all((Path(f"firmware/{t}/version.json").read_text()
                    if Path(f"firmware/{t}/version.json").exists() else None) == _snap5c[t]
