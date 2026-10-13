@@ -22,6 +22,10 @@ from os import getenv as _getenv
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -33,7 +37,40 @@ import wake_word  # module-level import is light (pipecat frames only;
 from . import config_store, node_command, registry
 from .guard import mutation_guard
 
-router = APIRouter(prefix="/api/dashboard")
+class _DashboardRoute(APIRoute):
+    """Dashboard routes answer their OWN validation errors (2026-10-13).
+
+    pipecat's runner installs an app-wide RequestValidationError handler
+    (pipecat/runner/run.py:_configure_server_app) that (1) calls
+    `await request.body()` — on a multipart upload the stream is already
+    consumed, so every form 422 became a 500 RuntimeError("Stream
+    consumed") on the live app (the suite's plain FastAPI never showed
+    it); and (2) logs exc.errors() verbatim — Pydantic puts the rejected
+    `input` in each error, so a key PUT that failed validation (e.g. an
+    old cached UI omitting `kind`) wrote the FULL API KEY to journald.
+    It can't be overridden at app level (register_dashboard runs before
+    pipecat's main() re-registers its handler), so the dashboard router
+    catches RequestValidationError per-route, before pipecat ever sees
+    it: never reads the body, and strips `input`/`ctx` from both the
+    log line and the response (loc + msg are what the UI renders).
+    """
+
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def handler(request):
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                errors = [{k: e[k] for k in ("type", "loc", "msg") if k in e}
+                          for e in exc.errors()]
+                logger.warning(f"dashboard: 422 on {request.url.path}: {errors}")
+                return JSONResponse(status_code=422, content=jsonable_encoder({"detail": errors}))
+
+        return handler
+
+
+router = APIRouter(prefix="/api/dashboard", route_class=_DashboardRoute)
 # H5: every mutating route gets the Origin/Host guard (+optional
 # LVI_DASHBOARD_TOKEN check) — see guard.py.
 GUARD = [Depends(mutation_guard)]
