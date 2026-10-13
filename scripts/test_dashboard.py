@@ -375,6 +375,51 @@ def main():
     finally:
         _routes_m5._sonos_names = _real_names_m5
 
+    # 041 L3: ONE volume truth. /mapping serves effective_volumes for every
+    # zone through the same resolver as the test tone; each zone resolves
+    # in its OWN backend section; one code default everywhere.
+    import yaml as _yaml_l3
+    import sonos_output as _so_l3
+    import wiim_output as _wo_l3
+    from dashboard import routes as _routes_l3
+    _sonos_keys_l3 = set(((config_store.read_section("sonos") or {}).get("zones") or {}))
+    _wiim_keys_l3 = set(((config_store.read_section("wiim") or {}).get("zones") or {}))
+    _ev = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
+    check("041 L3 effective_volumes covers every zone (sonos ∪ wiim)",
+          bool(_ev) and set(_ev) == _sonos_keys_l3 | _wiim_keys_l3, f"ev={_ev}")
+    check("041 L3 effective volume == test-tone volume for every zone (one resolver)",
+          bool(_ev) and all(_ev[z] == _routes_l3._zone_test_volume(z, _routes_l3._backend_of(z)) for z in _ev), f"ev={_ev}")
+    # backend isolation: a Sonos global change must not move a WiiM zone
+    _sonos_sec_l3 = dict(config_store.read_section("sonos") or {})
+    _saved_live_l3 = dict(_so_l3._LIVE_ZONE_VOLUMES)
+    try:
+        config_store.write_section("sonos", {**_sonos_sec_l3, "clip_volume": 61, "zone_volumes": {}})
+        _so_l3.zone_volume_overrides({})
+        _ev2 = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
+        _wiim_glob = (config_store.read_section("wiim") or {}).get("clip_volume")
+        _wiim_expect = int(_wiim_glob) if _wiim_glob is not None else getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None)
+        check("041 L3 Sonos global moves Sonos zones only; WiiM resolves in its own section",
+              bool(_ev2) and all(_ev2[z] == 61 for z in _sonos_keys_l3)
+              and all(_ev2[z] == _wiim_expect for z in _wiim_keys_l3 if z not in _wo_l3._LIVE_WIIM_VOLUMES),
+              f"ev2={_ev2} wiim_expect={_wiim_expect}")
+        # live slider layer wins
+        if _sonos_keys_l3:
+            _z = sorted(_sonos_keys_l3)[0]
+            _so_l3.zone_volume_overrides({_z: 13})
+            _ev3 = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
+            check("041 L3 live slider override wins", _ev3.get(_z) == 13, f"ev3={_ev3}")
+    finally:
+        config_store.write_section("sonos", _sonos_sec_l3)
+        _so_l3.zone_volume_overrides(_saved_live_l3)
+    # one code default: a config with no clip_volume → the SAME number in
+    # SonosOutput (was 70), WiiMOutput (35) and the dashboard resolver (35)
+    _cfg_l3 = SCRATCH / "l3-novol.yaml"
+    _cfg_l3.write_text(_yaml_l3.safe_dump({"sonos": {"enabled": False, "zones": {}}}))
+    _so_def = _so_l3.SonosOutput(config_path=str(_cfg_l3), echo_gate=None, zone_selector=lambda: None, led=None)
+    check("041 L3 SonosOutput default clip volume == DEFAULT_CLIP_VOLUME (was 70)",
+          _so_def._volume == getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None) == 35,
+          f"sonos={_so_def._volume} default={getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None)}")
+
     # 9. TTS settings panel (Settings tab — config-editable arc)
     r = client.get("/api/dashboard/tts")
     ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_set" in r.json()
