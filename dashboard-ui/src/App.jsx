@@ -9,7 +9,27 @@ import { useEffect, useRef, useState } from 'react'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
-async function api(path, opts = {}) {
+// design note M6 (2026-10-13): LVI_DASHBOARD_TOKEN on the bot makes every
+// mutation 401 without X-Dashboard-Token (guard.py). The React port sent
+// a stored token but never ASKED for one — setting the token bricked
+// every save. On a mutation 401: prompt (once, shared across concurrent
+// callers), remember in localStorage, retry the request once. A token
+// that 401s again is dropped so the next save asks fresh. Reads stay
+// open server-side, so GETs never prompt.
+let tokenPrompt = null
+function askToken(wasStored) {
+  if (!tokenPrompt) {
+    tokenPrompt = Promise.resolve().then(() => {
+      const t = window.prompt(wasStored
+        ? 'Saved dashboard token was rejected. Enter the token (LVI_DASHBOARD_TOKEN on the bot):'
+        : 'This dashboard requires a token (LVI_DASHBOARD_TOKEN on the bot):')
+      return (t || '').trim() || null
+    }).finally(() => { setTimeout(() => { tokenPrompt = null }, 0) })
+  }
+  return tokenPrompt
+}
+
+async function api(path, opts = {}, _retried = false) {
   const headers = { ...(opts.headers || {}) }
   const tok = localStorage.getItem(TOKEN_KEY)
   if (tok) headers['X-Dashboard-Token'] = tok
@@ -25,6 +45,18 @@ async function api(path, opts = {}) {
     e.network = true
     throw e
   }
+  const method = (opts.method || 'GET').toUpperCase()
+  if (r.status === 401 && method !== 'GET' && !_retried) {
+    const t = await askToken(!!tok)
+    if (t) {
+      localStorage.setItem(TOKEN_KEY, t)
+      return api(path, opts, true)
+    }
+    const e = new Error('dashboard token required — save cancelled')
+    e.status = 401
+    throw e
+  }
+  if (r.status === 401 && _retried) localStorage.removeItem(TOKEN_KEY)  // wrong token: ask fresh next time
   let body = {}
   try { body = await r.json() } catch { /* empty body */ }
   if (!r.ok) {
