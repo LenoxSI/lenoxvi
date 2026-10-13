@@ -52,10 +52,12 @@ class MappingPayload(BaseModel):
 
 
 class SessionModePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     mode: str = Field(pattern="^(fresh|sticky)$")
 
 
 class ZonePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
     # design note H3 (2026-10-13): player_uid is a SONOS concept (RINCON_…).
@@ -289,6 +291,7 @@ async def discover_zones():
 
 
 class ZoneVolumePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     volume: int = Field(ge=0, le=100)
 
 
@@ -541,11 +544,13 @@ def _zone_test_volume(name: str, backend: str) -> int:
 
 
 class WifiPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     ssid: str = Field(min_length=1, max_length=32)
     password: str = Field(min_length=1, max_length=63)
 
 
 class NamePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     name: str = Field(min_length=1, max_length=31, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -561,6 +566,10 @@ async def restart_node(room: str):
         reply = await node_command.request(room, "restart", timeout=8.0)
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
+    # 041 M3: a node that answers ok:false did NOT restart — 502, never a
+    # lying 200 (same contract as scan/name/mute/info).
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"restart failed: {reply.get('data')}")
     return reply
 
 
@@ -588,6 +597,13 @@ async def set_node_wifi(room: str, payload: WifiPayload):
                                            timeout=8.0)
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
+    # 041 M3: the immediate ack is ok:false when the node REJECTED the creds
+    # before trying them (fw cmd.cpp: "missing ssid/pass", "nvs error") —
+    # the UI used to show "Wi-Fi applying…" on a 200 for a node that
+    # applied nothing. Only ok:true ("stored, connecting") means applying.
+    # Never echo the password: the node's data is a status string.
+    if not reply.get("ok"):
+        raise HTTPException(status_code=502, detail=f"wifi rejected by node: {reply.get('data')}")
     return reply
 
 
@@ -604,7 +620,10 @@ async def set_node_name(room: str, payload: NamePayload):
 
 
 class MutePayload(BaseModel):
-    mute: bool = Field(default=True)  # default true — the button's primary action
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    # 041 M7: REQUIRED — the old default=True meant a body-less POST muted
+    # a node. The UI always sends an explicit bool.
+    mute: bool
 
 
 @router.post("/nodes/{room}/mute", dependencies=GUARD)
@@ -725,6 +744,7 @@ _DEEPGRAM_FLUX_VOICES = (
 
 
 class TTSPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
                           pattern="^(elevenlabs|deepgram|deepgram-flux)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
@@ -772,6 +792,7 @@ class TTSKeyPayload(BaseModel):
     # which the next restart would execute. Alphanumeric + _ . - only.
     # Verified against the three real production keys before shipping:
     # all pass (2026-10-04).
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     api_key: str = Field(min_length=8, max_length=256,
                          pattern=r"^[A-Za-z0-9_.\-]+$")
 
@@ -887,6 +908,7 @@ class IntelligencePayload(BaseModel):
     # conversation field). Claude / custom OpenAI-compatible endpoints
     # are DESIGNED FOR (same envelope, URL+key+model) but not shipped —
     # the pattern 422s them until their lanes exist (design note).
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     kind: str = Field(pattern="^(hermes|openclaw)$")
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
@@ -1120,6 +1142,7 @@ async def restart_bot():
 
 
 class VoiceTuningPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     wake_threshold: float | None = Field(default=None, ge=0.30, le=0.60)
     wake_awake_timeout: float | None = Field(default=None, ge=5.0, le=60.0)
     vad_confidence: float | None = Field(default=None, ge=0.30, le=0.90)
@@ -1184,6 +1207,7 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
 
 
 class OWWModelPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     model: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+\.onnx$")
 
 
@@ -1400,6 +1424,7 @@ async def upload_firmware(
 
 
 class FirmwareVersionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
 
