@@ -599,10 +599,10 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
   const addZone = async () => {
     if (!newZone.name.trim()) { setMsg('Zone name required.', 'err', 'Zones'); return }
     try {
-      await api('/api/dashboard/zones', { method: 'POST', json: {
-        name: newZone.name, backend: newZone.backend,
-        ip: newZone.ip,
-        player_uid: newZone.backend === 'sonos' ? newZone.player_uid : '' } })
+      // player_uid is Sonos-only (041 H3) — WiiM zones send none at all.
+      const body = { name: newZone.name, backend: newZone.backend, ip: newZone.ip }
+      if (newZone.backend === 'sonos') body.player_uid = newZone.player_uid
+      await api('/api/dashboard/zones', { method: 'POST', json: body })
       setMsg(`Zone ${newZone.name} added — applies on next bot restart.`, 'ok', 'Zones')
       setNewZone({ name: '', backend: 'sonos', ip: '', player_uid: '' })
       reloadAll()

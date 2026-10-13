@@ -23,7 +23,7 @@ from os import getenv as _getenv
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from config import cfg, cfg_env
 
@@ -58,8 +58,26 @@ class SessionModePayload(BaseModel):
 class ZonePayload(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
-    player_uid: str = Field(min_length=8, max_length=64)
+    # design note H3 (2026-10-13): player_uid is a SONOS concept (RINCON_…).
+    # It used to be required for every backend with min_length=8, while the
+    # UI sends '' for WiiM — so adding a WiiM zone from the dashboard 422'd
+    # every time, and the suite papered over it with a fake RINCON.
+    # Optional at the field; the validator below requires it for sonos only.
+    player_uid: str | None = Field(default=None, max_length=64)
     backend: str = Field(default="sonos", pattern="^(sonos|wiim)$")
+
+    @model_validator(mode="after")
+    def _uid_per_backend(self):
+        uid = (self.player_uid or "").strip()
+        if self.backend == "sonos":
+            if len(uid) < 8:
+                raise ValueError("sonos zones need a player_uid (RINCON_…, 8+ chars)")
+            self.player_uid = uid
+        else:
+            # WiiM's HTTP API is UID-less — accept-and-drop whatever the
+            # form sent ('' today) so a stray value never lands in config.
+            self.player_uid = None
+        return self
 
 
 # ── status ───────────────────────────────────────────────────────────
@@ -329,8 +347,8 @@ async def add_zone(payload: ZonePayload):
     if name in _all_zones():
         raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
     if payload.backend == "wiim":
-        # WiiM zones need no player_uid (HTTP API is UID-less) — but the
-        # form still sends one; accept and ignore it. Adding a zone to a
+        # WiiM zones need no player_uid (HTTP API is UID-less); the
+        # payload validator already dropped any sent value. Adding a zone to a
         # backend IMPLIES enabling it: the 2026-10-04 bedroom test went
         # silent because the wiim section was written without
         # enabled: true and WiiMOutput constructed disabled (replies
