@@ -1566,41 +1566,84 @@ def main():
             _routes9._write_env_key = _fake_wek9
             try:
                 _kr = client.put("/api/dashboard/intelligence/key",
-                                 json={"api_key": "suite-keymaterial-12345"})
+                                 json={"kind": "hermes",
+                                       "api_key": "suite-keymaterial-12345"})
                 _kj = _kr.json()
                 check("9b11 key POST ok + never echoes material",
                       _kr.status_code == 200 and _kj.get("key_set") is True
                       and "suite-keymaterial-12345" not in _kr.text,
                       _kr.text[:120])
                 _kbad = client.put("/api/dashboard/intelligence/key",
-                                   json={"api_key": "bad\nkey"})
+                                   json={"kind": "hermes", "api_key": "bad\nkey"})
                 check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
-                # 036 M-2 pin: the key save is KIND-AWARE — hermes writes
-                # LVI_HERMES_KEY, openclaw writes LVI_OPENCLAW_KEY (the
-                # variable each lane reads FIRST, per the bug-7 + naming
-                # laws). The old route always wrote LVI_BRAIN_KEY: a Hermes
-                # key save was silently ignored AND clobbered the OpenClaw
-                # token.
+                # design note H1 contract pins: kind is REQUIRED (no silent
+                # guess from config), only shipped lanes, extra="forbid".
+                _knk = client.put("/api/dashboard/intelligence/key",
+                                  json={"api_key": "suite-keymaterial-12345"})
+                check("9b11c key POST without kind 422s (041 H1)",
+                      _knk.status_code == 422, _knk.text[:120])
+                _kbk = client.put("/api/dashboard/intelligence/key",
+                                  json={"kind": "claude",
+                                        "api_key": "suite-keymaterial-12345"})
+                check("9b11c key POST unshipped kind 422s",
+                      _kbk.status_code == 422, _kbk.text[:120])
+                _kex = client.put("/api/dashboard/intelligence/key",
+                                  json={"kind": "hermes", "apikey": "x",
+                                        "api_key": "suite-keymaterial-12345"})
+                check("9b11c key POST extra field 422s (forbid)",
+                      _kex.status_code == 422, _kex.text[:120])
+                # 036 M-2 + 041 H1 pin: the variable follows the PAYLOAD's
+                # kind, NOT config.yaml's. The UI-rebuilt 401: dropdown on
+                # OpenClaw, config still hermes, Save key → the OpenClaw
+                # token landed in LVI_HERMES_KEY. Cross each kind against
+                # the opposite configured kind so the old config-derived
+                # route would fail both halves.
                 _wek_calls9 = []
                 async def _fake_wek_rec9(var, value):
                     _wek_calls9.append(var)
                     return True
                 _routes9._write_env_key = _fake_wek_rec9
                 try:
-                    # explicit kinds — earlier 9b11 blocks leave kind=hermes
-                    # in the throwaway config, so set each kind before its save
-                    # naming law (2026-10-08): openclaw → LVI_OPENCLAW_KEY
-                    client.put("/api/dashboard/intelligence",
-                               json={"kind": "openclaw"})
-                    client.put("/api/dashboard/intelligence/key",
-                               json={"api_key": "suite-keymaterial-12345"})
                     client.put("/api/dashboard/intelligence",
                                json={"kind": "hermes"})
-                    client.put("/api/dashboard/intelligence/key",
-                               json={"api_key": "suite-keymaterial-12345"})
-                    check("9b11b key save is kind-aware (hermes→LVI_HERMES_KEY, openclaw→LVI_OPENCLAW_KEY)",
+                    _kx1 = client.put("/api/dashboard/intelligence/key",
+                                      json={"kind": "openclaw",
+                                            "api_key": "suite-keymaterial-12345"})
+                    client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw", "agent": "suite-agent"})
+                    _kx2 = client.put("/api/dashboard/intelligence/key",
+                                      json={"kind": "hermes",
+                                            "api_key": "suite-keymaterial-12345"})
+                    check("9b11b key save follows payload kind, not config (041 H1)",
                           _wek_calls9 == ["LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"],
                           f"calls={_wek_calls9}")
+                    check("9b11b key response names the variable written",
+                          _kx1.json().get("var") == "LVI_OPENCLAW_KEY"
+                          and _kx2.json().get("var") == "LVI_HERMES_KEY",
+                          f"{_kx1.text[:80]} | {_kx2.text[:80]}")
+                    _cfg_kind9 = (_yaml9.safe_load(
+                        Path(os.environ["LVI_CONFIG"]).read_text())
+                        .get("intelligence") or {}).get("kind")
+                    check("9b11b key save never touches config kind",
+                          _cfg_kind9 == "openclaw", f"kind={_cfg_kind9}")
+                    # GET reports key status for EVERY kind (chip follows
+                    # the kind on screen).
+                    _skh9 = _os.environ.pop("LVI_HERMES_KEY", None)
+                    _sko9 = _os.environ.get("LVI_OPENCLAW_KEY")
+                    _os.environ["LVI_OPENCLAW_KEY"] = "suite-oc-token-123"
+                    try:
+                        _gk9 = client.get("/api/dashboard/intelligence").json()
+                        check("9b11c GET keys_set per kind (041 H1)",
+                              _gk9.get("keys_set") == {"hermes": False, "openclaw": True}
+                              and "suite-oc-token-123" not in str(_gk9),
+                              str(_gk9.get("keys_set")))
+                    finally:
+                        if _skh9 is not None:
+                            _os.environ["LVI_HERMES_KEY"] = _skh9
+                        if _sko9 is None:
+                            _os.environ.pop("LVI_OPENCLAW_KEY", None)
+                        else:
+                            _os.environ["LVI_OPENCLAW_KEY"] = _sko9
                 finally:
                     _routes9._write_env_key = _fake_wek9
                     client.put("/api/dashboard/intelligence",
