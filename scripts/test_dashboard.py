@@ -497,9 +497,80 @@ def main():
               and "1.1.0+ required" not in str(_j_mut.get("detail", "")))
         check("mute: unknown-cmd 501s with the per-line truth (no firmware lie)",
               ok, f"status={_r_mut.status_code} body={_r_mut.text[:140]}")
+
+        # 041 M3: restart + wifi check the node's ack — ok:false is a 502,
+        # never a lying 200. Replies are the real firmware strings
+        # (cmd.cpp: restart "rebooting"; set_wifi "nvs error" /
+        # "stored, connecting").
+        _m3_reply = {}
+        async def _fake_m3_request(room, cmd, args=None, timeout=12.0):
+            if cmd in _m3_reply:
+                return _m3_reply[cmd]
+            return await _real_request(room, cmd, args, timeout)
+        _routes_mut.node_command.request = _fake_m3_request
+        _m3_reply["restart"] = {"ok": False, "data": "busy"}
+        _r = client.post("/api/dashboard/nodes/suite-mute-probe/restart")
+        check("M3 restart: node ok:false → 502 (041)",
+              _r.status_code == 502 and "busy" in _r.text, f"status={_r.status_code} body={_r.text[:120]}")
+        _m3_reply["restart"] = {"ok": True, "data": "rebooting"}
+        _r = client.post("/api/dashboard/nodes/suite-mute-probe/restart")
+        check("M3 restart: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
+        _m3_reply["set_wifi"] = {"ok": False, "data": "nvs error"}
+        _r = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                         json={"ssid": "suite-net", "password": "suite-secret-pw"})
+        check("M3 wifi: node ok:false → 502, password never echoed (041)",
+              _r.status_code == 502 and "nvs error" in _r.text
+              and "suite-secret-pw" not in _r.text,
+              f"status={_r.status_code} body={_r.text[:120]}")
+        _m3_reply["set_wifi"] = {"ok": True, "data": "stored, connecting"}
+        _r = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                         json={"ssid": "suite-net", "password": "suite-secret-pw"})
+        check("M3 wifi: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
+
+        # 041 M7: MutePayload.mute is REQUIRED — a body-less/empty POST
+        # must never mute a node (old default=True did).
+        _m3_reply["set_mute"] = {"ok": True, "data": {"muted": True}}
+        _r_e = client.post("/api/dashboard/nodes/suite-mute-probe/mute", json={})
+        _r_n = client.post("/api/dashboard/nodes/suite-mute-probe/mute")
+        check("M7 mute: empty body / no body 422 (no default-True trap)",
+              _r_e.status_code == 422 and _r_n.status_code == 422,
+              f"empty={_r_e.status_code} none={_r_n.status_code}")
     finally:
         _routes_mut.node_command.request = _real_request
         _reg_mut.mark_disconnected("suite-mute-pc")
+
+    # 041 M7: extra="forbid" on EVERY write payload — a misspelled key
+    # 422s instead of silently no-opping (the mapping-wipe bug's wider
+    # cousin). Each body is otherwise VALID, so the extra key is the only
+    # reason to reject; config.yaml must be byte-identical afterwards.
+    import hashlib as _hl_m7
+    _cfg_path_m7 = Path(os.environ["LVI_CONFIG"])
+    _sha_m7 = _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest()
+    _first_zone_m7 = next(iter((config_store.read_section("sonos") or {}).get("zones") or {"x": 0}))
+    _m7_cases = [
+        ("PUT", "/api/dashboard/tts", {"provider": "elevenlabs", "bogus": 1}),
+        ("PUT", "/api/dashboard/voice-tuning", {"wake_threshold": 0.5, "wake_treshold": 0.5}),
+        ("PUT", "/api/dashboard/intelligence", {"kind": "hermes", "knd": "openclaw"}),
+        ("PUT", f"/api/dashboard/zones/{_first_zone_m7}/volume", {"volume": 30, "vol": 30}),
+        ("POST", "/api/dashboard/zones", {"name": "m7z", "backend": "wiim", "ip": "127.0.0.6", "bogus": 1}),
+        ("POST", "/api/dashboard/nodes/suite-m7/session-mode", {"mode": "fresh", "mdoe": "sticky"}),
+        ("PUT", "/api/dashboard/oww/select", {"model": "x.onnx", "bogus": 1}),
+        ("POST", "/api/dashboard/firmware/version", {"version": "1.0.0", "bogus": 1}),
+        ("PUT", "/api/dashboard/tts/key/elevenlabs", {"api_key": "validkey_0123456789", "bogus": 1}),
+        ("POST", "/api/dashboard/nodes/suite-m7/name", {"name": "ok-name", "bogus": 1}),
+        ("POST", "/api/dashboard/nodes/suite-m7/wifi", {"ssid": "s", "password": "p", "bogus": 1}),
+        ("POST", "/api/dashboard/nodes/suite-m7/mute", {"mute": True, "bogus": 1}),
+    ]
+    _m7_bad = []
+    for _meth, _url, _body in _m7_cases:
+        _rr = client.request(_meth, _url, json=_body)
+        _det = _rr.json().get("detail") if _rr.status_code == 422 else None
+        if not (_rr.status_code == 422 and "extra_forbidden" in str(_det)):
+            _m7_bad.append((_url, _rr.status_code, _rr.text[:80]))
+    check(f"M7 extra key 422s on all {len(_m7_cases)} write payloads (041)",
+          not _m7_bad, f"not forbidden: {_m7_bad}")
+    check("M7 forbidden writes left config.yaml byte-identical",
+          _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest() == _sha_m7, "")
 
     # 9b2. Key-route hardening (Opus audit finding 1): the character-class
     # pattern must reject newline injection (the old code-exec lane) and
