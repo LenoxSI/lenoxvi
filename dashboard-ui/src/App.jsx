@@ -1183,29 +1183,36 @@ const TUNING_FIELDS = [
 
 function Tuning({ tuning, setMsg, setRebooting }) {
   const [vals, setVals] = useState({})
-  // Same bug-class fix as TTS (#3): sync from server once; drafts are
-  // local until saved — the 5s poll must not clobber slider edits.
-  const [tuned, setTuned] = useState(false)
+  // design note M4 (2026-10-13): dirty-set saves. Save used to send ALL six
+  // knobs from a sync-once draft — nudging one slider rewrote the other
+  // five with whatever this tab loaded, clobbering edits made elsewhere
+  // (another tab, another device). Now: Save sends only touched knobs, and
+  // UNTOUCHED sliders keep following the server on every poll. The dirty
+  // set lives in a ref too so the resync effect runs on `tuning` changes
+  // ONLY — keying it on dirty would snap sliders back to the stale
+  // pre-save values the moment a save clears the set.
+  const [dirty, setDirty] = useState({})
+  const dirtyRef = useRef({})
+  const markDirty = d => { dirtyRef.current = d; setDirty(d) }
   useEffect(() => {
-    if (tuning && !tuned) {
-      setVals({
-        wake_threshold: tuning.wake_threshold,
-        wake_awake_timeout: tuning.wake_awake_timeout,
-        vad_confidence: tuning.vad_confidence,
-        vad_min_volume: tuning.vad_min_volume,
-        lull_secs: tuning.lull_secs,
-        dedup_window: tuning.dedup_window,
-      })
-      setTuned(true)
-    }
-  }, [tuning, tuned])
+    if (!tuning) return
+    setVals(prev => {
+      const next = { ...prev }
+      for (const [f] of TUNING_FIELDS) if (!dirtyRef.current[f]) next[f] = tuning[f]
+      return next
+    })
+  }, [tuning])
 
+  const dirtyFields = TUNING_FIELDS.map(([f]) => f).filter(f => dirty[f])
   const save = async () => {
+    if (!dirtyFields.length) { setMsg('Nothing changed — no knobs touched.', 'muted', 'Voice tuning'); return }
     const body = {}
-    for (const [f] of TUNING_FIELDS) body[f] = parseFloat(vals[f])
+    for (const f of dirtyFields) body[f] = parseFloat(vals[f])
     try {
       await api('/api/dashboard/voice-tuning', { method: 'PUT', json: body })
-      setMsg('Tuning saved — applies on next bot restart.', 'ok', 'Voice tuning')
+      markDirty({})
+      window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // pull the saved truth back
+      setMsg(`Tuning saved (${dirtyFields.length} knob${dirtyFields.length > 1 ? 's' : ''}) — applies on next bot restart.`, 'ok', 'Voice tuning')
       offerRestart(setMsg, setRebooting)
     } catch (e) { setMsg('Tuning save failed: ' + e.message, 'err', 'Voice tuning') }
   }
@@ -1218,18 +1225,21 @@ function Tuning({ tuning, setMsg, setRebooting }) {
           {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
             <div key={f} className="grid gap-1">
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[13px] font-medium">{label}</span>
+                <span className="text-[13px] font-medium">{label}{dirty[f] ? ' •' : ''}</span>
                 <span className="font-mono text-[13px]">{vals[f] ?? '—'}</span>
               </div>
               <input type="range" min={min} max={max} step={step} value={vals[f] ?? min}
-                onChange={e => setVals({ ...vals, [f]: e.target.value })}
+                onChange={e => { setVals({ ...vals, [f]: e.target.value }); markDirty({ ...dirtyRef.current, [f]: true }) }}
                 className="accent-[var(--accent)]" aria-label={label} />
               <span className="text-[12px] text-[var(--muted)]">{hint}</span>
             </div>
           ))}
         </div>
         <div className="flex justify-end">
-          <button className={BTN_PRIMARY} onClick={save}>Save tuning</button>
+          <button className={BTN_PRIMARY} onClick={save} disabled={!dirtyFields.length}
+            title={dirtyFields.length ? `Saves only the ${dirtyFields.length} knob(s) you changed (•).` : 'Move a slider first.'}>
+            {dirtyFields.length ? `Save tuning (${dirtyFields.length})` : 'Save tuning'}
+          </button>
         </div>
       </div>
     </Section>
