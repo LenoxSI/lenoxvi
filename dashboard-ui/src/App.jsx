@@ -445,6 +445,16 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   }
 
   const zoneNames = Object.keys(mapping?.zones || {})
+  // design note H2 (2026-10-13): rows = mapped rooms ∪ connected nodes. Rows
+  // used to come from room_zones alone, so a node that had connected but
+  // was never mapped had NO row — a fresh install could not map its first
+  // node from the React UI (regression vs page.html; also the 036 "third
+  // node can't onboard" residual). Mapped rooms keep config order;
+  // unmapped nodes follow in registry order.
+  const mappedRooms = Object.keys(mapping?.room_zones || {})
+  const unmappedRooms = (status?.rooms || []).map(r => r.room)
+    .filter(r => r && !mappedRooms.includes(r))
+  const roomRows = [...mappedRooms, ...unmappedRooms]
   const saveMapping = async room => {
     const zone = mapDraft?.[room]
     if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
@@ -464,7 +474,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   return (
     <>
       <Section id="rooms" title="Room → zone mapping"
-        note="Pick a speaker zone for each mic node. Rooms appear once their node has connected at least once.">
+        note="Pick a speaker zone for each mic node. New nodes appear here as soon as they connect.">
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-[14px]">
             <thead>
@@ -475,13 +485,24 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(mapping?.room_zones || {}).map(([room, zone]) => (
+              {roomRows.map(room => {
+                const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? ''
+                const unmapped = !mapping?.room_zones?.[room]
+                return (
                 <tr key={room} className="border-t border-[var(--separator)]">
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(room)}</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">
+                    {esc(room)}
+                    {unmapped && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
+                  </td>
                   <td className="px-4 py-2">
-                    <select value={mapDraft?.[room] ?? zone}
+                    {/* Empty placeholder (041 H2): without it an unmapped row
+                        DISPLAYS the first zone while its value is '' — a
+                        fake selection that Save would reject as "pick a zone". */}
+                    <select value={zone}
                       onChange={e => { setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
                       className={`${INPUT_CLS} w-[200px]`}>
+                      {(zone === '' || !zoneNames.includes(zone)) &&
+                        <option value="" disabled>{zoneNames.length ? 'pick a zone…' : 'add a zone below first'}</option>}
                       {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>
                   </td>
@@ -489,9 +510,10 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     <button className={BTN_PRIMARY} onClick={() => saveMapping(room)}>Save</button>
                   </td>
                 </tr>
-              ))}
-              {Object.keys(mapping?.room_zones || {}).length === 0 &&
-                <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="3">No rooms mapped yet.</td></tr>}
+                )
+              })}
+              {roomRows.length === 0 &&
+                <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="3">No mic nodes yet — power one on and it will appear here.</td></tr>}
             </tbody>
           </table>
         </div>
