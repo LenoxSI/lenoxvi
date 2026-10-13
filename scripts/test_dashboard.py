@@ -360,6 +360,32 @@ def main():
         check("TTS GET never leaks key values",
               "api_key" not in t and not any("sk_" in str(v) for v in t.values()),
               f"keys={list(t)}")
+        # 041 M1: GET /tts serves the FULL accepted catalog per provider —
+        # the UI's only pick-list source (it hardcoded 12/40 Aura, 16/36
+        # Flux). Every catalog entry must pass the server's own validation
+        # (no I/O: validate the payload directly), so the list can never
+        # offer a value the PUT rejects.
+        _cat = t.get("catalog") or {}
+        check("041 M1 TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36)",
+              len(_cat.get("elevenlabs", [])) == 2 and len(_cat.get("deepgram", [])) == 40
+              and len(_cat.get("deepgram-flux", [])) == 36,
+              str({k: len(v) for k, v in _cat.items()}))
+        from dashboard import routes as _routes_m1
+        _m1_bad = []
+        for _prov, _vals in _cat.items():
+            for _v in _vals:
+                try:
+                    if _prov == "elevenlabs":
+                        _p = _routes_m1.TTSPayload(provider=_prov, model=_v, voice_id="AbC123xyZw9876543210")
+                    elif _prov == "deepgram":
+                        _p = _routes_m1.TTSPayload(provider=_prov, deepgram_voice=_v)
+                    else:
+                        _p = _routes_m1.TTSPayload(provider=_prov, deepgram_flux_voice=_v)
+                    _routes_m1._validate_tts_payload(_p)
+                except Exception as _e:
+                    _m1_bad.append((_prov, _v, str(_e)[:40]))
+        check("041 M1 every catalog entry passes the server's own TTS validation",
+              not _m1_bad and sum(len(v) for v in _cat.values()) == 78, f"bad={_m1_bad[:3]}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
