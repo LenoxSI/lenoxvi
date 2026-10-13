@@ -800,15 +800,31 @@ def main():
                           data={"track": "warp"})
         check("9b5b unknown track 400s (never a silent wrong dir)",
               _rb.status_code == 400, str(_rb.status_code))
-        # (c) default (no track field) stays array — legacy callers safe
+        # (c) 041 M2: NO default track — a track-less upload 422s and
+        # touches neither track's directory (reverses the 036 H-B
+        # "default stays array" pin: no board identity in the image yet,
+        # so a silent array default is a cross-flash accelerant).
+        _snap5c = {t: (Path(f"firmware/{t}/version.json").read_text()
+                       if Path(f"firmware/{t}/version.json").exists() else None)
+                   for t in ("node", "flex")}
         _rc = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
-        _jc = _rc.json()
-        check("9b5b default upload stays on the array track",
-              _rc.status_code == 200 and _jc.get("track") == "node"
+        check("9b5b M2 upload without track 422s (no silent array default)",
+              _rc.status_code == 422, _rc.text[:120])
+        check("9b5b M2 track-less upload left both manifests untouched",
+              all((Path(f"firmware/{t}/version.json").read_text()
+                   if Path(f"firmware/{t}/version.json").exists() else None) == _snap5c[t]
+                  for t in ("node", "flex")), str(_snap5c)[:120])
+        # explicit array track still works
+        _rd = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("arr.bin", _fake_image5b("1.9.7"),
+                                          "application/octet-stream")},
+                          data={"track": "node"})
+        check("9b5b explicit array track upload lands in firmware/node/",
+              _rd.status_code == 200 and _rd.json().get("track") == "node"
               and json.loads(Path("firmware/node/version.json").read_text())["version"] == "1.9.7",
-              _rc.text[:120])
+              _rd.text[:120])
     finally:
         os.chdir(_saved_updir5b)
 
