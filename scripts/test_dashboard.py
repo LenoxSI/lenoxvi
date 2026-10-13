@@ -351,6 +351,30 @@ def main():
     check("M14 probe mapping actually gone from config",
           _probe is None, f"room_zones m14_probe_room={_probe}")
 
+    # 041 M5: /mapping only runs soco name lookups on ?names=1, and only
+    # for SONOS zones (the 5s UI poll used to hit every zone, WiiM
+    # included, on every tick).
+    from dashboard import routes as _routes_m5
+    _m5_calls = []
+    _real_names_m5 = _routes_m5._sonos_names
+    _routes_m5._sonos_names = lambda zones: (_m5_calls.append(sorted(zones)) or {k: k for k in zones})
+    try:
+        _rm = client.get("/api/dashboard/mapping")
+        check("041 M5 plain /mapping poll runs NO soco lookup and omits sonos_names",
+              _rm.status_code == 200 and not _m5_calls and "sonos_names" not in _rm.json(),
+              f"calls={_m5_calls} keys={list(_rm.json())}")
+        _rn = client.get("/api/dashboard/mapping?names=1")
+        _wiim_keys_m5 = set(((config_store.read_section("wiim") or {}).get("zones") or {}))
+        _sonos_keys_m5 = set(((config_store.read_section("sonos") or {}).get("zones") or {}))
+        check("041 M5 ?names=1 looks up Sonos zones only (never WiiM)",
+              _rn.status_code == 200 and len(_m5_calls) == 1
+              and set(_m5_calls[0]) == _sonos_keys_m5
+              and not (set(_m5_calls[0]) & _wiim_keys_m5)
+              and "sonos_names" in _rn.json(),
+              f"calls={_m5_calls} sonos={sorted(_sonos_keys_m5)} wiim={sorted(_wiim_keys_m5)}")
+    finally:
+        _routes_m5._sonos_names = _real_names_m5
+
     # 9. TTS settings panel (Settings tab — config-editable arc)
     r = client.get("/api/dashboard/tts")
     ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_set" in r.json()
