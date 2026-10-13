@@ -642,8 +642,12 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
 function ZoneList({ mapping, setMsg, reloadAll }) {
   const [discovered, setDiscovered] = useState(null)
   const [newZone, setNewZone] = useState({ name: '', backend: 'sonos', ip: '', player_uid: '' })
-  const zoneVols = mapping?.zone_volumes || {}
-  const clipVolume = mapping?.clip_volume ?? 70
+  // design note L3 (2026-10-13): the slider shows what the zone ACTUALLY
+  // plays at — the server's effective_volumes (live > per-zone > the
+  // zone's own backend global > one code default). The old `?? 70`
+  // fallback here disagreed with the backends (35) and showed WiiM zones
+  // Sonos's global.
+  const effVols = mapping?.effective_volumes || {}
 
   const saveVolume = async (name, vol) => {
     try {
@@ -706,7 +710,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                   </span>
                 </td>
                 <td className="px-4 py-2">
-                  <VolSlider name={name} initial={zoneVols[name] ?? clipVolume} onCommit={saveVolume} />
+                  <VolSlider name={name} initial={effVols[name]} onCommit={saveVolume} />
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button className={BTN_DEFAULT} onClick={() => testClip(name)}>Play test clip</button>
@@ -763,6 +767,17 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
 function VolSlider({ name, initial, onCommit }) {
   const [val, setVal] = useState(initial)
   useEffect(() => { setVal(initial) }, [initial])
+  // No server number yet (older bot / first paint): show — and lock the
+  // slider rather than invent a default that may not be what plays.
+  if (val == null) {
+    return (
+      <div className="flex items-center gap-2">
+        <input type="range" min="0" max="100" value={0} disabled readOnly
+          className="w-[140px] accent-[var(--accent)] opacity-40" aria-label={`${name} volume`} />
+        <span className="font-mono text-[12px] w-[30px] text-right">—</span>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-2">
       <input type="range" min="0" max="100" value={val}

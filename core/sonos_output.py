@@ -253,13 +253,13 @@ class SonosOutput(FrameProcessor):
         # Read through core/config so LVI_CONFIG (if ever set) applies here
         # too — a direct Path("config.yaml") default would let the bot read
         # two different config files in one process.
-        from config import CONFIG_PATH
+        from config import CONFIG_PATH, DEFAULT_CLIP_VOLUME
 
         cfg = yaml.safe_load(Path(config_path or CONFIG_PATH).read_text()) or {}
         sonos = cfg.get("sonos", {})
         self._enabled = bool(sonos.get("enabled"))
         self._zone = sonos.get("default_zone")
-        self._volume = int(sonos.get("clip_volume", 70))
+        self._volume = int(sonos.get("clip_volume", DEFAULT_CLIP_VOLUME))  # 041 L3: one default
         # Per-zone volume overrides (2026-10-04, dashboard slider): config
         # `sonos.zone_volumes: {<zone>: int}` is the durable copy; the live
         # layer (zone_volume_overrides below) lets the dashboard change a

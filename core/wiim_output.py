@@ -104,11 +104,11 @@ class WiiMOutput(FrameProcessor):
         # Optional sync callable returning the reply zone NAME (same
         # contract as SonosOutput's zone_selector — bot.py's _reply_zone).
         self._zone_selector = zone_selector
-        from config import cfg
+        from config import cfg, DEFAULT_CLIP_VOLUME
         wiim = cfg("wiim") or {}
         self._enabled = bool(wiim.get("enabled"))
         self._zone = wiim.get("default_zone")
-        self._volume = int(wiim.get("clip_volume", 35))
+        self._volume = int(wiim.get("clip_volume", DEFAULT_CLIP_VOLUME))  # 041 L3: one default
         self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
                               if isinstance(v, (int, float))}
         self._zones = dict(wiim.get("zones") or {})

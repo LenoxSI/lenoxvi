@@ -29,7 +29,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from config import cfg, cfg_env
+from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 
 import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
@@ -239,6 +239,9 @@ async def get_mapping(names: bool = False):
         "zone_volumes": {**(cfg("sonos", "zone_volumes") or {}),
                          **(cfg("wiim", "zone_volumes") or {})},
         "clip_volume": cfg("sonos", "clip_volume"),
+        # 041 L3: what each zone ACTUALLY plays at — the slider's only
+        # source (the UI's own `?? 70` fallback disagreed with the backends).
+        "effective_volumes": {z: effective_zone_volume(z) for z in zones},
     }
     # 041 M5 (2026-10-13): Sonos display names are OPT-IN (?names=1). The
     # React UI polls /mapping every 5s and never reads them, yet every poll
@@ -361,7 +364,7 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
         section = dict(cfg("sonos") or {})
     vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
     before = vols.get(name)
-    if payload.volume == int(section.get("clip_volume", 35)):
+    if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
         # Setting a zone back to the global value = no override needed;
         # keep the config minimal (same pattern as session modes).
         vols.pop(name, None)
@@ -564,22 +567,33 @@ async def test_zone(name: str):
     return {"ok": True, "zone": name, "url": url, "backend": backend}
 
 
-def _zone_test_volume(name: str, backend: str) -> int:
-    """Slider-aware test-tone volume (live override > config per-zone >
-    global), resolved through the right backend's live layer."""
+def effective_zone_volume(name: str, backend: str | None = None) -> int:
+    """THE volume a clip in `name` plays at (design note L3, 2026-10-13):
+    live override (dashboard slider) > `<backend>.zone_volumes` >
+    `<backend>.clip_volume` > DEFAULT_CLIP_VOLUME — resolved in the zone's
+    OWN backend section (the UI used to show WiiM zones Sonos's global).
+    Same precedence the output backends apply at reply time; the
+    dashboard displays this number instead of re-deriving it."""
+    backend = backend or _backend_of(name)
     if backend == "wiim":
-        from wiim_output import live_wiim_volume
-        vol = live_wiim_volume(name)
-        if vol is None:
-            zv = (cfg("wiim", "zone_volumes") or {}).get(name)
-            vol = int(zv) if zv is not None else int(cfg("wiim", "clip_volume") or 35)
+        from wiim_output import live_wiim_volume as _live
+        section = cfg("wiim") or {}
     else:
-        from sonos_output import live_zone_volume
-        vol = live_zone_volume(name)
-        if vol is None:
-            zv = (cfg("sonos", "zone_volumes") or {}).get(name)
-            vol = int(zv) if zv is not None else int(cfg("sonos", "clip_volume") or 35)
-    return int(vol)
+        from sonos_output import live_zone_volume as _live
+        section = cfg("sonos") or {}
+    vol = _live(name)
+    if vol is not None:
+        return int(vol)
+    zv = (section.get("zone_volumes") or {}).get(name)
+    if zv is not None:
+        return int(zv)
+    gv = section.get("clip_volume")
+    return int(gv) if gv is not None else DEFAULT_CLIP_VOLUME
+
+
+def _zone_test_volume(name: str, backend: str) -> int:
+    """Test-tone volume = the zone's effective volume (one resolver)."""
+    return effective_zone_volume(name, backend)
 
 
 # ── node commands (firmware 1.1.0: restart / scan / set_wifi / set_name) ──
