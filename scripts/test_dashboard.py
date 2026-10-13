@@ -287,13 +287,38 @@ def main():
         importlib.reload(_cfg_mod)
     # M14: zone DELETE with a dangling room mapping does ONE atomic
     # multi-section write (zone gone + mapping cleaned, same pass).
-    # player_uid is required by ZonePayload even for wiim (route ignores
-    # it for the wiim backend) — the first run omitted it and 422'd.
+    # 041 H3: the probe WiiM zone carries NO player_uid — this used to
+    # need a fake RINCON because ZonePayload required a uid for every
+    # backend (so the real UI's WiiM add 422'd every time).
     _r_add14 = client.post("/api/dashboard/zones", json={
-        "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9",
-        "player_uid": "RINCON_M14PROBE"})
-    check("M14 probe zone add ok",
+        "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9"})
+    check("M14 probe zone add ok (wiim, no player_uid — 041 H3)",
           _r_add14.status_code == 200, f"status={_r_add14.status_code} body={_r_add14.text[:120]}")
+    _wz14 = ((config_store.read_section("wiim") or {}).get("zones") or {}).get("m14_probe_zone")
+    check("H3 wiim zone written without a player_uid key",
+          isinstance(_wz14, dict) and "player_uid" not in _wz14, f"zone={_wz14}")
+    # 041 H3: the UI's exact pre-fix WiiM body (player_uid: '') is legal;
+    # any stray value sent for wiim is dropped, never written.
+    _r_h3 = client.post("/api/dashboard/zones", json={
+        "name": "h3_probe_zone", "backend": "wiim", "ip": "127.0.0.8",
+        "player_uid": ""})
+    check("H3 wiim zone add with empty player_uid ok",
+          _r_h3.status_code == 200, f"status={_r_h3.status_code} body={_r_h3.text[:120]}")
+    client.delete("/api/dashboard/zones/h3_probe_zone")
+    # Sonos still REQUIRES a real uid (validator, sonos-only).
+    _r_h3s = client.post("/api/dashboard/zones", json={
+        "name": "h3_sonos_nouid", "backend": "sonos", "ip": "127.0.0.7"})
+    check("H3 sonos zone without player_uid 422s",
+          _r_h3s.status_code == 422, f"status={_r_h3s.status_code} body={_r_h3s.text[:120]}")
+    _r_h3t = client.post("/api/dashboard/zones", json={
+        "name": "h3_sonos_short", "backend": "sonos", "ip": "127.0.0.7",
+        "player_uid": "RINC"})
+    check("H3 sonos zone with short player_uid 422s",
+          _r_h3t.status_code == 422, f"status={_r_h3t.status_code} body={_r_h3t.text[:120]}")
+    check("H3 rejected sonos probes never reached config",
+          not ({"h3_sonos_nouid", "h3_sonos_short"}
+               & set(((config_store.read_section("sonos") or {}).get("zones") or {}))),
+          "")
     client.put("/api/dashboard/mapping", json={
         "room_zones": {"m14_probe_room": "m14_probe_zone"}})
     _del = client.delete("/api/dashboard/zones/m14_probe_zone")
