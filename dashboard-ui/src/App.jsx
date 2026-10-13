@@ -1369,7 +1369,24 @@ export default function App() {
   const [rebooting, setRebooting] = useState(false)
   const active = useActiveSection()
 
-  const reloadAll = async () => {
+  // design note M5 (2026-10-13): poll hygiene. One refresh cycle at a time —
+  // a call that lands mid-cycle doesn't stack a second wave of 5 GETs
+  // (slow /mapping used to pile them up); it marks the cycle dirty and
+  // gets the CURRENT cycle's promise, which loops once more so a save's
+  // `await reloadAll()` still resolves on post-save data. Hidden tabs skip
+  // the interval; becoming visible refreshes immediately.
+  const reloadInFlight = useRef(null)
+  const reloadAgain = useRef(false)
+  const reloadAll = () => {
+    if (reloadInFlight.current) { reloadAgain.current = true; return reloadInFlight.current }
+    reloadInFlight.current = (async () => {
+      try {
+        do { reloadAgain.current = false; await reloadOnce() } while (reloadAgain.current)
+      } finally { reloadInFlight.current = null }
+    })()
+    return reloadInFlight.current
+  }
+  const reloadOnce = async () => {
     const jobs = [
       api('/api/dashboard/status').then(setStatus).catch(e => {
         if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status')
@@ -1384,10 +1401,16 @@ export default function App() {
 
   useEffect(() => {
     reloadAll()
-    const t = setInterval(reloadAll, 5000)
+    const t = setInterval(() => { if (!document.hidden) reloadAll() }, 5000)
     const h = () => reloadAll()
+    const vis = () => { if (!document.hidden) reloadAll() }
     window.addEventListener('lenoxvi:reload-all', h)
-    return () => { clearInterval(t); window.removeEventListener('lenoxvi:reload-all', h) }
+    document.addEventListener('visibilitychange', vis)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('lenoxvi:reload-all', h)
+      document.removeEventListener('visibilitychange', vis)
+    }
   }, [])
 
   return (

@@ -228,9 +228,9 @@ def _sonos_names(zones: dict) -> dict:
 
 
 @router.get("/mapping")
-async def get_mapping():
+async def get_mapping(names: bool = False):
     zones = _all_zones()
-    return {
+    out = {
         "room_zones": dict(config_store.read_section("room_zones") or {}),
         "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
@@ -239,11 +239,16 @@ async def get_mapping():
         "zone_volumes": {**(cfg("sonos", "zone_volumes") or {}),
                          **(cfg("wiim", "zone_volumes") or {})},
         "clip_volume": cfg("sonos", "clip_volume"),
-        # M5: soco network calls go to a thread — the dashboard rides the
-        # voice pipeline's event loop; a slow/offline player must not
-        # stall audio ingest (Opus review).
-        "sonos_names": await asyncio.to_thread(_sonos_names, zones),
     }
+    # 041 M5 (2026-10-13): Sonos display names are OPT-IN (?names=1). The
+    # React UI polls /mapping every 5s and never reads them, yet every poll
+    # ran soco network calls against EVERY zone — including WiiM IPs,
+    # which a Sonos client can't answer (an offline player = a timeout per
+    # poll). Sonos zones only. Still threaded when asked (note-028 M5: this
+    # is the voice pipeline's event loop).
+    if names:
+        out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
+    return out
 
 
 @router.put("/mapping", dependencies=GUARD)
