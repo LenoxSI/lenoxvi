@@ -8,6 +8,83 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-10-13 — Dashboard hardening + the naming law
+
+The Opus 5.5 dashboard review (design note) closed end to end — every
+HIGH and MED plus L3 — along with two bugs nobody had flagged, the
+"one lane, one variable" naming law, and the note-028 smalls. Every fix
+ships with suite pins that fail against the pre-fix code (red-probed);
+suite 162 → 188 checks. Live-verified on the house rig after each deploy.
+
+### Upgrading from 0.6.1
+- **Config section `brain:` is now `intelligence:`** — rename it in
+  `config.yaml` (no fallback reads the old name). Env overrides follow:
+  `LVI_INTELLIGENCE_KIND` / `LVI_INTELLIGENCE_AGENT` / `LVI_INTELLIGENCE_MAX_TOKENS`.
+- **`LVI_BRAIN_KEY` is gone.** Each lane reads exactly one variable:
+  Hermes → `LVI_HERMES_KEY`, OpenClaw → `LVI_OPENCLAW_KEY`. No cross-kind
+  fallback — a missing key is one clear error line, never a wrong-token 401.
+- **API contract tightened** (scripts calling the dashboard API):
+  `PUT /intelligence/key` requires `kind`; `POST /firmware/upload`
+  requires `track` (no silent array default); every write payload
+  rejects unknown fields (422); `POST /nodes/{room}/mute` requires an
+  explicit `mute`; `/mapping` returns Sonos display names only with
+  `?names=1`.
+
+### Added
+- **Voice catalog from the server** — `GET /tts` returns `catalog`
+  (2 ElevenLabs models, 40 Aura, 36 Flux); the dashboard's pick-lists
+  are built from it. All 76 Deepgram voices are now pickable (the UI
+  listed only 28 — 48 were unreachable).
+- **Per-kind Intelligence URL memory** — switching provider swaps in
+  that lane's remembered URL; the OpenClaw lane can't be pointed at the
+  Hermes api_server by accident.
+- **Unmapped nodes are mappable** — the mapping table lists every
+  connected node with an "unmapped" chip, so a fresh install (or a
+  third node) can be mapped from the dashboard.
+- **Dashboard token prompt** — with `LVI_DASHBOARD_TOKEN` set, a save
+  prompts once, remembers the token, and retries (previously every save
+  just failed).
+- **Firmware upload safety** — no default track; confirm names the
+  line and warns when the filename hints at the other one; after a push,
+  pick which nodes restart (nothing pre-checked).
+- `deploy_firmware.sh --track flex`, plus a version-from-image gate that
+  refuses to ship on a manifest/binary mismatch.
+- `effective_volumes` on `/mapping` — what each zone actually plays at.
+
+### Fixed — dashboard
+- Intelligence key save follows the provider on screen, not the one in
+  config (the UI could write the OpenClaw token into `LVI_HERMES_KEY`).
+- Adding a WiiM zone 422'd every time (`player_uid` was required for all
+  backends) — now Sonos-only.
+- Mute button after a node reboot: re-reads the node's state per
+  connection; unknown state shows "Mute?" and a click mutes.
+- Restart / Wi-Fi routes returned 200 when the node said no — now 502;
+  the password is never echoed.
+- Misspelled fields silently no-op'd (a typo'd tuning key rewrote
+  `wake.threshold`); an empty mute body muted the node.
+- Deepgram TTS first save 422'd (the voice menu held the ElevenLabs model).
+- Tuning saves sent all six knobs and reverted edits made elsewhere —
+  now only touched knobs.
+- Polling: one refresh cycle at a time, hidden tabs skip, and the 5 s
+  poll no longer runs Sonos lookups (it was probing the WiiM too).
+- One volume default (35) for both output backends and the dashboard —
+  Sonos defaulted to 70 when config omitted `clip_volume`; WiiM sliders
+  showed the Sonos global.
+- `fw=None` in the Nodes table (fw_push / offer-tee race); mute errors
+  and tooltip tell the per-line truth (array = physical button).
+
+### Fixed — security / robustness
+- **Form-upload 422s returned 500** and **key-route 422s logged the full
+  API key to the journal** — pipecat's app-wide validation handler read
+  the request body and logged rejected values. Dashboard routes now
+  answer their own 422s (no body read, rejected values stripped). Journal
+  audit back to 2026-10-03: no real key was ever logged.
+- Wake barge-in interrupt never ran (async callback was never awaited).
+- Note-028 smalls: config anchored to the repo root (cwd-proof), clip
+  server can't half-bind, TTS secrets checked at construction, zone
+  delete is one atomic multi-section write.
+- `firmware/flex/` gitignored (flex images bake fallback Wi-Fi creds).
+
 ## [0.6.1] — 2026-10-07 — Software mute + ElevenLabs voice shaping
 
 Node mute becomes a first-class control and the flash-v2.5 voice gets
