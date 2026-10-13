@@ -1169,16 +1169,21 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           <div className="flex items-center gap-2 flex-wrap flex-1">
             <input id="int-key" type="password" placeholder="paste key…"
               className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
-            {intelligence?.key_set ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
+            {/* design note H1: chip reflects the kind ON SCREEN (keys_set per kind) */}
+            {intelligence?.keys_set?.[intKind] ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
           </div>
         </Field>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <button className={BTN_DEFAULT} onClick={async () => {
-            const key = document.getElementById('int-key').value.trim()
+            const keyEl = document.getElementById('int-key')
+            const key = keyEl.value.trim()
             if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
             try {
-              await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { api_key: key } })
-              setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'Intelligence')
+              // design note H1: send the kind on screen — the server writes THAT
+              // kind's variable, never the one config.yaml happens to hold.
+              const r = await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { kind: intKind, api_key: key } })
+              keyEl.value = ''  // don't leave the pasted key sitting in the DOM
+              setMsg(`Key saved to ${r?.var || '.env'} — applies on next bot restart.`, 'ok', 'Intelligence')
               reloadAll()
             } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
           }}>Save key</button>

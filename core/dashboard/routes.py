@@ -17,6 +17,7 @@ import subprocess
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Literal
 from os import getenv as _getenv
 
 import numpy as np
@@ -881,7 +882,22 @@ class IntelligencePayload(BaseModel):
                               pattern=r"^[A-Za-z0-9_.-]+$")
 
 
+# One lane, one variable, named for its intelligence (naming law
+# 2026-10-08). Single source for the dashboard routes — GET status, key
+# save, and the Test probe all read this map.
+INTELLIGENCE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
+
+
 class IntelligenceKeyPayload(BaseModel):
+    # design note H1 (2026-10-13): the key is saved for the kind the user is
+    # LOOKING AT, not the kind config.yaml holds. The old route derived the
+    # variable from saved config, so picking OpenClaw in the dropdown and
+    # saving its token on a hermes-configured install wrote the OpenClaw
+    # token into LVI_HERMES_KEY — the 401-incident failure mode, rebuilt
+    # by the UI. kind is REQUIRED (no default = no silent guess) and
+    # extra="forbid" so a misspelled field 422s instead of no-opping.
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["hermes", "openclaw"]
     # Same character-class law as TTSKeyPayload (Opus audit 2026-10-04
     # finding 1): no newlines/quotes/backslashes — a `\n` in a key PUT
     # must never smuggle a second env var into .env.
@@ -899,13 +915,16 @@ async def get_intelligence():
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (a fallback turned a missing key into a silent
     # wrong-token outage once). key_kind names the variable.
-    _kv = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
+    # keys_set (design note H1): status for EVERY kind, so the UI chip shows
+    # the key of the kind on screen, not the kind in config.
+    _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
     return {
         "kind": kind,
         "url": intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
         "urls": intelligence_cfg.get("urls") or {},
         "agent": intelligence_cfg.get("agent"),
         "key_set": bool(_os.getenv(_kv)),
+        "keys_set": {k: bool(_os.getenv(v)) for k, v in INTELLIGENCE_KEY_VARS.items()},
         "key_kind": _kv.lower() if _os.getenv(_kv) else None,
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
@@ -954,12 +973,13 @@ async def put_intelligence(payload: IntelligencePayload):
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
     """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law +
     the 2026-10-08 naming law: each intelligence's key names what it is):
-    hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — writing the
-    variable the agent reads FIRST for that kind. Never echoed. Legacy
-    fallbacks (LVI_BRAIN_KEY generic slot, cross-kind) keep old installs
-    working either way."""
-    kind = (config_store.read_section("intelligence") or {}).get("kind") or "hermes"
-    var = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
+    hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — the ONE variable
+    that lane reads (strict law: no fallbacks, no cross-kind). The kind
+    comes from the PAYLOAD (design note H1) — the kind the user is saving a
+    key for — never from saved config. Never echoed; the response names
+    the variable so the UI can say where the key went."""
+    kind = payload.kind
+    var = INTELLIGENCE_KEY_VARS[kind]
     replaced = await _write_env_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
     return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind}
@@ -980,7 +1000,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     # fallback anywhere (this probe previously read the now-DELETED
     # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
     # caught in the 2026-10-08 brain→intelligence sweep).
-    _kv = "LVI_HERMES_KEY" if kind == "hermes" else "LVI_OPENCLAW_KEY"
+    _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
     key = _os.getenv(_kv) or ""
     if not url:
         return {"ok": False, "error": "no url configured"}

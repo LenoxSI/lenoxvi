@@ -200,9 +200,7 @@ class HermesAgent(FrameProcessor):
         self._agent = ""
         if self._kind == "openclaw":
             self._agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", "") or "")
-        # Key resolution (design note): LVI_BRAIN_KEY first, LVI_HERMES_KEY
-        # fallback — zero migration for existing installs. Missing key is
-        # NOT a construction brick (audit finding #4 class, the provider-
+        # Missing key is NOT a construction brick (audit finding #4 class, the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
         # Key law (bug-7 + naming law, strict 2026-10-08): each lane reads
