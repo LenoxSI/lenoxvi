@@ -258,12 +258,13 @@ function Stat({ label, children }) {
 }
 
 /* ── node row actions ─────────────────────────────────────── */
-function NodeActions({ room, online, setMsg, reloadAll }) {
+function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
   const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi' | 'mute'
   const [renameVal, setRenameVal] = useState('')
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
   const [wifiPass, setWifiPass] = useState('')
   const [muted, setMuted] = useState(false)  // confirmed from the node's ack, never optimistic
+  const [muteUnknown, setMuteUnknown] = useState(false)  // every /info try failed this connection
   const [muteBusy, setMuteBusy] = useState(false)
 
   // Refresh the button from the NODE's truth on every mount (2026-10-07):
@@ -271,14 +272,45 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
   // state — the button must re-derive it, or "Muted" un-highlights and the
   // UI lies about a muted mic. One GET per mount, NOT per 5s poll (that
   // would spam the data channel). Older firmware omits 'muted' = false.
-  const askedRef = useRef(false)
+  //
+  // design note H4 (2026-10-13): ask once per CONNECTION, not once per mount.
+  // The old latch never reset, so a node that rebooted (Restart button in
+  // this same component) came back unmuted while the button still said
+  // Muted — a privacy lie. Keyed on last_seen, NOT just online: registry
+  // .mark_disconnected skips the offline flip while a newer session owns
+  // the room, and on a fast reboot the new session connects BEFORE the
+  // zombie is reaped — online never goes false, but mark_connected always
+  // stamps a fresh last_seen. Up to 3 tries 4s apart: the first /info can
+  // land before the new data channel is open.
+  const askedAtRef = useRef(null)   // last_seen stamp of the connection we asked
+  const triesRef = useRef(0)        // /info attempts for that connection
+  const [infoTick, setInfoTick] = useState(0)  // bumped only by the retry timer
   useEffect(() => {
-    if (!online || askedRef.current) return
-    askedRef.current = true
+    if (!online) { askedAtRef.current = null; return }
+    const stamp = String(lastSeen ?? 'online')
+    if (askedAtRef.current === stamp) return
+    if (askedAtRef.current !== `${stamp}#retry`) triesRef.current = 0  // new connection
+    askedAtRef.current = stamp
+    triesRef.current += 1
+    // Staleness = "a newer connection took over" (stamp moved), NOT effect
+    // cleanup — StrictMode's dev double-invoke would cancel the only ask.
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
-      .then(r => { if (r?.ok) setMuted(!!r?.data?.muted) })
-      .catch(() => {})
-  }, [room, online])
+      .then(r => {
+        if (askedAtRef.current !== stamp) return
+        if (r?.ok) { setMuted(!!r?.data?.muted); setMuteUnknown(false) }
+        else throw new Error('info not ok')
+      })
+      .catch(() => {
+        if (askedAtRef.current !== stamp) return
+        // Out of tries: say so — never keep showing the LAST connection's state.
+        if (triesRef.current >= 3) { setMuteUnknown(true); return }
+        setTimeout(() => {
+          if (askedAtRef.current !== stamp) return
+          askedAtRef.current = `${stamp}#retry`  // same connection, ask again
+          setInfoTick(n => n + 1)
+        }, 4000)
+      })
+  }, [room, online, lastSeen, infoTick])
 
   // Raw POST — callers own the busy lifecycle (the wifi flow is
   // two-stage: busy must STAY 'wifi' after a successful scan; a
@@ -292,9 +324,11 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
     setMuteBusy(true)
     setMsg(`Toggling mute on ${room}…`, 'pulse', 'Nodes')
     try {
-      const r = await post('mute', { mute: !muted })
+      // Unknown state → MUTE (privacy-safe), never a blind toggle.
+      const r = await post('mute', { mute: muteUnknown ? true : !muted })
       const now = !!(r?.data?.muted)
       setMuted(now)
+      setMuteUnknown(false)
       setMsg(`${room}: mic ${now ? 'MUTED — the node hears nothing' : 'live'}.`, 'ok', 'Nodes')
     } catch (e) { setMsg('Mute failed: ' + e.message, 'err', 'Nodes') }
     finally { setMuteBusy(false) }
@@ -367,8 +401,9 @@ function NodeActions({ room, online, setMsg, reloadAll }) {
         </button>
         <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy || muteBusy}
           onClick={toggleMute}
-          title={muted ? 'Mic is muted — click to unmute.' : 'Software mute (flex nodes; array nodes use their physical mute button).'}>
-          {muteBusy ? '…' : muted ? 'Muted' : 'Mute'}
+          title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
+            : muted ? 'Mic is muted — click to unmute.' : 'Software mute (flex nodes; array nodes use their physical mute button).'}>
+          {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
           <>
@@ -557,7 +592,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     </div>
                   </td>
                   <td className="px-4 py-2">
-                    <NodeActions room={r.room} online={r.online} setMsg={setMsg} reloadAll={reloadAll} />
+                    <NodeActions room={r.room} online={r.online} lastSeen={r.last_seen} setMsg={setMsg} reloadAll={reloadAll} />
                   </td>
                 </tr>
               ))}
