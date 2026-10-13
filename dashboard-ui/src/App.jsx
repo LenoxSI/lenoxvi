@@ -749,40 +749,69 @@ function VolSlider({ name, initial, onCommit }) {
 function FirmwarePanel({ status, setMsg, reloadAll }) {
   const [fwFile, setFwFile] = useState(null)
   const [pushing, setPushing] = useState(false)
-  const [fwTrack, setFwTrack] = useState('node')  // 036 H-B: which hardware line the .bin is for
+  // 041 M2 (2026-10-13): NO default track. The image carries no board
+  // identity yet (fw design note M4), so the human's pick is the ONLY thing
+  // between a Flex .bin and an array node — a preselected 'node' made the
+  // dangerous choice the lazy one. Push stays disabled until chosen.
+  const [fwTrack, setFwTrack] = useState('')
+  // After a push: which online nodes to nudge. NOTHING pre-checked — the
+  // bot can't tell which line a node runs (fw_push sends version only),
+  // so it never guesses; restarting the other line's node is harmless
+  // (it reads its own track) but costs that room its voice for ~15s.
+  const [pickup, setPickup] = useState(null)  // {version, track, rooms: {room: bool}}
+  const trackLabel = t => (t === 'flex' ? 'FLEX' : 'ARRAY')
 
   const push = async () => {
     if (!fwFile) { setMsg('Pick a .bin to push.', 'err', 'Firmware'); return }
+    if (!fwTrack) { setMsg('Pick the hardware line (track) this .bin is for.', 'err', 'Firmware'); return }
+    // Filename hint: warn (never block) when the name says the other line.
+    const fname = fwFile.name.toLowerCase()
+    const hintsFlex = fname.includes('flex')
+    // (node_esp32.bin is BOTH lines' build name — never a hint.)
+    const hintsArray = /array|respeaker-xvf/.test(fname) && !hintsFlex
+    const mismatch = (fwTrack === 'node' && hintsFlex) || (fwTrack === 'flex' && hintsArray)
+    if (!window.confirm(
+      `Push ${fwFile.name} to the ${trackLabel(fwTrack)} track?\n\n` +
+      `Every ${trackLabel(fwTrack).toLowerCase()} node OTAs this image on its next check. ` +
+      `Wrong line = dead node (USB rescue).` +
+      (mismatch ? `\n\n⚠ The filename looks like a ${hintsFlex ? 'FLEX' : 'ARRAY'} build, but you picked ${trackLabel(fwTrack)}.` : '')))
+      return
     setPushing(true)
-    setMsg(`Uploading ${fwFile.name} to the ${fwTrack === 'flex' ? 'flex' : 'array'} track…`, 'pulse', 'Firmware')
+    setPickup(null)
+    setMsg(`Uploading ${fwFile.name} to the ${trackLabel(fwTrack).toLowerCase()} track…`, 'pulse', 'Firmware')
     let upj = null
     try {
       const fd = new FormData()
       fd.append('file', fwFile, fwFile.name)
       fd.append('track', fwTrack)
       upj = await api('/api/dashboard/firmware/upload', { method: 'POST', body: fd })
-      setMsg(`Firmware ${upj.version} served (${fwTrack === 'flex' ? 'flex' : 'array'} track).`, 'ok', 'Firmware')
+      setMsg(`Firmware ${upj.version} served (${trackLabel(upj.track).toLowerCase()} track).`, 'ok', 'Firmware')
     } catch (e) {
       setMsg('Firmware push failed: ' + e.message, 'err', 'Firmware')
       return
     } finally { setPushing(false) }
-    // Seamless pickup (old page's proven pattern): nodes self-pick-up on
-    // their next OTA cycle, but that can be minutes away — offer to nudge
-    // each online node into its check right now (restart → boot → check).
     const online = (status?.rooms || []).filter(n => n.online)
-    if (online.length && window.confirm(
-      `Restart ${online.length} node${online.length > 1 ? 's' : ''} now so it picks up ${upj.version}?\n\n` +
-      online.map(n => '• ' + n.room).join('\n') +
-      '\n\n(Otherwise each node grabs it on its next check.)')) {
-      setMsg('Restarting node(s)…', 'pulse', 'Firmware')
-      for (const n of online) {
-        try {
-          await api(`/api/dashboard/nodes/${encodeURIComponent(n.room)}/restart`, { method: 'POST' })
-        } catch (e) { setMsg(`Restart '${n.room}' failed: ${e.message}`, 'err', 'Firmware') }
-      }
-      setMsg(`Restart sent — ${online.map(n => n.room).join(', ')} reboots onto ${upj.version} (~15s).`, 'ok', 'Firmware')
-      await reloadAll()
+    if (online.length) {
+      setPickup({ version: upj.version, track: upj.track,
+                  rooms: Object.fromEntries(online.map(n => [n.room, false])) })
     }
+  }
+
+  const restartPicked = async () => {
+    const picked = Object.entries(pickup?.rooms || {}).filter(([, on]) => on).map(([r]) => r)
+    if (!picked.length) { setMsg('No nodes checked — nothing restarted.', 'muted', 'Firmware'); return }
+    setMsg(`Restarting ${picked.join(', ')}…`, 'pulse', 'Firmware')
+    const failed = []
+    for (const room of picked) {
+      try {
+        await api(`/api/dashboard/nodes/${encodeURIComponent(room)}/restart`, { method: 'POST' })
+      } catch (e) { failed.push(`${room} (${e.message})`) }
+    }
+    const ok = picked.filter(r => !failed.some(f => f.startsWith(r + ' ')))
+    if (failed.length) setMsg(`Restart failed: ${failed.join('; ')}` + (ok.length ? ` — sent to ${ok.join(', ')}.` : ''), 'err', 'Firmware')
+    else setMsg(`Restart sent — ${ok.join(', ')} reboot${ok.length > 1 ? '' : 's'} and check for ${pickup.version} (~15s).`, 'ok', 'Firmware')
+    setPickup(null)
+    await reloadAll()
   }
 
   return (
@@ -791,18 +820,41 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium text-[var(--muted)]">Track</span>
-          <select className={`${INPUT_CLS} w-[120px]`} value={fwTrack}
+          <select className={`${INPUT_CLS} w-[150px]`} value={fwTrack}
             onChange={e => setFwTrack(e.target.value)}
             title="Which hardware line this .bin is for — the image and manifest go to that track's directory only. Cross-flashing the other line kills its node.">
-            <option value="node">array (node)</option>
+            <option value="" disabled>pick a line…</option>
+            <option value="node">array</option>
             <option value="flex">flex</option>
           </select>
           <input type="file" accept=".bin" className="text-[13px]"
             onChange={e => setFwFile(e.target.files?.[0] || null)} />
-          <button className={BTN_PRIMARY} disabled={pushing || !fwFile} onClick={push}>
+          <button className={BTN_PRIMARY} disabled={pushing || !fwFile || !fwTrack} onClick={push}
+            title={!fwTrack ? 'Pick the track first.' : !fwFile ? 'Pick a .bin first.' : ''}>
             {pushing ? 'Uploading…' : 'Push firmware'}
           </button>
         </div>
+        {pickup && (
+          <div className="grid gap-2 border-t border-[var(--separator)] pt-3">
+            <span className="text-[13px]">
+              {pickup.version} is on the {trackLabel(pickup.track).toLowerCase()} track. Restart nodes now so they grab it
+              (check only {trackLabel(pickup.track).toLowerCase()} nodes — others would just reboot for nothing):
+            </span>
+            <div className="flex gap-4 flex-wrap">
+              {Object.entries(pickup.rooms).map(([room, on]) => (
+                <label key={room} className="flex items-center gap-2 text-[13px] font-mono">
+                  <input type="checkbox" checked={on}
+                    onChange={e => setPickup(p => ({ ...p, rooms: { ...p.rooms, [room]: e.target.checked } }))} />
+                  {esc(room)}
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button className={BTN_PRIMARY} onClick={restartPicked}>Restart checked</button>
+              <button className={BTN_DEFAULT} onClick={() => { setPickup(null); setMsg('Skipped — nodes grab it on their next check.', 'muted', 'Firmware') }}>Skip</button>
+            </div>
+          </div>
+        )}
       </div>
     </Section>
   )

@@ -1358,7 +1358,14 @@ async def oww_delete_model(name: str, source: str = ""):
 @router.post("/firmware/upload", dependencies=GUARD)
 async def upload_firmware(
     file: UploadFile = File(...),
-    track: str = Form("node"),
+    # 041 M2 (2026-10-13): REQUIRED — no default. The old Form("node")
+    # silently staged a track-less upload onto the ARRAY line; with no
+    # board identity in the image yet (fw design note M4), a Flex .bin
+    # landing there gets OTA'd by an array node and kills it. A missing
+    # track is a 422, never a guess. (Reverses the 036 H-B "legacy
+    # callers stay array" default — its only caller was the dead
+    # page.html, which never sent a track.)
+    track: str = Form(...),
 ):
     """Upload a firmware .bin; version comes from the image's embedded
     ESP app descriptor (magic 0xABCD5432 at byte 24; version string at
