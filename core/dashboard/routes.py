@@ -780,6 +780,21 @@ _DEEPGRAM_FLUX_VOICES = (
 )
 
 
+# the owner's trim (2026-10-05): flash for speed, v4 turbo for expression.
+# MUST match TTSPayload.model's pattern (suite pins it).
+_ELEVENLABS_MODELS = ("eleven_flash_v2_5", "eleven_v4_turbo")
+
+# design note M1 (2026-10-13): the dashboard's pick-lists come FROM HERE via
+# GET /tts — the UI used to hardcode its own copies (12 of 40 Aura, 16 of
+# 36 Flux), so most accepted voices were unpickable and a configured
+# aura-2-zeus-en couldn't even display. One catalog, one owner.
+TTS_CATALOG = {
+    "elevenlabs": list(_ELEVENLABS_MODELS),
+    "deepgram": list(_DEEPGRAM_VOICES),
+    "deepgram-flux": list(_DEEPGRAM_FLUX_VOICES),
+}
+
+
 class TTSPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
@@ -851,6 +866,9 @@ async def get_tts():
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
+        # 041 M1: the accepted values per provider — the UI's only source
+        # for its pick-lists (elevenlabs = model ids; deepgram* = voices).
+        "catalog": TTS_CATALOG,
         "note": "provider/voice/model apply on next bot restart; keys apply "
                 "on next bot restart (read at pipeline construction)",
     }

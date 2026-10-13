@@ -997,44 +997,21 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     </Section>
   )
 }
-const TTS_MODELS = {
-  elevenlabs: [
-    ['eleven_flash_v2_5', 'flash v2.5'],
-    ['eleven_v4_turbo', 'v4 turbo'],
-  ],
-  deepgram: [
-    ['aura-2-thalia-en', 'aura-2 thalia'],
-    ['aura-2-andromeda-en', 'aura-2 andromeda'],
-    ['aura-2-helena-en', 'aura-2 helena'],
-    ['aura-2-apollo-en', 'aura-2 apollo'],
-    ['aura-2-arcas-en', 'aura-2 arcas'],
-    ['aura-2-aries-en', 'aura-2 aries'],
-    ['aura-2-asteria-en', 'aura-2 asteria'],
-    ['aura-2-athena-en', 'aura-2 athena'],
-    ['aura-2-atlas-en', 'aura-2 atlas'],
-    ['aura-2-aurora-en', 'aura-2 aurora'],
-    ['aura-2-callista-en', 'aura-2 callista'],
-    ['aura-2-cora-en', 'aura-2 cora'],
-  ],
-  'deepgram-flux': [
-    ['flux-hannah-en', 'flux hannah'],
-    ['flux-kit-en', 'flux kit'],
-    ['flux-alexis-en', 'flux alexis'],
-    ['flux-cliff-en', 'flux cliff'],
-    ['flux-sienna-en', 'flux sienna'],
-    ['flux-cole-en', 'flux cole'],
-    ['flux-brooke-en', 'flux brooke'],
-    ['flux-colin-en', 'flux colin'],
-    ['flux-gemma-en', 'flux gemma'],
-    ['flux-haley-en', 'flux haley'],
-    ['flux-heather-en', 'flux heather'],
-    ['flux-miles-en', 'flux miles'],
-    ['flux-sean-en', 'flux sean'],
-    ['flux-bree-en', 'flux bree'],
-    ['flux-brittany-en', 'flux brittany'],
-    ['flux-bruce-en', 'flux bruce'],
-  ],
-}
+// design note M1 (2026-10-13): pick-lists come from GET /tts `catalog` —
+// the server's accepted values, one owner. The UI used to hardcode its
+// own copies (12 of 40 Aura, 16 of 36 Flux): most voices were unpickable
+// and a configured aura-2-zeus-en couldn't display.
+const EL_MODEL_LABELS = { eleven_flash_v2_5: 'flash v2.5', eleven_v4_turbo: 'v4 turbo' }
+const ttsLabel = v =>
+  v.startsWith('aura-2-') ? 'aura-2 ' + v.slice(7).replace(/-en$/, '')
+  : v.startsWith('flux-') ? 'flux ' + v.slice(5).replace(/-en$/, '')
+  : (EL_MODEL_LABELS[v] || v)
+// Each provider's SAVED value lives in its own field. The old sync loaded
+// tts.model (the ElevenLabs model) for every provider, so a Deepgram
+// config DISPLAYED the first voice while holding 'eleven_flash_v2_5' —
+// the first Save 422'd.
+const savedFor = (t, p) =>
+  p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice : t?.deepgram_flux_voice
 
 function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
@@ -1057,7 +1034,8 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   useEffect(() => {
     if (tts && !ttsSynced) {
       setProvider(tts.provider || 'elevenlabs')
-      setModel(tts.model || TTS_MODELS[tts.provider]?.[0]?.[0] || 'eleven_flash_v2_5')
+      const prov = tts.provider || 'elevenlabs'
+      setModel(savedFor(tts, prov) || tts.catalog?.[prov]?.[0] || '')
       setFluxSpeed(parseFloat(tts?.deepgram_flux_speed ?? 1.0))
       setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
       setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
@@ -1067,10 +1045,13 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   }, [tts, ttsSynced])
 
   // bug 8 fix: switching provider resets the model menu to that
-  // provider's own list — the old page's ttsFlipFields behavior.
+  // provider's own list — and (041 M1) lands on THAT provider's saved
+  // value when it has one, not blindly on the first entry.
+  const catalog = tts?.catalog || {}
+  const options = catalog[provider] || []
   const onProviderChange = p => {
     setProvider(p)
-    setModel(TTS_MODELS[p]?.[0]?.[0] || '')
+    setModel(savedFor(tts, p) || catalog[p]?.[0] || '')
   }
 
   const saveTTS = async () => {
@@ -1114,7 +1095,12 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => setModel(e.target.value)}>
-              {(TTS_MODELS[provider] || []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              {/* A saved value the catalog doesn't carry (hand-edited config)
+                  shows honestly instead of faking the first entry. */}
+              {model && !options.includes(model) &&
+                <option value={model} disabled>{ttsLabel(model)} (not accepted)</option>}
+              {!options.length && <option value="" disabled>loading…</option>}
+              {options.map(v => <option key={v} value={v}>{ttsLabel(v)}</option>)}
             </select>
             {provider === 'elevenlabs' &&
               <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="Voice id (fq1S…)"
