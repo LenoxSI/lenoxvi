@@ -43,6 +43,45 @@ case "$TRACK" in
   *) echo "FATAL: unknown track '$TRACK' (node|flex)"; exit 1 ;;
 esac
 
+# ── 0. Preflight: the checkout must BE this track's firmware line ──────────
+# The script builds whatever $FW_REPO has checked out. Both lines live in one
+# repo (array = main, flex = flex-xvf3800), so the wrong checkout publishes
+# the OTHER board's firmware to this track — the node accepts it as an
+# upgrade and cross-flashes itself (2026-10-15: the checkout sat on
+# flex-xvf3800 while the default track is node). Refuse instead of guessing.
+case "$TRACK" in
+  node) FW_BRANCH="main" ;;
+  flex) FW_BRANCH="flex-xvf3800" ;;
+esac
+FW_CUR=$(git -C "$FW_REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached HEAD)")
+if [ "$FW_CUR" != "$FW_BRANCH" ]; then
+  echo "FATAL: track '$TRACK' ships branch '$FW_BRANCH', but $FW_REPO is on '$FW_CUR'."
+  echo "       Building it would publish the other board's firmware to the '$TRACK'"
+  echo "       track and the node would cross-flash itself. Switch first:"
+  echo "         git -C \"$FW_REPO\" checkout $FW_BRANCH"
+  exit 1
+fi
+# Tracked changes = an image no commit can reproduce. (Untracked/ignored files
+# — sdkconfig, deps/, components/ — are the build environment, not source.)
+if [ -n "$(git -C "$FW_REPO" status --porcelain --untracked-files=no)" ]; then
+  echo "FATAL: $FW_REPO has uncommitted changes to tracked files — commit or stash first:"
+  git -C "$FW_REPO" status --short --untracked-files=no | head -10
+  exit 1
+fi
+# libpeer is gitignored and shared by both lines; its patches are load-bearing
+# (0003 = the data-channel handshake, design note). The fetch script verifies
+# pin + patch stack and refuses a hand-edited tree.
+if [ -f "$FW_REPO/scripts/fetch_libpeer.sh" ]; then
+  bash "$FW_REPO/scripts/fetch_libpeer.sh" || { echo "FATAL: deps/libpeer check failed"; exit 1; }
+fi
+echo "==> firmware source: $FW_BRANCH @ $(git -C "$FW_REPO" rev-parse --short HEAD)"
+# Test hook: scripts/test_deploy_guard.sh runs the preflight matrix with no
+# credentials, no build and no publish.
+if [ "${DEPLOY_PREFLIGHT_ONLY:-}" = "1" ]; then
+  echo "==> preflight OK (DEPLOY_PREFLIGHT_ONLY) — stopping before the build"
+  exit 0
+fi
+
 WIFI_SSID="${WIFI_SSID:?must be set (your WiFi network name)}"
 WIFI_PASSWORD="${WIFI_PASSWORD:?must be set}"
 PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:?must be set (e.g. https://<bot-host-LAN-IP>:7860/api/offer)}"
