@@ -4,7 +4,8 @@
 # updates itself — no USB cable, no basement trip.
 #
 # Flow:
-#   1. Build node_esp32.bin (WIFI creds + pipecat URL baked in)
+#   1. Build node_esp32.bin (pipecat URL baked in; NO WiFi credentials —
+#      nodes read them from NVS, set via the dashboard WiFi flow)
 #   2. Bump firmware/node/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
 #   3. Copy bin + version.json to the lenoxvi repo on the appliance host
@@ -82,8 +83,21 @@ if [ "${DEPLOY_PREFLIGHT_ONLY:-}" = "1" ]; then
   exit 0
 fi
 
-WIFI_SSID="${WIFI_SSID:?must be set (your WiFi network name)}"
-WIFI_PASSWORD="${WIFI_PASSWORD:?must be set}"
+# WiFi credentials are NEVER baked into an OTA image (2026-10-15): these
+# images are served over plain HTTP to the whole LAN (/firmware/...), so a
+# baked password is readable by anyone who can fetch the .bin. Nodes read
+# WiFi from NVS (tknode: wifi_ssid/wifi_pass — dashboard WiFi flow); the
+# baked value is only a fallback when NVS is empty. Every node already
+# running a cred-free image and online has proven its NVS (both did on
+# 2026-10-15: room-b + room-a on 1.2.8). A BRAND-NEW board with
+# empty NVS needs one USB bench flash with credentials first — that is a
+# bench build, never this script.
+if [ -n "${WIFI_SSID:-}${WIFI_PASSWORD:-}" ]; then
+  echo "NOTE: WIFI_SSID/WIFI_PASSWORD are set in your environment — ignored;"
+  echo "      OTA images never carry WiFi credentials (nodes use NVS)."
+fi
+WIFI_SSID=""
+WIFI_PASSWORD=""
 PIPECAT_SMALLWEBRTC_URL="${PIPECAT_SMALLWEBRTC_URL:?must be set (e.g. https://<bot-host-LAN-IP>:7860/api/offer)}"
 PIPECAT_ROOM="${PIPECAT_ROOM:-lenoxvi}"
 
@@ -104,6 +118,24 @@ XVF_OTA_TRACK="$OTA_TRACK_ENV" idf.py build
 
 BIN="$FW_REPO/build/node_esp32.bin"
 [ -f "$BIN" ] || { echo "FATAL: $BIN missing after build"; exit 1; }
+# Prove it, don't trust it: every compile unit must define the WiFi creds as
+# EMPTY. (A stale build/ or a CMake change could still bake them.) Reads only
+# the build's own compile_commands.json; never prints a value.
+python3 - "$FW_REPO/build/compile_commands.json" <<'PYEOF' || { echo "FATAL: built image carries WiFi credentials — not publishing"; exit 1; }
+import json, re, sys
+cmds = [c.get("command", "") for c in json.load(open(sys.argv[1]))]
+bad = 0
+seen = 0
+for c in cmds:
+    for key in ("WIFI_SSID", "WIFI_PASSWORD"):
+        for m in re.finditer(r"-D" + key + r"=(\S+)", c):
+            seen += 1
+            if m.group(1).replace("\\", "").replace('"', ""):
+                bad += 1
+if seen == 0 or bad:
+    sys.exit(1)
+print(f"==> WiFi credentials: empty in all {seen} defines (NVS supplies them)")
+PYEOF
 BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 
 # ── 2. Version bump ────────────────────────────────────────────────────────
