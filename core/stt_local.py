@@ -70,6 +70,25 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             )
             self._fw_model = LocalWhisperSTTService._shared_model
 
+    async def cleanup(self):
+        """Close the base class's unused OpenAI client explicitly.
+
+        BaseWhisperSTTService (pipecat's cloud-Whisper base) builds an
+        AsyncOpenAI/httpx2 client in __init__ even though this service never
+        calls OpenAI. Left alone, it is closed only by the openai SDK's
+        finalizer when GC eventually reclaims the session — a stray
+        aclose() task scheduled per dead session (design note). Close it at teardown,
+        bounded so a hung close can never stall pipeline shutdown.
+        """
+        await super().cleanup()
+        client = getattr(self, "_client", None)
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.close(), timeout=2.0)
+            except Exception as e:  # never block teardown on an unused client
+                logger.debug(f"local-whisper: unused OpenAI client close: {e!r}")
+            self._client = None
+
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe raw WAV audio bytes with faster-whisper.
 

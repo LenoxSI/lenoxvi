@@ -17,6 +17,7 @@ Requires .env (see .env.example) with all three keys:
 import asyncio
 import os
 import sys
+import threading
 
 from loguru import logger
 
@@ -354,7 +355,35 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         node_command.on_message(message, sender)
 
     runner = PipelineRunner(handle_sigint=False)
-    await runner.run(task)
+    try:
+        await runner.run(task)
+    finally:
+        _reclaim_session()
+
+
+def _reclaim_session() -> None:
+    """Reclaim a finished session's pipeline graph NOW (design note leak fix).
+
+    Every session builds a fresh pipeline (wake model, Silero VAD, resamplers,
+    WebRTC transport) that forms one big reference cycle, so refcounting can't
+    free it — only the cyclic GC can. Python 3.14's incremental collector never
+    reached those cycles on this bot: measured 2026-10-14/15, ~74 MB + ~4
+    native threads per dead session, 110 sessions → 10.4 GB RSS / 406 threads,
+    and one manual gc.collect() (injected via sys.remote_exec) freed 80 threads
+    + 1.2 GB at once. The per-session native threads are NOT the openWakeWord
+    model (its ONNX pool is process-wide — tested); whatever owns them, it is
+    reachable only through the dead cycle, so collecting the cycle frees it.
+    A full collection costs ~70-100 ms (measured), paid once per ENDED session
+    (node reboot/reconnect) — the other live node's audio just buffers.
+    """
+    import gc
+    import time
+
+    t0 = time.perf_counter()
+    freed = gc.collect()
+    logger.info(f"session teardown: gc reclaimed {freed} objects in "
+                f"{1000 * (time.perf_counter() - t0):.0f} ms; "
+                f"threads={threading.active_count()} py-visible")
 
 
 async def bot(runner_args: RunnerArguments):
