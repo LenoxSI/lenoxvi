@@ -117,6 +117,15 @@ BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 # script used to silently ship the old version under a new number).
 BIN_VER=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" "$BIN")
 echo "==> binary self-reports version: ${BIN_VER:-<none>}"
+# Board identity (design note): the image's compiled-in OTA URL names its own
+# track. Backstop to the branch guard — never publish an image whose own
+# track isn't the one we're about to stage it on.
+BIN_TRACK=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" --track "$BIN")
+if [ "$BIN_TRACK" != "$TRACK" ]; then
+  echo "FATAL: the built image belongs to track '${BIN_TRACK:-<unknown>}', not '$TRACK' — not publishing (cross-flash)."
+  exit 1
+fi
+echo "==> binary self-reports track: $BIN_TRACK"
 VFILE="$LVI_LOCAL/firmware/$TRACK/version.json"
 mkdir -p "$LVI_LOCAL/firmware/$TRACK"
 if [ -f "$VFILE" ]; then

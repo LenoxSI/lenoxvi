@@ -30,6 +30,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
+import firmware_image
 
 import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
@@ -1491,6 +1492,27 @@ async def upload_firmware(
         raise HTTPException(
             status_code=400,
             detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
+        )
+    # Board identity (design note, 2026-10-15): both lines share the project
+    # name and — by design — version numbers, so nothing a human sees tells
+    # an array image from a Flex one. The image knows: its compiled-in OTA
+    # URL format names its own track. Refuse a mismatch BEFORE the swap —
+    # the served image and manifest stay untouched.
+    img_track = firmware_image.image_track(tmp.read_bytes())
+    if img_track is None:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail="can't tell which board this image is for (no single OTA-track "
+                   "marker) — not uploading it to any track",
+        )
+    if img_track != track:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"this is {firmware_image.TRACK_LABEL[img_track]} firmware — it can't "
+                   f"go on the {firmware_image.TRACK_LABEL[track]} track (it would "
+                   f"cross-flash that node). Pick track '{img_track}'.",
         )
     tmp.replace(dest)  # validated: swap in atomically
     manifest = {"version": version, "filename": "node_esp32.bin"}

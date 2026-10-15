@@ -31,7 +31,19 @@ def app_version(bin_path: str) -> tuple[str, str] | None:
     return version, project
 
 
+def app_track(bin_path: str) -> str | None:
+    """'node' / 'flex' / None — the image's own OTA track (core/firmware_image.py)."""
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))
+    from firmware_image import image_track
+    return image_track(open(bin_path, "rb").read())
+
+
 if __name__ == "__main__":
     import sys
-    r = app_version(sys.argv[1])
-    print(r[0] if r else "")
+    if sys.argv[1] == "--track":
+        print(app_track(sys.argv[2]) or "")
+    else:
+        r = app_version(sys.argv[1])
+        print(r[0] if r else "")
