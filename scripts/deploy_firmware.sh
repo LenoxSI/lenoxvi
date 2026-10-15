@@ -53,7 +53,13 @@ echo "==> building firmware (track: $TRACK)"
 cd "$FW_REPO"
 export IDF_PYTHON_ENV_PATH="$HOME/.espressif/python_env/idf5.3_py3.12_env"
 source "$HOME/esp-idf/export.sh" >/dev/null
-LOG_DATACHANNEL_MESSAGES= WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
+# Data-channel message logging is debug-only and prints set_wifi payloads
+# (the WiFi password) to serial — never in a deployed image. unset (not an
+# empty assignment: the old firmware CMake treated set-but-empty as ON, so
+# this line used to ENABLE it on every script build, 2026-10-13). Also
+# protects against a value inherited from the caller's shell.
+unset LOG_DATACHANNEL_MESSAGES
+WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
 PIPECAT_SMALLWEBRTC_URL="$PIPECAT_SMALLWEBRTC_URL" PIPECAT_ROOM="$PIPECAT_ROOM" \
 XVF_OTA_TRACK="$OTA_TRACK_ENV" idf.py build
 
