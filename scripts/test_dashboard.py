@@ -1926,6 +1926,67 @@ def main():
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
+    # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
+    # big reference cycle; Python 3.14.4's incremental GC never reclaimed
+    # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
+    # deterministically when the pipeline ends, and the local STT closes the
+    # unused OpenAI client itself instead of leaving it to a GC finalizer.
+    import ast as _ast043
+    _bot_src = (REPO_CORE.parent / "bot.py").read_text()
+    _bot_ast = _ast043.parse(_bot_src)
+    _run_bot = next((n for n in _ast043.walk(_bot_ast)
+                     if isinstance(n, _ast043.AsyncFunctionDef) and n.name == "run_bot"), None)
+    _reclaim_in_finally = False
+    if _run_bot is not None:
+        for _n in _ast043.walk(_run_bot):
+            if isinstance(_n, _ast043.Try) and _n.finalbody:
+                _body_src = _ast043.unparse(_n)
+                if "runner.run(task)" in _body_src and any(
+                        "_reclaim_session()" in _ast043.unparse(f) for f in _n.finalbody):
+                    _reclaim_in_finally = True
+    check("043a run_bot reclaims the session in a finally around runner.run",
+          _reclaim_in_finally)
+    _reclaim_fn = next((n for n in _ast043.walk(_bot_ast)
+                        if isinstance(n, _ast043.FunctionDef) and n.name == "_reclaim_session"), None)
+    check("043b _reclaim_session runs a full gc.collect()",
+          _reclaim_fn is not None and "gc.collect()" in _ast043.unparse(_reclaim_fn))
+
+    import asyncio as _aio043
+    import time as _t043
+    from stt_local import LocalWhisperSTTService as _LWS
+    from pipecat.services.whisper.base_stt import BaseWhisperSTTService as _BWS
+
+    class _FakeClient:
+        def __init__(self, hang=False):
+            self.closed = False
+            self.hang = hang
+        async def close(self):
+            if self.hang:
+                await _aio043.sleep(10)
+            self.closed = True
+
+    async def _noop_cleanup(self):
+        return None
+
+    _saved_cleanup = _BWS.cleanup
+    _BWS.cleanup = _noop_cleanup  # isolate OUR cleanup from pipecat's task plumbing
+    try:
+        _svc = _LWS.__new__(_LWS)
+        _fc = _FakeClient()
+        _svc._client = _fc
+        _aio043.run(_LWS.cleanup(_svc))
+        check("043c local STT cleanup closes the unused OpenAI client",
+              _fc.closed and _svc._client is None)
+        _svc2 = _LWS.__new__(_LWS)
+        _svc2._client = _FakeClient(hang=True)
+        _t0 = _t043.monotonic()
+        _aio043.run(_LWS.cleanup(_svc2))
+        _dt = _t043.monotonic() - _t0
+        check("043c hung client close is bounded (teardown never stalls)",
+              _dt < 3.5 and _svc2._client is None, f"{_dt:.2f}s")
+    finally:
+        _BWS.cleanup = _saved_cleanup
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")
