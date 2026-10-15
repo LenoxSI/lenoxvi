@@ -912,18 +912,28 @@ def main():
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
     # Flex .bin there would be OTA'd by an array node (cross-flash).
-    def _fake_image5b(ver: str) -> bytes:
+    # Board identity (design note): real images carry exactly one OTA-track
+    # URL format; the route refuses an image whose own track differs.
+    _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "node": b"%.*s/firmware/%s"}
+
+    def _fake_image5b(ver: str, board: str | None = "node", both: bool = False) -> bytes:
         head = bytearray(b"\x00" * 256)
         head[32:36] = b"\x32\x54\xcd\xab"          # esp_app_desc magic
         head[48:80] = ver.encode().ljust(32, b"\x00")  # version string
-        return bytes(head) + b"\x00" * (1024 * 200)  # over the size floor
+        body = bytearray(b"\x00" * (1024 * 200))   # over the size floor
+        marks = [_MARK5B["flex"], _MARK5B["node"]] if both else ([_MARK5B[board]] if board else [])
+        off = 4096
+        for m in marks:
+            body[off:off + len(m)] = m
+            off += 512
+        return bytes(head) + bytes(body)
 
     _saved_updir5b = os.getcwd()
     os.chdir(SCRATCH)  # uploads are relative to cwd; keep them in scratch
     try:
         # (a) flex-declared upload → firmware/flex/
         _r = client.post("/api/dashboard/firmware/upload",
-                         files={"file": ("flex.bin", _fake_image5b("1.9.9"),
+                         files={"file": ("flex.bin", _fake_image5b("1.9.9", "flex"),
                                          "application/octet-stream")},
                          data={"track": "flex"})
         _j = _r.json()
@@ -965,6 +975,68 @@ def main():
               _rd.status_code == 200 and _rd.json().get("track") == "node"
               and json.loads(Path("firmware/node/version.json").read_text())["version"] == "1.9.7",
               _rd.text[:120])
+
+        # 045: board identity — the image's own OTA-track marker must match
+        # the declared track; every refusal leaves BOTH tracks' served
+        # image + manifest byte-identical.
+        def _snap045():
+            out = {}
+            for t in ("node", "flex"):
+                for f in ("version.json", "node_esp32.bin"):
+                    q = Path(f"firmware/{t}/{f}")
+                    out[f"{t}/{f}"] = q.read_bytes() if q.exists() else None
+            return out
+        _before045 = _snap045()
+        _re = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "flex"),
+                                          "application/octet-stream")},
+                          data={"track": "node"})
+        check("045 Flex image declared for the ARRAY track -> 400, names the board",
+              _re.status_code == 400 and "reSpeaker Flex firmware" in _re.text
+              and "track 'flex'" in _re.text, f"{_re.status_code} {_re.text[:160]}")
+        _rf = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "node"),
+                                          "application/octet-stream")},
+                          data={"track": "flex"})
+        check("045 array image declared for the FLEX track -> 400, names the board",
+              _rf.status_code == 400 and "array (XVF3800" in _rf.text
+              and "track 'node'" in _rf.text, f"{_rf.status_code} {_rf.text[:160]}")
+        _rg = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", None),
+                                          "application/octet-stream")},
+                          data={"track": "node"})
+        check("045 image with NO track marker -> 400 (never guessed onto a track)",
+              _rg.status_code == 400 and "can't tell which board" in _rg.text,
+              f"{_rg.status_code} {_rg.text[:160]}")
+        _rh = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", both=True),
+                                          "application/octet-stream")},
+                          data={"track": "flex"})
+        check("045 image with BOTH markers -> 400 (can't be trusted either way)",
+              _rh.status_code == 400 and "can't tell which board" in _rh.text,
+              f"{_rh.status_code} {_rh.text[:160]}")
+        _after045 = _snap045()
+        check("045 every refusal left both tracks' served image + manifest byte-identical",
+              _after045 == _before045,
+              str([k for k in _before045 if _before045[k] != _after045.get(k)]))
+        _leftover045 = [str(q) for t in ("node", "flex")
+                        for q in Path(f"firmware/{t}").glob("*.uploading")]
+        check("045 every refusal cleaned up its .uploading temp", not _leftover045,
+              str(_leftover045))
+
+        # deploy_firmware.sh's backstop uses the same helper via the CLI
+        import subprocess as _sp045
+        _abv = str(Path(__file__).resolve().parent / "app_bin_version.py")
+        _cli = {}
+        for _lbl, _img in (("flex", _fake_image5b("1.9.5", "flex")), ("node", _fake_image5b("1.9.5", "node")),
+                           ("none", _fake_image5b("1.9.5", None)), ("both", _fake_image5b("1.9.5", both=True))):
+            _fp = Path(SCRATCH) / f"cli045-{_lbl}.bin"
+            _fp.write_bytes(_img)
+            _cli[_lbl] = _sp045.run([sys.executable, _abv, "--track", str(_fp)],
+                                    capture_output=True, text=True).stdout.strip()
+            _fp.unlink()
+        check("045 app_bin_version.py --track: flex/node/none/both -> flex/node/''/''",
+              _cli == {"flex": "flex", "node": "node", "none": "", "both": ""}, str(_cli))
     finally:
         os.chdir(_saved_updir5b)
 
