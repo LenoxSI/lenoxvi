@@ -3,8 +3,9 @@
 Two firmware lines, one track name each, used everywhere (server dirs,
 upload API, deploy script, git branches, tags):
 
-    array — XVF3800 mic-array board   (branch array-xvf3800, tags array-v*)
-    flex  — reSpeaker Flex             (branch flex-xvf3800,  tags flex-v*)
+    array — XVF3800 mic-array board   (-DBOARD=array, tags array-v*)
+    flex  — reSpeaker Flex             (-DBOARD=flex,  tags flex-v*)
+    (both lines build from the firmware repo's single `main` branch)
 
 A wrong pick cross-flashes the other node (AGENTS.md cross-flash law; the
 array node has no way to boot Flex firmware), so an image must PROVE its

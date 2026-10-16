@@ -17,6 +17,10 @@ The two version streams are independent.
   removes any other `.bin` left in the track directory.
 - `deploy_firmware.sh --track array|flex` is now **required** — there is no
   default line.
+- `deploy_firmware.sh` builds both lines from the firmware repo's `main`
+  branch (the firmware's per-line branches were folded into one source tree),
+  passing `-DBOARD=<track>` and using one build directory per line
+  (`build/array`, `build/flex`). Any other checked-out branch is refused.
 - Board identity reads the image's project name as well as its OTA URL:
   firmware 1.2.9+ images are `array_esp32` / `flex_esp32` and must agree with
   their own URL; older `node_esp32` images are still accepted, judged by URL.
