@@ -991,6 +991,37 @@ def main():
           any(r.get("room") == "h4-direct-room" and r.get("muted") is False
               for r in _st_h4.get("rooms", [])), str(_st_h4.get("rooms"))[:200])
 
+    # Board line (firmware 1.2.19+): fw_push names the line ("array"|"flex")
+    # so the Nodes table can label each node's hardware. Same race handling.
+    _reg.note_offer("test-pc-line", "line-direct-room")
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.19", "line": "flex", "muted": False}}), "test-pc-line")
+    check("line: fw_push carries line -> room record line='flex'",
+          _room_rec("line-direct-room").get("line") == "flex", str(_room_rec("line-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.19", "line": "node"}}), "test-pc-line")
+    check("line: an unknown line ('node') is dropped, not displayed",
+          _room_rec("line-direct-room").get("line") == "flex", str(_room_rec("line-direct-room")))
+    check("line: a node that never said (older firmware) shows line=None",
+          "line" in _room_rec("fw-direct-room") and _room_rec("fw-direct-room")["line"] is None,
+          str(_room_rec("fw-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.19", "line": "array"}}), "test-pc-line-unbound")
+    _held_line = _reg._line_by_pc.get("test-pc-line-unbound")
+    _reg.note_offer("test-pc-line-unbound", "line-unbound-room")
+    check("line: survives the connect race (held by pc, drained with the fw hold)",
+          _held_line == "array" and "test-pc-line-unbound" not in _reg._line_by_pc
+          and _room_rec("line-unbound-room").get("line") == "array"
+          and _room_rec("line-unbound-room").get("fw") == "1.2.19",
+          f"held={_held_line} rec={_room_rec('line-unbound-room')}")
+    _st_line = client.get("/api/dashboard/status").json()
+    check("line: /status rooms[] carries line",
+          any(r.get("room") == "line-unbound-room" and r.get("line") == "array"
+              for r in _st_line.get("rooms", [])), str(_st_line.get("rooms"))[:200])
+
     # 9b5b. Track-aware firmware upload (036 H-B): the image + manifest
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
