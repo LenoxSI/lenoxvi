@@ -2041,6 +2041,74 @@ def main():
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
+    # 9b12. Dead-TTS containment (the 2026-10-16 07:49 incident): with the
+    # ElevenLabs websocket dead, her UNspoken weather answer still armed as
+    # echo text, and the owner's repeat question scored 71% bag-of-words overlap
+    # (5 of 7 words, only 'nantucket' content — s/the/on/today counted) —
+    # dropped as an "echo". Two fixes pinned here: the echo bar 0.6 -> 0.9
+    # (an echo is her words coming back: nearly ALL transcript words must
+    # be hers) and no phantom arming (a dead TTS makes no sound, so its
+    # texts can never echo back — they register nothing).
+    import asyncio as _aio12
+    import echo_gate as _eg12
+    import hermes_agent as _ha12
+    from pipecat.frames.frames import (  # noqa: E402
+        TranscriptionFrame as _TF12, VADUserStartedSpeakingFrame as _VAD12,
+    )
+    from pipecat.processors.frame_processor import FrameDirection as _FD12
+    _ANS12 = ("It's overcast on Nantucket today, about 60 degrees but feels "
+              "like 48 with a stiff 21 mile-an-hour wind off the water. High "
+              "of 65, low of 56, and about a third of a chance of rain, so "
+              "maybe grab a jacket if you're heading out.")
+
+    async def _c12_probe():
+        _a = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+                               room="suite-9b12", session_mode="fresh")
+        # the exact armed state at 07:49:10 — both fillers + the answer
+        # the dead TTS never actually spoke
+        _a._echo_texts = ["On it.",
+                          "Still on it — this one's a slow one.",
+                          _ANS12]
+
+        async def _sink12(frame, direction=None):
+            pass
+
+        _a.push_frame = _sink12
+        await _a.process_frame(_VAD12(), _FD12.DOWNSTREAM)
+        await _a.process_frame(_TF12("What's the weather today on Nantucket?",
+                                     "", 0, 0, 0), _FD12.DOWNSTREAM)
+        return _a
+
+    _a12 = _aio12.run(_c12_probe())
+    check("9b12 the 07:49 repeat question lands (was dropped as an echo)",
+          any("Nantucket" in t for t in _a12._buffer), f"buffer={_a12._buffer}")
+    check("9b12 same-topic repeat is NOT her echo (bar 0.6 -> 0.9)",
+          _a12._is_own_echo("What's the weather today on Nantucket?") is False,
+          f"echo_texts={len(_a12._echo_texts)}")
+    check("9b12 short same-topic follow-up is NOT her echo",
+          _a12._is_own_echo("and what about tomorrow on Nantucket") is False, "")
+    check("9b12 verbatim re-transcription of her reply IS caught",
+          _a12._is_own_echo(_ANS12) is True, "")
+    check("9b12 clipped tail of her reply IS caught",
+          _a12._is_own_echo("maybe grab a jacket if you're heading out") is True, "")
+    _a_dead = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+                                room="suite-9b12", session_mode="fresh",
+                                tts_is_usable=lambda: False)
+    _a_dead._register_echo(_ANS12)
+    _a_dead._register_echo("On it.")
+    check("9b12 dead-TTS push arms NO echo texts",
+          _a_dead._echo_texts == [], f"echo_texts={_a_dead._echo_texts}")
+    _a_live = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+                                room="suite-9b12", session_mode="fresh")
+    _a_live._register_echo(_ANS12)
+    _a_live._register_echo("On it.")
+    check("9b12 live/unknown TTS still arms echo texts (compat)",
+          _a_live._echo_texts == [_ANS12, "On it."], f"echo_texts={_a_live._echo_texts}")
+    _bot_src12 = (REPO_CORE.parent / "bot.py").read_text()
+    check("9b12 bot.py wires tts_is_usable into the agent",
+          "tts_is_usable" in _bot_src12 and "tts_usable_probe" in _bot_src12,
+          "bot.py missing the dead-TTS wire")
+
     # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
