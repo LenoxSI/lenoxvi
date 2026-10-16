@@ -576,7 +576,7 @@ state).
   can never clobber the served image (`6f04906`, `a09aa80`)
 
 ### Changed
-- Firmware binary renamed `node_esp32.bin` → `node_esp32.bin` across
+- Firmware binary renamed to the generic `node_esp32.bin` across
   the OTA chain (served name, manifest, deploy script, upload dest,
   firmware CMake project name) — generic naming for the public repo;
   version untouched, node unaffected (equal-version skip) (`c73832c`)

@@ -82,7 +82,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
 ## The dashboard (operator surface)
 
 `https://<bot-host-LAN-IP>:7860/dashboard` — LAN-only by design, no
-auth on reads (design note). Mutating routes carry two guard rails
+auth on reads. Mutating routes carry two guard rails
 (`core/dashboard/guard.py`): an Origin/Host check (kills
 cross-origin-tab and DNS-rebinding shapes) and an optional
 `LVI_DASHBOARD_TOKEN`. The page prompts for it once.
