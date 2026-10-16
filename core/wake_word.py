@@ -8,10 +8,7 @@ listener itself always hears everything.
 Turn semantics (plan of record, 2026-09-15):
 - IDLE: audio feeds OWW only. "Hey Willow" (score >= threshold) -> AWAKE.
 - AWAKE: audio flows to VAD/STT (the intelligence works normally). Falls back to
-  IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity, OR once the
-  follow-up cap is spent: the wake turn + MAX_FOLLOWUPS user turns, then the
-  next time the bot finishes speaking -> IDLE (needs a fresh "Hey Willow").
-  A wake while AWAKE starts a fresh count.
+  IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity.
 - LOCKED: bot speaking. STT is gated; the wake listener is still fed
   (since 2026-09-19 — starving OWW mid-turn caused false rewakes) but its
   score is ignored outside IDLE, so her voice can't re-wake herself, even
@@ -43,13 +40,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 WAKE_MODEL = "Hey_Willow_1-0.onnx"
 WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
 AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
-# Follow-up cap (2026-10-15, TODO "follow-up loop"): every reply re-armed the
-# AWAKE window and any speech start kept it alive, so a talking room (TV) held
-# the gate open indefinitely — 287 s / 36 room snippets to the brain from ONE
-# wake (20:03:02). Cap = user turns allowed AFTER the wake turn; 0 = one
-# question per wake. Replay of that sequence: cap 2 -> IDLE at +33 s, 3 snippets.
-# (config: wake.max_followups > env: LVI_MAX_FOLLOWUPS)
-MAX_FOLLOWUPS = 2
 
 
 class TurnState(Enum):
@@ -107,16 +97,6 @@ class WakeWordFilter(FrameProcessor):
         self._echo_gate = echo_gate
         _awake = cfg_env("wake", "awake_timeout", "LVI_AWAKE_TIMEOUT", str(AWAKE_TIMEOUT))
         self._awake_timeout = float(_awake)
-        self._max_followups = max(0, int(float(
-            cfg_env("wake", "max_followups", "LVI_MAX_FOLLOWUPS", str(MAX_FOLLOWUPS)))))
-        # Follow-up accounting: _turns = user turns since the wake (the wake
-        # turn is 1); _turn_open = this listening phase already counted (VAD
-        # blips within one phase are ONE turn; a bot reply ends the phase);
-        # _spent = cap reached — stay IDLE through any replies still in
-        # flight (a "Working on it…" filler's real answer) until a real wake.
-        self._turns = 0
-        self._turn_open = False
-        self._spent = False
         self._state = TurnState.IDLE
         self._oww = None  # lazy-loaded in setup
         self._name = ""
@@ -180,22 +160,6 @@ class WakeWordFilter(FrameProcessor):
         the reply path."""
         self._speech_until = time.monotonic() + seconds + 2.0
 
-    def _start_session(self) -> None:
-        """A real wake (IDLE wake, barge-in, or re-wake while AWAKE) opens a
-        fresh follow-up allowance. A VAD start already counted for THIS
-        utterance ("Hey Willow, ..." is speech too) stays its turn."""
-        self._turns = 1 if self._turn_open else 0
-        self._spent = False
-
-    def _close_spent(self, why: str) -> None:
-        self._state = TurnState.IDLE
-        self._spent = True
-        self._turn_open = False
-        logger.info(f"wake_word: -> IDLE ({why}) — {self._turns} user turn(s) "
-                    f"since the wake, cap 1+{self._max_followups}; say Hey Willow again")
-        if self._led:
-            self._led.send("oww-sleeping")
-
     def _score(self, pcm: bytes) -> float:
         audio = np.frombuffer(pcm, dtype=np.int16)
         return float(self._oww.predict(audio)[self._name])
@@ -225,8 +189,6 @@ class WakeWordFilter(FrameProcessor):
                     self._audio_buf.clear()
                     self._state = TurnState.AWAKE
                     self._last_activity = now
-                    self._turn_open = False  # IDLE: no phase is open
-                    self._start_session()
                     # Window forensics: reset the counters at window open.
                     self._awake_frames = 0
                     self._awake_peak = 0
@@ -265,8 +227,6 @@ class WakeWordFilter(FrameProcessor):
                         self._audio_buf.clear()
                         self._state = TurnState.AWAKE
                         self._last_activity = now
-                        self._turn_open = False  # her reply phase ended by the barge-in
-                        self._start_session()
                         logger.info(
                             f"wake_word: BARGE-IN (score {score:.2f}, "
                             f"2-frame confirm) -> AWAKE")
@@ -301,18 +261,6 @@ class WakeWordFilter(FrameProcessor):
                         if self._led:
                             self._led.send("oww-awake")
                         break
-                elif (self._state is TurnState.AWAKE and score >= self._threshold
-                      and self._turns > (1 if self._turn_open else 0)):
-                    # Re-wake while AWAKE (follow-up cap, 2026-10-15): a
-                    # deliberate "Hey Willow" mid-conversation starts a fresh
-                    # allowance. Only once a turn beyond this utterance has
-                    # been counted — the wake phrase's own decaying tail
-                    # right after an IDLE wake must not log as a re-wake.
-                    self._interrupt_chain = 0
-                    self._start_session()
-                    self._last_activity = now
-                    logger.info(f"wake_word: HEY WILLOW while awake (score {score:.2f}) "
-                                f"-> fresh follow-up allowance")
                 else:
                     self._interrupt_chain = 0
 
@@ -328,13 +276,9 @@ class WakeWordFilter(FrameProcessor):
                 # until reconnect. Safety cap: release to AWAKE when the
                 # known speech window (note_speech; 30s fallback) passes.
                 if now > self._speech_until:
-                    logger.warning("wake_word: LOCKED safety release — no stop frame before the speech cap")
-                    if self._spent or self._turns > self._max_followups:
-                        self._close_spent("follow-up cap, after safety release")
-                        return
                     self._state = TurnState.AWAKE
                     self._last_activity = now
-                    self._turn_open = False
+                    logger.warning("wake_word: LOCKED safety release — no stop frame before the speech cap")
                     if self._led:
                         self._led.send("oww-awake")  # ring back to listening
                 return
@@ -394,26 +338,14 @@ class WakeWordFilter(FrameProcessor):
             # late when the intelligence stalls the pipeline, so the gate is the
             # wrong place to notify the ring.
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            # A reply ends the listening phase. Cap spent (or already spent
-            # by an earlier reply in this turn) -> IDLE, never re-armed.
-            self._turn_open = False
-            if self._spent:
-                self._state = TurnState.IDLE
-                logger.debug("wake_word: -> IDLE (bot finished; follow-ups already spent)")
-            elif self._turns > self._max_followups:
-                self._close_spent("follow-up cap")
-            else:
-                self._state = TurnState.AWAKE
-                self._last_activity = now
-                logger.debug("wake_word: -> AWAKE (bot finished)")
+            self._state = TurnState.AWAKE
+            self._last_activity = now
+            logger.debug("wake_word: -> AWAKE (bot finished)")
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # Real activity: user is talking (this is what keeps AWAKE alive)
             self._vad_fired = True
             if self._state is TurnState.AWAKE:
                 self._last_activity = now
-                if not self._turn_open:
-                    self._turn_open = True
-                    self._turns += 1
         elif self._state is TurnState.AWAKE and (now - self._last_activity) > self._awake_timeout:
             self._state = TurnState.IDLE
             if not self._vad_fired:
