@@ -941,14 +941,23 @@ def main():
     # Flex .bin there would be OTA'd by an array node (cross-flash).
     # Board identity (design note): real images carry exactly one OTA-track
     # URL format; the route refuses an image whose own track differs.
-    _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "node": b"%.*s/firmware/%s"}
+    # 046 (2026-10-16): one track vocabulary (array | flex); 1.2.9+ images
+    # also carry a per-line project name. "legacy" = array <=1.2.8's
+    # track-less URL format (still a valid array witness on node_esp32).
+    _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "array": b"%.*s/firmware/array/%s",
+               "legacy": b"%.*s/firmware/%s"}
+    _PROJ5B = {"flex": b"flex_esp32", "array": b"array_esp32", "legacy": b"node_esp32",
+               None: b"node_esp32"}
 
-    def _fake_image5b(ver: str, board: str | None = "node", both: bool = False) -> bytes:
+    def _fake_image5b(ver: str, board: str | None = "array", both: bool = False,
+                      project: bytes | None = None) -> bytes:
         head = bytearray(b"\x00" * 256)
         head[32:36] = b"\x32\x54\xcd\xab"          # esp_app_desc magic
         head[48:80] = ver.encode().ljust(32, b"\x00")  # version string
+        proj = project if project is not None else (b"node_esp32" if both else _PROJ5B[board])
+        head[80:112] = proj.ljust(32, b"\x00")        # project_name
         body = bytearray(b"\x00" * (1024 * 200))   # over the size floor
-        marks = [_MARK5B["flex"], _MARK5B["node"]] if both else ([_MARK5B[board]] if board else [])
+        marks = [_MARK5B["flex"], _MARK5B["legacy"]] if both else ([_MARK5B[board]] if board else [])
         off = 4096
         for m in marks:
             body[off:off + len(m)] = m
@@ -983,7 +992,7 @@ def main():
         # so a silent array default is a cross-flash accelerant).
         _snap5c = {t: (Path(f"firmware/{t}/version.json").read_text()
                        if Path(f"firmware/{t}/version.json").exists() else None)
-                   for t in ("node", "flex")}
+                   for t in ("array", "flex")}
         _rc = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
@@ -992,15 +1001,15 @@ def main():
         check("9b5b M2 track-less upload left both manifests untouched",
               all((Path(f"firmware/{t}/version.json").read_text()
                    if Path(f"firmware/{t}/version.json").exists() else None) == _snap5c[t]
-                  for t in ("node", "flex")), str(_snap5c)[:120])
+                  for t in ("array", "flex")), str(_snap5c)[:120])
         # explicit array track still works
         _rd = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")},
-                          data={"track": "node"})
-        check("9b5b explicit array track upload lands in firmware/node/",
-              _rd.status_code == 200 and _rd.json().get("track") == "node"
-              and json.loads(Path("firmware/node/version.json").read_text())["version"] == "1.9.7",
+                          data={"track": "array"})
+        check("9b5b explicit array track upload lands in firmware/array/",
+              _rd.status_code == 200 and _rd.json().get("track") == "array"
+              and json.loads(Path("firmware/array/version.json").read_text())["version"] == "1.9.7",
               _rd.text[:120])
 
         # 045: board identity — the image's own OTA-track marker must match
@@ -1008,8 +1017,8 @@ def main():
         # image + manifest byte-identical.
         def _snap045():
             out = {}
-            for t in ("node", "flex"):
-                for f in ("version.json", "node_esp32.bin"):
+            for t in ("array", "flex"):
+                for f in ("version.json", f"{t}_esp32.bin"):
                     q = Path(f"firmware/{t}/{f}")
                     out[f"{t}/{f}"] = q.read_bytes() if q.exists() else None
             return out
@@ -1017,21 +1026,21 @@ def main():
         _re = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "flex"),
                                           "application/octet-stream")},
-                          data={"track": "node"})
+                          data={"track": "array"})
         check("045 Flex image declared for the ARRAY track -> 400, names the board",
               _re.status_code == 400 and "reSpeaker Flex firmware" in _re.text
               and "track 'flex'" in _re.text, f"{_re.status_code} {_re.text[:160]}")
         _rf = client.post("/api/dashboard/firmware/upload",
-                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "node"),
+                          files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "array"),
                                           "application/octet-stream")},
                           data={"track": "flex"})
         check("045 array image declared for the FLEX track -> 400, names the board",
               _rf.status_code == 400 and "array (XVF3800" in _rf.text
-              and "track 'node'" in _rf.text, f"{_rf.status_code} {_rf.text[:160]}")
+              and "track 'array'" in _rf.text, f"{_rf.status_code} {_rf.text[:160]}")
         _rg = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", None),
                                           "application/octet-stream")},
-                          data={"track": "node"})
+                          data={"track": "array"})
         check("045 image with NO track marker -> 400 (never guessed onto a track)",
               _rg.status_code == 400 and "can't tell which board" in _rg.text,
               f"{_rg.status_code} {_rg.text[:160]}")
@@ -1046,7 +1055,7 @@ def main():
         check("045 every refusal left both tracks' served image + manifest byte-identical",
               _after045 == _before045,
               str([k for k in _before045 if _before045[k] != _after045.get(k)]))
-        _leftover045 = [str(q) for t in ("node", "flex")
+        _leftover045 = [str(q) for t in ("array", "flex")
                         for q in Path(f"firmware/{t}").glob("*.uploading")]
         check("045 every refusal cleaned up its .uploading temp", not _leftover045,
               str(_leftover045))
@@ -1055,15 +1064,109 @@ def main():
         import subprocess as _sp045
         _abv = str(Path(__file__).resolve().parent / "app_bin_version.py")
         _cli = {}
-        for _lbl, _img in (("flex", _fake_image5b("1.9.5", "flex")), ("node", _fake_image5b("1.9.5", "node")),
+        for _lbl, _img in (("flex", _fake_image5b("1.9.5", "flex")), ("array", _fake_image5b("1.9.5", "array")),
                            ("none", _fake_image5b("1.9.5", None)), ("both", _fake_image5b("1.9.5", both=True))):
             _fp = Path(SCRATCH) / f"cli045-{_lbl}.bin"
             _fp.write_bytes(_img)
             _cli[_lbl] = _sp045.run([sys.executable, _abv, "--track", str(_fp)],
                                     capture_output=True, text=True).stdout.strip()
             _fp.unlink()
-        check("045 app_bin_version.py --track: flex/node/none/both -> flex/node/''/''",
-              _cli == {"flex": "flex", "node": "node", "none": "", "both": ""}, str(_cli))
+        check("045 app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
+              _cli == {"flex": "flex", "array": "array", "none": "", "both": ""}, str(_cli))
+
+        # 046 (2026-10-16): firmware names — one vocabulary, per-line files.
+        _rn = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("x.bin", _fake_image5b("1.9.4", "array"),
+                                          "application/octet-stream")},
+                          data={"track": "node"})
+        check("046 retired track name 'node' -> 400 naming array | flex",
+              _rn.status_code == 400 and "array | flex" in _rn.text, f"{_rn.status_code} {_rn.text[:120]}")
+        # In-field images (<=1.2.8, project node_esp32) are still judged by
+        # their URL marker: array legacy URL -> array, flex URL -> flex.
+        _rl = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("old.bin", _fake_image5b("1.9.3", "legacy"),
+                                          "application/octet-stream")},
+                          data={"track": "array"})
+        check("046 legacy array image (node_esp32 + track-less URL) still uploads to array",
+              _rl.status_code == 200 and _rl.json().get("track") == "array", f"{_rl.status_code} {_rl.text[:120]}")
+        _rlf = client.post("/api/dashboard/firmware/upload",
+                           files={"file": ("oldf.bin", _fake_image5b("1.9.3", "flex", project=b"node_esp32"),
+                                           "application/octet-stream")},
+                           data={"track": "flex"})
+        check("046 legacy flex image (node_esp32 + flex URL) still uploads to flex",
+              _rlf.status_code == 200 and _rlf.json().get("track") == "flex", f"{_rlf.status_code} {_rlf.text[:120]}")
+        # A named image must agree with its own URL marker.
+        _before046 = _snap045()
+        _rm = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("liar.bin", _fake_image5b("1.9.2", "array", project=b"flex_esp32"),
+                                          "application/octet-stream")},
+                          data={"track": "array"})
+        _rm2 = client.post("/api/dashboard/firmware/upload",
+                           files={"file": ("liar2.bin", _fake_image5b("1.9.2", "flex", project=b"array_esp32"),
+                                           "application/octet-stream")},
+                           data={"track": "flex"})
+        _rm3 = client.post("/api/dashboard/firmware/upload",
+                           files={"file": ("alien.bin", _fake_image5b("1.9.2", "array", project=b"some_other_app"),
+                                           "application/octet-stream")},
+                           data={"track": "array"})
+        check("046 project name vs URL disagreement / unknown project -> 400, nothing written",
+              all(r.status_code == 400 and "can't tell which board" in r.text for r in (_rm, _rm2, _rm3))
+              and _snap045() == _before046,
+              f"{_rm.status_code} {_rm2.status_code} {_rm3.status_code}")
+        # Served file is named for its track; a pre-rename .bin is swept.
+        Path("firmware/array/node_esp32.bin").write_bytes(b"stale")
+        _rs = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("whatever-name.bin", _fake_image5b("1.9.9", "array"),
+                                          "application/octet-stream")},
+                          data={"track": "array"})
+        _man046 = json.loads(Path("firmware/array/version.json").read_text())
+        check("046 upload serves firmware/array/array_esp32.bin, manifest names it, stale node_esp32.bin removed",
+              _rs.status_code == 200 and _rs.json().get("filename") == "array_esp32.bin"
+              and _man046 == {"version": "1.9.9", "filename": "array_esp32.bin"}
+              and sorted(q.name for q in Path("firmware/array").glob("*.bin")) == ["array_esp32.bin"],
+              f"{_rs.text[:120]} {_man046} {[q.name for q in Path('firmware/array').glob('*.bin')]}")
+        _rsf = client.post("/api/dashboard/firmware/upload",
+                           files={"file": ("f.bin", _fake_image5b("1.9.9", "flex"),
+                                           "application/octet-stream")},
+                           data={"track": "flex"})
+        check("046 flex upload serves firmware/flex/flex_esp32.bin",
+              _rsf.status_code == 200 and _rsf.json().get("filename") == "flex_esp32.bin"
+              and sorted(q.name for q in Path("firmware/flex").glob("*.bin")) == ["flex_esp32.bin"],
+              _rsf.text[:120])
+
+        # 046: the OTA server (core/firmware_server.py) — first suite
+        # coverage of the node-facing routes. Tracks point at this scratch.
+        import firmware_server as _fws
+        from fastapi import FastAPI as _FA046
+        _saved_tracks046 = dict(_fws.FIRMWARE_TRACKS)
+        _fws.FIRMWARE_TRACKS.update({"array": Path("firmware/array").resolve(),
+                                     "flex": Path("firmware/flex").resolve()})
+        try:
+            _app046 = _FA046()
+            _fws.register_firmware_routes(_app046)
+            _c046 = TestClient(_app046)
+            _legacy = _c046.get("/firmware/version")
+            _arr = _c046.get("/firmware/array/version")
+            _flx = _c046.get("/firmware/flex/version")
+            check("046 OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
+                  _legacy.status_code == 200 and _legacy.json() == _arr.json()
+                  == {"version": "1.9.9", "filename": "array_esp32.bin"},
+                  f"{_legacy.status_code} {_legacy.text[:80]} | {_arr.text[:80]}")
+            check("046 OTA: /firmware/flex/version serves the flex manifest",
+                  _flx.status_code == 200 and _flx.json() == {"version": "1.9.9", "filename": "flex_esp32.bin"},
+                  _flx.text[:80])
+            _lb = _c046.get("/firmware/array_esp32.bin")
+            _tb = _c046.get("/firmware/array/array_esp32.bin")
+            check("046 OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
+                  _lb.status_code == 200 and _lb.content == _tb.content
+                  == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
+            check("046 OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
+                  _c046.get("/firmware/node/version").status_code == 404, "")
+            check("046 OTA: path traversal out of a track dir 404s",
+                  _c046.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
+        finally:
+            _fws.FIRMWARE_TRACKS.clear()
+            _fws.FIRMWARE_TRACKS.update(_saved_tracks046)
     finally:
         os.chdir(_saved_updir5b)
 

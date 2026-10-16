@@ -35,12 +35,23 @@ run() {  # run <expect PASS|REFUSE> <label> <track> [repo]
 }
 
 git -C "$T/fw" checkout -q array-xvf3800
-run PASS   "node track, checkout on array-xvf3800"           node
+run PASS   "array track, checkout on array-xvf3800"           array
 run REFUSE "flex track, checkout on array-xvf3800 (cross-flash)" flex
 
 git -C "$T/fw" checkout -q flex-xvf3800
 run PASS   "flex track, checkout on flex-xvf3800"               flex
-run REFUSE "node track, checkout on flex-xvf3800 (cross-flash)" node
+run REFUSE "array track, checkout on flex-xvf3800 (cross-flash)" array
+
+# Old track name and missing --track: refused, never defaulted to a line.
+git -C "$T/fw" checkout -q array-xvf3800
+run REFUSE "retired track name 'node' (renamed array)"           node
+out=$(FW_REPO="$T/fw" DEPLOY_PREFLIGHT_ONLY=1 bash "$DEPLOY" 2>&1); rc=$?
+if [ $rc -ne 0 ] && grep -q -- "--track array|flex is required" <<<"$out"; then
+  printf '[PASS] %-58s -> %s\n' "no --track at all (no default line)" REFUSE
+else
+  printf '[FAIL] %-58s -> rc=%s (expected REFUSE)\n' "no --track at all (no default line)" "$rc"; fail=1
+fi
+git -C "$T/fw" checkout -q flex-xvf3800
 
 git -C "$T/fw" checkout -q --detach HEAD
 run REFUSE "flex track, detached HEAD"                          flex
@@ -61,11 +72,11 @@ run REFUSE "flex track, hand-edited deps/libpeer"               flex
 # tree): whatever branch it is on, exactly one track may pass.
 REAL_BRANCH=$(git -C "$FW_REAL" symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)
 case "$REAL_BRANCH" in
-  array-xvf3800) run PASS "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
+  array-xvf3800) run PASS "REAL checkout ($REAL_BRANCH): array track" array "$FW_REAL"
                 run REFUSE "REAL checkout ($REAL_BRANCH): flex track" flex "$FW_REAL" ;;
-  flex-xvf3800) run REFUSE "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
+  flex-xvf3800) run REFUSE "REAL checkout ($REAL_BRANCH): array track" array "$FW_REAL"
                 run PASS "REAL checkout ($REAL_BRANCH): flex track" flex "$FW_REAL" ;;
-  *)            run REFUSE "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
+  *)            run REFUSE "REAL checkout ($REAL_BRANCH): array track" array "$FW_REAL"
                 run REFUSE "REAL checkout ($REAL_BRANCH): flex track" flex "$FW_REAL" ;;
 esac
 
