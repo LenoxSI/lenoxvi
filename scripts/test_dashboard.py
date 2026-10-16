@@ -1381,6 +1381,7 @@ def main():
             TranscriptionFrame as _TF,
             VADUserStartedSpeakingFrame as _VADStart,
             BotStartedSpeakingFrame as _BotStart,
+            BotStoppedSpeakingFrame as _BotStop,
             InputAudioRawFrame as _InputAudio,
         )
         from pipecat.processors.frame_processor import (  # noqa: E402
@@ -1527,6 +1528,147 @@ def main():
                   len(_ran8c) == 1 and _wf8c._interrupt_task is not None
                   and _wf8c._interrupt_task.done(),
                   f"ran={len(_ran8c)} task={getattr(_wf8c, '_interrupt_task', 'missing')}")
+            # ── FU follow-up cap (2026-10-15): one wake used to hold the
+            # gate open as long as anyone talked — every reply re-armed AWAKE
+            # and every VAD start kept it alive (TV: 287 s / 36 room snippets
+            # to the brain from ONE wake at 20:03:02). Cap = user turns
+            # allowed after the wake turn; then the next reply -> IDLE.
+            def _wf11(cap):
+                score = {"v": 0.0}
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None)
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": score["v"]})
+                wf._name = "Hey_Willow"
+                wf._frame_size = 2560
+                wf._barge_in = False
+                wf._max_followups = cap  # pinned: the suite copies the live config.yaml
+                return wf, score
+
+            async def _audio11(wf):
+                await wf.process_frame(_InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM)
+
+            async def _wake11(wf, score):
+                score["v"] = 0.99
+                await _audio11(wf)
+                score["v"] = 0.0
+
+            async def _reply11(wf):
+                await wf.process_frame(_BotStart(), _FD8.DOWNSTREAM)
+                await wf.process_frame(_BotStop(), _FD8.DOWNSTREAM)
+
+            async def _turn11(wf):
+                await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await _reply11(wf)
+
+            async def _probe11_cap2():
+                wf, sc = _wf11(2)
+                await _wake11(wf, sc)
+                states = []
+                for _ in range(3):
+                    await _turn11(wf)
+                    states.append(wf._state)
+                return states
+
+            _st11 = _asyncio.run(_probe11_cap2())
+            check("FU cap 2: wake turn + 2 follow-ups stay AWAKE, the 3rd reply -> IDLE",
+                  _st11 == [_TurnState.AWAKE, _TurnState.AWAKE, _TurnState.IDLE], str(_st11))
+
+            async def _probe11_cap0():
+                wf, sc = _wf11(0)
+                await _wake11(wf, sc)
+                await _turn11(wf)
+                return wf._state
+
+            _st11b = _asyncio.run(_probe11_cap0())
+            check("FU cap 0: one question per wake — the first reply -> IDLE",
+                  _st11b is _TurnState.IDLE, str(_st11b))
+
+            async def _probe11_blips():
+                wf, sc = _wf11(0)
+                await _wake11(wf, sc)
+                for _ in range(4):  # coughs/fragments in ONE listening phase
+                    await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                n = wf._turns
+                return n
+
+            _n11 = _asyncio.run(_probe11_blips())
+            check("FU VAD blips within one listening phase count as ONE turn",
+                  _n11 == 1, f"turns={_n11}")
+
+            async def _probe11_spent():
+                # cap 0: the filler ends the turn (-> IDLE); the REAL answer
+                # arriving later must not reopen the mic.
+                wf, sc = _wf11(0)
+                await _wake11(wf, sc)
+                await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await _reply11(wf)              # "Working on it…"
+                after_filler = wf._state
+                await _reply11(wf)              # the actual answer
+                return after_filler, wf._state
+
+            _sp11 = _asyncio.run(_probe11_spent())
+            check("FU spent session stays IDLE through a reply still in flight (filler, then answer)",
+                  _sp11 == (_TurnState.IDLE, _TurnState.IDLE), str(_sp11))
+
+            async def _probe11_rewake():
+                # cap 1: turn 1, turn 2 opens, then "Hey Willow" mid-utterance
+                # -> fresh allowance (this utterance = turn 1) -> its reply
+                # keeps the gate AWAKE (without the re-wake it would close).
+                wf, sc = _wf11(1)
+                await _wake11(wf, sc)
+                await _turn11(wf)
+                await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await _wake11(wf, sc)           # re-wake while AWAKE
+                turns_after = wf._turns
+                await _reply11(wf)
+                return turns_after, wf._state
+
+            _rw11 = _asyncio.run(_probe11_rewake())
+            check("FU Hey Willow while AWAKE resets the allowance (no forced re-wake mid-conversation)",
+                  _rw11 == (1, _TurnState.AWAKE), str(_rw11))
+
+            async def _probe11_tail():
+                # the wake phrase's own decaying tail right after an IDLE wake
+                # (and within the counted phase) must not count as a re-wake
+                wf, sc = _wf11(2)
+                await _wake11(wf, sc)
+                await _wake11(wf, sc)           # tail frame, no turn yet
+                await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await _wake11(wf, sc)           # tail frame inside turn 1
+                return wf._turns, wf._spent
+
+            _tl11 = _asyncio.run(_probe11_tail())
+            check("FU the wake phrase's own tail is not a re-wake (turn count untouched)",
+                  _tl11 == (1, False), str(_tl11))
+
+            async def _probe11_replay():
+                # Tonight's real shape: TV talks in every phase. Cap 2 must
+                # close after the 3rd reply and STAY closed with TV still on.
+                wf, sc = _wf11(2)
+                await _wake11(wf, sc)
+                for _ in range(10):
+                    await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                    await wf.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                    await _reply11(wf)
+                return wf._state, wf._turns
+
+            _rp11 = _asyncio.run(_probe11_replay())
+            check("FU TV-shaped loop (speech in every phase) closes at the cap and stays IDLE",
+                  _rp11 == (_TurnState.IDLE, 3), str(_rp11))
+
+            _prev11 = _os.environ.get("LVI_MAX_FOLLOWUPS")
+            _os.environ["LVI_MAX_FOLLOWUPS"] = "3"
+            try:
+                _w11e = _WF(echo_gate=_EchoGate8())
+                _cfg11 = _w11e._max_followups
+            finally:
+                if _prev11 is None:
+                    _os.environ.pop("LVI_MAX_FOLLOWUPS", None)
+                else:
+                    _os.environ["LVI_MAX_FOLLOWUPS"] = _prev11
+            import wake_word as _ww11
+            check("FU cap is a config knob (LVI_MAX_FOLLOWUPS / wake.max_followups), default 2",
+                  _cfg11 == 3 and _ww11.MAX_FOLLOWUPS == 2, f"env3->{_cfg11} default={_ww11.MAX_FOLLOWUPS}")
+
             # ── backend clip stop (fake player layers, 9b7 pattern) ──
             _CANCELS8 = []
 
@@ -2058,6 +2200,47 @@ def main():
               _dt < 3.5 and _svc2._client is None, f"{_dt:.2f}s")
     finally:
         _BWS.cleanup = _saved_cleanup
+
+    # RSS-step fix (2026-10-15): Whisper loads at bot STARTUP (fresh heap +
+    # warm-up + malloc_trim), not inside the first voice turn of an aged,
+    # fragmented process (768 MB -> 2.8 GB). The preload must use exactly the
+    # model/device/precision run_bot's STT uses, or the bot loads twice.
+    import ast as _astR
+    _botR = _astR.parse((REPO_CORE.parent / "bot.py").read_text())
+    def _cfg_triples(node):
+        out = []
+        for n in _astR.walk(node):
+            if (isinstance(n, _astR.Call) and getattr(n.func, "id", "") in ("cfg_env", "_cfg_env")
+                    and len(n.args) >= 4 and all(isinstance(a, _astR.Constant) for a in n.args[:4])):
+                out.append(tuple(a.value for a in n.args[:4]))
+        return out
+    _stt_call = next((n for n in _astR.walk(_botR) if isinstance(n, _astR.Call)
+                      and getattr(n.func, "id", "") == "LocalWhisperSTTService"), None)
+    _pre_call = next((n for n in _astR.walk(_botR) if isinstance(n, _astR.Call)
+                      and getattr(n.func, "id", "") == "preload_shared_model"), None)
+    _stt_tr = [t for t in _cfg_triples(_stt_call) if t[1] in ("model", "device", "compute_type")] if _stt_call else []
+    _pre_tr = _cfg_triples(_pre_call) if _pre_call else []
+    check("RSS preload uses the SAME stt model/device/compute_type config as run_bot",
+          _pre_call is not None and len(_pre_tr) == 3 and _pre_tr == _stt_tr,
+          f"preload={_pre_tr} run_bot={_stt_tr}")
+    _main_src = _astR.unparse(_botR)
+    check("RSS preload runs before main() (startup, not first voice turn)",
+          _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
+          "preload call missing or after main()")
+    import stt_local as _sttR
+    import ctypes as _ctR
+    _orig_cdll = _ctR.CDLL
+    def _no_libc(*a, **k):
+        raise OSError("no libc here")
+    _ctR.CDLL = _no_libc
+    try:
+        _sttR._trim_heap("suite")
+        _trim_ok = True
+    except Exception as _e:
+        _trim_ok = False
+    finally:
+        _ctR.CDLL = _orig_cdll
+    check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
