@@ -331,6 +331,10 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
   // land before the new data channel is open.
   const askedAtRef = useRef(null)   // last_seen stamp of the connection we asked
   const triesRef = useRef(0)        // /info attempts for that connection
+  // 041 L1: bumped by every toggle — a slow /info reply that was sent
+  // BEFORE the toggle must never stomp the fresh ack state (the stamp
+  // guard only covers connection changes, not in-room races).
+  const muteSeqRef = useRef(0)
   const [infoTick, setInfoTick] = useState(0)  // bumped only by the retry timer
   useEffect(() => {
     if (!online) { askedAtRef.current = null; return }
@@ -341,14 +345,15 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
     triesRef.current += 1
     // Staleness = "a newer connection took over" (stamp moved), NOT effect
     // cleanup — StrictMode's dev double-invoke would cancel the only ask.
+    const seq = muteSeqRef.current  // 041 L1: staleness vs a toggle fired mid-flight
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
       .then(r => {
-        if (askedAtRef.current !== stamp) return
+        if (askedAtRef.current !== stamp || muteSeqRef.current !== seq) return
         if (r?.ok) { setMuted(!!r?.data?.muted); setMuteUnknown(false) }
         else throw new Error('info not ok')
       })
       .catch(() => {
-        if (askedAtRef.current !== stamp) return
+        if (askedAtRef.current !== stamp || muteSeqRef.current !== seq) return
         // Out of tries: say so — never keep showing the LAST connection's state.
         if (triesRef.current >= 3) { setMuteUnknown(true); return }
         setTimeout(() => {
@@ -368,6 +373,7 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
 
   const toggleMute = async () => {
     if (muteBusy) return
+    muteSeqRef.current++  // 041 L1: any /info in flight is now stale
     setMuteBusy(true)
     setMsg(`Toggling mute on ${room}…`, 'pulse', 'Nodes')
     try {
@@ -544,7 +550,12 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     // room_zones key (MappingPayload contract, routes.py) — a bare
     // merged dict 422s (or worse: pre-forbid, silently wiped the
     // mapping via Pydantic's default_factory). Never unwrapped.
-    const body = { room_zones: { ...(mapping?.room_zones || {}), [room]: zone } }
+    // 041 L2: spread the DRAFT map, not the server copy — the server
+    // copy dropped every OTHER row's unsaved pick the moment one row
+    // saved. The draft holds synced server values + all row edits, so
+    // one Save persists the whole visible map (and the full-dict
+    // wipe-guard contract stays honest).
+    const body = { room_zones: { ...(mapDraft || mapping?.room_zones || {}), [room]: zone } }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
@@ -806,7 +817,14 @@ function VolSlider({ name, initial, onCommit }) {
         onChange={e => setVal(+e.target.value)}
         onMouseUp={() => onCommit(name, val)}
         onTouchEnd={() => onCommit(name, val)}
-        onKeyUp={() => onCommit(name, val)}
+        onKeyUp={e => {
+          // 041 L5: only VALUE-MOVING keys commit — the old bare
+          // onKeyUp fired on Tab too, so walking the form with the
+          // keyboard PUTed an unchanged volume into config.
+          if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+               'Home', 'End', 'PageUp', 'PageDown'].includes(e.key))
+            onCommit(name, val)
+        }}
         className="w-[140px] accent-[var(--accent)]"
         aria-label={`${name} volume`} />
       <span className="font-mono text-[12px] w-[30px] text-right">{val}</span>
@@ -945,10 +963,16 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
   useEffect(() => { load() }, [])
 
   const select = async () => {
-    const name = sel.split('/').pop()
+    // 041 L4: the dropdown value is the row's full path — resolve the
+    // ROW (basename + source) so a same-basename root/models/
+    // collision activates the exact copy the picker named; a name-only
+    // select always resolved to the models/ copy.
+    const row = models.find(m => m.path === sel)
+    const name = row?.name || sel.split('/').pop()
     if (!name || !name.endsWith('.onnx')) { setMsg('No model selected.', 'err', 'Wake word model'); return }
+    const body = { model: name, ...(row?.source ? { source: row.source } : {}) }
     try {
-      await api('/api/dashboard/oww/select', { method: 'PUT', json: { model: name } })
+      await api('/api/dashboard/oww/select', { method: 'PUT', json: body })
       setMsg(`Active model set to '${name}' — applies on next bot restart.`, 'ok', 'Wake word model')
       await load()
       offerRestart(setMsg, setRebooting)
@@ -1063,6 +1087,11 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   // a drag in progress); committed on Save via the same DOM read.
   const [fluxSpeed, setFluxSpeed] = useState(1.0)
   const [fluxExpr, setFluxExpr] = useState(1)
+  // 041 L8: a Flux knob rides the save ONLY if the server had one set
+  // (editing it) or the user actually moved the slider. An untouched
+  // placeholder on an unset knob used to be written as an explicit
+  // config value — pinning Flux to numbers nobody chose.
+  const fluxTouched = useRef({ speed: false, expr: false })
   // ElevenLabs flash-v2.5 knobs (2026-10-07): speed 0.7–1.2, stability
   // 0.0–1.0. Same draft law — synced once, committed on Save.
   const [elSpeed, setElSpeed] = useState(null)   // null = not set = ElevenLabs default
@@ -1105,10 +1134,13 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       body.deepgram_voice = model
     } else if (provider === 'deepgram-flux') {
       body.deepgram_flux_voice = model
-      // Flux sliders ride along — live-tuned values from the controlled
-      // state (committed on Save; omitting them is also fine = leave as-is).
-      body.deepgram_flux_speed = parseFloat(fluxSpeed)
-      body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
+      // 041 L8: knobs ride ONLY when the server had one (an edit) or
+      // the user moved the slider — an untouched placeholder on an
+      // unset knob writes nothing (the route's None = leave-as-is).
+      if (fluxTouched.current.speed || tts?.deepgram_flux_speed != null)
+        body.deepgram_flux_speed = parseFloat(fluxSpeed)
+      if (fluxTouched.current.expr || tts?.deepgram_flux_expressivity != null)
+        body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
     }
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
@@ -1146,12 +1178,12 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               <>
                 <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed</span>
                 <input id="tts-flux-speed" type="range" min="0.5" max="1.5" step="0.05"
-                  value={fluxSpeed} onChange={e => setFluxSpeed(parseFloat(e.target.value))}
+                  value={fluxSpeed} onChange={e => { setFluxSpeed(parseFloat(e.target.value)); fluxTouched.current.speed = true }}
                   className="w-[140px] accent-[var(--accent)]" aria-label="Flux speed" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{fluxSpeed.toFixed(2)}</span>
                 <span className="text-[12px] font-medium text-[var(--muted)]">expressivity</span>
                 <input id="tts-flux-expressivity" type="range" min="-2" max="2" step="1"
-                  value={fluxExpr} onChange={e => setFluxExpr(parseInt(e.target.value, 10))}
+                  value={fluxExpr} onChange={e => { setFluxExpr(parseInt(e.target.value, 10)); fluxTouched.current.expr = true }}
                   className="w-[140px] accent-[var(--accent)]" aria-label="Flux expressivity" />
                 <span className="font-mono text-[12px] w-[20px] text-right">{fluxExpr}</span>
               </>

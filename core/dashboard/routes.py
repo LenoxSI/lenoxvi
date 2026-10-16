@@ -1297,6 +1297,11 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
 class OWWModelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
     model: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+\.onnx$")
+    # 041 L4: the source disambiguates a same-basename root/models/
+    # collision — without it the route resolved models/-first and a
+    # click on the ROOT row silently activated the models/ copy.
+    # None = legacy resolution (models first, root fallback).
+    source: Literal["root", "models"] | None = None
 
 
 def _oww_dir() -> Path:
@@ -1397,15 +1402,27 @@ async def oww_upload_model(file: UploadFile = File(...)):
 @router.put("/oww/select", dependencies=GUARD)
 async def oww_select_model(payload: OWWModelPayload):
     """Point wake.model at an uploaded model (applies on next restart).
-    Merges into the wake section — threshold/awake_timeout survive."""
+    Merges into the wake section — threshold/awake_timeout survive.
+
+    041 L4: `source` keys the EXACT file the panel row named — with the
+    same basename in both root and models/, a name-only select always
+    resolved to the models/ copy and a click on the root row silently
+    activated the other file. None keeps the legacy resolution."""
     name = payload.model
-    path = _oww_dir() / name
-    if not path.is_file():
-        # legacy root model? (pre-models-dir uploads / hand-copied files)
-        if (Path(".") / name).is_file():
-            path = Path(".") / name
-        else:
-            raise HTTPException(status_code=404, detail=f"model '{name}' not found")
+    if payload.source is not None:
+        path = (_oww_dir() if payload.source == "models" else Path(".")) / name
+        if not path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"model '{name}' not found in {payload.source}")
+    else:
+        path = _oww_dir() / name
+        if not path.is_file():
+            # legacy root model? (pre-models-dir uploads / hand-copied files)
+            if (Path(".") / name).is_file():
+                path = Path(".") / name
+            else:
+                raise HTTPException(status_code=404, detail=f"model '{name}' not found")
     current = dict(config_store.read_section("wake") or {})
     current["model"] = str(path)
     try:
