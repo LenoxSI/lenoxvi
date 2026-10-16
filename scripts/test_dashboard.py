@@ -2204,6 +2204,71 @@ def main():
           and hasattr(_bot13.ElevenLabsTTSService, "_push_tts_frames"),
           "Tracked* must sit on TTSTracked over a websocket TTS service")
 
+    # 9b14. 041 L9 — node-command error mapping: an in-flight duplicate is a
+    # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a
+    # bare transport timeout (empty detail — the 21:01 restart error shape)
+    # now says half-open + self-heals instead of an empty string the UI
+    # rendered as "Gateway Timeout".
+    import asyncio as _aio14
+    import dashboard.node_command as _nc14
+    from dashboard.node_command import (CommandInFlight as _InFlight14,
+                                        NoLiveSession as _NoLive14)
+
+    registry.note_offer("pc-9b14", "suite-9b14")
+    registry.mark_connected("pc-9b14")
+    _real_request14 = _nc14.request
+
+    def _raising_request14(exc):
+        async def _r(room, cmd, args=None, timeout=12.0):
+            raise exc
+        return _r
+
+    try:
+        _nc14.request = _raising_request14(
+            _InFlight14("'restart' already in flight for 'suite-9b14'"))
+        _r14a = client.post("/api/dashboard/nodes/suite-9b14/restart")
+        check("9b14 L9: in-flight duplicate -> 409 Conflict (was a 504)",
+              _r14a.status_code == 409 and "already in flight" in _r14a.text,
+              f"status={_r14a.status_code} body={_r14a.text[:80]}")
+        _nc14.request = _raising_request14(TimeoutError())
+        _r14b = client.post("/api/dashboard/nodes/suite-9b14/restart")
+        check("9b14 L9: bare timeout -> 504 with half-open + self-heal wording",
+              _r14b.status_code == 504 and "half-open" in _r14b.text
+              and "10 min" in _r14b.text,
+              f"status={_r14b.status_code} body={_r14b.text[:100]}")
+        _nc14.request = _raising_request14(
+            _NoLive14("no live session for room 'suite-9b14'"))
+        _r14c = client.post("/api/dashboard/nodes/suite-9b14/restart")
+        check("9b14 L9: half-open session -> 504 naming the half-open shape",
+              _r14c.status_code == 504 and "half-open" in _r14c.text,
+              f"status={_r14c.status_code} body={_r14c.text[:100]}")
+    finally:
+        _nc14.request = _real_request14
+        registry.mark_disconnected("pc-9b14")
+
+    # node_command side: a pending duplicate raises CommandInFlight (the
+    # route's 409 depends on the class, not on message sniffing).
+    _saved_sender14 = _nc14.registry.sender_for_room
+
+    async def _inflight_probe14():
+        _nc14.registry.sender_for_room = lambda room: (object(), "pc-9b14")
+        fut = _aio14.get_event_loop().create_future()
+        _nc14._pending[("pc-9b14", "restart")] = fut
+        try:
+            await _nc14.request("suite-9b14", "restart")
+            return "no-raise"
+        except _InFlight14:
+            return "inflight"
+        except TimeoutError as e:
+            return f"timeout:{str(e)[:40]}"
+        finally:
+            _nc14._pending.pop(("pc-9b14", "restart"), None)
+            _nc14.registry.sender_for_room = _saved_sender14
+
+    _res14 = _aio14.run(_inflight_probe14())
+    check("9b14 L9: node_command raises CommandInFlight for a pending duplicate",
+          _res14 == "inflight", f"result={_res14}")
+
     # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
