@@ -9,7 +9,8 @@ segment:
   +48 project_name[32]
 
 Verified live 2026-10-08 against a built flex image (reports 1.1.0 from
-project(node_esp32 VERSION 1.1.0)); esptool image_info v1 does NOT print
+project(node_esp32 VERSION 1.1.0)); project names are array_esp32 /
+flex_esp32 since 1.2.9. esptool image_info v1 does NOT print
 the app version, so we parse it ourselves.
 
 M9 (design note): deploy_firmware.sh uses this so the SHIPPED manifest can
@@ -32,7 +33,7 @@ def app_version(bin_path: str) -> tuple[str, str] | None:
 
 
 def app_track(bin_path: str) -> str | None:
-    """'node' / 'flex' / None — the image's own OTA track (core/firmware_image.py)."""
+    """'array' / 'flex' / None — the image's own track (core/firmware_image.py)."""
     import os
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))

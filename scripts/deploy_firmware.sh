@@ -4,9 +4,9 @@
 # updates itself — no USB cable, no basement trip.
 #
 # Flow:
-#   1. Build node_esp32.bin (pipecat URL baked in; NO WiFi credentials —
+#   1. Build <track>_esp32.bin (pipecat URL baked in; NO WiFi credentials —
 #      nodes read them from NVS, set via the dashboard WiFi flow)
-#   2. Bump firmware/node/version.json (semver: pass "major"/"minor"/"patch",
+#   2. Bump firmware/<track>/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
 #   3. Copy bin + version.json to the lenoxvi repo on the appliance host
 #   4. Restart the bot (serves /firmware/* via core/firmware_server.py) —
@@ -14,34 +14,32 @@
 #   5. Poke the node (future: an HTTP poke endpoint); today the node picks
 #      it up on its next boot/reconnect
 #
-# Usage:
-#   ./scripts/deploy_firmware.sh              # patch bump, array track
-#   ./scripts/deploy_firmware.sh minor        # 1.0.1 -> 1.1.0
-#   ./scripts/deploy_firmware.sh --version 1.2.0
-#   ./scripts/deploy_firmware.sh --track flex # flex track (any bump args
-#                                             # work the same; binary is
-#                                             # built with XVF_OTA_TRACK=flex
-#                                             # and ships to firmware/flex/)
-# Track law (design note/034a): the array node (XVF3800 mic-array board) is
-# track "node" — legacy URLs /firmware/version + /firmware/<bin>, manifest
-# in firmware/node/. The flex node (reSpeaker Flex) is track "flex" —
-# /firmware/flex/*, manifest in firmware/flex/. NEVER stage a flex build
-# into firmware/node/ or vice versa: the other node would cross-flash
-# itself and boot the wrong hardware config.
+# Usage (--track is REQUIRED — there is no default line):
+#   ./scripts/deploy_firmware.sh --track array                  # patch bump
+#   ./scripts/deploy_firmware.sh --track flex minor             # 1.0.1 -> 1.1.0
+#   ./scripts/deploy_firmware.sh --track array --version 1.2.0
+# Track law: one name per line, everywhere —
+#   array  XVF3800 mic-array board  branch array-xvf3800  tags array-vX.Y.Z
+#          build/array_esp32.bin -> firmware/array/ (/firmware/array/*; the
+#          legacy /firmware/version URL also serves this track)
+#   flex   reSpeaker Flex           branch flex-xvf3800   tags flex-vX.Y.Z
+#          build/flex_esp32.bin  -> firmware/flex/  (/firmware/flex/*)
+# NEVER stage one line's build on the other's track: that node would
+# cross-flash itself and boot the wrong hardware config.
 set -euo pipefail
 
 FW_REPO="${FW_REPO:-$HOME/projects/lenoxvi-firmware}"
 LVI_LOCAL="${LVI_LOCAL:-$HOME/projects/lenoxvi}"
 LVI_HOST="${LVI_HOST:-lenoxvi}"
 
-TRACK="node"
-if [ "${1:-}" = "--track" ]; then
-  TRACK="$2"; shift 2
+if [ "${1:-}" != "--track" ] || [ -z "${2:-}" ]; then
+  echo "FATAL: --track array|flex is required (no default line — a wrong guess cross-flashes a node)"
+  exit 1
 fi
+TRACK="$2"; shift 2
 case "$TRACK" in
-  node) LVI_REMOTE_DIR="projects/lenoxvi/firmware/node"; OTA_TRACK_ENV="" ;;
-  flex) LVI_REMOTE_DIR="projects/lenoxvi/firmware/flex"; OTA_TRACK_ENV="flex" ;;
-  *) echo "FATAL: unknown track '$TRACK' (node|flex)"; exit 1 ;;
+  array|flex) LVI_REMOTE_DIR="projects/lenoxvi/firmware/$TRACK" ;;
+  *) echo "FATAL: unknown track '$TRACK' (array|flex)"; exit 1 ;;
 esac
 
 # ── 0. Preflight: the checkout must BE this track's firmware line ──────────
@@ -49,11 +47,8 @@ esac
 # repo (array = array-xvf3800, flex = flex-xvf3800), so the wrong checkout publishes
 # the OTHER board's firmware to this track — the node accepts it as an
 # upgrade and cross-flashes itself (2026-10-15: the checkout sat on
-# flex-xvf3800 while the default track is node). Refuse instead of guessing.
-case "$TRACK" in
-  node) FW_BRANCH="array-xvf3800" ;;
-  flex) FW_BRANCH="flex-xvf3800" ;;
-esac
+# flex-xvf3800 while the default track was array). Refuse instead of guessing.
+FW_BRANCH="$TRACK-xvf3800"
 FW_CUR=$(git -C "$FW_REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached HEAD)")
 if [ "$FW_CUR" != "$FW_BRANCH" ]; then
   echo "FATAL: track '$TRACK' ships branch '$FW_BRANCH', but $FW_REPO is on '$FW_CUR'."
@@ -114,9 +109,12 @@ source "$HOME/esp-idf/export.sh" >/dev/null
 unset LOG_DATACHANNEL_MESSAGES
 WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
 PIPECAT_SMALLWEBRTC_URL="$PIPECAT_SMALLWEBRTC_URL" PIPECAT_ROOM="$PIPECAT_ROOM" \
-XVF_OTA_TRACK="$OTA_TRACK_ENV" idf.py build
+idf.py build
+# (The track is hard-coded per branch in the firmware CMakeLists — never
+# env-driven — so a stale CMake cache can't build one line's URL into the
+# other. The branch guard above is what picks the line.)
 
-BIN="$FW_REPO/build/node_esp32.bin"
+BIN="$FW_REPO/build/${TRACK}_esp32.bin"
 [ -f "$BIN" ] || { echo "FATAL: $BIN missing after build"; exit 1; }
 # Prove it, don't trust it: every compile unit must define the WiFi creds as
 # EMPTY. (A stale build/ or a CMake change could still bake them.) Reads only
@@ -185,7 +183,7 @@ fi
 cat > "$VFILE" <<EOF
 {
   "version": "$NEW",
-  "filename": "node_esp32.bin",
+  "filename": "${TRACK}_esp32.bin",
   "md5": "$BIN_MD5",
   "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -209,6 +207,9 @@ fi
 # ── 3. Ship to the appliance host ──────────────────────────────────────────────────
 echo "==> copying firmware + manifest to $LVI_HOST"
 scp -q "$BIN" "$VFILE" "$LVI_HOST:$LVI_REMOTE_DIR/"
+# The manifest names only ${TRACK}_esp32.bin — drop any other .bin left in the
+# track dir (e.g. a pre-rename node_esp32.bin) so it holds exactly what's served.
+ssh "$LVI_HOST" "find ~/$LVI_REMOTE_DIR -maxdepth 1 -name '*.bin' ! -name '${TRACK}_esp32.bin' -delete"
 
 # ── 4. Restart bot (drops the node's session; files read per request) ──────
 echo "==> restarting bot on $LVI_HOST"
@@ -225,6 +226,6 @@ cat <<EOF
     future work — nothing sends a data-channel message today).
     OTA is the only flash path (USB is retired). Watch (appliance host):
       journalctl --user -u lenoxvi-bot -f | grep firmware_server
-    Expected: "firmware_server: serving node_esp32.bin" then the node
+    Expected: "firmware_server: serving $TRACK/${TRACK}_esp32.bin" then the node
     reboots into $NEW.
 EOF

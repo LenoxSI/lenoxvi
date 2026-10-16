@@ -520,8 +520,8 @@ async def bot(runner_args: RunnerArguments):
 if __name__ == "__main__":
     from pipecat.runner.run import main
 
-    # Node OTA delivery: /firmware/version + /firmware/<bin> (see
-    # core/firmware_server.py; files live in firmware/node/ in-repo).
+    # Node OTA delivery: /firmware/<track>/version + /firmware/<track>/<bin>
+    # (array | flex; see core/firmware_server.py — files in firmware/<track>/).
     from pipecat.runner.run import app as _runner_app
     from firmware_server import register_firmware_routes
     register_firmware_routes(_runner_app)

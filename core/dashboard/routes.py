@@ -1480,19 +1480,20 @@ async def upload_firmware(
     possible (manual version entry removed 2026-09-29).
 
     Track-aware (036 H-B): the uploader declares which hardware line
-    the image is for (node=array, flex=reSpeaker Flex); the image and
-    manifest land in that track's directory ONLY. The old route staged
-    every upload into firmware/node/ — a Flex .bin there gets OTA'd by
-    an array node and kills it (cross-flash, AGENTS.md law). A wrong
-    track is an honest 400, not a silent dead node."""
-    if track not in ("node", "flex"):
+    the image is for (array | flex — the one track vocabulary, 2026-10-16);
+    the image and manifest land in that track's directory ONLY, under the
+    track's own file name (array_esp32.bin / flex_esp32.bin). A Flex .bin
+    on the array track gets OTA'd by an array node and kills it
+    (cross-flash, AGENTS.md law). A wrong track is an honest 400, not a
+    silent dead node."""
+    if track not in firmware_image.TRACKS:
         raise HTTPException(status_code=400,
-                            detail=f"unknown track '{track}' (node|array flex)")
+                            detail=f"unknown track '{track}' (array | flex)")
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
     dest_dir = Path(f"firmware/{track}")
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / "node_esp32.bin"  # fixed served name (manifest points here)
+    dest = dest_dir / f"{track}_esp32.bin"  # fixed served name (manifest points here)
     size = 0
     # Stage to a temp file FIRST: a rejected upload must never clobber
     # the currently-served good image (loaded-gun rule, design note).
@@ -1523,11 +1524,10 @@ async def upload_firmware(
             status_code=400,
             detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
         )
-    # Board identity (design note, 2026-10-15): both lines share the project
-    # name and — by design — version numbers, so nothing a human sees tells
-    # an array image from a Flex one. The image knows: its compiled-in OTA
-    # URL format names its own track. Refuse a mismatch BEFORE the swap —
-    # the served image and manifest stay untouched.
+    # Board identity (design note, 2026-10-15; project names 2026-10-16): the
+    # image proves its line — compiled-in OTA URL format, plus the project
+    # name on 1.2.9+ images (core/firmware_image.py). Refuse a mismatch
+    # BEFORE the swap — the served image and manifest stay untouched.
     img_track = firmware_image.image_track(tmp.read_bytes())
     if img_track is None:
         tmp.unlink(missing_ok=True)
@@ -1545,11 +1545,17 @@ async def upload_firmware(
                    f"cross-flash that node). Pick track '{img_track}'.",
         )
     tmp.replace(dest)  # validated: swap in atomically
-    manifest = {"version": version, "filename": "node_esp32.bin"}
+    manifest = {"version": version, "filename": dest.name}
     mpath = Path(f"firmware/{track}/version.json")
     mtmp = mpath.with_suffix(".json.tmp")
     mtmp.write_text(json.dumps(manifest, indent=2))
     mtmp.replace(mpath)
+    # The manifest now names only dest: any other .bin in the track dir
+    # (e.g. a pre-rename node_esp32.bin) is unreachable — remove it so the
+    # directory holds exactly what's served.
+    for stale in dest_dir.glob("*.bin"):
+        if stale.name != dest.name:
+            stale.unlink(missing_ok=True)
     logger.info(f"dashboard: firmware {version} served on track '{track}' "
                 f"({size} bytes) — nodes on this track pick it up on next check")
     return {"ok": True, "filename": dest.name, "size": size, "version": version,

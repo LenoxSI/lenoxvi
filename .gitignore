@@ -26,14 +26,14 @@ config.yaml
 config.backup.yaml
 
 # runtime artifacts — certs are regenerable per-host (make-cert.sh), clips
-# are serve-on-only garbage, firmware/node is scp-populated by deploy_firmware.sh
-# firmware/flex is the flex OTA track (deploy_firmware.sh --track flex) —
-# flex images bake fallback WiFi creds, NEVER committable (036 M-8)
+# are serve-on-only garbage, firmware/array + firmware/flex are the OTA tracks
+# (dashboard upload / deploy_firmware.sh --track array|flex) — built images,
+# never committed
 # firmware/xvf3800 is fetched at bring-up (fetch_xmos_fw.sh) — the upstream
 # image ships no license, so it must not be committed (M15)
 certs/
 clips/
-firmware/node/
+firmware/array/
 firmware/flex/
 firmware/xvf3800/
 *.bundle

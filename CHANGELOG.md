@@ -8,6 +8,26 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Changed
+- **One name per firmware line, everywhere: `array` and `flex`.** The array
+  line's OTA track was called `node`; it is now `array` in the server
+  directories (`firmware/array/`), the upload API (`track: "array"`), the
+  dashboard track picker and `deploy_firmware.sh`. Served images are named
+  for their line (`array_esp32.bin`, `flex_esp32.bin`); an upload or deploy
+  removes any other `.bin` left in the track directory.
+- `deploy_firmware.sh --track array|flex` is now **required** — there is no
+  default line.
+- Board identity reads the image's project name as well as its OTA URL:
+  firmware 1.2.9+ images are `array_esp32` / `flex_esp32` and must agree with
+  their own URL; older `node_esp32` images are still accepted, judged by URL.
+
+### Upgrading
+- On the bot host, move the array track directory before restarting:
+  `mv firmware/node firmware/array`. The old `/firmware/version` and
+  `/firmware/<file>` URLs keep serving the array track permanently, so array
+  nodes on firmware 1.2.8 or older keep updating.
+- Upload API callers: `track: "node"` is now a 400 — send `"array"`.
+
 ## [0.6.3] — 2026-10-15 — Session leak, firmware safety, Whisper at startup
 
 Hardening release — the server side of the firmware 1.2.8 hardening work.

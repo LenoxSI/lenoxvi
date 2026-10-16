@@ -836,10 +836,10 @@ function VolSlider({ name, initial, onCommit }) {
 function FirmwarePanel({ status, setMsg, reloadAll }) {
   const [fwFile, setFwFile] = useState(null)
   const [pushing, setPushing] = useState(false)
-  // 041 M2 (2026-10-13): NO default track. The image carries no board
-  // identity yet (fw design note M4), so the human's pick is the ONLY thing
-  // between a Flex .bin and an array node — a preselected 'node' made the
-  // dangerous choice the lazy one. Push stays disabled until chosen.
+  // 041 M2 (2026-10-13): NO default track — a preselected line made the
+  // dangerous choice the lazy one. The server also refuses an image whose
+  // own identity names the other line (design note). Push stays disabled
+  // until chosen.
   const [fwTrack, setFwTrack] = useState('')
   // After a push: which online nodes to nudge. NOTHING pre-checked — the
   // bot can't tell which line a node runs (fw_push sends version only),
@@ -854,9 +854,9 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
     // Filename hint: warn (never block) when the name says the other line.
     const fname = fwFile.name.toLowerCase()
     const hintsFlex = fname.includes('flex')
-    // (node_esp32.bin is BOTH lines' build name — never a hint.)
+    // (node_esp32.bin was BOTH lines' build name before 1.2.9 — never a hint.)
     const hintsArray = /array|respeaker-xvf/.test(fname) && !hintsFlex
-    const mismatch = (fwTrack === 'node' && hintsFlex) || (fwTrack === 'flex' && hintsArray)
+    const mismatch = (fwTrack === 'array' && hintsFlex) || (fwTrack === 'flex' && hintsArray)
     if (!window.confirm(
       `Push ${fwFile.name} to the ${trackLabel(fwTrack)} track?\n\n` +
       `Every ${trackLabel(fwTrack).toLowerCase()} node OTAs this image on its next check. ` +
@@ -911,7 +911,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
             onChange={e => setFwTrack(e.target.value)}
             title="Which hardware line this .bin is for — the image and manifest go to that track's directory only. Cross-flashing the other line kills its node.">
             <option value="" disabled>pick a line…</option>
-            <option value="node">array</option>
+            <option value="array">array</option>
             <option value="flex">flex</option>
           </select>
           <input type="file" accept=".bin" className="text-[13px]"

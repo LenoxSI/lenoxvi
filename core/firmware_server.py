@@ -1,22 +1,27 @@
-"""firmware_server — OTA delivery for the reSpeaker node, served by bot.py.
+"""firmware_server — OTA delivery for the mic nodes, served by bot.py.
 
-The node's OTA client (lenoxvi-firmware/src/ota.cpp) does a plain GET of
-{PIPECAT_SMALLWEBRTC_URL minus /api/offer}/firmware/version and expects:
+One directory per firmware line (track), named like everything else:
 
-    {"version": "1.2.3", "filename": "node_esp32.bin"}
+    firmware/array/version.json + array_esp32.bin   array line (XVF3800 mic-array)
+    firmware/flex/version.json  + flex_esp32.bin    flex line (reSpeaker Flex)
 
-then downloads /firmware/<filename> as the raw app image and flashes it
-(esp_ota_ops, A/B partitions, rollback-safe). Versions compare numerically.
+A node's OTA client (lenoxvi-firmware/src/ota.cpp) GETs its track's manifest,
+{PIPECAT_SMALLWEBRTC_URL minus /api/offer}/firmware/<track>/version:
 
-Files live in lenoxvi/firmware/node/ — gitignored on the host and
-populated by scp from deploy_firmware.sh, not tracked in the repo:
-    firmware/node/version.json    served at /firmware/version
-    firmware/node/node_esp32.bin served at /firmware/node_esp32.bin
+    {"version": "1.2.9", "filename": "array_esp32.bin"}
 
-Deploy flow: scripts/deploy_firmware.sh (VM) builds + copies + bumps
-version.json; the node picks it up within its idle poll window. (Future
-work: a "check-ota" data-channel message from the bot — nothing sends one
-today.)
+then downloads /firmware/<track>/<filename> as the raw app image and flashes
+it (esp_ota_ops, A/B partitions, rollback-safe). Versions compare
+numerically. A track without a manifest 404s = "no update" (safe no-op).
+
+LEGACY ALIAS (permanent): array images up to 1.2.8 have the track-less URL
+compiled in — /firmware/version and /firmware/<filename>. Those routes serve
+the ARRAY track, forever: any array node still on (or rolled back to) an old
+image must keep finding its updates.
+
+Files are gitignored, written only by the dashboard upload route or
+scripts/deploy_firmware.sh — both refuse an image whose own identity
+(core/firmware_image.py) doesn't match the track.
 """
 
 import json
@@ -27,26 +32,16 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 
-FIRMWARE_DIR = Path(__file__).resolve().parent.parent / "firmware" / "node"
-VERSION_FILE = FIRMWARE_DIR / "version.json"
-
-# Per-model OTA tracks (design note/034a, 2026-10-07): the flex node
-# (reSpeaker Flex, fw 1.0.x) requests /firmware/flex/version — the array
-# node's legacy /firmware/version stays byte-identical. A track without
-# a deployed manifest 404s, which the node's OTA client treats as "no
-# update" (safe no-op). Track dirs live beside the array's:
-#   firmware/node/version.json          (array — legacy URL, unchanged)
-#   firmware/flex/version.json          (flex track)
+FIRMWARE_ROOT = Path(__file__).resolve().parent.parent / "firmware"
 FIRMWARE_TRACKS = {
-    None: FIRMWARE_DIR,                    # legacy /firmware/version
-    "flex": FIRMWARE_DIR.parent / "flex",
+    "array": FIRMWARE_ROOT / "array",
+    "flex": FIRMWARE_ROOT / "flex",
 }
+LEGACY_TRACK = "array"   # what the track-less legacy URLs serve (see docstring)
 
 
 def _track_dir(track: str | None) -> Path:
-    if track is None:
-        return FIRMWARE_DIR
-    d = FIRMWARE_TRACKS.get(track)
+    d = FIRMWARE_TRACKS.get(track or LEGACY_TRACK)
     if d is None:
         raise HTTPException(status_code=404, detail=f"unknown firmware track '{track}'")
     return d
@@ -57,7 +52,8 @@ def _read_manifest(track: str | None = None) -> dict:
     version_file = _track_dir(track) / "version.json"
     if not version_file.is_file():
         raise HTTPException(status_code=404,
-                             detail=f"no version.json (track '{track or 'node'}') — run deploy_firmware.sh")
+                             detail=f"no version.json (track '{track or LEGACY_TRACK}') — "
+                                    f"upload firmware from the dashboard or run deploy_firmware.sh")
     try:
         manifest = json.loads(version_file.read_text())
     except json.JSONDecodeError as e:
@@ -74,23 +70,24 @@ def register_firmware_routes(app) -> None:
     it's read-only delivery of deployed firmware files (scp-populated by
     deploy_firmware.sh; gitignored, not in the repo)."""
 
-    @app.get("/firmware/version")
-    async def firmware_version():
-        manifest = _read_manifest()
+    def _manifest_response(track: str | None) -> JSONResponse:
+        manifest = _read_manifest(track)
         # Only version + filename pass through: the manifest's md5 (if any) is
-        # currently dropped, not served to the node.
+        # currently dropped, not served to the node. A manifest always names
+        # its file (both writers set it); the fallback is the pre-rename name.
         filename = manifest.get("filename", "node_esp32.bin")
         return JSONResponse({"version": manifest["version"], "filename": filename})
 
+    @app.get("/firmware/version")
+    async def firmware_version():
+        # LEGACY ALIAS: array images <=1.2.8 ask here — serves the array track.
+        return _manifest_response(None)
+
     @app.get("/firmware/{track}/version")
     async def firmware_track_version(track: str):
-        # Per-model manifest (flex track; design note). Registered AFTER the
-        # legacy route in source but FastAPI matches by path shape — the
-        # literal /firmware/version above is also matched by this pattern,
-        # so the specific route must be declared first (it is).
-        manifest = _read_manifest(track)
-        filename = manifest.get("filename", "node_esp32.bin")
-        return JSONResponse({"version": manifest["version"], "filename": filename})
+        # FastAPI matches in declaration order: the literal /firmware/version
+        # above is declared first, so it never falls into this pattern.
+        return _manifest_response(track)
 
     @app.get("/firmware/{track}/{filename}")
     async def firmware_track_bin(track: str, filename: str):
@@ -104,14 +101,15 @@ def register_firmware_routes(app) -> None:
 
     @app.get("/firmware/{filename}")
     async def firmware_bin(filename: str):
+        # LEGACY ALIAS: array images <=1.2.8 download from here — array track.
+        d = _track_dir(None)
         # Path traversal guard: only serve files that actually live in the dir
-        target = (FIRMWARE_DIR / filename).resolve()
-        if not str(target).startswith(str(FIRMWARE_DIR.resolve())) or not target.is_file():
+        target = (d / filename).resolve()
+        if not str(target).startswith(str(d.resolve())) or not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
-        logger.info(f"firmware_server: serving {filename} ({target.stat().st_size} bytes)")
+        logger.info(f"firmware_server: serving {LEGACY_TRACK}/{filename} via legacy URL "
+                    f"({target.stat().st_size} bytes)")
         return FileResponse(target, media_type="application/octet-stream")
 
-    logger.info(
-        f"firmware_server: /firmware/* routes live "
-        f"({FIRMWARE_DIR}{'' if VERSION_FILE.is_file() else ' — no version.json yet'})"
-    )
+    served = {t: (d / "version.json").is_file() for t, d in FIRMWARE_TRACKS.items()}
+    logger.info(f"firmware_server: /firmware/* routes live ({FIRMWARE_ROOT}; manifests: {served})")
