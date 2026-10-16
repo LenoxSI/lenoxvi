@@ -628,6 +628,7 @@ def main():
         _j_mut = _r_mut.json()
         ok = (_r_mut.status_code == 501
               and "physical mute button" in str(_j_mut.get("detail", ""))
+              and "1.2.11" in str(_j_mut.get("detail", ""))  # H4: what fixes it on array
               and "1.1.0+ required" not in str(_j_mut.get("detail", "")))
         check("mute: unknown-cmd 501s with the per-line truth (no firmware lie)",
               ok, f"status={_r_mut.status_code} body={_r_mut.text[:140]}")
@@ -669,6 +670,13 @@ def main():
         check("M7 mute: empty body / no body 422 (no default-True trap)",
               _r_e.status_code == 422 and _r_n.status_code == 422,
               f"empty={_r_e.status_code} none={_r_n.status_code}")
+        # H4: a successful set_mute updates the room record from the ACK
+        # (the node's truth), so /status agrees before the next push.
+        _r_h4 = client.post("/api/dashboard/nodes/suite-mute-probe/mute", json={"mute": True})
+        _rec_h4 = next((r for r in _reg_mut.known_rooms() if r["room"] == "suite-mute-probe"), {})
+        check("H4 set_mute ack updates the room record (muted=True)",
+              _r_h4.status_code == 200 and _rec_h4.get("muted") is True,
+              f"status={_r_h4.status_code} rec={_rec_h4}")
     finally:
         _routes_mut.node_command.request = _real_request
         _reg_mut.mark_disconnected("suite-mute-pc")
@@ -934,6 +942,54 @@ def main():
           and any(r["room"] == "fw-unknown-room" and r.get("fw") == "1.1.4"
                   for r in _reg.known_rooms()),
           f"held={_reg._fw_by_pc} rooms={_reg.known_rooms()}")
+
+    # H4 (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
+    # state — fw_push carries "muted" at connect, mute_push fires when an
+    # array node's PHYSICAL button is pressed. Same race handling as fw.
+    def _room_rec(name):
+        return next((r for r in _reg.known_rooms() if r["room"] == name), {})
+    _reg.note_offer("test-pc-h4", "h4-direct-room")
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.11", "muted": True}}), "test-pc-h4")
+    check("H4 fw_push carries muted -> room record muted=True (direct room)",
+          _room_rec("h4-direct-room").get("muted") is True, str(_room_rec("h4-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
+                    "ok": True, "data": {"muted": False}}), "test-pc-h4")
+    check("H4 mute_push (physical button) flips the room record to muted=False",
+          _room_rec("h4-direct-room").get("muted") is False, str(_room_rec("h4-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
+                    "ok": True, "data": {"muted": "yes"}}), "test-pc-h4")
+    check("H4 mute_push with a non-bool muted is ignored (no change)",
+          _room_rec("h4-direct-room").get("muted") is False, str(_room_rec("h4-direct-room")))
+    check("H4 a node that never reported (old firmware) shows muted=None",
+          "muted" in _room_rec("fw-direct-room") and _room_rec("fw-direct-room")["muted"] is None,
+          str(_room_rec("fw-direct-room")))
+    # provisional-window race: push before the tee correlates the room
+    _reg.mark_connected("test-pc-h4-race")
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
+                    "ok": True, "data": {"muted": True}}), "test-pc-h4-race")
+    _reg.note_offer("test-pc-h4-race", "h4-race-room")
+    check("H4 mute state survives the connect/tee race (held, promoted with room)",
+          _room_rec("h4-race-room").get("muted") is True, str(_room_rec("h4-race-room")))
+    # unbound pc_id (the fw=None race order): held, drained by note_offer
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.11", "muted": True}}), "test-pc-h4-unbound")
+    _held_h4 = _reg._muted_by_pc.get("test-pc-h4-unbound")
+    _reg.note_offer("test-pc-h4-unbound", "h4-unbound-room")
+    check("H4 unbound-pc mute hold drained by note_offer (with the fw hold)",
+          _held_h4 is True and "test-pc-h4-unbound" not in _reg._muted_by_pc
+          and _room_rec("h4-unbound-room").get("muted") is True
+          and _room_rec("h4-unbound-room").get("fw") == "1.2.11",
+          f"held={_held_h4} rec={_room_rec('h4-unbound-room')}")
+    _st_h4 = client.get("/api/dashboard/status").json()
+    check("H4 /status rooms[] carries muted",
+          any(r.get("room") == "h4-direct-room" and r.get("muted") is False
+              for r in _st_h4.get("rooms", [])), str(_st_h4.get("rooms"))[:200])
 
     # 9b5b. Track-aware firmware upload (036 H-B): the image + manifest
     # must land in the DECLARED track's directory, and an unknown track
