@@ -15,7 +15,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/deploy-guard.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 
 git clone -q --no-hardlinks "$FW_REAL" "$T/fw"
-git -C "$T/fw" checkout -q main
+git -C "$T/fw" checkout -q array-xvf3800
 git -C "$T/fw" checkout -q flex-xvf3800
 # libpeer is gitignored: give the clone a copy of the real (verified) tree.
 mkdir -p "$T/fw/deps" && cp -a "$FW_REAL/deps/libpeer" "$T/fw/deps/libpeer"
@@ -34,9 +34,9 @@ run() {  # run <expect PASS|REFUSE> <label> <track> [repo]
   fi
 }
 
-git -C "$T/fw" checkout -q main
-run PASS   "node track, checkout on main"                       node
-run REFUSE "flex track, checkout on main (cross-flash)"         flex
+git -C "$T/fw" checkout -q array-xvf3800
+run PASS   "node track, checkout on array-xvf3800"           node
+run REFUSE "flex track, checkout on array-xvf3800 (cross-flash)" flex
 
 git -C "$T/fw" checkout -q flex-xvf3800
 run PASS   "flex track, checkout on flex-xvf3800"               flex
@@ -61,7 +61,7 @@ run REFUSE "flex track, hand-edited deps/libpeer"               flex
 # tree): whatever branch it is on, exactly one track may pass.
 REAL_BRANCH=$(git -C "$FW_REAL" symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)
 case "$REAL_BRANCH" in
-  main)         run PASS "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
+  array-xvf3800) run PASS "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
                 run REFUSE "REAL checkout ($REAL_BRANCH): flex track" flex "$FW_REAL" ;;
   flex-xvf3800) run REFUSE "REAL checkout ($REAL_BRANCH): node track" node "$FW_REAL"
                 run PASS "REAL checkout ($REAL_BRANCH): flex track" flex "$FW_REAL" ;;

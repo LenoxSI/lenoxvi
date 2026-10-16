@@ -46,12 +46,12 @@ esac
 
 # ── 0. Preflight: the checkout must BE this track's firmware line ──────────
 # The script builds whatever $FW_REPO has checked out. Both lines live in one
-# repo (array = main, flex = flex-xvf3800), so the wrong checkout publishes
+# repo (array = array-xvf3800, flex = flex-xvf3800), so the wrong checkout publishes
 # the OTHER board's firmware to this track — the node accepts it as an
 # upgrade and cross-flashes itself (2026-10-15: the checkout sat on
 # flex-xvf3800 while the default track is node). Refuse instead of guessing.
 case "$TRACK" in
-  node) FW_BRANCH="main" ;;
+  node) FW_BRANCH="array-xvf3800" ;;
   flex) FW_BRANCH="flex-xvf3800" ;;
 esac
 FW_CUR=$(git -C "$FW_REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached HEAD)")
