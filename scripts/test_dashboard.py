@@ -120,6 +120,25 @@ def main():
     r = client.get("/dashboard")
     check("GET /dashboard -> 200 html", r.status_code == 200 and "dashboard" in r.text)
 
+    # 2026-10-16: page.html fallback DELETED (041 sweep) — dist/ missing
+    # must 404 naming the build step, never serve a stale page.
+    # (REPO_CORE anchors this the same way __init__.py resolves ui_index:
+    # parents[2] of core/dashboard/__init__.py == REPO_CORE.parent.)
+    _pg_idx = REPO_CORE.parent / "dashboard-ui" / "dist" / "index.html"
+    assert _pg_idx.exists(), f"suite dist index missing: {_pg_idx}"
+    _pg_moved = _pg_idx.with_name("index.html.suite-moved")
+    _pg_idx.rename(_pg_moved)
+    try:
+        r_pg404 = client.get("/dashboard")
+        check("page.html gone: no dist → 404 naming the build step",
+              r_pg404.status_code == 404 and "npm run build" in r_pg404.text,
+              f"status={r_pg404.status_code} body={r_pg404.text[:120]}")
+    finally:
+        _pg_moved.rename(_pg_idx)
+    r = client.get("/dashboard")
+    check("dashboard serves again once dist/ is back",
+          r.status_code == 200, f"status={r.status_code}")
+
     # 3. offer tee + registry: node offer (with room), browser (no room)
     offer = {"sdp": "v=0\r\n", "type": "offer", "room": "bedroom"}
     resp = client.post("/api/offer", json=offer)
@@ -670,7 +689,6 @@ def main():
         ("POST", "/api/dashboard/zones", {"name": "m7z", "backend": "wiim", "ip": "127.0.0.6", "bogus": 1}),
         ("POST", "/api/dashboard/nodes/suite-m7/session-mode", {"mode": "fresh", "mdoe": "sticky"}),
         ("PUT", "/api/dashboard/oww/select", {"model": "x.onnx", "bogus": 1}),
-        ("POST", "/api/dashboard/firmware/version", {"version": "1.0.0", "bogus": 1}),
         ("PUT", "/api/dashboard/tts/key/elevenlabs", {"api_key": "validkey_0123456789", "bogus": 1}),
         ("POST", "/api/dashboard/nodes/suite-m7/name", {"name": "ok-name", "bogus": 1}),
         ("POST", "/api/dashboard/nodes/suite-m7/wifi", {"ssid": "s", "password": "p", "bogus": 1}),
@@ -686,6 +704,15 @@ def main():
           not _m7_bad, f"not forbidden: {_m7_bad}")
     check("M7 forbidden writes left config.yaml byte-identical",
           _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest() == _sha_m7, "")
+
+    # 045 follow-up (2026-10-16): the legacy manifest-only POST route is
+    # REMOVED — the upload route is the only manifest writer (version and
+    # track come from the image itself, board-identity-guarded). A bare
+    # manifest write could point the array track at anything.
+    r_leg = client.request("POST", "/api/dashboard/firmware/version",
+                           json={"version": "1.0.0"})
+    check("legacy POST /firmware/version removed (404, never a bare manifest write)",
+          r_leg.status_code == 404, f"status={r_leg.status_code} body={r_leg.text[:100]}")
 
     # 2026-10-13 key-leak pin: a key PUT that fails validation must not
     # put the key in the response OR any log line (pipecat's handler
@@ -1320,6 +1347,22 @@ def main():
           bool(s.get("stt_model")), f"stt_model={s.get('stt_model')!r}")
     check("status exposes tts_provider",
           bool(s.get("tts_provider")), f"tts_provider={s.get('tts_provider')!r}")
+
+    # 2026-10-16 TTS health tap: tracked TTS services (bot.py TTSTracked)
+    # relay pipecat's set_usable() verdicts per room — status carries
+    # them so a hears-but-can't-speak node is visible without journald.
+    registry.note_tts("tts-suite-down", "elevenlabs", False)
+    registry.note_tts("tts-suite-up", "deepgram", True)
+    s_tts = client.get("/api/dashboard/status").json()
+    _rt = {x["room"]: x for x in s_tts["rooms"]}
+    check("status carries per-room TTS health (tts_usable + tts_provider)",
+          _rt.get("tts-suite-down", {}).get("tts_usable") is False
+          and _rt.get("tts-suite-down", {}).get("tts_provider") == "elevenlabs"
+          and _rt.get("tts-suite-up", {}).get("tts_usable") is True,
+          f"probe={[x for x in s_tts['rooms'] if x['room'].startswith('tts-suite')]}")
+    check("every rooms[] entry carries the tts fields (None = no service)",
+          all("tts_usable" in x and "tts_provider" in x for x in s_tts["rooms"]),
+          f"rooms={[x['room'] for x in s_tts['rooms']]}")
     # Dynamic, not static: set config wake.model and re-GET status —
     # the readout must move with the config (it reads through the
     # same chain the consumer uses).
