@@ -2109,6 +2109,101 @@ def main():
           "tts_is_usable" in _bot_src12 and "tts_usable_probe" in _bot_src12,
           "bot.py missing the dead-TTS wire")
 
+    # 9b13. TTS reconnect-on-next-utterance (2026-10-16 follow-on): pipecat
+    # writes a websocket TTS service off permanently once its 3 reconnect
+    # attempts exhaust — and an unusable service refuses every speak, so the
+    # run_tts reconnect can never fire again; the room stays mute until a
+    # node/bot restart. TTSTracked now retries the websocket AT the next
+    # speak: only a socket that actually opens clears the verdict (and the
+    # dashboard tts-down chip with it), and a cooldown keeps a lasting
+    # outage from taxing every utterance with a connect timeout.
+    import asyncio as _aio13
+    sys.path.insert(0, str(REPO_CORE.parent))
+    import bot as _bot13
+    _TTST13 = _bot13.TTSTracked
+
+    class _SpeakSink13:
+        """Minimal stand-in for the real service below the mixin: records
+        speaks, counts websocket connect attempts, fails them on demand."""
+        def __init__(self):
+            self._is_usable = True
+            self._websocket = None
+            self.fail_connect = False
+            self.connects = 0
+            self.spokes = []
+        @property
+        def is_usable(self):
+            return self._is_usable
+        async def set_usable(self, is_usable):
+            self._is_usable = is_usable
+        async def _disconnect(self):
+            self._websocket = None
+        async def _connect(self):
+            self.connects += 1
+            if self.fail_connect:
+                raise ConnectionError("suite: WAN still down")
+            self._websocket = object()
+        async def _push_tts_frames(self, src_frame, *a, **k):
+            self.spokes.append(src_frame)
+            return "spoke"
+
+    class _Tracked13(_TTST13, _SpeakSink13):
+        pass
+
+    _s13 = _Tracked13()
+    _s13.bind_tts_room("suite-9b13")
+    _aio13.run(_s13.set_usable(False))   # pipecat's permanent death verdict
+    _rc13 = _aio13.run(_s13._push_tts_frames("first speak"))
+    check("9b13 dead TTS retries the websocket on the next speak",
+          _s13.is_usable and _s13.connects == 1 and _rc13 == "spoke"
+          and _s13.spokes == ["first speak"],
+          f"usable={_s13.is_usable} connects={_s13.connects} rc={_rc13}")
+
+    _live13 = _Tracked13()
+    _rc13b = _aio13.run(_live13._push_tts_frames("live speak"))
+    check("9b13 a live TTS service never pays the revive",
+          _live13.connects == 0 and _rc13b == "spoke",
+          f"connects={_live13.connects} rc={_rc13b}")
+
+    _dead13 = _Tracked13()
+    _dead13.bind_tts_room("suite-9b13")
+    _aio13.run(_dead13.set_usable(False))
+    _dead13.fail_connect = True
+    _rc13c = _aio13.run(_dead13._push_tts_frames("during outage"))
+    check("9b13 failed revive stays dead and never breaks the speak",
+          (not _dead13.is_usable) and _dead13.connects == 1 and _rc13c == "spoke",
+          f"usable={_dead13.is_usable} connects={_dead13.connects} rc={_rc13c}")
+    _aio13.run(_dead13._push_tts_frames("still down"))
+    check("9b13 cooldown throttles retries while the outage lasts",
+          _dead13.connects == 1, f"connects={_dead13.connects}")
+    _dead13._revive_last_attempt = 0.0   # simulate the cooldown expiring
+    _aio13.run(_dead13._push_tts_frames("after cooldown"))
+    check("9b13 a later speak gets the next retry",
+          _dead13.connects == 2 and not _dead13.is_usable,
+          f"connects={_dead13.connects} usable={_dead13.is_usable}")
+
+    import dashboard.registry as _reg13
+    _notes13 = []
+    _orig_note13 = _reg13.note_tts
+    _reg13.note_tts = lambda room, provider, usable: _notes13.append((room, provider, usable))
+    try:
+        _chip13 = _Tracked13()
+        _chip13.bind_tts_room("suite-9b13")
+        _aio13.run(_chip13.set_usable(False))
+        _aio13.run(_chip13._push_tts_frames("revive me"))
+        check("9b13 a revived TTS clears the dashboard tts-down chip",
+              _notes13[-1] == ("suite-9b13", "elevenlabs", True) and _chip13.is_usable,
+              f"notes={_notes13}")
+    finally:
+        _reg13.note_tts = _orig_note13
+
+    check("9b13 the real ElevenLabs service rides the revive mixin",
+          issubclass(_bot13.TrackedElevenLabsTTSService, _TTST13)
+          and hasattr(_bot13.ElevenLabsTTSService, "_connect")
+          and hasattr(_bot13.ElevenLabsTTSService, "_disconnect")
+          and hasattr(_bot13.ElevenLabsTTSService, "_push_tts_frames"),
+          "Tracked* must sit on TTSTracked over a websocket TTS service")
+
     # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
