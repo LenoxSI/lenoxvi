@@ -8,6 +8,69 @@ CMakeLists, bumped together with the server manifest on every OTA deploy
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-10-15 — Session leak, firmware safety, Whisper at startup
+
+Hardening release, rig side of the firmware hardening work (notes notes
+042–045). The bot no longer grows by ~90 MB and 4 threads per WebRTC
+session; firmware publishing can no longer cross-flash a node, leak the
+WiFi password into an image or into serial logs; Whisper loads at boot
+instead of inside the first question. Every fix ships with suite pins that
+fail against the pre-fix code; suite 188 → 202 checks. Live-verified on the
+house rig (both nodes) after each deploy.
+
+### Upgrading from 0.6.2
+- **`deploy_firmware.sh` no longer takes WiFi credentials.** `WIFI_SSID` /
+  `WIFI_PASSWORD` are ignored (with a note) and the build verifies both are
+  empty before publishing — OTA images are served over plain HTTP to the
+  whole LAN. Nodes read WiFi from NVS (dashboard WiFi flow). **Before
+  deploying a cred-free image, every node on that track must already have
+  WiFi in NVS** — a node running any cred-free image and online has proven
+  it. A brand-new board needs one USB flash with credentials first (the
+  firmware has no provisioning AP).
+- **`deploy_firmware.sh` checks the firmware checkout first:** track `node`
+  builds only from `main`, track `flex` only from `flex-xvf3800`; detached
+  HEAD, uncommitted changes to tracked files or a hand-edited
+  `deps/libpeer` refuse. Switch branches with the `git checkout` it prints.
+- **Firmware uploads must match their board.** `POST /firmware/upload`
+  reads the image's own OTA track (its compiled update URL) and refuses an
+  image declared for the other track — or one it can't identify — with a
+  400 that names the right track.
+- **Bot startup takes ~2 s longer** and holds Whisper (~0.6 GB RAM, ~2.2 GB
+  VRAM) from boot instead of from the first voice turn.
+- Companion firmware (separate version stream): array `v1.2.8` / Flex
+  `flex-v1.2.8` — OTA rollback, data-channel handshake fix (20/20 first-try
+  connects), OTA download retry, 100 KB of internal RAM back. Recommended,
+  not required by this rig release.
+
+### Fixed
+- **Per-session memory/thread leak** (design note): every ended WebRTC
+  session's pipeline was a reference cycle that Python 3.14.4's incremental
+  GC never reclaimed (~110 sessions → 10.4 GB RSS / 406 threads). The bot
+  now reclaims each ended session deterministically (~120 ms, logged), and
+  the local STT closes the OpenAI client its cloud base class creates per
+  session. 20-restart soak: threads and RSS flat.
+- **First voice turn could grow the bot by ~2 GB:** Whisper loaded lazily
+  inside the first transcription, and a long-running fragmented heap kept
+  the ~1.2 GB load spike. It now loads + warms at startup (fresh heap,
+  `malloc_trim`), which also removes ~2.5 s from the first "Hey Willow" of
+  the day.
+- **`deploy_firmware.sh` builds logged every data-channel message to
+  serial — including `set_wifi` passwords** (it exported
+  `LOG_DATACHANNEL_MESSAGES` empty, which the firmware CMake treated as
+  on). The script now unsets it; the firmware side requires `=1`.
+- **Cross-flash guards:** a wrong firmware checkout (e.g. on
+  `flex-xvf3800` with the default `node` track) would have published the
+  other board's firmware; the upload route accepted a Flex image on the
+  array track. Both refuse now (see Upgrading). `scripts/test_deploy_guard.sh`
+  proves the checkout guard against a throwaway clone.
+- WiFi credentials are no longer baked into OTA images (see Upgrading).
+
+### Known issue
+- A talking room (TV) can keep the gate awake after one wake: room speech
+  extends the follow-up window and every reply re-arms it (one wake held it
+  287 s). Multi-turn conversation is deliberate and stays uncapped; the fix
+  belongs on the TV side (auto-mute/duck on wake) — next.
+
 ## [0.6.2] — 2026-10-13 — Dashboard hardening + the naming law
 
 The Opus 5.5 dashboard review (design note) closed end to end — every
