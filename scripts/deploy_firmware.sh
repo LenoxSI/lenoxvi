@@ -18,12 +18,13 @@
 #   ./scripts/deploy_firmware.sh --track array                  # patch bump
 #   ./scripts/deploy_firmware.sh --track flex minor             # 1.0.1 -> 1.1.0
 #   ./scripts/deploy_firmware.sh --track array --version 1.2.0
-# Track law: one name per line, everywhere —
-#   array  XVF3800 mic-array board  branch array-xvf3800  tags array-vX.Y.Z
-#          build/array_esp32.bin -> firmware/array/ (/firmware/array/*; the
-#          legacy /firmware/version URL also serves this track)
-#   flex   reSpeaker Flex           branch flex-xvf3800   tags flex-vX.Y.Z
-#          build/flex_esp32.bin  -> firmware/flex/  (/firmware/flex/*)
+# Track law: one name per line, everywhere. Both lines build from the
+# firmware repo's `main` branch (2026-10-16 branch fold), chosen by -DBOARD:
+#   array  XVF3800 mic-array board  -DBOARD=array  tags array-vX.Y.Z
+#          build/array/array_esp32.bin -> firmware/array/ (/firmware/array/*;
+#          the legacy /firmware/version URL also serves this track)
+#   flex   reSpeaker Flex           -DBOARD=flex   tags flex-vX.Y.Z
+#          build/flex/flex_esp32.bin   -> firmware/flex/  (/firmware/flex/*)
 # NEVER stage one line's build on the other's track: that node would
 # cross-flash itself and boot the wrong hardware config.
 set -euo pipefail
@@ -42,13 +43,14 @@ case "$TRACK" in
   *) echo "FATAL: unknown track '$TRACK' (array|flex)"; exit 1 ;;
 esac
 
-# ── 0. Preflight: the checkout must BE this track's firmware line ──────────
-# The script builds whatever $FW_REPO has checked out. Both lines live in one
-# repo (array = array-xvf3800, flex = flex-xvf3800), so the wrong checkout publishes
-# the OTHER board's firmware to this track — the node accepts it as an
-# upgrade and cross-flashes itself (2026-10-15: the checkout sat on
-# flex-xvf3800 while the default track was array). Refuse instead of guessing.
-FW_BRANCH="$TRACK-xvf3800"
+# ── 0. Preflight: the checkout must be the firmware repo's `main` ──────────
+# Since the 2026-10-16 branch fold one source tree builds both lines; the
+# line is the -DBOARD passed to the build below (= $TRACK), never whatever
+# happens to be checked out. A different branch (an old per-line branch, a
+# feature branch) is refused: it could carry the other line's code. Backstops
+# after the build: the image's own identity must match $TRACK (below), and a
+# 1.2.9+ node refuses an image named for the other line (fw M4).
+FW_BRANCH="main"
 FW_CUR=$(git -C "$FW_REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached HEAD)")
 if [ "$FW_CUR" != "$FW_BRANCH" ]; then
   echo "FATAL: track '$TRACK' ships branch '$FW_BRANCH', but $FW_REPO is on '$FW_CUR'."
@@ -109,17 +111,16 @@ source "$HOME/esp-idf/export.sh" >/dev/null
 unset LOG_DATACHANNEL_MESSAGES
 WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
 PIPECAT_SMALLWEBRTC_URL="$PIPECAT_SMALLWEBRTC_URL" PIPECAT_ROOM="$PIPECAT_ROOM" \
-idf.py build
-# (The track is hard-coded per branch in the firmware CMakeLists — never
-# env-driven — so a stale CMake cache can't build one line's URL into the
-# other. The branch guard above is what picks the line.)
+idf.py -B "$FW_REPO/build/$TRACK" -DBOARD="$TRACK" build
+# (One build dir per line: a cached BOARD can never leak from one line's
+# build into the other's.)
 
-BIN="$FW_REPO/build/${TRACK}_esp32.bin"
+BIN="$FW_REPO/build/$TRACK/${TRACK}_esp32.bin"
 [ -f "$BIN" ] || { echo "FATAL: $BIN missing after build"; exit 1; }
 # Prove it, don't trust it: every compile unit must define the WiFi creds as
 # EMPTY. (A stale build/ or a CMake change could still bake them.) Reads only
 # the build's own compile_commands.json; never prints a value.
-python3 - "$FW_REPO/build/compile_commands.json" <<'PYEOF' || { echo "FATAL: built image carries WiFi credentials — not publishing"; exit 1; }
+python3 - "$FW_REPO/build/$TRACK/compile_commands.json" <<'PYEOF' || { echo "FATAL: built image carries WiFi credentials — not publishing"; exit 1; }
 import json, re, sys
 cmds = [c.get("command", "") for c in json.load(open(sys.argv[1]))]
 bad = 0
