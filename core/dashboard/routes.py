@@ -1526,16 +1526,9 @@ async def upload_firmware(
             "track": track}
 
 
-class FirmwareVersionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
-    version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
-
-
-@router.post("/firmware/version", dependencies=GUARD)
-async def set_firmware_version(payload: FirmwareVersionPayload):
-    """Write version.json (manifest) so nodes pick the uploaded bin up."""
-    manifest = {"version": payload.version, "filename": "node_esp32.bin"}
-    p = Path("firmware/node/version.json")
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(__import__("json").dumps(manifest, indent=2))
-    return {"ok": True, "manifest": manifest}
+# 045 follow-up (2026-10-16): the legacy POST /firmware/version route is
+# REMOVED. It wrote the array manifest with any version string and no
+# binary — a hand-crafted manifest could point the track at a version
+# that was never validated (or never uploaded). The upload route above is
+# the only manifest writer now: version AND track come from the image
+# itself, guarded by the 045 board-identity check.

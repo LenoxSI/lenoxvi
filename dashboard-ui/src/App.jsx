@@ -609,6 +609,13 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                       ${r.online ? 'bg-[var(--accent-soft)] text-[var(--success)]' : 'text-[var(--muted)]'}`}>
                       {r.online ? 'online' : 'offline'}
                     </span>
+                    {r.online && r.tts_usable === false && (
+                      <span
+                        title={`TTS (${r.tts_provider || 'provider unknown'}) is down — this node hears you but can't speak. Reboot the node (or the bot) to rebuild its session.`}
+                        className="inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium bg-[var(--danger)] text-[var(--danger-foreground)]">
+                        tts down
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(r.fw) || '—'}</td>

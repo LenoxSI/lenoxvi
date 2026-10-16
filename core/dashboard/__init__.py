@@ -5,10 +5,11 @@ Served by the bot process itself (the pipecat runner's FastAPI app on
 extra process, no new ports, no build step.
 
 Design contract (design note, ratified 2026-09-29):
-- The HTML page (page.html) is a thin, unstyled skin over JSON
-  /api/... endpoints. A later restyle swaps the page only; endpoints
-  are the stable contract (they are also what a future host-side
-  integration would consume).
+- The page is the prebuilt React app in dashboard-ui/dist. The old
+  page.html thin JSON skin was deleted 2026-10-16 (dead since the
+  HeroUI port, actively wrong vs the API). Endpoints are the stable
+  contract (they are also what a future host-side integration would
+  consume).
 - No auth: LAN-only page by design. Users who expose it to the
   internet do so at their own risk.
 - Config edits write the SAME config.yaml a human would hand-edit,
@@ -64,19 +65,24 @@ def register_dashboard(app) -> None:
     # HeroUI rebuild (2026-10-07, design note): FastAPI serves the
     # prebuilt React app from dashboard-ui/dist — a fresh clone needs
     # zero node toolchain (dist/ is committed; the build stays dev-side,
-    # npm run build in dashboard-ui/). The legacy page.html stays as a
-    # fallback for a bare clone without dist.
+    # npm run build in dashboard-ui/).
+    # 2026-10-16: the legacy page.html fallback is DELETED (041 sweep) —
+    # dead since the dist/ commit and actively wrong vs the API (its
+    # intelligence key save omits `kind`; M7 extra=forbid 422s it). A
+    # clone without dist/ gets an honest 404 naming the build step,
+    # never a stale page that lies about the API.
     ui_index = Path(__file__).resolve().parents[2] / "dashboard-ui" / "dist" / "index.html"
-    legacy_page = (Path(__file__).parent / "page.html").read_text()
 
-    from fastapi.responses import FileResponse, HTMLResponse
+    from fastapi import HTTPException as _HTTPException
+    from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
     @app.get("/dashboard", include_in_schema=False)
     async def dashboard_page():
         if ui_index.is_file():
             return FileResponse(ui_index)
-        return HTMLResponse(legacy_page)
+        raise _HTTPException(status_code=404,
+                              detail="dashboard UI not built — run npm run build in dashboard-ui/")
 
     ui_assets = ui_index.parent / "assets"
     if ui_assets.is_dir():
@@ -87,7 +93,6 @@ def register_dashboard(app) -> None:
     # root from /dashboard (no trailing slash). Serve each one at both
     # root and /dashboard/ so the lockups load either way (bug 1 fix,
     # 2026-10-07: 404s on /lenoxvi-horizontal-on-dark.svg).
-    from fastapi import HTTPException as _HTTPException
     from fastapi import Response as _Resp
 
     @app.get("/{root_file}", include_in_schema=False)
@@ -101,4 +106,4 @@ def register_dashboard(app) -> None:
                 return _Resp(content=f.read_bytes(), media_type=media)
         raise _HTTPException(status_code=404, detail="not found")
 
-    logger.info("dashboard: serving /dashboard (HeroUI build if present, legacy fallback)")
+    logger.info("dashboard: serving /dashboard (HeroUI build; no dist → 404 with the build step)")

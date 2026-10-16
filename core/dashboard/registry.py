@@ -131,6 +131,20 @@ def note_firmware(pc_id: str, version: str) -> None:
     rec["fw"] = version
 
 
+def note_tts(room: str | None, provider: str, usable: bool) -> None:
+    """Tracked TTS services (bot.py TTSTracked) report pipecat's
+    usability verdict for THIS pipeline's room (2026-10-16 room-b
+    silent incident): a websocket death marks a service permanently
+    unusable — the node keeps hearing while replies silently vanish,
+    and nothing on the dashboard said so. Room None/PROVISIONAL is
+    ignored (browser sessions have no room TTS worth reporting)."""
+    if not room or room == PROVISIONAL:
+        return
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec["tts_provider"] = provider
+    rec["tts_usable"] = bool(usable)
+
+
 def note_offer(pc_id, room):
     """The offer tee recorded a completed offer/response exchange.
 
@@ -300,6 +314,12 @@ def known_rooms():
                 "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
                 "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
+                # TTS health (2026-10-16): None until this room's
+                # pipeline reports — False = the node hears but can't
+                # speak (dead TTS service; pipecat never revives it
+                # in-session).
+                "tts_provider": rec.get("tts_provider"),
+                "tts_usable": rec.get("tts_usable"),
             }
         )
     return sorted(out, key=lambda r: r["room"])

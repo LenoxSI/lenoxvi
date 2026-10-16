@@ -62,6 +62,58 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 
+class TTSTracked:
+    """Mixin: relay pipecat's set_usable() verdicts to the dashboard
+    registry for this pipeline's room (2026-10-16 room-b silent
+    incident). An ElevenLabs websocket death makes pipecat mark the
+    service PERMANENTLY unusable after 3 failed reconnects — the node
+    keeps hearing, replies silently vanish, and the only clue sat in
+    journald. Fail-open by design: observability must never take down
+    the voice pipeline."""
+
+    _tts_room: str | None = None
+    _tts_provider: str = "elevenlabs"
+
+    def bind_tts_room(self, room: str | None) -> None:
+        self._tts_room = room
+        try:
+            from dashboard import registry
+            registry.note_tts(room, self._tts_provider, True)
+        except Exception:
+            logger.opt(exception=True).warning("tts health: initial note failed")
+
+    async def set_usable(self, is_usable: bool):
+        await super().set_usable(is_usable)
+        try:
+            from dashboard import registry
+            registry.note_tts(self._tts_room, self._tts_provider, is_usable)
+        except Exception:
+            logger.opt(exception=True).warning("tts health: note failed")
+
+
+class TrackedElevenLabsTTSService(TTSTracked, ElevenLabsTTSService):
+    _tts_provider = "elevenlabs"
+
+
+if ElevenLabsDialogueTTSService is not None:
+    class TrackedElevenLabsDialogueTTSService(TTSTracked, ElevenLabsDialogueTTSService):
+        _tts_provider = "elevenlabs"
+else:
+    TrackedElevenLabsDialogueTTSService = None
+
+if DeepgramTTSService is not None:
+    class TrackedDeepgramTTSService(TTSTracked, DeepgramTTSService):
+        _tts_provider = "deepgram"
+else:
+    TrackedDeepgramTTSService = None
+
+if DeepgramFluxTTSService is not None:
+    class TrackedDeepgramFluxTTSService(TTSTracked, DeepgramFluxTTSService):
+        _tts_provider = "deepgram"
+else:
+    TrackedDeepgramFluxTTSService = None
+
+
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
     from config import cfg, cfg_env
 
@@ -98,7 +150,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             raise RuntimeError("tts.provider=deepgram but this pipecat has no "
                                "pipecat.services.deepgram.tts — upgrade pipecat "
                                "or set tts.provider: elevenlabs")
-        tts = DeepgramTTSService(
+        tts = TrackedDeepgramTTSService(
             api_key=os.environ["DEEPGRAM_API_KEY"],
             voice=cfg_env("tts", "deepgram_voice", "LVI_TTS_VOICE",
                           "aura-2-thalia-en"),
@@ -115,7 +167,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             raise RuntimeError("tts.provider=deepgram-flux but this pipecat "
                                "has no pipecat.services.deepgram.flux.tts — "
                                "upgrade pipecat or set tts.provider: elevenlabs")
-        tts = DeepgramFluxTTSService(
+        tts = TrackedDeepgramFluxTTSService(
             api_key=os.environ["DEEPGRAM_API_KEY"],
             settings=DeepgramFluxTTSService.Settings(
                 voice=cfg_env("tts", "deepgram_flux_voice", "LVI_TTS_FLUX_VOICE",
@@ -149,7 +201,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                     f"tts.model {el_model!r} rides the Text-to-Dialogue "
                     "lane, which needs pipecat's ElevenLabsDialogueTTSService "
                     "(pipecat >= 1.10)")
-            tts = ElevenLabsDialogueTTSService(
+            tts = TrackedElevenLabsDialogueTTSService(
                 api_key=os.environ["ELEVENLABS_API_KEY"],
                 settings=ElevenLabsDialogueTTSService.Settings(
                     model=el_model,
@@ -158,7 +210,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             )
             logger.info(f"tts backend: elevenlabs {el_model} (text-to-dialogue)")
         else:
-            tts = ElevenLabsTTSService(
+            tts = TrackedElevenLabsTTSService(
                 api_key=os.environ["ELEVENLABS_API_KEY"],
                 voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
                 model=el_model,
@@ -218,6 +270,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # `session_modes`, dashboard checkbox 2026-10-03).
     _room = _pipeline_room()
     _session_mode = (cfg("session_modes") or {}).get(_room, "fresh")
+
+    # TTS health tap (2026-10-16 incident): key this pipeline's TTS
+    # service to its room so pipecat's usability verdicts land on the
+    # dashboard — note_tts(True) here, then every set_usable().
+    if isinstance(tts, TTSTracked):
+        tts.bind_tts_room(_room)
 
     # Intelligence dispatch (design note): hermes AND openclaw both ride
     # HermesAgent — the kind branch lives inside _ask_hermes (envelope
