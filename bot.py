@@ -431,4 +431,19 @@ if __name__ == "__main__":
 
         uvicorn.run = _tls_run
 
+    # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
+    # step"): same model/device/precision run_bot uses. Non-fatal — a failure
+    # leaves the lazy load in LocalWhisperSTTService.ensure_model() in charge.
+    try:
+        from stt_local import preload_shared_model
+        from config import cfg_env as _cfg_env
+
+        preload_shared_model(
+            _cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
+            _cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
+            _cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
+        )
+    except Exception as e:
+        logger.warning(f"whisper preload failed ({e}) — will load lazily on the first voice turn")
+
     main()

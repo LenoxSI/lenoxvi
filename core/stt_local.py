@@ -16,6 +16,64 @@ from openai.types.audio import Transcription
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 
+def _rss_mb() -> int:
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return -1
+
+
+def _trim_heap(why: str) -> None:
+    """Hand freed heap back to the OS (glibc malloc_trim). Loading the model
+    streams ~1.6 GB through RAM on its way to the GPU; in a long-lived,
+    fragmented heap that transient peak was KEPT (2026-10-15: the first voice
+    turn of a 7.5 h-old process took the bot 768 MB -> 2.8 GB, of which only
+    ~612 MB was the model's real cost). Never raises."""
+    try:
+        import ctypes
+
+        before = _rss_mb()
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+        logger.info(f"stt_local: malloc_trim after {why}: RSS {before} -> {_rss_mb()} MB")
+    except Exception as e:  # non-glibc / no libc: harmless to skip
+        logger.debug(f"stt_local: malloc_trim unavailable: {e}")
+
+
+def preload_shared_model(model: str, device: str, compute_type: str) -> None:
+    """Load + warm the shared Whisper model at bot STARTUP (sync, before the
+    server runs), instead of lazily on the first voice turn.
+
+    Why (2026-10-15, TODO "RSS step"): the lazy load happened inside a heap
+    fragmented by hours of sessions, so its transient peak stuck as RSS. At
+    startup the heap is fresh, the warm-up pulls cuBLAS/CUDA in too, and
+    malloc_trim returns the peak. Bonus: the first "Hey Willow" of the day no
+    longer waits ~2.5 s for the model. Failure is non-fatal — the lazy path in
+    ensure_model() still works."""
+    if LocalWhisperSTTService._shared_model is not None:
+        return
+    import time
+
+    import numpy as np
+    from faster_whisper import WhisperModel
+
+    t0 = time.monotonic()
+    before = _rss_mb()
+    logger.info(f"stt_local: preloading faster-whisper {model} on {device} ({compute_type}) at startup")
+    m = WhisperModel(model, device=device, compute_type=compute_type)
+    # Warm-up: the first encode loads cuBLAS (+~0.5 GB) — do it now, not
+    # inside someone's first question. 1 s of silence, result discarded.
+    segs, _ = m.transcribe(np.zeros(16000, dtype=np.float32), language="en")
+    list(segs)
+    LocalWhisperSTTService._shared_model = m
+    logger.info(f"stt_local: whisper ready in {time.monotonic() - t0:.1f}s "
+                f"(RSS {before} -> {_rss_mb()} MB before trim)")
+    _trim_heap("startup preload")
+
+
 class LocalWhisperSTTService(BaseWhisperSTTService):
     """Segmented STT backed by a local faster-whisper model.
 
@@ -69,6 +127,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
                 compute_type=self._compute_type,
             )
             self._fw_model = LocalWhisperSTTService._shared_model
+            _trim_heap("lazy whisper load")
 
     async def cleanup(self):
         """Close the base class's unused OpenAI client explicitly.
