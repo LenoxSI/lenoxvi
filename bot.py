@@ -18,6 +18,7 @@ import asyncio
 import os
 import sys
 import threading
+import time
 
 from loguru import logger
 
@@ -69,10 +70,19 @@ class TTSTracked:
     service PERMANENTLY unusable after 3 failed reconnects — the node
     keeps hearing, replies silently vanish, and the only clue sat in
     journald. Fail-open by design: observability must never take down
-    the voice pipeline."""
+    the voice pipeline.
+
+    Reconnect-on-next-utterance (the incident follow-on): an unusable
+    websocket service refuses every speak, so its own run_tts reconnect
+    never fires and the room stays mute until a node/bot restart.
+    _push_tts_frames gives a dead service one bounded websocket retry AT
+    the next speak — only a socket that actually opens clears the
+    verdict, and the health note below carries the revival to the
+    dashboard chip."""
 
     _tts_room: str | None = None
     _tts_provider: str = "elevenlabs"
+    _revive_last_attempt: float = 0.0
 
     def bind_tts_room(self, room: str | None) -> None:
         self._tts_room = room
@@ -89,6 +99,51 @@ class TTSTracked:
             registry.note_tts(self._tts_room, self._tts_provider, is_usable)
         except Exception:
             logger.opt(exception=True).warning("tts health: note failed")
+
+    async def _try_revive(self) -> None:
+        """One bounded websocket retry for a service pipecat wrote off.
+
+        Called from _push_tts_frames when a speak arrives while the
+        service is unusable. The retry is the same _connect() run_tts
+        would have done, hoisted above the usability gate — with a
+        _disconnect() first, because the death spiral leaves finished
+        receive/keepalive tasks that a bare _connect() would trust as
+        alive. A cooldown (config tts.revive_cooldown_secs) keeps a live
+        outage from taxing every utterance with a connect timeout.
+        Never raises: a failed revive just leaves the service dead and
+        the speak falls through to pipecat's silent skip."""
+        try:
+            from config import cfg_env
+            cooldown = float(cfg_env("tts", "revive_cooldown_secs",
+                                      "LVI_TTS_REVIVE_COOLDOWN", 30) or 30)
+        except Exception:
+            cooldown = 30.0
+        now = time.monotonic()
+        if now - self._revive_last_attempt < cooldown:
+            return
+        self._revive_last_attempt = now
+        logger.warning(f"tts revive: {self._tts_provider} TTS is marked unusable — "
+                       "retrying the websocket for this speak")
+        try:
+            await self._disconnect()
+            await self._connect()
+            if self._websocket is not None:
+                await self.set_usable(True)
+                logger.info(f"tts revive: {self._tts_provider} websocket is back — "
+                            "service usable again")
+        except Exception:
+            logger.opt(exception=True).warning("tts revive: attempt failed "
+                                               "(staying unusable)")
+
+    async def _push_tts_frames(self, src_frame, *args, **kwargs):
+        # Every speak funnels through here (all four of TTSService's call
+        # sites). A dead service normally skips silently inside pipecat's
+        # usability gate; the revive gives it one bounded shot at the
+        # websocket first. Fail-open: _try_revive never raises, so a
+        # revive bug can never eat the speak path.
+        if not self.is_usable:
+            await self._try_revive()
+        return await super()._push_tts_frames(src_frame, *args, **kwargs)
 
 
 class TrackedElevenLabsTTSService(TTSTracked, ElevenLabsTTSService):
