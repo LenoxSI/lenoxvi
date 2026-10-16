@@ -27,6 +27,23 @@ from loguru import logger
 
 from . import registry
 
+
+class NodeCommandError(Exception):
+    """Base for node-command transport failures (routes map them to HTTP)."""
+
+
+class CommandInFlight(NodeCommandError):
+    """A duplicate command is already awaiting this node's reply — a
+    CONFLICT, not a timeout (041 L9: this used to raise a bare
+    TimeoutError, so a double-click read as a 'Gateway Timeout')."""
+
+
+class NoLiveSession(NodeCommandError):
+    """The registry knows the room but no live data channel exists —
+    the half-open session shape (the node thinks it's connected, the
+    bot can't reach it)."""
+
+
 # pc_id -> asyncio.Future, keyed (pc_id, cmd) — awaited by API routes.
 _pending = {}
 _pending_lock = asyncio.Lock()
@@ -84,12 +101,12 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     payload = {"cmd": cmd, **(args or {})}
     out, pc_id = registry.sender_for_room(room)
     if out is None:
-        raise TimeoutError(f"no live session for room '{room}'")
+        raise NoLiveSession(f"no live session for room '{room}'")
 
     key = (pc_id, cmd)
     async with _pending_lock:
         if key in _pending and not _pending[key].done():
-            raise TimeoutError(f"'{cmd}' already in flight for '{room}'")
+            raise CommandInFlight(f"'{cmd}' already in flight for '{room}'")
         fut = asyncio.get_event_loop().create_future()
         _pending[key] = fut
 

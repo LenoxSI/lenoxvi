@@ -95,7 +95,15 @@ function AppMsg({ msg }) {
 }
 
 /* ── restart lane ──────────────────────────────────────────── */
+// 041 L7: restartBot has three call sites (Overview's button + offerRestart
+// from the OWW and Voice save lanes) and the React `rebooting` state can
+// race the second caller — two concurrent restarts meant two transient
+// restart units and two 90s wait loops fighting over one message chip. A
+// module-level latch is the only airtight double-fire guard.
+let _botRestarting = false
 async function restartBot(setMsg, setRebooting) {
+  if (_botRestarting) return false
+  _botRestarting = true
   setRebooting(true)
   setMsg('Restarting…', 'pulse', 'Bot control')
   let postErr = null
@@ -126,6 +134,7 @@ async function restartBot(setMsg, setRebooting) {
       'uptime never reset within 90s; the old bot process is still running.', 'err', 'Bot control')
   }
   setRebooting(false)
+  _botRestarting = false
   return !!up
 }
 
@@ -269,10 +278,16 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
             // Chip shows the brand only — the agent id lives in the Intelligence
             // section (the owner 2026-10-08): strip " · <agent>" from the label.
             const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
+            // 041 L10: only a real brand wears brand colors — the loading
+            // placeholder ('—') used to render in Hermes white/blue.
             const s = brand === 'OpenClaw'
               ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
-              : { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
-            return <span className="inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium" style={s}>{brand}</span>
+              : brand === 'Hermes'
+              ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
+              : null
+            return <span
+              className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium${s ? '' : ' text-[var(--muted)]'}`}
+              style={s}>{brand}</span>
           })()}
         </Stat>
       </div>
@@ -1361,9 +1376,9 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
                 } catch (e) {
                   setMsg('Test failed: ' + e.message, 'err', 'Intelligence')
                 } finally {
-                  btn.disabled = false; btn.textContent = 'Test connection'
+                  btn.disabled = false; btn.textContent = 'Test saved config'
                 }
-              }}>Test connection</button>
+              }} title="Tests the SAVED config on disk (config.yaml) — Save first if you edited kind, URL, or agent above.">Test saved config</button>
             <button className={BTN_PRIMARY} onClick={async () => {
               const kind = document.getElementById('int-kind').value
               const url = document.getElementById('int-url').value.trim()

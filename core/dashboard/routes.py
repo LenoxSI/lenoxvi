@@ -616,13 +616,41 @@ def _room_online(room: str) -> None:
         raise HTTPException(status_code=409, detail=f"node '{room}' is not online")
 
 
+_HALF_OPEN_HINT = (
+    "node not reachable — the session may be half-open (the node thinks "
+    "it's connected, the bot can't reach it). The liveness watchdog "
+    "reboots the node and it self-heals within ~10 min; try again after "
+    "it reconnects."
+)
+
+
+async def _node_cmd(room: str, cmd: str, args: dict | None = None,
+                    timeout: float = 12.0):
+    """One node command with honest HTTP mapping (041 L9).
+
+    An in-flight duplicate is a CONFLICT: 409, never the old 504 that
+    the UI rendered as a naked 'Gateway Timeout'. A bare transport
+    timeout (empty detail — the 21:01 restart error shape) and a
+    half-open session both say WHAT happened and that it self-heals."""
+    try:
+        return await node_command.request(room, cmd, args, timeout)
+    except node_command.CommandInFlight as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except node_command.NoLiveSession as e:
+        # transport exceptions stay terse — the HTTP boundary owns the
+        # human wording, so every NoLiveSession says the half-open shape
+        # and that it self-heals, whatever the raiser said.
+        raise HTTPException(status_code=504, detail=f"{e} — the session may "
+              "be half-open; the liveness watchdog reboots the node and it "
+              "self-heals within ~10 min")
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e) or _HALF_OPEN_HINT)
+
+
 @router.post("/nodes/{room}/restart", dependencies=GUARD)
 async def restart_node(room: str):
     _room_online(room)
-    try:
-        reply = await node_command.request(room, "restart", timeout=8.0)
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "restart", timeout=8.0)
     # 041 M3: a node that answers ok:false did NOT restart — 502, never a
     # lying 200 (same contract as scan/name/mute/info).
     if not reply.get("ok"):
@@ -633,10 +661,7 @@ async def restart_node(room: str):
 @router.post("/nodes/{room}/scan", dependencies=GUARD)
 async def scan_node(room: str):
     _room_online(room)
-    try:
-        reply = await node_command.request(room, "scan", timeout=20.0)
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "scan", timeout=20.0)
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"scan failed: {reply.get('data')}")
     return reply  # {"ok": true, "data": {"ssid": rssi, ...}}
@@ -648,12 +673,9 @@ async def set_node_wifi(room: str, payload: WifiPayload):
     # Fire-and-report: the node disconnects to apply creds; the final
     # verify/rollback result lands over the NEW session (firmware
     # reports on reconnect). The dashboard shows "applying…".
-    try:
-        reply = await node_command.request(room, "set_wifi",
-                                           {"ssid": payload.ssid, "pass": payload.password},
-                                           timeout=8.0)
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "set_wifi",
+                            {"ssid": payload.ssid, "pass": payload.password},
+                            timeout=8.0)
     # 041 M3: the immediate ack is ok:false when the node REJECTED the creds
     # before trying them (fw cmd.cpp: "missing ssid/pass", "nvs error") —
     # the UI used to show "Wi-Fi applying…" on a 200 for a node that
@@ -667,10 +689,7 @@ async def set_node_wifi(room: str, payload: WifiPayload):
 @router.post("/nodes/{room}/name", dependencies=GUARD)
 async def set_node_name(room: str, payload: NamePayload):
     _room_online(room)
-    try:
-        reply = await node_command.request(room, "set_name", {"name": payload.name})
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "set_name", {"name": payload.name})
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"rename failed: {reply.get('data')}")
     return reply
@@ -699,10 +718,7 @@ async def set_node_mute(room: str, payload: MutePayload):
     ever fix it. The message now tells the truth for both lines without
     guessing which one is asking."""
     _room_online(room)
-    try:
-        reply = await node_command.request(room, "set_mute", {"mute": payload.mute})
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "set_mute", {"mute": payload.mute})
     if not reply.get("ok"):
         if "unknown cmd" in str(reply.get("data") or ""):
             raise HTTPException(
@@ -722,10 +738,7 @@ async def node_info(room: str):
     dies on page refresh; the node's truth doesn't — this is the
     source of truth for it. One round-trip per page load, not per poll."""
     _room_online(room)
-    try:
-        reply = await node_command.request(room, "get_info", timeout=8.0)
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
+    reply = await _node_cmd(room, "get_info", timeout=8.0)
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"info failed: {reply.get('data')}")
     return reply  # {"ok": true, "data": {"name", "mac", "fw", "muted"?}}
