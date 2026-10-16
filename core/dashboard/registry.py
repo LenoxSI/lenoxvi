@@ -36,6 +36,8 @@ _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire, M6)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
 _muted_by_pc = {}  # pc_id -> mic mute state (H4; held the same way as fw)
+_line_by_pc = {}  # pc_id -> board line "array"|"flex" (firmware 1.2.19+; held the same way)
+NODE_LINES = ("array", "flex")
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -132,6 +134,22 @@ def note_firmware(pc_id: str, version: str) -> None:
     rec["fw"] = version
 
 
+def note_line(pc_id: str, line: str) -> None:
+    """fw_push (firmware 1.2.19+) names the board line the image was built
+    for — the same compiled-in track the OTA board guard uses — so the
+    Nodes table can label each node's hardware. Only the two real lines
+    are accepted (anything else is dropped, not displayed). Same
+    provisional-window handling as note_firmware."""
+    if line not in NODE_LINES:
+        return
+    room = _room_by_pc.get(pc_id)
+    if not room or room == PROVISIONAL:
+        _line_by_pc[pc_id] = line
+        return
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec["line"] = line
+
+
 def note_muted(pc_id: str, muted: bool) -> None:
     """H4 (2026-10-16, firmware 1.2.11+): the node's mic-mute state, from
     fw_push (connect) or mute_push (an array node's PHYSICAL button was
@@ -158,11 +176,14 @@ def _drain_held(pc_id, label) -> None:
     binds pc_id -> label must call this (the fw=None bug, 2026-10-09)."""
     held_fw = _fw_by_pc.pop(pc_id, None)
     held_muted = _muted_by_pc.pop(pc_id, None)
-    if held_fw is None and held_muted is None:
+    held_line = _line_by_pc.pop(pc_id, None)
+    if held_fw is None and held_muted is None and held_line is None:
         return
     rec = _known_rooms.setdefault(label, {"online": False, "first_seen": time.time()})
     if held_fw:
         rec["fw"] = held_fw
+    if held_line:
+        rec["line"] = held_line
     if held_muted is not None:
         rec["muted"] = held_muted
 
@@ -340,6 +361,9 @@ def known_rooms():
                 "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
                 "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
+                # board line "array"|"flex" (fw_push, 1.2.19+); None =
+                # older firmware that doesn't say.
+                "line": rec.get("line"),
                 # TTS health (2026-10-16): None until this room's
                 # pipeline reports — False = the node hears but can't
                 # speak (dead TTS service; pipecat never revives it

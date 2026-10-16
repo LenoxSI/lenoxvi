@@ -740,7 +740,7 @@ async def node_info(room: str):
     reply = await _node_cmd(room, "get_info", timeout=8.0)
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"info failed: {reply.get('data')}")
-    return reply  # {"ok": true, "data": {"name", "mac", "fw", "muted"?}}
+    return reply  # {"ok": true, "data": {"name", "mac", "fw", "line"?, "muted"?}}
 
 
 # ── session mode (fresh | sticky per node — dashboard checkbox) ──────

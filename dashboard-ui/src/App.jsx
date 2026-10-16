@@ -658,7 +658,16 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     )}
                   </td>
                   <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(r.fw) || '—'}</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">
+                    {esc(r.fw) || '—'}
+                    {(r.line === 'array' || r.line === 'flex') && (
+                      <span
+                        title={r.line === 'array' ? 'reSpeaker XVF3800 mic array (LED ring, physical mute button)' : 'reSpeaker Flex (XVF3800, no LED ring or button)'}
+                        className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
+                        {r.line}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
                       <Switch
