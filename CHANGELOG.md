@@ -2,21 +2,21 @@
 
 All notable changes to lenoxvi are documented here.
 
-Rig-level versioning only — firmware carries its own `project(VERSION)` in its
-CMakeLists, bumped together with the server manifest on every OTA deploy
-(see notes notes/v2/016). The two version streams are independent.
+Server-level versioning only — firmware carries its own `project(VERSION)` in
+its CMakeLists, bumped together with the server manifest on every OTA deploy.
+The two version streams are independent.
 
 ## [Unreleased]
 
 ## [0.6.3] — 2026-10-15 — Session leak, firmware safety, Whisper at startup
 
-Hardening release, rig side of the firmware hardening work (notes notes
-042–045). The bot no longer grows by ~90 MB and 4 threads per WebRTC
-session; firmware publishing can no longer cross-flash a node, leak the
-WiFi password into an image or into serial logs; Whisper loads at boot
-instead of inside the first question. Every fix ships with suite pins that
-fail against the pre-fix code; suite 188 → 202 checks. Live-verified on the
-house rig (both nodes) after each deploy.
+Hardening release — the server side of the firmware 1.2.8 hardening work.
+The bot no longer grows by ~90 MB and 4 threads per WebRTC session;
+firmware publishing can no longer cross-flash a node, leak the WiFi
+password into an image or into serial logs; Whisper loads at boot instead
+of inside the first question. Every fix ships with suite checks that fail
+against the pre-fix code; suite 188 → 202 checks. Verified on both node
+types after each change.
 
 ### Upgrading from 0.6.2
 - **`deploy_firmware.sh` no longer takes WiFi credentials.** `WIFI_SSID` /
@@ -40,10 +40,10 @@ house rig (both nodes) after each deploy.
 - Companion firmware (separate version stream): array `v1.2.8` / Flex
   `flex-v1.2.8` — OTA rollback, data-channel handshake fix (20/20 first-try
   connects), OTA download retry, 100 KB of internal RAM back. Recommended,
-  not required by this rig release.
+  not required by this release.
 
 ### Fixed
-- **Per-session memory/thread leak** (design note): every ended WebRTC
+- **Per-session memory/thread leak**: every ended WebRTC
   session's pipeline was a reference cycle that Python 3.14.4's incremental
   GC never reclaimed (~110 sessions → 10.4 GB RSS / 406 threads). The bot
   now reclaims each ended session deterministically (~120 ms, logged), and
@@ -52,7 +52,7 @@ house rig (both nodes) after each deploy.
 - **First voice turn could grow the bot by ~2 GB:** Whisper loaded lazily
   inside the first transcription, and a long-running fragmented heap kept
   the ~1.2 GB load spike. It now loads + warms at startup (fresh heap,
-  `malloc_trim`), which also removes ~2.5 s from the first "Hey Willow" of
+  `malloc_trim`), which also removes ~2.5 s from the first wake word of
   the day.
 - **`deploy_firmware.sh` builds logged every data-channel message to
   serial — including `set_wifi` passwords** (it exported
@@ -66,18 +66,17 @@ house rig (both nodes) after each deploy.
 - WiFi credentials are no longer baked into OTA images (see Upgrading).
 
 ### Known issue
-- A talking room (TV) can keep the gate awake after one wake: room speech
-  extends the follow-up window and every reply re-arms it (one wake held it
-  287 s). Multi-turn conversation is deliberate and stays uncapped; the fix
-  belongs on the TV side (auto-mute/duck on wake) — next.
+- A talking room (e.g. a TV) can keep the gate awake after one wake: room
+  speech extends the follow-up window and every reply re-arms it.
+  Multi-turn conversation is deliberate and stays uncapped; the planned fix
+  is on the TV side (auto-mute/duck on wake).
 
 ## [0.6.2] — 2026-10-13 — Dashboard hardening + the naming law
 
-The Opus 5.5 dashboard review (design note) closed end to end — every
-HIGH and MED plus L3 — along with two bugs nobody had flagged, the
-"one lane, one variable" naming law, and the note-028 smalls. Every fix
-ships with suite pins that fail against the pre-fix code (red-probed);
-suite 162 → 188 checks. Live-verified on the house rig after each deploy.
+A full dashboard code review closed end to end — every high and medium
+finding — along with two previously unreported bugs, the "one provider,
+one variable" naming rule, and a batch of small fixes. Every fix ships with
+suite checks that fail against the pre-fix code; suite 162 → 188 checks.
 
 ### Upgrading from 0.6.1
 - **Config section `brain:` is now `intelligence:`** — rename it in
@@ -140,10 +139,9 @@ suite 162 → 188 checks. Live-verified on the house rig after each deploy.
 - **Form-upload 422s returned 500** and **key-route 422s logged the full
   API key to the journal** — pipecat's app-wide validation handler read
   the request body and logged rejected values. Dashboard routes now
-  answer their own 422s (no body read, rejected values stripped). Journal
-  audit back to 2026-10-03: no real key was ever logged.
+  answer their own 422s (no body read, rejected values stripped).
 - Wake barge-in interrupt never ran (async callback was never awaited).
-- Note-028 smalls: config anchored to the repo root (cwd-proof), clip
+- Small fixes: config anchored to the repo root (cwd-proof), clip
   server can't half-bind, TTS secrets checked at construction, zone
   delete is one atomic multi-section write.
 - `firmware/flex/` gitignored (flex images bake fallback Wi-Fi creds).
@@ -151,7 +149,7 @@ suite 162 → 188 checks. Live-verified on the house rig after each deploy.
 ## [0.6.1] — 2026-10-07 — Software mute + ElevenLabs voice shaping
 
 Node mute becomes a first-class control and the flash-v2.5 voice gets
-tunable character — both live-proven the night they shipped.
+tunable character.
 
 ### Added — software mic mute + per-model OTA
 - Dashboard **Mute button** (Nodes card, per row): zeroes the mic at
@@ -163,12 +161,12 @@ tunable character — both live-proven the night they shipped.
   ack, never optimistic, and re-derived from the node on every page
   load (new `GET /nodes/{room}/info`) — a refresh can't lie about a
   muted mic. Online-gated; firmware 1.1.0+.
-- **Per-model OTA tracks** (design note follow-up): `/firmware/{track}/
+- **Per-model OTA tracks**: `/firmware/{track}/
   version` + `/firmware/{track}/{bin}` routes; the flex node reads
   `/firmware/flex/version`, the array node's legacy URLs stay
   byte-identical, and a track without a deployed manifest 404s = no
-  update (safe). First flex OTA shipped fw 1.1.0 over the air to
-  room-a — no bench, no cable.
+  update (safe). Flex firmware 1.1.0 is the first over-the-air update on
+  the new track — no cable needed.
 - **ElevenLabs flash-v2.5 speed + stability**: config keys
   `tts.elevenlabs_speed` (0.7–1.2) and `tts.elevenlabs_stability`
   (0.0–1.0) with dashboard sliders (draft law — synced once, local
@@ -186,15 +184,15 @@ tunable character — both live-proven the night they shipped.
 
 ## [0.6.0] — 2026-10-07 — HeroUI dashboard + node two (Flex)
 
-The dashboard becomes a React app, and lenoxvi gets its second mic node.
-Both live-proven on the house rig the same day they shipped.
+The dashboard becomes a React app, and lenoxvi gets its second mic node
+type.
 
 ### Added — HeroUI dashboard (replaces legacy page.html)
 - React + Vite + Tailwind v4 + HeroUI v3 single-page dashboard
   (`dashboard-ui/`), built on the LenoxVI design kit; prebuilt `dist/`
   committed so a fresh clone needs zero node toolchain. Wireframe-C
   single page: Overview, Rooms, Nodes, Zones, Voice (TTS + tuning),
-  Wake word model, Intelligence, Firmware (design note).
+  Wake word model, Intelligence, Firmware.
 - Common message strip — every section's status/error/success renders
   in one header area with explicit owner labels (no more int-msg debug
   output in the strip).
@@ -210,8 +208,8 @@ Both live-proven on the house rig the same day they shipped.
   restart), per-row test + remove.
 - Statusbar duplicate-reconnect fix: last-good facts are kept during
   restart countdown; NET chatter no longer duplicates the line.
-- Dashboard suite pins the new contracts (9b series through 9b11;
-  mapping-wipe guards included).
+- Dashboard suite pins the new contracts (mapping-wipe guards
+  included).
 
 ### Fixed — dashboard correctness (audit + live finds)
 - Mapping wipe: the React save sent a BARE merged dict (no
@@ -227,8 +225,7 @@ Both live-proven on the house rig the same day they shipped.
   the truth.
 - Kind-aware brain key resolution: the hermes lane auths with
   `LVI_HERMES_KEY`, the openclaw lane with `LVI_BRAIN_KEY` — a kind
-  flip can no longer cross tokens (bug-7 landmine; suite 9b11 pins
-  both lanes). Same fix in the intelligence probe.
+  flip can no longer cross tokens (suite checks pin both lanes). Same fix in the intelligence probe.
 - Intelligence test button renders the body's `ok` field, never the
   HTTP status (the route answers 200 with `{ok: false}` on failure —
   caught live when the strip said "✓ ok" while the backend logged
@@ -240,11 +237,11 @@ Both live-proven on the house rig the same day they shipped.
   deepgram (the Pydantic pattern correctly 422'd it) — provider-
   aware body restored; Flux speed/expressivity UI restored.
 
-### Added — node two: reSpeaker Flex (room-a)
-- Second mic node live end-to-end: wake score 1.00, whisper
-  transcription, brain reply, zone playback — multi-turn with
-  conversation memory, from across the room (2026-10-07 21:48).
-- New firmware track `flex-xvf3800` (private repo `lenoxvi-firmware`,
+### Added — second node type: reSpeaker Flex
+- Second mic node type supported end to end: wake, Whisper
+  transcription, intelligence reply, zone playback — multi-turn with
+  conversation memory.
+- New firmware line `flex-xvf3800` (firmware repo `lenoxvi-firmware`,
   tagged `v1.0.0`): inthost XMOS image architecture — the XVF3800 is
   the I2S clock master (formatBCE inthost v1.0.7), ESP32 on the
   proven slave config. Stock Flex images + XIAO-as-master falsified
@@ -257,57 +254,58 @@ Both live-proven on the house rig the same day they shipped.
 
 ### Docs
 - README full rewrite: dashboard surface, WiiM backend, turn-taking,
-  Intelligence lanes (rides to this tag per "leave for next tag").
+  Intelligence lanes.
 
 ## [0.5.0] — 2026-10-05 — Intelligence + turn-taking hardening
 
-Three feature arcs in one day, live-proven on the house rig.
+Three feature arcs: a second intelligence provider, turn-taking, and
+hardening.
 
-### Added — Intelligence lane (design note)
+### Added — Intelligence lane
 - `brain.kind: openclaw` — voice turns answered by an OpenClaw Gateway
   agent (`model: openclaw/<agent>`, sticky rooms via
   `x-openclaw-session-key`, Hermes-only `conversation` field omitted).
   Requires `gateway.http.endpoints.chatCompletions.enabled: true` on the
   OpenClaw side (off by default, 2026.9.8).
 - Key resolution `LVI_BRAIN_KEY` → `LVI_HERMES_KEY` fallback; a missing key
-  no longer bricks construction (audit finding #4 class) — the turn fails
+  no longer bricks construction — the turn fails
   with a clear message and the dashboard reports it.
 - Dashboard "Intelligence" section (Settings): provider picker
   (Hermes / OpenClaw; Claude + custom OpenAI-compatible designed-for),
   per-kind fields, key set ✓, Test-connection button (health + one
-  minimal completion, latency), rig-facts line.
+  minimal completion, latency), system info line.
 - Reasoning-preamble meter: OpenClaw/GLM planning text can merge into
-  `content` (measured 2/8 spike calls) — logged with a counter, never
+  `content` (seen in testing) — logged with a counter, never
   silently stripped.
 
-### Added — Turn-taking (design note)
-- B3 epoch turns: wake-word speech runs as a background task with
+### Added — Turn-taking
+- Epoch turns: wake-word speech runs as a background task with
   generation epochs; a new wake **supersedes** — old reply discarded at
   every await, no history write, spoken ack "Hold on — switching."
 - Wake-word barge-in: 2 consecutive OWW frames over threshold interrupt
-  the sounding clip (`wake.barge_in`, default false; live: true) — both
+  the sounding clip (`wake.barge_in`, default false) — both
   backends `stop_current_clip()` + `_speech_epoch` bump.
-- Fix A load-anchored timers: speech/duck timers anchor at clip-load
+- Load-anchored timers: speech/duck timers anchor at clip-load
   with epoch guard + generation-time fallback — the ring LED no longer
   desyncs from the speaker on long brain calls.
 - Echo-gate relax: confirmed wake or barge-in relaxes the duration gate
   to a ~0.5s tail; text containment stays armed.
 
 ### Fixed
-- 84-minute deaf outage — `process_frame`'s final passthrough lost in B3
-  churn; suite gap closed with 9b9 (agent-eats-frames red line).
-- The 20:56 "stub-brain" incident — bot.py dispatch only knew
-  `== "hermes"`, so `kind: openclaw` fell to the echo dummy; regression
-  check added (construction dispatch AST).
+- Mic could go deaf: `process_frame`'s final passthrough was lost during
+  the turn-taking rework; regression check added.
+- `kind: openclaw` silently fell back to the echo stub — bot.py dispatch
+  only recognized `hermes`; regression check added (construction
+  dispatch AST).
 - Dashboard 422s render as `[object Object]` — Pydantic detail arrays now
   stringify with fields; first hit: empty `agent` on Intelligence save.
 - API URL hidden for Hermes — provider-agnostic plumbing now shows for
-  every kind (public-flip: a stranger's Hermes lives at their URL).
+  every kind (any deployment's Hermes lives at its own URL).
 
 ## [0.4.0] — 2026-10-04
 
 The config-editable dashboard release. The dashboard stops being
-read-only-plus-sliders and becomes the primary way to operate the rig:
+read-only-plus-sliders and becomes the primary way to operate lenoxvi:
 TTS provider/voice/model, Flux's speed + expressivity, and the six
 pipecat ear-tuning knobs all live in the GUI now, with a restart button
 and a save→apply flow that never forces a tab hop.
@@ -338,8 +336,8 @@ and a save→apply flow that never forces a tab hop.
 - **Post-save "restart now?" popup** — every Voice-tab save offers a
   one-click apply; cancel keeps apply-later
 - **Three-tab dashboard** — Zones (mapping/nodes/zones) / Voice (TTS
-  + tuning) / Settings (rig facts, bot control, firmware)
-- **Rig facts bar** atop Settings — Bot Version, TTS provider, STT
+  + tuning) / Settings (system info, bot control, firmware)
+- **System info bar** atop Settings — Bot Version, TTS provider, STT
   model, OWW model, all resolved through the same config > env >
   default chains the consumers use (moves with the host, never static)
 - **Live version in statusbar** — git describe at boot, updates every
@@ -367,11 +365,12 @@ that makes every voice conversation auditable in the Hermes dashboard.
   dedicated AI-out lane (Sonos stays the full-integration lane). Same
   FrameProcessor contract as SonosOutput (speaking LEDs, echo gate,
   wake-gate speech hints), no duck holder — the interrupt IS the duck.
-  Volume snapshot → set → play → restore around every clip. Arrival
-  verify first (design note correction): `playPromptUrl` is a STUB on
+  Volume snapshot → set → play → restore around every clip. Note:
+  `playPromptUrl` is a STUB on
   current firmware (Linkplay 4.8.827634) — acks OK, never fetches — so
   replies play via `setPlayerCmd:play` as main media. Music stops when
-  she speaks, nothing restores (client-owned sources are unresumable).
+  the assistant speaks, nothing restores (client-owned sources are
+  unresumable).
   `X-Hermes-Session-Key` rides every brain call: sticky rooms merge into
   ONE long-lived dashboard session per room, fresh pipelines get one
   session per connection — both visible and auditable in the Hermes
@@ -386,8 +385,8 @@ that makes every voice conversation auditable in the Hermes dashboard.
 ### Fixed
 - **WiiM hardware-fade compensation** — the Pro ramps volume in over the
   first ~1s of main-media playback and ramps out at the end; short
-  replies ramped down before finishing ("quiet, ramps up, ramps down" —
-  the owner's ear). No firmware knob exists, so reply clips carry 0.25s
+  replies ramped down before finishing. No firmware knob exists, so
+  reply clips carry 0.25s
   lead-in silence + 0.35s tail. Sonos lane untouched
 - **Voice sessions invisible in the Hermes dashboard** — see
   X-Hermes-Session-Key above
@@ -396,18 +395,16 @@ that makes every voice conversation auditable in the Hermes dashboard.
   missing `enabled: true` on dashboard-added wiim zones (silent disabled
   backend), and the shared clip server never started when no SonosOutput
   existed in the pipeline (LEDs cycled, zero audio). Deploy gate added:
-  host-venv import smoke before every restart touching core/
+  an import smoke test before every restart that touches core/
 
 ### Changed
 - **Dashboard zone UX** — native-name prefill from discovery (no more
   lowercase mangling), no parenthetical echo when key = native name,
-  backend column without decorative markers (the owner rulings, all
-  screenshot-caught)
+  backend column without decorative markers
 
 ## [0.3.4] — 2026-10-04
 
-The zone-tuning release. The matrix switch leaves the audio path and two
-config fossils follow it out: zone keys now match the players' native Sonos
+The zone-tuning release: zone keys now match the players' native Sonos
 names, and volume becomes a by-ear dashboard control instead of a
 config-file number.
 
@@ -429,30 +426,29 @@ config-file number.
 
 ### Fixed
 - **Test tone silent on zone keys containing spaces** — the tone's filename
-  embedded the raw zone key (`test-Sonos Port-….mp3`), and Sonos's audioClip
-  fetcher fails silently on unencoded spaces: the tone never sounded on
-  'Sonos Port' while 'living_room' worked, and replies dodged it by
-  generating space-free names. Slugify the filename at the route and
+  embedded the raw zone key, and Sonos's audioClip fetcher fails silently
+  on unencoded spaces: the tone never sounded on a zone like 'Living Room'
+  while space-free keys worked, and replies dodged it by generating
+  space-free names. Slugify the filename at the route and
   percent-encode the path in `url_for` — no future zone name can break a
   clip fetch
 
 ### Changed
-- **Zone keys = native Sonos player names** — 'Sonos Port' → 'Dining Room',
-  'living_room' → 'Living Room' across config (zones, default_zone,
-  room_zones, `brain.zone` label prefix, zone_volumes overrides). The
+- **Zone keys = native Sonos player names** across config (zones,
+  default_zone, room_zones, `brain.zone` label prefix, zone_volumes
+  overrides). The
   dashboard already displayed native names; now the keys match them, so a
   user reading Sonos's app and the dashboard sees one name per player.
   Keyed lookups all the way down (room_zones → zones → play), so a
   consistent rename is safe, and the slug fix means spaces in keys are fine
-- **`sonos.clip_volume` 70 → 35** — recalibrated for the matrix-free direct
-  path (was measured through the matrix switch, design note); the owner
-  ear-tuned it the same day
+- **`sonos.clip_volume` default 70 → 35** — recalibrated by ear for a
+  direct speaker path
 
 ## [0.3.3] — 2026-10-03
 
 The rename + voice-UX release: the project takes its public name. One silent-failure bug found by a live test,
 one lying verify found by a deliberate wrong-password rollback test, and two
-conversation features shipped and live-proven the same day.
+conversation features shipped and verified the same day.
 
 ### Added
 - **Per-node session modes (fresh | sticky)** — dashboard checkbox per node.
@@ -463,103 +459,95 @@ conversation features shipped and live-proven the same day.
   so Hermes server-side conversation continuity applies. Fresh is the
   privacy default — unmapped rooms start every session clean. New guarded
   `POST /nodes/{room}/session-mode`; status carries `session_modes`.
-  Ratified spec: **sticky = stash + server-side continuity** (user ruling
-  2026-10-03). Live-proven: a "what's the last thing I asked you" test
-  across a node restart AND a bot restart answered correctly from restored
-  history (`01619f5`)
+  Spec: **sticky = stash + server-side continuity**. Verified: a
+  "what's the last thing I asked you" test across a node restart AND a bot
+  restart answered correctly from restored history (`01619f5`)
 - **Tiered fillers** — one spoken line per latency tier so a slow brain turn
   no longer goes silent after the first ack: tier 1 acks at 3s (the classic
-  pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then she
-  waits quietly. Config `brain.fillers` is a tiered list; a flat string list
+  pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then the
+  assistant waits quietly. Config `brain.fillers` is a tiered list; a flat string list
   still parses as a single ack tier at `brain.filler_after_secs` (legacy
   configs unchanged). All lines <2s spoken; tier 2/3 lines meet the ≥3-word
-  echo-containment contract. Live-proven same day: all three tiers fired in
-  sequence on a 48s turn, rotation never repeated a line across the session
+  echo-containment contract. Verified: all three tiers fire in sequence on
+  a long turn, and rotation never repeats a line within a session
   (`31ef583`)
 - **Wake-window forensics** — an AWAKE window that closes without VAD now
   logs delivered-frame count, peak amplitude, echo-gate state, and
   whether VAD ever fired, so the next silent failure names its own cause
   (frames=0 = stalled track; low peak = below-threshold speech;
-  echo_blocked = a Sonos clip swallowed it). The 2026-10-03 09:00 silent
-  failure (wake 0.98, then 7s of nothing, undiagnosable from the journal)
-  motivated it (`6df33ee`)
+  echo_blocked = a Sonos clip swallowed it) (`6df33ee`)
 
 ### Fixed
-- **pc_id capture was a silent no-op** (H1 regression) — `SmallWebRTCTransport`
+- **pc_id capture was a silent no-op** (regression) — `SmallWebRTCTransport`
   is a facade holding `._client`, not `._webrtc_connection`; the runner args
-  carry the connection directly. Every wake since 10-01 had recorded
-  `room: null` in the status API (`6df33ee`)
+  carry the connection directly. Wakes had been recording `room: null` in
+  the status API (`6df33ee`)
 - **Wi-Fi `set_wifi` lying verify** (firmware 1.1.1) — NVS writes never
   reached the live WiFi driver (config only pushed at boot), so a wrong
   password re-associated on the OLD creds and acked "connected" in 1.2s —
   rollback unreachable. 1.1.1 pushes creds into the driver on `set_wifi`
   AND after rollback restore; a wrong password now produces 3 auth strikes
-  → auto-restore → rejoin (journal-proven: 44s dark, node healthy after).
-  Found by the deliberate wrong-password rollback test; incident recovery
-  via USB full-flash + NVS region erase (see design note)
+  → auto-restore → rejoin. Found by a deliberate wrong-password rollback
+  test
 - **Rename sweep coherence** — project renamed across 25 files: the env
-  prefix, the systemd unit example and the GitHub repo follow the new name; host dirs/venv/unit renamed
-  (lenoxvi-bot.service active); firmware factory default room name = "lenoxvi"
-  (fresh flashes boot as lenoxvi; deployed nodes keep their dashboard names —
-  user spec). Node renamed back to bedroom-mic after a mistaken rename
-  (recorded as the cautionary tale it is)
+  prefix, the systemd unit example and the GitHub repo follow the new name; firmware factory default room name = "lenoxvi"
+  (fresh flashes boot as lenoxvi; deployed nodes keep their dashboard
+  names)
 
 ### Known issues
 - Node command acks that fire while the node is off-network (rollback
   notifications) never reach the dashboard — the node reappearing online
   is the signal. Rider queued: queue the ack for delivery after rejoin
-- The 2026-10-03 17:45–17:52 disconnect loop (22s session deaths,
-  media-stream errors) occurred only on a bot process that booted while
-  the node was mid-restart; the fresh process at 18:01 held one clean
-  session with zero errors. Watch for recurrence; forensics now in place
+- A disconnect loop (22s session deaths, media-stream errors) was seen
+  once on a bot process that started while a node was mid-restart; a
+  fresh process held a clean session. Not reproduced; forensics in place
 
 ## [0.3.2] — 2026-10-01
 
-The Opus 5.5 review release. A full-repo read-only review (design note,
-7 high / 15 medium findings) drove four fix batches — 13 findings — ending
-the reviewer's core verdict that "the design still assumes one node."
-Behavior is unchanged on a single-node rig; the fixes are correctness,
+The code-review release. A full-repo review (7 high / 15 medium findings)
+drove four fix batches — 13 findings — ending the review's core verdict
+that "the design still assumes one node." Behavior is unchanged on a
+single-node setup; the fixes are correctness,
 resilience, and the multi-node foundation.
 
 ### Added
 - **Zone capability audit at startup**: every configured zone is checked
   against the all-S2 audioClip scope at boot — an unsupported player is
-  logged before it can eat a reply mid-conversation (design note, `fb2e585`)
+  logged before it can eat a reply mid-conversation (`fb2e585`)
 
 ### Fixed
 - **Brain failure after the filler no longer goes silent**: the post-filler
   brain await has its own try/except (a sibling except clause cannot catch
-  an exception raised in another handler's body) — the house hears
+  an exception raised in another handler's body) — the user hears
   "Sorry — I can't reach my brain right now" instead of dead air, and the
   outage reply never enters the server-side history as a fake memory
-  (`897de5d`, review H3)
+  (`897de5d`)
 - **Duck-holder hardening**: every Sonos call is timeout-bounded; a dead
   websocket is dropped and reconnected on the next poll tick instead of
   retrying forever on the corpse; the wake gate's LOCKED state has a
   safety cap (refined by real clip duration via `note_speech`) so a lost
   stop-frame can no longer deafen the mic; the 8s silence tail is padded
   only when the holder is enabled and the turn is live, and lands AFTER
-  the echo gate so the mic still reopens at her last syllable; duck
+  the echo gate so the mic still reopens at the last syllable; duck
   ownership starts when the clip LOADS, not at generation end; the holder
-  dies in `cleanup()`, not just on CancelFrame (`634af8f`, review
-  H7/M1/M2/M3/M13)
+  dies in `cleanup()`, not just on CancelFrame (`634af8f`)
 - **Event loop unblocked**: MP3 encodes (reply clips, duck clip, dashboard
   test tones) and soco calls (name lookups, UPnP discovery) run in
   threads; dashboard node commands (restart/scan/rename/Wi-Fi) ride the
   direct data-channel wire via the output transport — a 40s brain call
-  can no longer stall a command into a 504 (`7ae9ecb`, review M4–M7)
+  can no longer stall a command into a 504 (`7ae9ecb`)
 - **Multi-node architecture**: room identity is per-pipeline — replies,
   wake records, and ducks resolve through THIS connection's pc_id instead
   of the global last-connected room; one openWakeWord Model per pipeline
   (the class-shared model mixed concurrent sessions' rolling buffers and
   every reconnect reset the live session's buffers); two physical nodes
   sharing a room name now log a loud rename warning instead of silently
-  evicting each other into a reconnect loop (`a23187a`, review H1/H2/M8)
+  evicting each other into a reconnect loop (`a23187a`)
 
 ## [0.3.1] — 2026-09-30
 
-Node management + audio UX — the rig gets self-service and learns to
-duck. All fixes and adjustments to existing features (per the
+Node management + audio UX — nodes get self-service and replies learn
+to duck. All fixes and adjustments to existing features (per the
 versioning rule: settings ship on main; a tag marks the day's shipped
 state).
 
@@ -568,8 +556,8 @@ state).
   audioClip duck now spans the ENTIRE awake window, not just reply
   clips — an eternal loop holds a 30s silence clip on the wake room's
   zone while the gate is awake (refresh at 24s), so full-volume music/TV
-  can no longer feed STT as phantom user turns (the "Nantucket." lyric
-  transcription). Reply clips carry an 8s silence TAIL so the holder's
+  can no longer feed STT as phantom user turns (song lyrics transcribed
+  as speech). Reply clips carry an 8s silence TAIL so the holder's
   refresh lands silence-on-silence — the duck is gapless from wake to
   sleep, no full-volume blips between reply and listening. Gate close
   cancels the holder and the music unducks once. Echo gate + LED timing
@@ -578,7 +566,7 @@ state).
   the WebRTC data channel directly (output transport `send_message`),
   bypassing the pipeline — a blocked brain call stalls pipeline frames
   3-40s in both directions, which left the ring holding stale purple
-  through the whole "On it." → answer gap (measured 12:23). Speaking
+  through the whole "On it." → answer gap. Speaking
   state now fires from SonosOutput's real-time TTS frames downstream
   of the brain; end-of-speaking is duration-timed to actual playback
   (`d02075a`, `69d9c5f`)
@@ -592,9 +580,9 @@ state).
   the OTA chain (served name, manifest, deploy script, upload dest,
   firmware CMake project name) — generic naming for the public repo;
   version untouched, node unaffected (equal-version skip) (`c73832c`)
-- Zone keys are now the player's native Sonos name (ruling: a player's
+- Zone keys are now the player's native Sonos name (a player's
   native name IS its name) — dashboard displays live Sonos names
-  verbatim; `living_room` ghost name retired (`bbed6cd`, `c2062f3`)
+  verbatim (`bbed6cd`, `c2062f3`)
 
 ### Fixed
 - Command channel end-to-end: `on_app_message` transport handler
@@ -606,7 +594,7 @@ state).
 - Renames carry the `room_zones` mapping key — no ghost rows, no
   orphaned zone routing (`7465111`)
 - Sync pipeline: host `config.yaml` is now authoritative —
-  `sync_host.sh` PULLS it to the VM, never pushes (push-every-sync
+  `sync_host.sh` PULLS it to the dev machine, never pushes (push-every-sync
   clobbered dashboard-written `room_zones` twice) (`26208bf`)
 - Stale-session disconnects no longer mark a live room offline
   (`b7137d0`); payload schemas drop the redundant `room` field
@@ -614,7 +602,7 @@ state).
 
 ## [0.3.0] — 2026-09-29
 
-Web dashboard v1 — the rig gets a GUI. Mapping, node status, zone
+Web dashboard v1 — lenoxvi gets a GUI. Mapping, node status, zone
 management, and test clips, all served by the bot process itself.
 
 ### Added
@@ -638,7 +626,7 @@ management, and test clips, all served by the bot process itself.
 - `room_zones:` and `dashboard.enabled:` config sections; new deps
   soco 0.31.4 + ruamel.yaml 0.19.1 (optional at boot — voice runs
   without them, `f47f6a0`)
-- `scripts/test_dashboard.py`: 20-check offline rig (fakes /api/offer
+- `scripts/test_dashboard.py`: 20-check offline test harness (fakes /api/offer
   in both immediate and background-task shapes; exercises the tee,
   registry, config round-trips, validation, and a live Sonos test
   clip)
@@ -649,7 +637,7 @@ management, and test clips, all served by the bot process itself.
   docstring defers its positive case to a live test instead of a person
 - Removed the "never address the user as boss" rule comment — how the
   brain addresses its user is brain-side (Hermes) config, not repo policy
-- Comment accuracy + formatting sweep (opus-5-5 review, design note):
+- Comment accuracy + formatting sweep (from a code review):
   wake_word docstring now matches the 2026-09-19 OWW-always-fed behavior
   and the permanent echo gate; sonos_output says MP3 not WAV; _is_own_echo
   describes the >=60%/3-word overlap it actually does; deploy_firmware
@@ -659,11 +647,11 @@ management, and test clips, all served by the bot process itself.
 
 ## [0.2.2] — 2026-09-20
 
-Review Minors + efficiency pass (final findings from the 2026-09-20 review).
+Review minors + efficiency pass (final findings from a code review).
 
 ### Changed
 - PipelineTask → PipelineWorker (deprecated alias, removed in pipecat 2.0);
-  imports from `pipecat.pipeline.worker` — verified on host pipecat 1.11.0
+  imports from `pipecat.pipeline.worker` — verified against pipecat 1.11.0
 - Whisper + OWW models now cached per-process, shared across pipelines:
   every node reconnect used to reload large-v3-turbo onto the GPU (seconds
   of deaf STT + VRAM churn); OWW shared model resets its rolling buffers
@@ -677,7 +665,7 @@ Review Minors + efficiency pass (final findings from the 2026-09-20 review).
 
 ## [0.2.1] — 2026-09-20
 
-Cleanup/efficiency pass from the superpowers-driven review (all 14 findings).
+Cleanup/efficiency pass from a full code review (all 14 findings).
 
 ### Fixed
 - requirements.txt: fresh-clone booby traps — missing `lameenc`,
@@ -699,19 +687,18 @@ Cleanup/efficiency pass from the superpowers-driven review (all 14 findings).
 ### Removed
 - config.yaml untracked (was in the index despite .gitignore — baked LAN
   IPs/Sonos UID into history); template is config.example.yaml
-- 888KB never-flashable slave XMOS bin (notes preserves the bytes)
+- 888KB never-flashable slave XMOS bin
 - Overdue debug scaffolding: aiortc DEBUG, once-per-second wake diag
   (~86k journald lines/day), dead attribute, no-op assignments
 
 ## [0.2.0] — 2026-09-20
 
-First tagged snapshot: the house voice rig as it stands. Phase 1–4 pipeline
-live (wake gate → VAD → local whisper STT → Hermes brain → ElevenLabs TTS →
-Sonos audioClip overlay), running as a systemd service on the appliance host,
-serving the house daily.
+First tagged snapshot. Full pipeline live (wake gate → VAD → local
+whisper STT → Hermes brain → ElevenLabs TTS → Sonos audioClip overlay),
+running as a systemd service.
 
 ### Added
-- Phase 1 bot: local whisper ears, stub brain, ElevenLabs mouth (`8a8e8a8`)
+- Initial bot: local whisper ears, stub brain, ElevenLabs mouth (`8a8e8a8`)
 - sonos_output: Sonos audioClip overlay — clip volume ~70, ~200ms load,
   opportunistic clip pruning at startup (`20c2a72`)
 - config.yaml as the single tuning surface (yaml > `LVI_*` env > code default) (`96ce51b`)
