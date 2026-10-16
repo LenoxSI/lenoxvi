@@ -283,7 +283,14 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # matched == "hermes", so kind: openclaw fell to the echo stub and
     # the owner got canned answers while the suite stayed green (9b11 tested
     # the agent directly, never the construction site).
-    intelligence = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode)
+    # Dead-TTS containment wire (2026-10-16 07:49 incident): the tracked
+    # TTS service's is_usable rides into the agent so texts pushed to a
+    # DEAD service are never armed as echo texts — they made no sound,
+    # cannot echo back, and their words were eating real follow-ups.
+    tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
+                        if isinstance(tts, TTSTracked) else None)
+    intelligence = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode,
+                                tts_is_usable=tts_usable_probe)
              if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
              else StubIntelligence(echo_gate=gate))
 

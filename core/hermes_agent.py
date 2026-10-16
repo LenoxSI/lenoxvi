@@ -186,7 +186,8 @@ class HermesAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None,
-                 room: str = None, session_mode: str = "fresh", **kwargs):
+                 room: str = None, session_mode: str = "fresh",
+                 tts_is_usable=None, **kwargs):
         super().__init__(**kwargs)
         from config import cfg_env
 
@@ -264,6 +265,14 @@ class HermesAgent(FrameProcessor):
         # it arrives (duration gates lose the race when her Sonos reply talks
         # over the mic and whisper transcribes late; measured live 2026-09-15).
         self._echo_texts: list[str] = []
+        # Dead-TTS phantom arming (2026-10-16 07:49 incident): echo texts
+        # exist so a late transcript of her SPEECH can be dropped. A dead
+        # TTS service makes no sound — nothing handed to it can echo back —
+        # so bot.py wires the tracked service's is_usable here and those
+        # pushes register nothing. None = no signal = arm always (stub /
+        # suite default); a service that dies mid-clip after speaking
+        # partially still arms — defense-in-depth.
+        self._tts_is_usable = tts_is_usable
         # Session modes (fresh | sticky, per node — dashboard checkbox,
         # 2026-10-03): sticky rooms keep conversation memory across node
         # reconnects AND bot restarts via a disk stash; fresh rooms start
@@ -293,11 +302,18 @@ class HermesAgent(FrameProcessor):
                     f"{' (sticky)' if self._sticky and room else ''}")
 
     def _is_own_echo(self, text: str) -> bool:
-        """True if `text` contains a meaningful chunk of her own last words.
+        """True if `text` is essentially her own words coming back.
 
-        An echo is her words coming back out of the mic — so containment beats
-        timing. True when >= 60% of the words (minimum 3) appear in one of
-        her recent spoken texts, in any order.
+        An echo is her reply re-transcribed by the mic — so nearly ALL of
+        the transcript's words must be words she actually spoke. The old
+        0.6 bar was stopword-blind (2026-10-16 07:49 incident): the owner's
+        repeat "What's the weather today on Nantucket?" scored 71% against
+        her weather ANSWER — 5 of 7 words, only 'nantucket' content; s,
+        the, on, today all counted as echo evidence — and the question
+        died as an "echo" while TTS was down. 0.9 keeps verbatim and
+        clipped-tail echoes caught (they are ~100% subsets of her words)
+        and lets same-topic follow-ups through (their own question words
+        are the missing percentage).
         """
         norm = _normalize(text)
         if not norm or not self._echo_texts:
@@ -308,9 +324,20 @@ class HermesAgent(FrameProcessor):
         for spoken in self._echo_texts:
             spoken_words = set(_normalize(spoken).split())
             hits = sum(1 for w in words if w in spoken_words)
-            if words and hits / len(words) >= 0.6:
+            if words and hits / len(words) >= 0.9:
                 return True
         return False
+
+    def _register_echo(self, text: str) -> None:
+        """Arm `text` for echo containment — unless the TTS service is
+        known-dead: it makes no sound, so its texts can never echo back,
+        and their words kept eating real follow-ups (2026-10-16: three
+        phantom texts held after a websocket death and swallowed the
+        user's repeat question)."""
+        if self._tts_is_usable is not None and not self._tts_is_usable():
+            return
+        self._echo_texts.append(text)
+        self._echo_texts = self._echo_texts[-4:]
 
     def _ask_hermes(self, text: str) -> str:
         """One chat completion; returns the reply text.
@@ -483,8 +510,7 @@ class HermesAgent(FrameProcessor):
                             if ack and (now_ack - self._supersede_ack_ts) >= ACK_GAP:
                                 self._supersede_ack_ts = now_ack
                                 await self.push_frame(TTSSpeakFrame(text=ack))
-                                self._echo_texts.append(ack)
-                                self._echo_texts = self._echo_texts[-4:]
+                                self._register_echo(ack)
                             # else: silent supersede — the turn still
                             # switches; only the announcement is rate-
                             # limited (or the ack is disabled via config).
@@ -530,7 +556,7 @@ class HermesAgent(FrameProcessor):
                             return  # superseded mid-filler — die quietly
                         filler = _pick_filler(pool)
                         await self.push_frame(TTSSpeakFrame(text=filler))
-                        self._echo_texts.append(filler)
+                        self._register_echo(filler)
                         filler_spoken = True
                         logger.info(
                             f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
@@ -541,8 +567,7 @@ class HermesAgent(FrameProcessor):
             if epoch != self._turn_epoch:
                 return  # superseded while thinking — discard, no history
             reply = _strip_tags(reply)
-            self._echo_texts.append(reply)
-            self._echo_texts = self._echo_texts[-4:]
+            self._register_echo(reply)
             # A failed call never reached the intelligence — don't write the
             # exchange into server-side history (Opus rider).
             if not failed:
