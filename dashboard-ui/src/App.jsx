@@ -305,7 +305,7 @@ function Stat({ label, children }) {
 }
 
 /* ── node row actions ─────────────────────────────────────── */
-function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
+function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll }) {
   const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi' | 'mute'
   const [renameVal, setRenameVal] = useState('')
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
@@ -336,8 +336,22 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
   // guard only covers connection changes, not in-room races).
   const muteSeqRef = useRef(0)
   const [infoTick, setInfoTick] = useState(0)  // bumped only by the retry timer
+  // H4 (firmware 1.2.11+): the node REPORTS its mute state (fw_push at
+  // connect, mute_push when an array node's physical button is pressed);
+  // /status carries it as rooms[].muted. Follow it whenever it changes —
+  // that's how a button press reaches this button within one 5s poll.
+  // null = older firmware that never reports: the /info ask below covers it.
+  useEffect(() => {
+    if (typeof reportedMuted !== 'boolean' || muteBusy) return
+    muteSeqRef.current++  // a newer truth than any /info in flight
+    setMuted(reportedMuted)
+    setMuteUnknown(false)
+  }, [reportedMuted])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!online) { askedAtRef.current = null; return }
+    // H4: a node that REPORTS its mute state (1.2.11+) needs no ask — the
+    // reported value is the truth and a racing /info reply could stomp it.
+    if (typeof reportedMuted === 'boolean') return
     const stamp = String(lastSeen ?? 'online')
     if (askedAtRef.current === stamp) return
     if (askedAtRef.current !== `${stamp}#retry`) triesRef.current = 0  // new connection
@@ -362,7 +376,7 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
           setInfoTick(n => n + 1)
         }, 4000)
       })
-  }, [room, online, lastSeen, infoTick])
+  }, [room, online, lastSeen, infoTick, reportedMuted])
 
   // Raw POST — callers own the busy lifecycle (the wifi flow is
   // two-stage: busy must STAY 'wifi' after a successful scan; a
@@ -455,7 +469,7 @@ function NodeActions({ room, online, lastSeen, setMsg, reloadAll }) {
         <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy || muteBusy}
           onClick={toggleMute}
           title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
-            : muted ? 'Mic is muted — click to unmute.' : 'Software mute (flex nodes; array nodes use their physical mute button).'}>
+            : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
           {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
@@ -657,7 +671,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     </div>
                   </td>
                   <td className="px-4 py-2">
-                    <NodeActions room={r.room} online={r.online} lastSeen={r.last_seen} setMsg={setMsg} reloadAll={reloadAll} />
+                    <NodeActions room={r.room} online={r.online} lastSeen={r.last_seen} reportedMuted={r.muted} setMsg={setMsg} reloadAll={reloadAll} />
                   </td>
                 </tr>
               ))}

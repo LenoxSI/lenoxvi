@@ -148,6 +148,19 @@ def on_message(message, pc_id: str) -> None:
         if fw:
             registry.note_firmware(pc_id, str(fw))
             logger.info(f"node_command: <- {pc_id[:24]}… fw_push: running {fw}")
+        # H4 (firmware 1.2.11+): fw_push also carries the node's mute state.
+        if isinstance(info, dict) and isinstance(info.get("muted"), bool):
+            registry.note_muted(pc_id, info["muted"])
+        return
+
+    # mute_push (H4, firmware 1.2.11+): an array node's PHYSICAL Mute button
+    # was pressed — the node tells us unprompted so the dashboard follows.
+    # Fire-and-forget like fw_push: nothing requested it, nothing replies.
+    if data.get("evt") == "cmd_result" and data.get("cmd") == "mute_push":
+        info = data.get("data") if isinstance(data.get("data"), dict) else {}
+        if isinstance(info.get("muted"), bool):
+            registry.note_muted(pc_id, info["muted"])
+            logger.info(f"node_command: <- {pc_id[:24]}… mute_push: muted={info['muted']} (physical button)")
         return
 
     if data.get("evt") != "cmd_result":

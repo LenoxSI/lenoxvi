@@ -704,29 +704,28 @@ class MutePayload(BaseModel):
 
 @router.post("/nodes/{room}/mute", dependencies=GUARD)
 async def set_node_mute(room: str, payload: MutePayload):
-    """Software mic mute (flex 1.1.0+, 2026-10-07): zeroes the mic at the
-    node — same effect as the array board's physical Mute button. The
-    node echoes its resulting state in the ack.
+    """Mic mute. Flex since 1.1.0; BOTH lines since firmware 1.2.11 (H4,
+    2026-10-16): persisted on the node (survives reboot/OTA), and on an
+    array node it drives the same XMOS pin as the physical Mute button
+    (red LED). The node echoes its resulting state in the ack; the room
+    record follows it (and follows physical presses via mute_push).
 
-    Per-line truth (2026-10-09, the lying-error incident): set_mute is
-    implemented on the FLEX line only (flex cmd.cpp:210). The array
-    line (main) has no set_mute at ANY version — its node has a
-    PHYSICAL mute button instead. The old "(firmware 1.1.0+ required)"
-    suffix was written when flex 1.1.0 shipped and misread an array
-    node's honest 'unknown cmd' as an old-flex problem — a 1.1.3 array
-    node failed with 'upgrade your firmware' when no upgrade could
-    ever fix it. The message now tells the truth for both lines without
-    guessing which one is asking."""
+    Per-line truth (2026-10-09, the lying-error incident): an array node
+    older than 1.2.11 answers 'unknown cmd' — the message says what fixes
+    it for BOTH lines without guessing which one is asking."""
     _room_online(room)
     reply = await _node_cmd(room, "set_mute", {"mute": payload.mute})
     if not reply.get("ok"):
         if "unknown cmd" in str(reply.get("data") or ""):
             raise HTTPException(
                 status_code=501,
-                detail="this node's firmware has no software mute — array "
-                      "nodes use their physical mute button; flex nodes "
-                      "need firmware 1.1.0+")
+                detail="this node's firmware has no dashboard mute — array "
+                      "nodes need firmware 1.2.11+ (older ones: use the "
+                      "physical mute button); flex nodes need 1.1.0+")
         raise HTTPException(status_code=502, detail=f"mute failed: {reply.get('data')}")
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    if isinstance(data.get("muted"), bool):
+        registry.note_muted_room(room, data["muted"])
     return reply  # {"ok": true, "data": {"muted": bool}}
 
 

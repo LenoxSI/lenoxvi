@@ -35,6 +35,7 @@ _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire, M6)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
+_muted_by_pc = {}  # pc_id -> mic mute state (H4; held the same way as fw)
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -131,6 +132,41 @@ def note_firmware(pc_id: str, version: str) -> None:
     rec["fw"] = version
 
 
+def note_muted(pc_id: str, muted: bool) -> None:
+    """H4 (2026-10-16, firmware 1.2.11+): the node's mic-mute state, from
+    fw_push (connect) or mute_push (an array node's PHYSICAL button was
+    pressed). Same provisional-window handling as note_firmware: held by
+    pc_id until note_offer binds the room."""
+    room = _room_by_pc.get(pc_id)
+    if not room or room == PROVISIONAL:
+        _muted_by_pc[pc_id] = bool(muted)
+        return
+    note_muted_room(room, muted)
+
+
+def note_muted_room(room: str, muted: bool) -> None:
+    """Mute state by room (the set_mute route's ack lands here)."""
+    if not room or room == PROVISIONAL:
+        return
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec["muted"] = bool(muted)
+
+
+def _drain_held(pc_id, label) -> None:
+    """Release everything held for pc_id through the connect window (fw
+    version, mute state) onto the now-known room record. EVERY path that
+    binds pc_id -> label must call this (the fw=None bug, 2026-10-09)."""
+    held_fw = _fw_by_pc.pop(pc_id, None)
+    held_muted = _muted_by_pc.pop(pc_id, None)
+    if held_fw is None and held_muted is None:
+        return
+    rec = _known_rooms.setdefault(label, {"online": False, "first_seen": time.time()})
+    if held_fw:
+        rec["fw"] = held_fw
+    if held_muted is not None:
+        rec["muted"] = held_muted
+
+
 def note_tts(room: str | None, provider: str, usable: bool) -> None:
     """Tracked TTS services (bot.py TTSTracked) report pipecat's
     usability verdict for THIS pipeline's room (2026-10-16 room-b
@@ -169,13 +205,8 @@ def note_offer(pc_id, room):
             rec["online"] = True
             rec["last_seen"] = time.time()
         # fw_push raced the tee (connect window): carry the held version
-        # onto the now-known room record.
-        held_fw = _fw_by_pc.pop(pc_id, None)
-        if held_fw:
-            rec = _known_rooms.setdefault(
-                label, {"online": False, "first_seen": time.time()}
-            )
-            rec["fw"] = held_fw
+        # (and mute state) onto the now-known room record.
+        _drain_held(pc_id, label)
     else:
         _room_by_pc[pc_id] = label
         # The OTHER race order (fw=None bug, 2026-10-09): fw_push landed
@@ -185,12 +216,7 @@ def note_offer(pc_id, room):
         # fw=None until some LATER reconnect got luckier ordering. Drain
         # here too — every path that binds pc_id→label must release the
         # held version, not just the provisional promotion.
-        held_fw = _fw_by_pc.pop(pc_id, None)
-        if held_fw:
-            rec = _known_rooms.setdefault(
-                label, {"online": False, "first_seen": time.time()}
-            )
-            rec["fw"] = held_fw
+        _drain_held(pc_id, label)
     _evict_other_sessions(pc_id, label)
 
 
@@ -320,6 +346,10 @@ def known_rooms():
                 # in-session).
                 "tts_provider": rec.get("tts_provider"),
                 "tts_usable": rec.get("tts_usable"),
+                # H4 (firmware 1.2.11+): mic mute — None = this node never
+                # reported it (older firmware); the dashboard then asks
+                # get_info instead.
+                "muted": rec.get("muted"),
             }
         )
     return sorted(out, key=lambda r: r["room"])
