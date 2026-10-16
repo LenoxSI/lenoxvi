@@ -10,7 +10,7 @@
 # ── Wake gate ──────────────────────────────────────────────────────────
 wake:
   enabled: true
-  barge_in: false       # B3 wake-word interrupt (design note): true =
+  barge_in: false       # wake-word interrupt: true =
                         # "Hey <YourName>" mid-reply kills her clip and
                         # reopens the mic (2-frame confirm). false =
                         # today's behavior, bit-for-bit.
@@ -129,7 +129,7 @@ sonos:
   #       player_uid: RINCON_xxxxxxxxxxxx1400
 
 # ── WiiM output (interrupt-no-restore; 2026-10-04 arrival verify) ──────
-# playPromptUrl is a STUB on current firmware (design note correction): acks
+# playPromptUrl is a STUB on current firmware: acks
 # OK, never fetches. Replies play via setPlayerCmd:play as MAIN media —
 # music stops, nothing restores. Volume snapshots/restores around the
 # clip. No player_uid needed (HTTP API is UID-less, HTTPS-only).
