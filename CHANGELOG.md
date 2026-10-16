@@ -182,7 +182,7 @@ tunable character.
   could flip the node twice; dedicated `muteBusy` flag + ask-once
   ref guard on the mount-time info fetch.
 
-## [0.6.0] — 2026-10-07 — HeroUI dashboard + node two (Flex)
+## [0.6.0] — 2026-10-07 — HeroUI dashboard + second node type (Flex)
 
 The dashboard becomes a React app, and lenoxvi gets its second mic node
 type.
