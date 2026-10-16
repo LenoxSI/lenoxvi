@@ -2269,6 +2269,43 @@ def main():
     check("9b14 L9: node_command raises CommandInFlight for a pending duplicate",
           _res14 == "inflight", f"result={_res14}")
 
+    # 9b15. 041 L4 — wake-model select keys on name + SOURCE: with the
+    # same basename in root and models/, a name-only select always
+    # resolved to the models/ copy — clicking the ROOT row silently
+    # activated the other file. source=None keeps the legacy resolution.
+    _l4_name = "suite-l4c.onnx"
+    _l4_bytes = b"l4-placeholder-onnx-bytes"
+    _l4_models = Path("models"); _l4_models.mkdir(parents=True, exist_ok=True)
+    (_l4_models / _l4_name).write_bytes(_l4_bytes)
+    _l4_root = Path(_l4_name); _l4_root.write_bytes(_l4_bytes)
+    try:
+        r = client.put("/api/dashboard/oww/select",
+                       json={"model": _l4_name, "source": "root"})
+        check("9b15 L4: source=root activates the ROOT copy (collision)",
+              r.status_code == 200 and r.json().get("model") == _l4_name,
+              f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
+        r = client.put("/api/dashboard/oww/select",
+                       json={"model": _l4_name, "source": "models"})
+        check("9b15 L4: source=models activates the MODELS copy (collision)",
+              r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
+              f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
+        r = client.put("/api/dashboard/oww/select", json={"model": _l4_name})
+        check("9b15 L4: no source keeps the legacy models-first resolution",
+              r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
+              f"status={r.status_code} body={r.text[:80]}")
+        r = client.put("/api/dashboard/oww/select",
+                       json={"model": "suite-l4-missing.onnx", "source": "root"})
+        check("9b15 L4: unknown name+source combo 404s naming the source",
+              r.status_code == 404 and "root" in r.text,
+              f"status={r.status_code} body={r.text[:80]}")
+        r = client.put("/api/dashboard/oww/select",
+                       json={"model": _l4_name, "source": "bogus"})
+        check("9b15 L4: source is a Literal (bogus source 422s)",
+              r.status_code == 422, f"status={r.status_code}")
+    finally:
+        _l4_root.unlink(missing_ok=True)
+        (_l4_models / _l4_name).unlink(missing_ok=True)
+
     # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
