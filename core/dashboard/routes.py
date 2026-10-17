@@ -670,16 +670,19 @@ async def scan_node(room: str):
 @router.post("/nodes/{room}/wifi", dependencies=GUARD)
 async def set_node_wifi(room: str, payload: WifiPayload):
     _room_online(room)
-    # Fire-and-report: the node disconnects to apply creds; the final
-    # verify/rollback result lands over the NEW session (firmware
-    # reports on reconnect). The dashboard shows "applying…".
+    # Fire-and-report: the node stores the new creds as a TRIAL and reboots
+    # (firmware 1.2.23+). The trial passes only when the node reaches THIS
+    # bot on the new network; after 3 failed boots (~90 s each) it rolls
+    # back to the previous network by itself. Older firmware applied live
+    # and called "got an IP" success.
     reply = await _node_cmd(room, "set_wifi",
                             {"ssid": payload.ssid, "pass": payload.password},
                             timeout=8.0)
     # 041 M3: the immediate ack is ok:false when the node REJECTED the creds
     # before trying them (fw cmd.cpp: "missing ssid/pass", "nvs error") —
     # the UI used to show "Wi-Fi applying…" on a 200 for a node that
-    # applied nothing. Only ok:true ("stored, connecting") means applying.
+    # applied nothing. Only ok:true ("stored, rebooting to verify"; older
+    # firmware: "stored, connecting") means applying.
     # Never echo the password: the node's data is a status string.
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"wifi rejected by node: {reply.get('data')}")

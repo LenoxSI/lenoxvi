@@ -452,7 +452,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
     setMsg(`Applying Wi-Fi to ${room}…`, 'pulse', 'Nodes')
     try {
       await post('wifi', { ssid: wifiStage.ssid, password: wifiPass })
-      setMsg(`Wi-Fi applying — ${room} disconnects, reconnects with new creds; a bad password auto-rolls back.`, 'ok', 'Nodes')
+      setMsg(`Wi-Fi saved — ${room} reboots onto the new network. If it can't reach the bot there, it switches back to the old network on its own within about 5 minutes.`, 'ok', 'Nodes')
       setWifiStage(null); setWifiPass('')
       setBusy(null)
       await reloadAll()
