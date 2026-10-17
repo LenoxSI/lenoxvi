@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
 import intelligence_target
+import tts_pocket
 
 import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
@@ -827,13 +828,14 @@ TTS_CATALOG = {
     "elevenlabs": list(_ELEVENLABS_MODELS),
     "deepgram": list(_DEEPGRAM_VOICES),
     "deepgram-flux": list(_DEEPGRAM_FLUX_VOICES),
+    "pocket": list(tts_pocket.POCKET_VOICES),
 }
 
 
 class TTSPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
-                          pattern="^(elevenlabs|deepgram|deepgram-flux)$")
+                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
     # Model trim: flash for reliability/speed, v4
     # turbo for expressiveness — v2/v3/v4-regular have no use case in a
@@ -854,6 +856,12 @@ class TTSPayload(BaseModel):
     # dialogue lane deliberately has no knobs (ElevenLabs guidance).
     elevenlabs_speed: float | None = Field(default=None, ge=0.7, le=1.2)
     elevenlabs_stability: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Pocket (local): a preset voice name only from the dashboard; a .wav
+    # clone path is config-file-only (it needs gated weights + an HF login).
+    pocket_voice: str | None = Field(default=None)
+    # Local hot standby behind a cloud provider. "off" clears it; None =
+    # leave as-is (partial update).
+    fallback: str | None = Field(default=None, pattern="^(pocket|off)$")
 
 
 def _validate_tts_payload(p: TTSPayload) -> None:
@@ -870,6 +878,16 @@ def _validate_tts_payload(p: TTSPayload) -> None:
             raise HTTPException(status_code=422, detail="deepgram_flux_voice must be one of the Flux voices (flux-hannah-en …)")
         if p.deepgram_flux_speed is not None and abs(p.deepgram_flux_speed * 20 - round(p.deepgram_flux_speed * 20)) > 1e-9:
             raise HTTPException(status_code=422, detail="speed must be 0.5–1.5 in 0.05 steps")
+    elif p.provider == "pocket":
+        if not p.pocket_voice or p.pocket_voice not in tts_pocket.POCKET_VOICES:
+            raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
+        if not tts_pocket.pocket_available():
+            raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
+    if p.fallback == "pocket":
+        if p.provider == "pocket":
+            raise HTTPException(status_code=422, detail="the fallback can't be the primary (Pocket is already the provider)")
+        if not tts_pocket.pocket_available():
+            raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
 
 
 class TTSKeyPayload(BaseModel):
@@ -899,6 +917,9 @@ async def get_tts():
         "deepgram_flux_expressivity": tts_cfg.get("deepgram_flux_expressivity"),
         "elevenlabs_speed": tts_cfg.get("elevenlabs_speed"),
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
+        "pocket_voice": tts_cfg.get("pocket_voice") or tts_pocket.DEFAULT_VOICE,
+        "fallback": tts_cfg.get("fallback") or None,
+        "pocket_installed": tts_pocket.pocket_available(),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
@@ -930,6 +951,9 @@ async def put_tts(payload: TTSPayload):
             current["elevenlabs_stability"] = payload.elevenlabs_stability
     elif payload.provider == "deepgram":
         current["deepgram_voice"] = payload.deepgram_voice
+    elif payload.provider == "pocket":
+        current["pocket_voice"] = payload.pocket_voice
+        current.pop("fallback", None)   # Pocket as primary never carries a fallback
     else:
         current["deepgram_flux_voice"] = payload.deepgram_flux_voice
         # Flux knobs ride along — None means "leave as-is" (partial update
@@ -939,6 +963,10 @@ async def put_tts(payload: TTSPayload):
             current["deepgram_flux_speed"] = payload.deepgram_flux_speed
         if payload.deepgram_flux_expressivity is not None:
             current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
+    if payload.fallback == "pocket" and payload.provider != "pocket":
+        current["fallback"] = "pocket"
+    elif payload.fallback == "off":
+        current.pop("fallback", None)
     try:
         config_store.write_section("tts", current)
     except FileNotFoundError as e:

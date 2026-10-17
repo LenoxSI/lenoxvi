@@ -454,11 +454,15 @@ def main():
         # (no I/O: validate the payload directly), so the list can never
         # offer a value the PUT rejects.
         _cat = t.get("catalog") or {}
-        check("TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36)",
+        check("TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36, pocket 21)",
               len(_cat.get("elevenlabs", [])) == 2 and len(_cat.get("deepgram", [])) == 40
-              and len(_cat.get("deepgram-flux", [])) == 36,
+              and len(_cat.get("deepgram-flux", [])) == 36
+              and len(_cat.get("pocket", [])) == 21,
               str({k: len(v) for k, v in _cat.items()}))
         from dashboard import routes as _routes_m1
+        import tts_pocket as _tp_m1
+        _m1_avail = _tp_m1.pocket_available
+        _tp_m1.pocket_available = lambda: True  # validate the list, not this host's install
         _m1_bad = []
         for _prov, _vals in _cat.items():
             for _v in _vals:
@@ -467,13 +471,16 @@ def main():
                         _p = _routes_m1.TTSPayload(provider=_prov, model=_v, voice_id="AbC123xyZw9876543210")
                     elif _prov == "deepgram":
                         _p = _routes_m1.TTSPayload(provider=_prov, deepgram_voice=_v)
+                    elif _prov == "pocket":
+                        _p = _routes_m1.TTSPayload(provider=_prov, pocket_voice=_v)
                     else:
                         _p = _routes_m1.TTSPayload(provider=_prov, deepgram_flux_voice=_v)
                     _routes_m1._validate_tts_payload(_p)
                 except Exception as _e:
                     _m1_bad.append((_prov, _v, str(_e)[:40]))
+        _tp_m1.pocket_available = _m1_avail
         check("every catalog entry passes the server's own TTS validation",
-              not _m1_bad and sum(len(v) for v in _cat.values()) == 78, f"bad={_m1_bad[:3]}")
+              not _m1_bad and sum(len(v) for v in _cat.values()) == 99, f"bad={_m1_bad[:3]}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
@@ -567,6 +574,72 @@ def main():
         "model": "eleven_bogus_v9"})
     check("TTS PUT rejects unknown model (422)",
           r.status_code == 422, f"status={r.status_code}")
+    # 050 Pocket lane + fallback (routes). pocket_available is monkeypatched
+    # so the pins are deterministic whether or not torch is on this host.
+    import tts_pocket as _tp050
+    _orig_avail050 = _tp050.pocket_available
+    _tp050.pocket_available = lambda: True
+    try:
+        t = client.get("/api/dashboard/tts").json()
+        check("050 GET /tts catalog.pocket = 21 presets, alba first",
+              (t.get("catalog", {}).get("pocket") or [None])[0] == "alba"
+              and len(t["catalog"]["pocket"]) == 21, f"{t.get('catalog', {}).get('pocket')}")
+        check("050 GET /tts reports pocket_installed + pocket_voice + fallback",
+              t.get("pocket_installed") is True and t.get("pocket_voice") == "alba"
+              and "fallback" in t,
+              str({k: t.get(k) for k in ("pocket_installed", "pocket_voice", "fallback")}))
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "vera"})
+        check("050 PUT pocket provider ok", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+        t = client.get("/api/dashboard/tts").json()
+        check("050 round-trip: provider pocket + voice vera",
+              t.get("provider") == "pocket" and t.get("pocket_voice") == "vera", str(t)[:160])
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "nope"})
+        check("050 PUT rejects unknown pocket voice (422)", r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "/x/clone.wav"})
+        check("050 PUT rejects a wav path from the dashboard (config-file only)",
+              r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba",
+                                                   "fallback": "pocket"})
+        check("050 PUT rejects pocket primary + pocket fallback (422)", r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "pocket"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 PUT cloud primary + pocket fallback persists",
+              r.status_code == 200 and t.get("fallback") == "pocket", f"{r.status_code} {t.get('fallback')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 PUT without fallback leaves it as-is (partial update)",
+              r.status_code == 200 and t.get("fallback") == "pocket", f"{t.get('fallback')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 switching to pocket primary drops a saved fallback",
+              r.status_code == 200 and t.get("fallback") is None, f"{t.get('fallback')}")
+        client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                               "deepgram_voice": "aura-2-thalia-en", "fallback": "pocket"})
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "off"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 PUT fallback off clears it", r.status_code == 200 and t.get("fallback") is None,
+              f"{r.status_code} {t.get('fallback')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "flux"})
+        check("050 PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
+        _tp050.pocket_available = lambda: False
+        t = client.get("/api/dashboard/tts").json()
+        check("050 GET /tts reports pocket_installed false when missing",
+              t.get("pocket_installed") is False, f"{t.get('pocket_installed')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
+        check("050 PUT pocket primary refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "pocket"})
+        check("050 PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
+    finally:
+        _tp050.pocket_available = _orig_avail050
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
     client.put("/api/dashboard/tts", json={
