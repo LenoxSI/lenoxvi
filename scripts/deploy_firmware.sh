@@ -85,8 +85,7 @@ fi
 # baked password is readable by anyone who can fetch the .bin. Nodes read
 # WiFi from NVS (tknode: wifi_ssid/wifi_pass — dashboard WiFi flow); the
 # baked value is only a fallback when NVS is empty. Every node already
-# running a cred-free image and online has proven its NVS (both did on
-# 2026-10-15: room-b + room-a on 1.2.8). A BRAND-NEW board with
+# running a cred-free image and online has proven its NVS. A BRAND-NEW board with
 # empty NVS needs one USB bench flash with credentials first — that is a
 # bench build, never this script.
 if [ -n "${WIFI_SSID:-}${WIFI_PASSWORD:-}" ]; then

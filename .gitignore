@@ -17,7 +17,7 @@ node_modules/
 # agent-facing rule files — kept privately, never GitHub
 AGENTS.md
 CLAUDE.md
-# brand design kit — PRIVATE (master copy lives on the NAS).
+# brand design kit — PRIVATE (the master copy is kept outside the repo).
 # Never GitHub, never in history. The React build bakes what
 # the page renders into dashboard-ui/dist; this folder stays local-only.
 design/
