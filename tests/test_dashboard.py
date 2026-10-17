@@ -2798,6 +2798,25 @@ def main():
     check("RSS preload runs before main() (startup, not first voice turn)",
           _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
           "preload call missing or after main()")
+    # 050 Pocket lane + fallback wiring. _main_src is ast.unparse (code only,
+    # comments stripped, single-quoted literals), so a comment can't fake a
+    # pass. Behavior is pinned in tests/pocket_test.py.
+    check("050 bot.py: pocket lane branch exists",
+          "tts_provider == 'pocket'" in _main_src)
+    check("050 bot.py: pocket primary fails loud with the install hint",
+          _main_src.count("INSTALL_HINT") >= 2, f"count={_main_src.count('INSTALL_HINT')}")
+    check("050 bot.py: fallback wrap keyed on tts.fallback",
+          "wrap_with_fallback(" in _main_src and "cfg('tts', 'fallback')" in _main_src)
+    check("050 bot.py: pocket+pocket fallback ignored with a warning",
+          "fallback: pocket ignored" in _main_src)
+    _pk_pre = _main_src.find("tts_pocket.preload(")
+    check("050 bot.py: pocket preload at startup, before main(), non-fatal",
+          _pk_pre != -1 and _pk_pre < _main_src.rfind("main()")
+          and "pocket preload failed" in _main_src)
+    check("050 bot.py: recovery task cancelled at session end",
+          "cancel_recovery(" in _main_src)
+    check("050 bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
+          "tts_primary = tts" in _main_src)
     import stt_local as _sttR
     import ctypes as _ctR
     _orig_cdll = _ctR.CDLL

@@ -197,7 +197,21 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # key. ElevenLabs stays the default (a config without tts.provider —
     # the fresh-clone state — must land on a provider that speaks).
     tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
-    if tts_provider == "deepgram":
+    if tts_provider == "pocket":
+        # Pocket TTS (Kyutai, CPU-native, fully local: no key, no egress).
+        # One model per process, preloaded at startup by tts_pocket.
+        import tts_pocket
+        if not tts_pocket.pocket_available():
+            raise RuntimeError("tts.provider=pocket but pocket-tts is not installed — "
+                               f"run: {tts_pocket.INSTALL_HINT}")
+        tts = tts_pocket.make_service(
+            mixin=TTSTracked,
+            voice=cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba"))
+        if tts is None:
+            raise RuntimeError("tts.provider=pocket but the Pocket model failed to "
+                               f"load — run: {tts_pocket.INSTALL_HINT}")
+        logger.info("tts backend: pocket (local)")
+    elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
         # Verified against developers.deepgram.com/docs/tts-models. Key is
         # env-side forever (secrets never ride config.yaml).
@@ -282,6 +296,24 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 ),
             )
             logger.info(f"tts backend: elevenlabs {el_model}")
+    # Hot standby (tts.fallback: pocket): the primary gets wrapped in
+    # pipecat's failover switcher just before the pipeline is built. No
+    # fallback key = today's pipeline, unchanged.
+    tts_primary = tts
+    _fallback = str(cfg("tts", "fallback") or "").strip().lower()
+    if _fallback == "pocket" and tts_provider == "pocket":
+        logger.warning("tts.fallback: pocket ignored — Pocket is already the primary")
+        _fallback = ""
+    tts_pocket_standby = None
+    if _fallback == "pocket":
+        import tts_pocket
+        tts_pocket_standby = (tts_pocket.make_service(
+            mixin=TTSTracked,
+            voice=cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba"))
+            if tts_pocket.pocket_available() else None)
+        if tts_pocket_standby is None:
+            logger.warning("tts.fallback: pocket requested but Pocket can't load — "
+                           f"running WITHOUT a fallback ({tts_pocket.INSTALL_HINT})")
     gate = EchoGate()
     # Multi-node fix: EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global
@@ -328,8 +360,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # TTS health tap: key this pipeline's TTS
     # service to its room so pipecat's usability verdicts land on the
     # dashboard — note_tts(True) here, then every set_usable().
-    if isinstance(tts, TTSTracked):
-        tts.bind_tts_room(_room)
+    if isinstance(tts_primary, TTSTracked):
+        tts_primary.bind_tts_room(_room)
+    if tts_pocket_standby is not None:
+        # Quiet bind: no initial "usable" note (that would overwrite the
+        # primary's chip); it reports only if it dies while speaking.
+        tts_pocket_standby._tts_room = _room
 
     # Intelligence dispatch: hermes AND openclaw both ride
     # IntelligenceAgent — the kind branch lives inside _ask_intelligence (envelope
@@ -341,8 +377,10 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # TTS service's is_usable rides into the agent so texts pushed to a
     # DEAD service are never armed as echo texts — they made no sound,
     # cannot echo back, and their words were eating real follow-ups.
+    # Reads `tts` late: with a fallback armed that's the switcher, whose
+    # is_usable means "some service can still speak".
     tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
-                        if isinstance(tts, TTSTracked) else None)
+                        if isinstance(tts_primary, TTSTracked) else None)
     intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, session_mode=_session_mode,
                                 tts_is_usable=tts_usable_probe)
              if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
@@ -401,6 +439,25 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                           wake_gate=wake_filter, led=led)
     _outputs.extend([sonos_out, wiim_out])
 
+    # Arm the hot standby: ServiceSwitcher([primary, pocket], Failover).
+    # The recovery loop queues its switch-back frame through the task,
+    # which doesn't exist yet: late-bound via _task_ref.
+    _task_ref = {}
+    if tts_pocket_standby is not None:
+        from tts_fallback import wrap_with_fallback
+        try:
+            _cool = float(cfg_env("tts", "revive_cooldown_secs",
+                                  "LVI_TTS_REVIVE_COOLDOWN", 30) or 30)
+        except (TypeError, ValueError):
+            _cool = 30.0
+
+        async def _queue(frame):
+            await _task_ref["task"].queue_frame(frame)
+
+        tts = wrap_with_fallback(tts_primary, tts_pocket_standby, room=_room,
+                                 queue_frame=_queue, cooldown=_cool)
+        logger.info(f"tts fallback: pocket armed behind {tts_provider}")
+
     task = PipelineWorker(
         Pipeline(
             [
@@ -439,6 +496,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # keepalive + on_client_disconnected handle real disconnects.
         idle_timeout_secs=None,
     )
+    _task_ref["task"] = task
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -477,6 +535,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     try:
         await runner.run(task)
     finally:
+        if tts_pocket_standby is not None:
+            from tts_fallback import cancel_recovery
+            cancel_recovery(tts)
         _reclaim_session()
 
 
@@ -564,5 +625,25 @@ if __name__ == "__main__":
         )
     except Exception as e:
         logger.warning(f"whisper preload failed ({e}) — will load lazily on the first voice turn")
+
+    # Pocket TTS at STARTUP when it's the provider or the fallback: one
+    # model per process, so sessions never load weights mid-wake.
+    # Non-fatal: a failure means primary-only (fallback) or a loud
+    # construction error (pocket primary).
+    try:
+        from config import cfg as _cfg
+        from config import cfg_env as _cfg_env
+
+        _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
+        _fb = str(_cfg("tts", "fallback") or "").strip().lower()
+        if _tp == "pocket" or _fb == "pocket":
+            import tts_pocket
+            if tts_pocket.pocket_available():
+                tts_pocket.preload(tts_pocket.resolve_voice(
+                    _cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")))
+            else:
+                logger.warning(f"pocket tts not installed — {tts_pocket.INSTALL_HINT}")
+    except Exception as e:
+        logger.warning(f"pocket preload failed ({e}) — running without Pocket")
 
     main()
