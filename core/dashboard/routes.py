@@ -883,6 +883,10 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
             raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
         if not tts_pocket.pocket_available():
             raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
+    # A Pocket voice is validated wherever it rides (primary voice or the
+    # fallback's voice): only the presets are dashboard-settable.
+    if p.pocket_voice is not None and p.pocket_voice not in tts_pocket.POCKET_VOICES:
+        raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
     if p.fallback == "pocket":
         if p.provider == "pocket":
             raise HTTPException(status_code=422, detail="the fallback can't be the primary (Pocket is already the provider)")
@@ -967,6 +971,10 @@ async def put_tts(payload: TTSPayload):
             current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
     if payload.fallback == "pocket" and payload.provider != "pocket":
         current["fallback"] = "pocket"
+        # The fallback's voice (same tts.pocket_voice key Pocket-as-primary
+        # uses) rides with the fallback; ignored when the fallback is off.
+        if payload.pocket_voice:
+            current["pocket_voice"] = payload.pocket_voice
     elif payload.fallback == "off":
         current.pop("fallback", None)
     try:

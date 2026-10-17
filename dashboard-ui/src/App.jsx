@@ -1155,6 +1155,9 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [elStab, setElStab] = useState(null)
   // Local hot standby (Pocket) behind a cloud provider. Same draft law.
   const [fallback, setFallback] = useState('off')
+  // The fallback's voice (tts.pocket_voice — the same key Pocket-as-primary
+  // uses). Same draft law: synced once, committed on Save.
+  const [pocketVoice, setPocketVoice] = useState('alba')
 
   useEffect(() => {
     if (tts && !ttsSynced) {
@@ -1166,6 +1169,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
       setElStab(tts?.elevenlabs_stability != null ? parseFloat(tts.elevenlabs_stability) : null)
       setFallback(tts?.fallback === 'pocket' ? 'pocket' : 'off')
+      setPocketVoice(tts?.pocket_voice || 'alba')
       setTtsSynced(true)
     }
   }, [tts, ttsSynced])
@@ -1207,6 +1211,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
     // The fallback only rides with a cloud primary; the server drops it
     // when Pocket itself is the provider.
     if (provider !== 'pocket') body.fallback = fallback
+    if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
       setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'TTS')
@@ -1227,7 +1232,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               <option value="deepgram">Deepgram Aura</option>
               <option value="deepgram-flux">Deepgram Flux</option>
               <option value="pocket" disabled={!tts?.pocket_installed && provider !== 'pocket'}>
-                Pocket (local){tts?.pocket_installed ? '' : ' — not installed'}
+                Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
               </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
@@ -1279,11 +1284,21 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
                 // before Pocket went missing can always be turned off.
                 disabled={!tts?.pocket_installed && fallback !== 'pocket'}
                 title={tts?.pocket_installed
-                  ? 'Speak with local Pocket TTS while this provider is down.'
+                  ? 'Speak with Pocket TTS (local) while this provider is down.'
                   : 'Install Pocket TTS to enable a local fallback.'}>
                 <option value="off">Off</option>
-                <option value="pocket">Pocket (local)</option>
+                <option value="pocket">Pocket TTS</option>
               </select>
+              {fallback === 'pocket' && (
+                <select id="tts-fallback-voice" className={`${INPUT_CLS} w-[200px]`} value={pocketVoice}
+                  onChange={e => setPocketVoice(e.target.value)}
+                  disabled={!tts?.pocket_installed}
+                  aria-label="Fallback voice" title="The Pocket TTS voice used while the cloud provider is down.">
+                  {(catalog.pocket || []).includes(pocketVoice) ? null :
+                    <option value={pocketVoice} disabled>{pocketVoice} (not accepted)</option>}
+                  {(catalog.pocket || []).map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              )}
             </Field>
           )}
           {provider !== 'pocket' && (
