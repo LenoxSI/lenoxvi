@@ -872,6 +872,25 @@ def main():
                 _routes_live_kinds = True
     check("bot.py: intelligence dispatch routes hermes AND openclaw to the real agent",
           _routes_live_kinds, "construction ternary must accept both live kinds")
+    # Naming rule (2026-10-17): the intelligence step is named for what it
+    # is, not for one of its two kinds. The dispatch's live branch must
+    # build IntelligenceAgent, and the old module must be gone — a stale
+    # core/hermes_agent.py would shadow-import fine and hide a half rename.
+    _live_cls = set()
+    if _brain_exp is not None:
+        for _sub in _ast.walk(_brain_exp.body):
+            if isinstance(_sub, _ast.Call) and isinstance(_sub.func, _ast.Name):
+                _live_cls.add(_sub.func.id)
+    check("bot.py: the live intelligence branch constructs IntelligenceAgent",
+          "IntelligenceAgent" in _live_cls, f"constructs={sorted(_live_cls)}")
+    check("core/hermes_agent.py is gone (no stale module behind the rename)",
+          not (REPO_CORE / "hermes_agent.py").exists()
+          and (REPO_CORE / "intelligence_agent.py").exists(), "")
+    _ia_src = (REPO_CORE / "intelligence_agent.py").read_text() \
+        if (REPO_CORE / "intelligence_agent.py").exists() else ""
+    check("intelligence_agent logs under its own module name",
+          "intelligence_agent:" in _ia_src and "hermes_agent:" not in _ia_src
+          and "def _ask_intelligence(" in _ia_src, "")
     # The skip mechanism, both directions, against the throwaway config
     # (sonos zones: Dining Room/Living Room; wiim zone: Master Bedroom).
     from loguru import logger as _lg
