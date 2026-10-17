@@ -628,6 +628,26 @@ def main():
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "flux"})
         check("050 PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
+        # Fallback voice: pickable with a cloud primary (it rides with
+        # fallback: pocket), validated, and ignored when the fallback is off.
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "pocket", "pocket_voice": "vera"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 fallback voice saves with a cloud primary",
+              r.status_code == 200 and t.get("pocket_voice") == "vera"
+              and t.get("provider") == "deepgram" and t.get("fallback") == "pocket",
+              f"{r.status_code} {t.get('provider')}/{t.get('fallback')}/{t.get('pocket_voice')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "pocket", "pocket_voice": "nope"})
+        check("050 fallback voice must be a Pocket preset (422)", r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "off", "pocket_voice": "charles"})
+        t = client.get("/api/dashboard/tts").json()
+        check("050 fallback voice ignored when the fallback is off",
+              r.status_code == 200 and t.get("pocket_voice") == "vera", f"{t.get('pocket_voice')}")
         # R2: a saved fallback must never lock the panel when Pocket goes
         # missing later — re-sending the SAME fallback isn't a new request.
         client.put("/api/dashboard/tts", json={"provider": "deepgram",
