@@ -678,6 +678,13 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         tts down
                       </span>
                     )}
+                    {r.online && r.tts_usable !== false && String(r.tts_provider || '').endsWith('(fallback)') && (
+                      <span
+                        title="The cloud TTS is down — this room is speaking with local Pocket TTS until it comes back."
+                        className="inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium bg-[var(--warning)] text-[var(--warning-foreground)]">
+                        tts fallback
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
                   <td className="px-4 py-2 font-mono text-[13px]">
@@ -1120,7 +1127,8 @@ const ttsLabel = v =>
 // config DISPLAYED the first voice while holding 'eleven_flash_v2_5' —
 // the first Save 422'd.
 const savedFor = (t, p) =>
-  p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice : t?.deepgram_flux_voice
+  p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice
+  : p === 'pocket' ? t?.pocket_voice : t?.deepgram_flux_voice
 
 function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
@@ -1145,6 +1153,8 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   // 0.0–1.0. Same draft law — synced once, committed on Save.
   const [elSpeed, setElSpeed] = useState(null)   // null = not set = ElevenLabs default
   const [elStab, setElStab] = useState(null)
+  // Local hot standby (Pocket) behind a cloud provider. Same draft law.
+  const [fallback, setFallback] = useState('off')
 
   useEffect(() => {
     if (tts && !ttsSynced) {
@@ -1155,6 +1165,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
       setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
       setElStab(tts?.elevenlabs_stability != null ? parseFloat(tts.elevenlabs_stability) : null)
+      setFallback(tts?.fallback === 'pocket' ? 'pocket' : 'off')
       setTtsSynced(true)
     }
   }, [tts, ttsSynced])
@@ -1190,7 +1201,12 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
         body.deepgram_flux_speed = parseFloat(fluxSpeed)
       if (fluxTouched.current.expr || tts?.deepgram_flux_expressivity != null)
         body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
+    } else if (provider === 'pocket') {
+      body.pocket_voice = model
     }
+    // The fallback only rides with a cloud primary; the server drops it
+    // when Pocket itself is the provider.
+    if (provider !== 'pocket') body.fallback = fallback
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
       setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'TTS')
@@ -1210,6 +1226,9 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               <option value="elevenlabs">ElevenLabs</option>
               <option value="deepgram">Deepgram Aura</option>
               <option value="deepgram-flux">Deepgram Flux</option>
+              <option value="pocket" disabled={!tts?.pocket_installed && provider !== 'pocket'}>
+                Pocket (local){tts?.pocket_installed ? '' : ' — not installed'}
+              </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => setModel(e.target.value)}>
@@ -1252,15 +1271,30 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
               <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
             </Field>
           )}
-          <Field label="API key">
-            <div className="flex items-center gap-2 flex-wrap flex-1">
-              <KeyInput id="tts-key" key={`tts-${provider}-${ttsKeyEpoch}`}
-                hint={provider === 'elevenlabs' ? tts?.elevenlabs_key_hint : tts?.deepgram_key_hint}
-                placeholder={provider === 'elevenlabs' ? 'paste ElevenLabs key…' : 'paste Deepgram key…'} />
-            </div>
-          </Field>
+          {provider !== 'pocket' && (
+            <Field label="Fallback">
+              <select id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
+                onChange={e => setFallback(e.target.value)}
+                disabled={!tts?.pocket_installed}
+                title={tts?.pocket_installed
+                  ? 'Speak with local Pocket TTS while this provider is down.'
+                  : 'Install Pocket TTS to enable a local fallback.'}>
+                <option value="off">Off</option>
+                <option value="pocket">Pocket (local)</option>
+              </select>
+            </Field>
+          )}
+          {provider !== 'pocket' && (
+            <Field label="API key">
+              <div className="flex items-center gap-2 flex-wrap flex-1">
+                <KeyInput id="tts-key" key={`tts-${provider}-${ttsKeyEpoch}`}
+                  hint={provider === 'elevenlabs' ? tts?.elevenlabs_key_hint : tts?.deepgram_key_hint}
+                  placeholder={provider === 'elevenlabs' ? 'paste ElevenLabs key…' : 'paste Deepgram key…'} />
+              </div>
+            </Field>
+          )}
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <button className={BTN_DEFAULT} onClick={async () => {
+            {provider !== 'pocket' ? <button className={BTN_DEFAULT} onClick={async () => {
               const key = readKey('tts-key')
               if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'TTS'); return }
               const route = provider === 'elevenlabs'
@@ -1271,7 +1305,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
                 setTtsKeyEpoch(n => n + 1)
                 reloadAll()
               } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
-            }}>Save key</button>
+            }}>Save key</button> : <span />}
             <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
           </div>
         </div>
