@@ -313,7 +313,7 @@ def register_sender(pc_id: str, out) -> None:
     """bot.py hands the OUTPUT TRANSPORT over at connect so node_command
     can send on that node's data channel without touching the pipeline
     (queue_frame enters at the pipeline source and queues behind a
-    blocked HermesAgent — restart/scan 504'd during 40s intelligence calls)."""
+    blocked IntelligenceAgent — restart/scan 504'd during 40s intelligence calls)."""
     _out_by_pc[pc_id] = out
 
 

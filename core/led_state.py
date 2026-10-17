@@ -3,7 +3,7 @@
 Why this exists: LED messages used to ride
 the pipecat pipeline as OutputTransportMessageFrames pushed by the wake
 gate. A pipecat processor stalls frames in BOTH directions while it
-works — HermesAgent blocks 3-40s on intelligence calls — so every LED message
+works — IntelligenceAgent blocks 3-40s on intelligence calls — so every LED message
 queued behind the intelligence and arrived as one burst when it returned. The
 node's ring held stale purple through the whole "On it." -> answer gap
 (30s): the gate logged LOCKED ~29.7 s after the speech actually
@@ -28,7 +28,7 @@ Who sends what (state ownership):
   - sonos_output.SonosOutput: bot-started-speaking / bot-stopped-
     speaking — it sits directly downstream of TTS, so TTSStarted/
     TTSStopped frames reach it the instant speech begins/ends, even
-    while HermesAgent is blocked upstream (the filler "On it." proved
+    while IntelligenceAgent is blocked upstream (the filler "On it." proved
     it: TTS generated and Sonos played while the intelligence ground on
     for another ~30 s). End-of-speech maps to the GATE's actual
     state: purple when the turn continues, dark when the gate already

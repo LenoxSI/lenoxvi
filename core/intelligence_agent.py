@@ -1,15 +1,19 @@
-"""hermes_agent — lenoxvi's real intelligence: the Hermes agent over the LAN API.
+"""intelligence_agent — lenoxvi's intelligence step: turns speech into a reply.
 
-Replaces intelligence_stub.py in the pipeline (Phase 3). Same turn shape — buffers
-user speech, waits for the end-of-turn lull, then gets a reply — but the reply
-comes from the Hermes API server (OpenAI-compatible, bearer auth) instead of a
-canned echo. The agent keeps its full toolset + memory; our system prompt
-layers voice-appropriate instructions on top (short, spoken-word replies).
+The real counterpart of intelligence_stub.py, same turn shape: buffers user
+speech, waits for the end-of-turn lull, plays fillers while it waits, filters
+echo/dedup/wake-phrase-only turns, keeps per-room history, and asks the
+configured intelligence over its OpenAI-compatible chat API (bearer auth).
+`intelligence.kind` picks the request shape — `hermes` (Hermes API server) or
+`openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`); everything else
+here is shared. The agent behind the API keeps its own tools + memory; our
+system prompt layers voice-appropriate instructions on top (short,
+spoken-word replies).
 
 Config (config.yaml `intelligence:` section; .env holds the key only):
-    intelligence.url / intelligence.model / intelligence.zone / intelligence.lull_secs /
-    intelligence.dedup_window / intelligence.fillers — see config.example.yaml
-    LVI_HERMES_KEY (.env) — the API server's bearer key
+    intelligence.kind / url / agent / model / zone / lull_secs /
+    dedup_window / fillers — see config.example.yaml
+    Key: LVI_HERMES_KEY (kind hermes) or LVI_OPENCLAW_KEY (kind openclaw)
 """
 
 import asyncio
@@ -172,7 +176,7 @@ class _SessionStash:
             tmp.write_text(json.dumps(data))
             os.replace(tmp, self._path)
         except OSError as e:
-            logger.warning(f"hermes_agent: session stash write failed: {e}")
+            logger.warning(f"intelligence_agent: session stash write failed: {e}")
 
 
 _session_stash = _SessionStash()
@@ -182,7 +186,7 @@ _session_stash = _SessionStash()
 _PREAMBLE_HITS = [0]
 
 
-class HermesAgent(FrameProcessor):
+class IntelligenceAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None,
@@ -218,7 +222,7 @@ class HermesAgent(FrameProcessor):
                      if self._key_var else None)
         if not self._key and self._kind != "stub":
             logger.warning(
-                f"hermes_agent: no intelligence key set ({self._key_var}) "
+                f"intelligence_agent: no intelligence key set ({self._key_var}) "
                 f"— kind={self._kind}; turns will fail until it is set")
         self._model = cfg_env("intelligence", "model", "LVI_HERMES_MODEL", "hermes-agent")
         # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
@@ -284,7 +288,7 @@ class HermesAgent(FrameProcessor):
             self._conversation = f"voice-{room}"
             self._history = _session_stash.load(room)[: self._max_history]
             logger.info(
-                f"hermes_agent: sticky session '{self._conversation}' "
+                f"intelligence_agent: sticky session '{self._conversation}' "
                 f"restored {len(self._history)} history entries"
             )
         else:
@@ -292,13 +296,13 @@ class HermesAgent(FrameProcessor):
                 # Sticky without a correlated room (offer-tee race, shouldn't
                 # happen): fail SAFE, not silent — fresh beats guessing which
                 # room's stash to load.
-                logger.warning("hermes_agent: sticky mode without a room — falling back to fresh")
+                logger.warning("intelligence_agent: sticky mode without a room — falling back to fresh")
             # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
             self._conversation = os.getenv(
                 "LVI_CONVERSATION",
                 f"voice-{cfg_env('intelligence', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
             )
-        logger.info(f"hermes_agent: conversation '{self._conversation}'"
+        logger.info(f"intelligence_agent: conversation '{self._conversation}'"
                     f"{' (sticky)' if self._sticky and room else ''}")
 
     def _is_own_echo(self, text: str) -> bool:
@@ -339,7 +343,7 @@ class HermesAgent(FrameProcessor):
         self._echo_texts.append(text)
         self._echo_texts = self._echo_texts[-4:]
 
-    def _ask_hermes(self, text: str) -> str:
+    def _ask_intelligence(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
         Intelligence lane: kind=openclaw reshapes the request —
@@ -415,7 +419,7 @@ class HermesAgent(FrameProcessor):
                 "The human", "Looking at", "First, I", "I'll ")):
             _PREAMBLE_HITS[0] += 1
             logger.warning(
-                "hermes_agent: openclaw reasoning preamble leaked into content "
+                "intelligence_agent: openclaw reasoning preamble leaked into content "
                 f"({_PREAMBLE_HITS[0]} this process) — reply[:80]={reply[:80]!r}")
         # Client-side output cap (2026-10-04): Hermes's api_server IGNORES
         # the request's max_tokens (verified live: max_tokens:5 returned a
@@ -427,12 +431,12 @@ class HermesAgent(FrameProcessor):
         char_cap = self._max_tokens * 4
         if len(reply) > char_cap:
             logger.warning(
-                f"hermes_agent: reply {len(reply)} chars exceeded cap "
+                f"intelligence_agent: reply {len(reply)} chars exceeded cap "
                 f"{char_cap} (max_tokens={self._max_tokens}) — truncated"
             )
             reply = reply[:char_cap].rsplit(maxsplit=1)[0].rstrip(",;:-—") + "."
         logger.info(
-            f"hermes_agent: tokens in={usage.get('prompt_tokens', '?')} "
+            f"intelligence_agent: tokens in={usage.get('prompt_tokens', '?')} "
             f"out={usage.get('completion_tokens', '?')}"
         )
         return reply
@@ -446,9 +450,9 @@ class HermesAgent(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame):
             if frame.text.strip():
                 if self._echo_gate and self._echo_gate.blocked():
-                    logger.debug(f"hermes_agent: echo-gate dropped [{frame.text.strip()}]")
+                    logger.debug(f"intelligence_agent: echo-gate dropped [{frame.text.strip()}]")
                 elif self._is_own_echo(frame.text):
-                    logger.info(f"hermes_agent: containment dropped echo [{frame.text.strip()[:60]}]")
+                    logger.info(f"intelligence_agent: containment dropped echo [{frame.text.strip()[:60]}]")
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()
@@ -466,11 +470,11 @@ class HermesAgent(FrameProcessor):
             self._buffer.clear()
             if text:
                 if _is_wake_phrase_only(text):
-                    logger.info(f"hermes_agent: dropped wake-phrase-only [{text}]")
+                    logger.info(f"intelligence_agent: dropped wake-phrase-only [{text}]")
                 else:
                     now = time.monotonic()
                     if text == self._last_user_text and (now - self._last_user_time) < self._dedup_window:
-                        logger.info(f"hermes_agent: dedup dropped repeat [{text[:60]}]")
+                        logger.info(f"intelligence_agent: dedup dropped repeat [{text[:60]}]")
                         self._speaking = False
                         self._flushed = True
                     else:
@@ -493,7 +497,7 @@ class HermesAgent(FrameProcessor):
                             except (asyncio.CancelledError, Exception):
                                 pass
                             logger.info(
-                                f"hermes_agent: turn superseded after "
+                                f"intelligence_agent: turn superseded after "
                                 f"{time.monotonic() - self._turn_started:.1f}s — "
                                 f"reply discarded, no history write")
                         self._turn_epoch += 1
@@ -534,7 +538,7 @@ class HermesAgent(FrameProcessor):
         broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
         try:
-            ask = asyncio.create_task(asyncio.to_thread(self._ask_hermes, text))
+            ask = asyncio.create_task(asyncio.to_thread(self._ask_intelligence, text))
             failed = False
             reply = None
             # Tiered fillers (option B, 2026-10-03): wait to each tier's
@@ -559,7 +563,7 @@ class HermesAgent(FrameProcessor):
                         self._register_echo(filler)
                         filler_spoken = True
                         logger.info(
-                            f"hermes_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
+                            f"intelligence_agent: filler tier {i + 1}/{len(tiers)} -> [{filler}]"
                         )
             if reply is None:
                 # every tier spent, intelligence still working — wait it out
@@ -577,7 +581,7 @@ class HermesAgent(FrameProcessor):
                 # Sticky rooms persist after every successful turn.
                 if self._sticky and self._room:
                     _session_stash.save(self._room, self._history)
-            logger.info(f"hermes_agent: [{text}] -> [{reply[:120]}]")
+            logger.info(f"intelligence_agent: [{text}] -> [{reply[:120]}]")
             await self.push_frame(TTSSpeakFrame(text=reply))
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
@@ -586,7 +590,7 @@ class HermesAgent(FrameProcessor):
             # point; ONE broad catch guards the whole turn — the last
             # defense before user-facing silence. A superseded turn that
             # fails is still superseded: no history write either way.
-            logger.error(f"hermes_agent: intelligence call failed"
+            logger.error(f"intelligence_agent: intelligence call failed"
                          f"{' after filler' if filler_spoken else ''}: {e}")
             if epoch != self._turn_epoch:
                 return

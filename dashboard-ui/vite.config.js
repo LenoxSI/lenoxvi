@@ -14,10 +14,11 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    // dev server proxies API calls to the live bot on the appliance
+    // dev server proxies API calls to a running bot. Point it at yours:
+    //   LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite
     proxy: {
       '/api': {
-        target: 'https://192.0.2.185:7860',
+        target: process.env.LENOXVI_DEV_BOT_URL || 'https://localhost:7860',
         changeOrigin: true,
         secure: false, // self-signed cert on the appliance
       },

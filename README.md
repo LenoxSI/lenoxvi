@@ -26,7 +26,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
   - `wake_word.py` — openWakeWord gate + turn lock (IDLE/AWAKE/LOCKED;
     default awake window 15s, tunable via `wake.awake_timeout`)
     + 2-frame wake-word barge-in (`wake.barge_in`)
-  - `hermes_agent.py` — the intelligence agent (`intelligence.kind`):
+  - `intelligence_agent.py` — the intelligence agent (`intelligence.kind`):
     `hermes` (Hermes API over LAN, bearer key) — **production runs
     this**; `openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`,
     sticky rooms via `x-openclaw-session-key`) — the second intelligence;
@@ -108,6 +108,18 @@ its TestClient: config round-trips (comment preservation), guard rails,
 session-key header; hermes round-trip restores conversation + Hermes
 header), key precedence + no-KeyError, key POST hygiene (never echoes
 material), test-probe ok/error paths.
+
+Developing the dashboard: the prebuilt `dashboard-ui/dist/` is committed,
+so running lenoxvi needs no node toolchain. To work on the UI, run the Vite
+dev server and point its `/api` proxy at a running bot (default
+`https://localhost:7860`):
+
+```
+cd dashboard-ui && npm install
+LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
+```
+
+`npm run build` regenerates `dist/` — commit it with the UI change.
 
 ## Fresh clone → running bot
 

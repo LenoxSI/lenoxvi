@@ -15,7 +15,7 @@ client keeps its audio while Sonos gets the same reply.
 
 LED ring (2026-09-30): this processor is the REAL-TIME speaking signal —
 it sits directly downstream of TTS, so TTSStarted/TTSStopped frames
-reach it the moment speech starts/ends, even while HermesAgent is
+reach it the moment speech starts/ends, even while IntelligenceAgent is
 blocked on an intelligence call (the wake gate's speaking view rides upstream
 frames, which stall behind the intelligence). Speaking LEDs go out on the
 pipeline-free led_state wire.
@@ -212,7 +212,7 @@ class SonosOutput(FrameProcessor):
         # Speaking LEDs fire HERE, from real-time TTS frames — this
         # processor sits downstream of the intelligence, so TTSStarted/
         # TTSStopped reach it the moment speech starts/ends even while
-        # HermesAgent is blocked on an intelligence call. The old speaking signal
+        # IntelligenceAgent is blocked on an intelligence call. The old speaking signal
         # (BotStartedSpeakingFrame at the wake gate) rides upstream frames
         # and stalled behind the intelligence.
         self._wake_gate = wake_gate

@@ -1,7 +1,7 @@
 """lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
 
 Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord "Hey Willow") ->
-Silero VAD -> local faster-whisper STT -> intelligence (HermesAgent via config.yaml
+Silero VAD -> local faster-whisper STT -> intelligence (IntelligenceAgent via config.yaml
 intelligence.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
 (voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.
 
@@ -31,7 +31,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from intelligence_stub import StubIntelligence
 from echo_gate import EchoGate
-from hermes_agent import HermesAgent
+from intelligence_agent import IntelligenceAgent
 from sonos_output import SonosOutput
 from wiim_output import WiiMOutput
 from stt_local import LocalWhisperSTTService
@@ -332,7 +332,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         tts.bind_tts_room(_room)
 
     # Intelligence dispatch: hermes AND openclaw both ride
-    # HermesAgent — the kind branch lives inside _ask_hermes (envelope
+    # IntelligenceAgent — the kind branch lives inside _ask_intelligence (envelope
     # only). A past bug: this ternary only
     # matched == "hermes", so kind: openclaw fell to the echo stub and
     # the operator got canned answers while the suite stayed green (9b11 tested
@@ -343,7 +343,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # cannot echo back, and their words were eating real follow-ups.
     tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
                         if isinstance(tts, TTSTracked) else None)
-    intelligence = (HermesAgent(echo_gate=gate, room=_room, session_mode=_session_mode,
+    intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, session_mode=_session_mode,
                                 tts_is_usable=tts_usable_probe)
              if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
              else StubIntelligence(echo_gate=gate))
@@ -362,7 +362,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         logger.info(f"vad params from config.yaml: {vad_params}")
 
     # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
-    # behind a blocked processor — HermesAgent holds the queue 3-40s on
+    # behind a blocked processor — IntelligenceAgent holds the queue 3-40s on
     # intelligence calls and every LED message used to arrive as one late burst
     # (measured 2026-09-30: the ring held stale purple through the whole
     # "On it." -> answer gap). One output transport, shared by the pipeline

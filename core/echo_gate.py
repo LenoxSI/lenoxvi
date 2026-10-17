@@ -14,9 +14,9 @@ PERMANENT defense-in-depth behind the turn lock, NOT scaffolding —
 do not remove. EchoGate.block(), called from SonosOutput._speak_to_sonos,
 sets a duration (clip length + load + tail margin) whenever a clip ships; blocked() consumers drop
 echo transcriptions during that window. Layers alongside: text
-containment (hermes_agent._is_own_echo), dedup, wake-phrase drop.
+containment (intelligence_agent._is_own_echo), dedup, wake-phrase drop.
 
-Consumers of blocked(): wake_word.py, hermes_agent.py, intelligence_stub.py.
+Consumers of blocked(): wake_word.py, intelligence_agent.py, intelligence_stub.py.
 Driver of block(): sonos_output.py (_speak_to_sonos).
 
 Zero infrastructure: one deadline timestamp, monotonic clock.

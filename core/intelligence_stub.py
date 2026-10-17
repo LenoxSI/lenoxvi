@@ -1,7 +1,7 @@
 """Static intelligence stub for lenoxvi (bench/dev echo intelligence).
 
 Deterministic echo intelligence for bench and dev runs without the Hermes API
-(production uses HermesAgent via config.yaml intelligence.kind: hermes; the stub
+(production uses IntelligenceAgent via config.yaml intelligence.kind: hermes; the stub
 is the code-default fallback when kind is unset).
 
 Frame timing (pipecat 1.11, segmented STT + VADProcessor):

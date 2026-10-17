@@ -7,7 +7,7 @@ Transport model (pipecat smallwebrtc, measured live): every node
 connection gets its own pipeline + transport; the OUTPUT TRANSPORT's
 send_message delivers on THAT node's data channel directly — no
 pipeline, no queues. The old queue_frame
-path entered at the pipeline source and queued behind HermesAgent:
+path entered at the pipeline source and queued behind IntelligenceAgent:
 a restart/scan during a 40s intelligence call 504'd. Same direct wire the LED
 messages use (led_state.LedSender).
 

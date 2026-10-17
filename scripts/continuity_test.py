@@ -1,6 +1,6 @@
-"""Headless continuity test for hermes_agent: does turn 2 know turn 1?
+"""Headless continuity test for intelligence_agent: does turn 2 know turn 1?
 
-Sends two requests shaped like hermes_agent does (system + capped
+Sends two requests shaped like intelligence_agent does (system + capped
 client history). The second asks what was said in the first — with working
 client-side history, the reply must reference "apple".
 """

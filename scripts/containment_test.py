@@ -1,10 +1,10 @@
-"""Headless test for hermes_agent's echo-containment + tag-strip logic."""
+"""Headless test for intelligence_agent's echo-containment + tag-strip logic."""
 
 import sys
 
 sys.path.insert(0, "core")
 
-from hermes_agent import _normalize, _strip_tags
+from intelligence_agent import _normalize, _strip_tags
 
 # Case 1: the live failure — her reply + filler blob transcribed back
 echo_texts = [

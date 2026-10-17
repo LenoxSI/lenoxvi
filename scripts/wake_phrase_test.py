@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "core")
 
-from hermes_agent import _is_wake_phrase_only
+from intelligence_agent import _is_wake_phrase_only
 
 should_drop = ["Hey Linux.", "hey willow", "Willow.", "ok willow!", "Hey Willow?",
                "okay yellow.", "hi willow"]

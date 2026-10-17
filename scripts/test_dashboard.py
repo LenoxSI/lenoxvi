@@ -855,7 +855,7 @@ def main():
     check("bot.py: no build-time ternary picks the backend (the bedroom-outage shape)",
           not _conditional, f"conditional={_conditional}")
     # 9b11 rider (the echo-stub incident): the intelligence construction ternary
-    # must route BOTH live kinds (hermes, openclaw) to HermesAgent — a
+    # must route BOTH live kinds (hermes, openclaw) to IntelligenceAgent — a
     # kind the ternary doesn't know falls to the echo stub silently while
     # every agent-level suite check stays green. The dispatch is the
     # wiring the suite never exercised; this AST check pins it.
@@ -1621,7 +1621,7 @@ def main():
         import types as _types_module
         from types import SimpleNamespace as _NS8
         from echo_gate import EchoGate as _EchoGate8
-        from hermes_agent import HermesAgent as _Agent  # noqa: E402
+        from intelligence_agent import IntelligenceAgent as _Agent  # noqa: E402
         from wake_word import TurnState as _TurnState, WakeWordFilter as _WF  # noqa: E402
         _FD = _FD8
 
@@ -1638,7 +1638,7 @@ def main():
                     time.sleep(2.0)  # the slow first turn
                 return f"reply to {text}"
 
-            agent._ask_hermes = fake_ask
+            agent._ask_intelligence = fake_ask
 
             async def fake_push(frame, direction=None):
                 t = getattr(frame, "text", None)
@@ -1979,7 +1979,7 @@ def main():
                   _brain9c.get("url") == "http://127.0.0.1:18789/v1",
                   f"url={_brain9c.get('url')}")
             # restore kind for later checks: the lane probes below build
-            # HermesAgent against the LIVE throwaway config and expect
+            # IntelligenceAgent against the LIVE throwaway config and expect
             # openclaw (the kind the earlier (a) block left behind)
             client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
 
@@ -2016,15 +2016,15 @@ def main():
                 _os.environ["LVI_BRAIN_KEY"] = "suite-intelligence-key-not-real"
                 _os.environ["LVI_HERMES_KEY"] = "suite-hermes-key-not-real"
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
-                for mod_name in ("hermes_agent",):
+                for mod_name in ("intelligence_agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import hermes_agent as _ha9
+                import intelligence_agent as _ha9
                 _urq9.urlopen = _fake_open9
                 # kind from the LVI_CONFIG we just PUT (openclaw)
-                _a9 = _ha9.HermesAgent(lull_secs=0.05, room="suite",
+                _a9 = _ha9.IntelligenceAgent(lull_secs=0.05, room="suite",
                                        session_mode="sticky")
-                _a9._ask_hermes("hi")
+                _a9._ask_intelligence("hi")
                 _oc_body = _cap9[-1]["body"]
                 _oc_hdr = _cap9[-1]["headers"]
                 check("9b11 openclaw lane: model encodes agent, no conversation",
@@ -2041,14 +2041,14 @@ def main():
                 # a clear error naming its OWN variable, never silently
                 # auth with another intelligence's token (a real wrong-token 401).
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
-                for mod_name in ("hermes_agent",):
+                for mod_name in ("intelligence_agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import hermes_agent as _ha9_fb
-                _a9_fb = _ha9_fb.HermesAgent(lull_secs=0.05, room="suite",
+                import intelligence_agent as _ha9_fb
+                _a9_fb = _ha9_fb.IntelligenceAgent(lull_secs=0.05, room="suite",
                                              session_mode="fresh")
                 try:
-                    _a9_fb._ask_hermes("hi")
+                    _a9_fb._ask_intelligence("hi")
                     _strict_ok9 = False
                     _strict_err9 = "no error raised"
                 except RuntimeError as _e9:
@@ -2058,20 +2058,20 @@ def main():
                       _strict_ok9, _strict_err9)
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 # fresh: header absent
-                _a9f = _ha9.HermesAgent(lull_secs=0.05, room="suite",
+                _a9f = _ha9.IntelligenceAgent(lull_secs=0.05, room="suite",
                                         session_mode="fresh")
-                _a9f._ask_hermes("hi")
+                _a9f._ask_intelligence("hi")
                 check("9b11 openclaw lane: fresh sends no session header",
                       "x-openclaw-session-key" not in _cap9[-1]["headers"], "")
                 # hermes round-trip: flip kind back, conversation field returns
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
-                for mod_name in ("hermes_agent",):
+                for mod_name in ("intelligence_agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import hermes_agent as _ha9b
-                _a9b = _ha9b.HermesAgent(lull_secs=0.05, room="suite",
+                import intelligence_agent as _ha9b
+                _a9b = _ha9b.IntelligenceAgent(lull_secs=0.05, room="suite",
                                          session_mode="fresh")
-                _a9b._ask_hermes("hi")
+                _a9b._ask_intelligence("hi")
                 _hm_body = _cap9[-1]["body"]
                 _hm_hdr = _cap9[-1]["headers"]
                 check("9b11 hermes round-trip: conversation field + Hermes header restored",
@@ -2090,10 +2090,10 @@ def main():
                 _os.environ.pop("LVI_HERMES_KEY", None)
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
                 try:
-                    _a9c = _ha9b.HermesAgent(lull_secs=0.05, room="suite",
+                    _a9c = _ha9b.IntelligenceAgent(lull_secs=0.05, room="suite",
                                              session_mode="fresh")
                     try:
-                        _a9c._ask_hermes("hi")
+                        _a9c._ask_intelligence("hi")
                         check("9b11 no-key: ask raises (not success)", False, "no raise")
                     except RuntimeError as _e9:
                         check("9b11 no-key: RuntimeError with a clear message",
@@ -2240,7 +2240,7 @@ def main():
     # texts can never echo back — they register nothing).
     import asyncio as _aio12
     import echo_gate as _eg12
-    import hermes_agent as _ha12
+    import intelligence_agent as _ha12
     from pipecat.frames.frames import (  # noqa: E402
         TranscriptionFrame as _TF12, VADUserStartedSpeakingFrame as _VAD12,
     )
@@ -2251,7 +2251,7 @@ def main():
               "maybe grab a jacket if you're heading out.")
 
     async def _c12_probe():
-        _a = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+        _a = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
                                room="suite-9b12", session_mode="fresh")
         # the exact armed state in that failure — both fillers + the answer
         # the dead TTS never actually spoke
@@ -2280,14 +2280,14 @@ def main():
           _a12._is_own_echo(_ANS12) is True, "")
     check("9b12 clipped tail of her reply IS caught",
           _a12._is_own_echo("maybe grab a jacket if you're heading out") is True, "")
-    _a_dead = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+    _a_dead = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
                                 room="suite-9b12", session_mode="fresh",
                                 tts_is_usable=lambda: False)
     _a_dead._register_echo(_ANS12)
     _a_dead._register_echo("On it.")
     check("9b12 dead-TTS push arms NO echo texts",
           _a_dead._echo_texts == [], f"echo_texts={_a_dead._echo_texts}")
-    _a_live = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
+    _a_live = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
                                 room="suite-9b12", session_mode="fresh")
     _a_live._register_echo(_ANS12)
     _a_live._register_echo("On it.")
