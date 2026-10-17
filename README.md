@@ -152,4 +152,31 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
 6. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/client`
    (run from the repo root — config and clips paths are relative)
 
-[openWakeWord]: https://github.com/dscripka/openWakeWord⟫
+[openWakeWord]: https://github.com/dscripka/openWakeWord
+
+## Local TTS (optional): Pocket TTS
+
+lenoxvi can speak with [Pocket TTS], a small CPU-only model from Kyutai: no
+API key, and nothing leaves your network. It runs about 3x faster than real
+time on a 4-core CPU, so it leaves the GPU to speech recognition.
+
+    pip install -r requirements-pocket.txt
+    bash scripts/fetch_pocket_weights.sh
+
+The first command installs the CPU build of torch (no CUDA wheels). The
+second caches the model and the 21 preset voices (about 350 MB), so the box
+can speak without internet. Then, in the dashboard's TTS panel, either:
+
+- pick **Pocket (local)** as the provider, or
+- keep a cloud provider and set **Fallback → Pocket (local)**. If the cloud
+  provider goes down, replies continue in a Pocket voice and switch back on
+  their own once it recovers (checked every `tts.revive_cooldown_secs`,
+  default 30 s). The reply that was playing when the provider failed may be
+  lost.
+
+Changes apply on the next bot restart. Preset voices and their licences:
+<https://huggingface.co/kyutai/tts-voices>. Voice cloning
+(`tts.pocket_voice: /path/to/voice.wav` in config.yaml) needs the gated
+`kyutai/pocket-tts` weights and your own Hugging Face login.
+
+[Pocket TTS]: https://github.com/kyutai-labs/pocket-tts⟫

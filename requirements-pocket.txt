@@ -1,0 +1,13 @@
+# Optional: Pocket TTS (Kyutai), fully local, CPU-only text-to-speech.
+# Enables tts.provider: pocket and/or tts.fallback: pocket.
+#
+#   pip install -r requirements-pocket.txt
+#   bash scripts/fetch_pocket_weights.sh
+#
+# The extra index pulls the CPU build of torch. Without it, pip on Linux
+# downloads the CUDA build plus several GB of nvidia-* wheels that Pocket
+# never uses. pocket-tts pins every weight and voice file to an exact
+# Hugging Face commit in its own config, so this version pin also pins
+# the weights.
+--extra-index-url https://download.pytorch.org/whl/cpu
+pocket-tts==3.3.0
