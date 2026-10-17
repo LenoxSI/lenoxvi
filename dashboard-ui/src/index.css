@@ -1,7 +1,6 @@
-/* lenoxvi dashboard theme — the design kit's HeroUI v3 override.
-   Source of truth: design/lenoxvi-theme.css (NAS master:
-   lenoxvi-design-kit). Fonts self-hosted (OFL) — no Google fetch on a
-   LAN-only dashboard. Dark is the default. */
+/* lenoxvi dashboard theme — the design kit's HeroUI v3 override
+   (lenoxvi-theme.css). Fonts self-hosted (OFL) — no third-party font fetch
+   on a LAN-only dashboard. Dark is the default. */
 
 @font-face {
   font-family: 'Chakra Petch';

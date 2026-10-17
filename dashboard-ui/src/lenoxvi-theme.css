@@ -1,5 +1,6 @@
-/* lenoxvi-theme.css — load after @heroui/styles. Dark is the default. */
-@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+/* lenoxvi-theme.css — load after @heroui/styles. Dark is the default.
+   Fonts are self-hosted (index.css @font-face) — never load them from a
+   third-party CDN: the dashboard is LAN-only and makes no outside calls. */
 
 :root {
   --lenoxvi-ink: #0f120e;
