@@ -8,6 +8,58 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-10-17 — Node-reported mute, board line, safer firmware pipeline
+
+The server side of the firmware 1.2.9 → 1.2.26 cleanup series. Nodes now
+report their own mute state and hardware line, the dashboard follows them,
+a TTS service that dies mid-session revives itself, and the firmware
+pipeline names each line once and builds every image from the committed
+configuration.
+
+- Companion firmware (separate version stream): `array-v1.2.26` /
+  `flex-v1.2.26` — mute that survives reboots, array mute button and
+  dashboard as one control, line reporting, escaped command replies,
+  verified Wi-Fi changes with automatic fallback, hardware watchdogs.
+
+### Added
+- **Node-reported mute state.** Nodes on firmware 1.2.11+ include `muted` in
+  their connect message and push a `mute_push` event when the physical mute
+  button on an array node is pressed. `/status` carries `rooms[].muted`, and
+  the dashboard's Mute button follows the node's reported state instead of
+  asking for it. The mute route accepts array nodes (firmware 1.2.11+) and
+  updates the room from the node's acknowledgement.
+- **Board line chip.** Nodes on firmware 1.2.19+ report their line (`array`
+  or `flex`); `/status` carries `rooms[].line` and the Nodes table shows it
+  as a chip next to the firmware version. Only the two known lines are
+  accepted; older firmware simply shows no chip.
+- **Per-room TTS health.** `/status` rooms carry `tts_usable` and
+  `tts_provider`, and the Nodes table shows a "tts down" chip when a node
+  can hear but its TTS service can no longer speak.
+
+### Fixed
+- **A dead websocket TTS service revives on the next reply.** pipecat marks
+  a websocket TTS service permanently unusable after three failed
+  reconnects, which left a room silent until a restart. The next speak now
+  makes one bounded reconnect attempt (cooldown `tts.revive_cooldown_secs`,
+  default 30); a failed attempt never breaks the speak path.
+- **Repeated questions are no longer mistaken for echo.** Echo containment
+  now requires nearly all transcript words to come from something the
+  assistant said (was 60%), and replies sent to a dead TTS service no longer
+  arm echo detection at all.
+- Dashboard: a duplicate in-flight node command is a 409 Conflict instead of
+  a bare 504; timeouts and half-open sessions say what happened and that the
+  node self-heals within about 10 minutes.
+- Dashboard: Restart bot can no longer start two restarts at once; a mapping
+  row's Save keeps other rows' unsaved picks; the wake-model picker activates
+  exactly the row clicked when two files share a name; the volume slider no
+  longer saves on Tab; untouched voice sliders no longer overwrite configured
+  values; a stale mute reply can no longer overwrite a newer toggle; the
+  Intelligence chip no longer shows brand colors while loading, and its test
+  button is labeled "Test saved config".
+- Wi-Fi changes: the dashboard message matches firmware 1.2.23+, which
+  reboots onto the new network and returns to the previous one by itself
+  if it can't reach the bot there.
+
 ### Changed
 - **One name per firmware line, everywhere: `array` and `flex`.** The array
   line's OTA track was called `node`; it is now `array` in the server
@@ -24,6 +76,17 @@ The two version streams are independent.
 - Board identity reads the image's project name as well as its OTA URL:
   firmware 1.2.9+ images are `array_esp32` / `flex_esp32` and must agree with
   their own URL; older `node_esp32` images are still accepted, judged by URL.
+
+- `deploy_firmware.sh` builds each line from a fresh configuration generated
+  from the firmware's `sdkconfig.defaults` (kept in `build/<line>/sdkconfig`).
+  A previously generated `sdkconfig` in the firmware checkout could silently
+  override a change to the defaults.
+
+### Removed
+- The manifest-only `POST /api/dashboard/firmware/version` route. The
+  board-checked firmware upload is now the only way to publish an image.
+- The legacy `core/dashboard/page.html` fallback page (out of date with the
+  current API). A missing `dist/` now returns a 404 that names the build step.
 
 ### Upgrading
 - On the bot host, move the array track directory before restarting:
