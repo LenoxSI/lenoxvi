@@ -94,6 +94,10 @@ class TTSTracked:
 
     async def set_usable(self, is_usable: bool):
         await super().set_usable(is_usable)
+        # While a Pocket fallback is speaking for this room, the switcher owns
+        # the chip; a recovery probe's verdict must not repaint it early.
+        if getattr(self, "_tts_note_suppressed", False):
+            return
         try:
             from dashboard import registry
             registry.note_tts(self._tts_room, self._tts_provider, is_usable)
@@ -123,7 +127,7 @@ class TTSTracked:
             return
         self._revive_last_attempt = now
         logger.warning(f"tts revive: {self._tts_provider} TTS is marked unusable — "
-                       "retrying the websocket for this speak")
+                       "retrying the websocket")
         try:
             await self._disconnect()
             await self._connect()
@@ -302,7 +306,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     tts_primary = tts
     _fallback = str(cfg("tts", "fallback") or "").strip().lower()
     if _fallback == "pocket" and tts_provider == "pocket":
-        logger.warning("tts.fallback: pocket ignored — Pocket is already the primary")
+        import tts_pocket
+        tts_pocket.warn_once("fallback-ignored",
+                             "tts.fallback: pocket ignored — Pocket is already the primary")
         _fallback = ""
     tts_pocket_standby = None
     if _fallback == "pocket":
@@ -312,8 +318,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             voice=cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba"))
             if tts_pocket.pocket_available() else None)
         if tts_pocket_standby is None:
-            logger.warning("tts.fallback: pocket requested but Pocket can't load — "
-                           f"running WITHOUT a fallback ({tts_pocket.INSTALL_HINT})")
+            tts_pocket.warn_once("fallback-unavailable",
+                                 "tts.fallback: pocket requested but Pocket can't load — "
+                                 f"running WITHOUT a fallback ({tts_pocket.INSTALL_HINT})")
     gate = EchoGate()
     # Multi-node fix: EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global
@@ -517,6 +524,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         registry.mark_disconnected(client.pc_id)
         registry.drop_sender(client.pc_id)
         logger.info("client disconnected")
+        if tts_pocket_standby is not None:
+            # Stop recovery BEFORE teardown: a probe firing between the
+            # cancel and the finally would open a socket on a dead session.
+            from tts_fallback import close_fallback
+            close_fallback(tts)
         await task.cancel()
 
     @transport.event_handler("on_app_message")
@@ -536,8 +548,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         await runner.run(task)
     finally:
         if tts_pocket_standby is not None:
-            from tts_fallback import cancel_recovery
-            cancel_recovery(tts)
+            from tts_fallback import close_fallback
+            close_fallback(tts)
         _reclaim_session()
 
 

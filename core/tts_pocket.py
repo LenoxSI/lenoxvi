@@ -42,6 +42,15 @@ _model: Any = None
 _voice_states: dict[str, Any] = {}
 _service_cls: type | None = None
 _load_failed = False
+_warned: set[str] = set()
+
+
+def warn_once(key: str, msg: str) -> None:
+    """A WARNING logged once per process (per-session repeats are noise)."""
+    if key in _warned:
+        return
+    _warned.add(key)
+    logger.warning(msg)
 
 
 def _importable(name: str) -> bool:
@@ -81,29 +90,37 @@ def _voice_state(voice: str) -> Any:
     return _voice_states[voice]
 
 
-def preload(voice: str) -> bool:
-    """Load the shared model + this voice's state. Never raises."""
-    global _model, _load_failed
-    if _model is not None:
+def _usable_voice(voice: str) -> str | None:
+    """`voice` if its state loads, else the default (warned once), else None.
+
+    A bad clone voice (missing .wav, gated weights not logged in) must not
+    take Pocket down: the model is fine, only that voice isn't."""
+    for v in dict.fromkeys((voice, DEFAULT_VOICE)):
         try:
-            _voice_state(voice)
-            return True
+            _voice_state(v)
+            return v
         except Exception as e:
-            logger.warning(f"pocket tts: voice {voice!r} failed to load ({e})")
+            warn_once(f"voice:{v}", f"pocket tts: voice {v!r} failed to load ({e})"
+                      + (f"; using {DEFAULT_VOICE!r}" if v != DEFAULT_VOICE else ""))
+    return None
+
+
+def preload(voice: str) -> bool:
+    """Load the shared model + a usable voice state. Never raises."""
+    global _model, _load_failed
+    if _model is None:
+        if _load_failed:
             return False
-    if _load_failed:
-        return False
-    try:
-        _model = _load_model()
-        _voice_state(voice)
-        logger.info(f"pocket tts: model loaded (voice {voice!r}, sr={_model.sample_rate})")
-        return True
-    except Exception as e:
-        _model = None
-        _load_failed = True
-        logger.warning(f"pocket tts: model failed to load ({e}); "
-                       f"install/fetch with: {INSTALL_HINT}")
-        return False
+        try:
+            _model = _load_model()
+        except Exception as e:
+            _model = None
+            _load_failed = True
+            logger.warning(f"pocket tts: model failed to load ({e}); "
+                           f"install/fetch with: {INSTALL_HINT}")
+            return False
+        logger.info(f"pocket tts: model loaded (sr={_model.sample_rate})")
+    return _usable_voice(voice) is not None
 
 
 def _english():
@@ -149,6 +166,9 @@ def make_service(*, mixin: type, voice: str, provider_label: str = "pocket"):
     voice = resolve_voice(voice)
     if _model is None and not preload(voice):
         return None
+    voice = _usable_voice(voice)
+    if voice is None:
+        return None
     try:
         svc = _service_class(mixin)(voice=voice)
     except Exception as e:
@@ -164,3 +184,4 @@ def _reset_for_tests() -> None:
     _service_cls = None
     _load_failed = False
     _voice_states.clear()
+    _warned.clear()

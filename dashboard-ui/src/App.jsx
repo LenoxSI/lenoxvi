@@ -1275,7 +1275,9 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             <Field label="Fallback">
               <select id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
                 onChange={e => setFallback(e.target.value)}
-                disabled={!tts?.pocket_installed}
+                // Stays usable while it holds 'pocket', so a fallback saved
+                // before Pocket went missing can always be turned off.
+                disabled={!tts?.pocket_installed && fallback !== 'pocket'}
                 title={tts?.pocket_installed
                   ? 'Speak with local Pocket TTS while this provider is down.'
                   : 'Install Pocket TTS to enable a local fallback.'}>

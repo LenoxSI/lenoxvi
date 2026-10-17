@@ -864,7 +864,7 @@ class TTSPayload(BaseModel):
     fallback: str | None = Field(default=None, pattern="^(pocket|off)$")
 
 
-def _validate_tts_payload(p: TTSPayload) -> None:
+def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> None:
     if p.provider == "elevenlabs":
         if not p.voice_id or not p.model:
             raise HTTPException(status_code=422, detail="elevenlabs needs voice_id and model")
@@ -886,7 +886,9 @@ def _validate_tts_payload(p: TTSPayload) -> None:
     if p.fallback == "pocket":
         if p.provider == "pocket":
             raise HTTPException(status_code=422, detail="the fallback can't be the primary (Pocket is already the provider)")
-        if not tts_pocket.pocket_available():
+        # Install check only when TURNING IT ON: re-sending an already-saved
+        # fallback must never lock the panel if Pocket went missing later.
+        if saved_fallback != "pocket" and not tts_pocket.pocket_available():
             raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
 
 
@@ -937,8 +939,8 @@ async def get_tts():
 async def put_tts(payload: TTSPayload):
     """Write provider + knobs to config.yaml (tts section). Applies on the
     next bot restart — same contract as every config edit."""
-    _validate_tts_payload(payload)
     current = dict(config_store.read_section("tts") or {})
+    _validate_tts_payload(payload, saved_fallback=current.get("fallback"))
     current["provider"] = payload.provider
     if payload.provider == "elevenlabs":
         current["voice_id"] = payload.voice_id
