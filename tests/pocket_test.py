@@ -155,6 +155,171 @@ _src = inspect.getsource(_P)
 check("050 pipecat internals: run_tts uses self._model + _get_voice_state",
       "self._model.generate_audio_stream" in _src and "_get_voice_state" in _src)
 
+# ── 050 fallback: switcher wrap + failover + recovery ──
+import tts_fallback as tf  # noqa: E402
+from pipecat.frames.frames import ErrorFrame, ManuallySwitchServiceFrame  # noqa: E402
+from pipecat.pipeline.service_switcher import ServiceSwitcherStrategyFailover  # noqa: E402
+
+
+class FakeSvc:
+    def __init__(self, name, provider):
+        self.name = name
+        self._tts_provider = provider
+        self.is_usable = True
+        self.revives = 0
+        self.revive_ok = False
+        self.queued = []
+
+    async def queue_frame(self, f, *a, **k):
+        self.queued.append(f)
+
+    async def _try_revive(self):
+        self.revives += 1
+        if self.revive_ok:
+            self.is_usable = True
+
+
+async def _failover():
+    p, k = FakeSvc("el", "elevenlabs"), FakeSvc("pk", "pocket")
+    strat = ServiceSwitcherStrategyFailover([p, k])
+    p.is_usable = False                      # pipecat flips this BEFORE the ErrorFrame
+    err = ErrorFrame(error="websocket dead")
+    err.processor = p
+    new = await strat.handle_error(err)
+    return new is k and strat.active_service is k
+
+
+check("050 primary unusable + ErrorFrame -> Pocket active", asyncio.run(_failover()))
+
+
+async def _recovery_one_switch():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+    switches, sleeps = [], []
+
+    async def req(svc):
+        switches.append(svc)
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 3:
+            p.revive_ok = True               # revives on the 3rd probe
+
+    ok = await tf.recover(p, req, 30.0, sleep=fake_sleep)
+    return ok, switches, sleeps, p.revives
+
+
+ok, sw, sl, rv = asyncio.run(_recovery_one_switch())
+check("050 recovery probes every cooldown", sl == [30.0, 30.0, 30.0], f"sleeps={sl}")
+check("050 recovery queues exactly ONE switch then stops",
+      ok and len(sw) == 1 and rv == 3, f"sw={sw} rv={rv}")
+
+
+async def _cancel():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+    sw = types.SimpleNamespace(_lenoxvi_recovery=None)
+
+    async def req(svc):
+        pass
+
+    task = asyncio.create_task(tf.recover(p, req, 30.0))
+    sw._lenoxvi_recovery = task
+    await asyncio.sleep(0)
+    tf.cancel_recovery(sw)
+    await asyncio.sleep(0)
+    return sw._lenoxvi_recovery is None and task.cancelled()
+
+
+check("050 session end cancels the recovery task", asyncio.run(_cancel()))
+
+
+async def _switch_notes():
+    import dashboard.registry as reg
+    notes = []
+    orig = reg.note_tts
+    reg.note_tts = lambda room, prov, ok: notes.append((room, prov, ok))
+    try:
+        p, k = FakeSvc("el", "elevenlabs"), FakeSvc("pk", "pocket")
+        queued = []
+
+        async def q(f):
+            queued.append(f)
+
+        sw = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_room="kitchen",
+                                   _lenoxvi_queue=q, _lenoxvi_cooldown=30.0,
+                                   _lenoxvi_recovery=None)
+        await tf.on_switched(sw, k)
+        started = sw._lenoxvi_recovery is not None
+        tf.cancel_recovery(sw)
+        await tf.on_switched(sw, p)
+        return notes, started
+    finally:
+        reg.note_tts = orig
+
+
+notes, started = asyncio.run(_switch_notes())
+check("050 switch to Pocket notes 'pocket (fallback)' + starts recovery",
+      len(notes) >= 1 and notes[0] == ("kitchen", "pocket (fallback)", True) and started,
+      f"notes={notes}")
+check("050 switch back notes the primary provider",
+      len(notes) >= 2 and notes[1] == ("kitchen", "elevenlabs", True), f"notes={notes}")
+
+
+async def _request_frame():
+    p, k = FakeSvc("el", "elevenlabs"), FakeSvc("pk", "pocket")
+    queued = []
+
+    async def q(f):
+        queued.append(f)
+
+    sw = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_room=None, _lenoxvi_queue=q,
+                               _lenoxvi_cooldown=0.0, _lenoxvi_recovery=None)
+    p.is_usable = False
+    p.revive_ok = True
+    await tf.on_switched(sw, k)
+    await asyncio.wait_for(sw._lenoxvi_recovery, 1.0)
+    return queued
+
+
+q = asyncio.run(_request_frame())
+check("050 recovery queues a ManuallySwitchServiceFrame for the primary",
+      len(q) == 1 and isinstance(q[0], ManuallySwitchServiceFrame)
+      and q[0].service._tts_provider == "elevenlabs", f"queued={q}")
+
+
+async def _wrap_real():
+    # Real ServiceSwitcher over two real TTSService instances (fake model):
+    # order, strategy, and that the switch event reaches on_switched.
+    import dashboard.registry as reg
+    from pipecat.pipeline.service_switcher import ServiceSwitcher
+    notes = []
+    orig = reg.note_tts
+    reg.note_tts = lambda room, prov, ok: notes.append((room, prov, ok))
+    try:
+        prim = tp.make_service(mixin=Mixin, voice="alba", provider_label="elevenlabs")
+        stand = tp.make_service(mixin=Mixin, voice="alba")
+
+        async def q(f):
+            pass
+
+        w = tf.wrap_with_fallback(prim, stand, room="kitchen", queue_frame=q, cooldown=30.0)
+        shape = (isinstance(w, ServiceSwitcher)
+                 and isinstance(w.strategy, ServiceSwitcherStrategyFailover)
+                 and w.services == [prim, stand] and w.strategy.active_service is prim)
+        await w.strategy._call_event_handler("on_service_switched", stand)
+        await asyncio.sleep(0.05)
+        wired = ("kitchen", "pocket (fallback)", True) in notes
+        tf.cancel_recovery(w)
+        return shape, wired
+    finally:
+        reg.note_tts = orig
+
+
+shape, wired = asyncio.run(_wrap_real())
+check("050 wrap_with_fallback: real switcher, Failover, [primary, pocket], primary active", shape)
+check("050 wrap_with_fallback: switch event reaches on_switched", wired)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)
