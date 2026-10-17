@@ -109,9 +109,17 @@ source "$HOME/esp-idf/export.sh" >/dev/null
 # this line used to ENABLE it on every script build, 2026-10-13). Also
 # protects against a value inherited from the caller's shell.
 unset LOG_DATACHANNEL_MESSAGES
+# Fresh config from sdkconfig.defaults on EVERY build, one per line, inside
+# its build dir. The repo-root sdkconfig is generated once and then wins over
+# sdkconfig.defaults (an explicit "is not set" line survives a defaults
+# change) — the M5 watchdog flip would have shipped with watchdogs still OFF.
+# The image must equal the committed defaults, nothing else.
+SDKCFG="$FW_REPO/build/$TRACK/sdkconfig"
+mkdir -p "$FW_REPO/build/$TRACK"
+rm -f "$SDKCFG"
 WIFI_SSID="$WIFI_SSID" WIFI_PASSWORD="$WIFI_PASSWORD" \
 PIPECAT_SMALLWEBRTC_URL="$PIPECAT_SMALLWEBRTC_URL" PIPECAT_ROOM="$PIPECAT_ROOM" \
-idf.py -B "$FW_REPO/build/$TRACK" -DBOARD="$TRACK" build
+idf.py -B "$FW_REPO/build/$TRACK" -DBOARD="$TRACK" -DSDKCONFIG="$SDKCFG" build
 # (One build dir per line: a cached BOARD can never leak from one line's
 # build into the other's.)
 
