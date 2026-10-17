@@ -108,8 +108,8 @@ session_modes: {}
 sonos:
   enabled: true
   default_zone: <zone-name>
-  # Voice-clip volume (0-100). 70 was the through-matrix sweet spot (note
-  # 001); 35 is the owner's ear-tuned direct-to-amp value (2026-10-04).
+  # Voice-clip volume (0-100). 70 was the through-matrix sweet spot;
+  # 35 is the ear-tuned direct-to-amp value (2026-10-04).
   clip_volume: 35
   # 48h retention: clips are served once, then garbage.
   clip_retention_days: 2

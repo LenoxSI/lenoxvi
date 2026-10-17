@@ -55,8 +55,8 @@ harness — the dashboard's job is operating the rig, not talking to it.
   - `test_dashboard.py` — **the permanent offline suite** (red-line
     discipline: every bug class gets a check; runs on the appliance
     venv in a scratch dir, never restarts the real bot, never deletes
-    prod files). Sections 9b3–9b11 cover TTS lane dispatch, Fix A
-    timers, B3 epoch turns + barge-in, passthrough, echo-gate relax,
+    prod files). Sections 9b3–9b11 cover TTS lane dispatch,
+    load-anchored speech timers, epoch turns + barge-in, passthrough, echo-gate relax,
     and the Intelligence lane.
 - `firmware/` — node firmware images + OTA manifests
   - `xvf3800/` — XMOS image fetched via `scripts/fetch_xmos_fw.sh` at

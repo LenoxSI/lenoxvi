@@ -1,22 +1,21 @@
 """node_command — bot→node dashboard commands over the WebRTC data channel.
 
-Firmware 1.1.0 command schema (design note): {"cmd": name, ...args}
+Firmware 1.1.0 command schema: {"cmd": name, ...args}
 out, {"evt":"cmd_result", "cmd": name, "ok": bool, "data": ...} back.
 
 Transport model (pipecat smallwebrtc, measured live): every node
 connection gets its own pipeline + transport; the OUTPUT TRANSPORT's
 send_message delivers on THAT node's data channel directly — no
-pipeline, no queues (M6, Opus review 2026-10-01). The old queue_frame
+pipeline, no queues. The old queue_frame
 path entered at the pipeline source and queued behind HermesAgent:
 a restart/scan during a 40s intelligence call 504'd. Same direct wire the LED
 messages use (led_state.LedSender).
 
-Liveness contract (design note zombie fix, ASYMMETRIC — docstring
-corrected 2026-10-01, was M7): the node probes every 5 min with
+Liveness contract (zombie fix, ASYMMETRIC): the node probes every 5 min with
 {"evt":"cmd_result","cmd":"probe","data":"probe"}; the bot MUST answer
 {"cmd":"pong"} or the node reboots its session. The node consumes the
 pong silently — NO reply-to-reply (symmetric ping/pong looped ~1/sec
-for 12 min, measured 2026-09-29 19:35–19:47). This handler answers
+for 12 min, measured 2026-09-29). This handler answers
 automatically — a quiet house never false-reboots a node.
 """
 
@@ -34,7 +33,7 @@ class NodeCommandError(Exception):
 
 class CommandInFlight(NodeCommandError):
     """A duplicate command is already awaiting this node's reply — a
-    CONFLICT, not a timeout (041 L9: this used to raise a bare
+    CONFLICT, not a timeout (this used to raise a bare
     TimeoutError, so a double-click read as a 'Gateway Timeout')."""
 
 
@@ -50,7 +49,7 @@ _pending_lock = asyncio.Lock()
 
 
 def _send(out, payload: dict) -> bool:
-    """Direct data-channel send via the output transport (M6): no
+    """Direct data-channel send via the output transport: no
     pipeline, no queue_frame — a blocked intelligence can't stall commands.
     Schedules the async send on the running loop; never raises."""
     import asyncio
@@ -133,7 +132,7 @@ def on_message(message, pc_id: str) -> None:
     # Liveness probe: answer immediately, unconditionally. The protocol
     # is ASYMMETRIC (node sends evt cmd_result "probe" every 5 min; bot
     # answers {"cmd":"pong"}; node consumes pong silently — no reply).
-    # Symmetric ping/pong looped ~1/sec for 12 min (measured 19:35–19:47).
+    # Symmetric ping/pong looped ~1/sec for 12 min (measured).
     if data.get("evt") == "cmd_result" and data.get("cmd") == "probe":
         send_pong(pc_id)
         return
@@ -151,12 +150,12 @@ def on_message(message, pc_id: str) -> None:
         # firmware 1.2.19+: fw_push names the board line (array|flex).
         if isinstance(info, dict) and isinstance(info.get("line"), str):
             registry.note_line(pc_id, info["line"])
-        # H4 (firmware 1.2.11+): fw_push also carries the node's mute state.
+        # Firmware 1.2.11+: fw_push also carries the node's mute state.
         if isinstance(info, dict) and isinstance(info.get("muted"), bool):
             registry.note_muted(pc_id, info["muted"])
         return
 
-    # mute_push (H4, firmware 1.2.11+): an array node's PHYSICAL Mute button
+    # mute_push (firmware 1.2.11+): an array node's PHYSICAL Mute button
     # was pressed — the node tells us unprompted so the dashboard follows.
     # Fire-and-forget like fw_push: nothing requested it, nothing replies.
     if data.get("evt") == "cmd_result" and data.get("cmd") == "mute_push":
@@ -177,7 +176,7 @@ def on_message(message, pc_id: str) -> None:
     # Room rename: the registry relabels, and the room_zones mapping key
     # must follow — otherwise the rename silently orphans the node's
     # zone mapping (the node's zone was lost when it
-    # renamed to bedroom-mic1, measured 2026-09-29 21:49) and the
+    # renamed to bedroom-mic1, measured 2026-09-29) and the
     # mapping table keeps a ghost row for the old name.
     if cmd == "set_name" and data.get("ok"):
         info = data.get("data") if isinstance(data.get("data"), dict) else None

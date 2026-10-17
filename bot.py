@@ -65,14 +65,14 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 class TTSTracked:
     """Mixin: relay pipecat's set_usable() verdicts to the dashboard
-    registry for this pipeline's room (2026-10-16 room-b silent
-    incident). An ElevenLabs websocket death makes pipecat mark the
+    registry for this pipeline's room (a node once went silent this
+    way). An ElevenLabs websocket death makes pipecat mark the
     service PERMANENTLY unusable after 3 failed reconnects — the node
     keeps hearing, replies silently vanish, and the only clue sat in
     journald. Fail-open by design: observability must never take down
     the voice pipeline.
 
-    Reconnect-on-next-utterance (the incident follow-on): an unusable
+    Reconnect-on-next-utterance (follow-on fix): an unusable
     websocket service refuses every speak, so its own run_tts reconnect
     never fires and the room stays mute until a node/bot restart.
     _push_tts_frames gives a dead service one bounded websocket retry AT
@@ -172,7 +172,7 @@ else:
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
     from config import cfg, cfg_env
 
-    # M12 (design note, fixed 2026-10-08): secrets are checked ONCE at
+    # Secrets are checked ONCE at
     # pipeline construction with a clear error naming the provider and
     # the .env variable — not a bare KeyError per TTS request. Same
     # fail-loud law as the intelligence key: construction survives,
@@ -192,7 +192,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
-    # TTS provider dispatch (the owner's ask 2026-10-04 19:41): tts.provider
+    # TTS provider dispatch: tts.provider
     # selects the engine; each provider's knobs live under its own config
     # key. ElevenLabs stays the default (a config without tts.provider —
     # the fresh-clone state — must land on a provider that speaks).
@@ -212,8 +212,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         )
         logger.info("tts backend: deepgram aura-2")
     elif tts_provider == "deepgram-flux":
-        # Deepgram Flux (the owner's pick 2026-10-04: "i want flux, ill never use
-        # aura and the voice quality is lame") — the voice-agent-first
+        # Deepgram Flux (preferred over Aura for voice quality) — the voice-agent-first
         # surface: conversation-aware, cross-turn voice consistency, /v2/speak
         # streaming. Same DEEPGRAM_API_KEY as Aura (one account, two model
         # families). Voice format flux-<name>-en; catalog at
@@ -243,7 +242,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # env as fallback; model in config.yaml; api_key stays env-side
         # forever (secrets never ride config.yaml — the .env is gitignored,
         # config.yaml is not).
-        # ONE provider, TWO lanes (the owner 12:05): the MODEL picks the lane —
+        # ONE provider, TWO lanes: the MODEL picks the lane —
         # eleven_v3*/eleven_v4* models ride the Text-to-Dialogue websocket
         # (the only lane that reaches them; the Realtime TTS WS rejects
         # them with HTTP 400 — commit fb0cf94 for v3, ElevenLabs docs for
@@ -269,7 +268,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 api_key=os.environ["ELEVENLABS_API_KEY"],
                 voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
                 model=el_model,
-                # Flash v2.5 voice-shaping knobs (the owner 2026-10-07 22:49):
+                # Flash v2.5 voice-shaping knobs:
                 # speed 0.7–1.2, stability 0.0–1.0 (lower = expressive,
                 # higher = consistent). Absent config = None = ElevenLabs
                 # default — never a made-up value. The v3/v4 dialogue lane
@@ -284,11 +283,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             )
             logger.info(f"tts backend: elevenlabs {el_model}")
     gate = EchoGate()
-    # Multi-node fix (Opus review H1): EVERYTHING room-related resolves
+    # Multi-node fix: EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global
     # "last connected" room. The offer tee has already correlated
-    # {room, pc_id} by the time the pipeline runs (send-time tee, note
-    # 024), so room_for_pc is exact here.
+    # {room, pc_id} by the time the pipeline runs (send-time tee), so
+    # room_for_pc is exact here.
     # pc_id SOURCE FIX (measured 2026-10-03): SmallWebRTCTransport is a
     # facade — it holds ._client, not ._webrtc_connection, so the
     # original attribute walk always returned None and every wake since
@@ -326,19 +325,19 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     _room = _pipeline_room()
     _session_mode = (cfg("session_modes") or {}).get(_room, "fresh")
 
-    # TTS health tap (2026-10-16 incident): key this pipeline's TTS
+    # TTS health tap: key this pipeline's TTS
     # service to its room so pipecat's usability verdicts land on the
     # dashboard — note_tts(True) here, then every set_usable().
     if isinstance(tts, TTSTracked):
         tts.bind_tts_room(_room)
 
-    # Intelligence dispatch (design note): hermes AND openclaw both ride
+    # Intelligence dispatch: hermes AND openclaw both ride
     # HermesAgent — the kind branch lives inside _ask_hermes (envelope
-    # only). The 20:56 "completely retarded" incident: this ternary only
+    # only). A past bug: this ternary only
     # matched == "hermes", so kind: openclaw fell to the echo stub and
-    # the owner got canned answers while the suite stayed green (9b11 tested
+    # the operator got canned answers while the suite stayed green (9b11 tested
     # the agent directly, never the construction site).
-    # Dead-TTS containment wire (2026-10-16 07:49 incident): the tracked
+    # Dead-TTS containment wire: the tracked
     # TTS service's is_usable rides into the agent so texts pushed to a
     # DEAD service are never armed as echo texts — they made no sound,
     # cannot echo back, and their words were eating real follow-ups.
@@ -365,14 +364,14 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
     # behind a blocked processor — HermesAgent holds the queue 3-40s on
     # intelligence calls and every LED message used to arrive as one late burst
-    # (2026-09-30 12:23: the ring held stale purple through the whole
+    # (measured 2026-09-30: the ring held stale purple through the whole
     # "On it." -> answer gap). One output transport, shared by the pipeline
     # and the LED wire; per-pipeline LedSender = per-node targeting free.
     from led_state import LedSender
 
     out = transport.output()
     led = LedSender(out)
-    # B3 barge-in (design note): the interrupt callback stops whichever
+    # Barge-in: the interrupt callback stops whichever
     # output is sounding. The outputs are built in the pipeline list below,
     # so the closure reaches them through this holder — set right after
     # construction, before any audio can flow.
@@ -393,7 +392,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                    if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true")
                    else None)
 
-    # B3 barge-in holder fill (design note): the interrupt callback's
+    # Barge-in holder fill: the interrupt callback's
     # closure reaches the backends through _outputs — set BEFORE the
     # pipeline task starts so the first interrupt can't race a None.
     sonos_out = SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
@@ -422,7 +421,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 # but the offer tee correlates the room in the same
                 # tick — a lost race there put a WiiM room on a
                 # Sonos-only pipeline and every reply died silently
-                # (bedroom outage 23:22, Opus audit finding #6). Building
+                # (a real bedroom outage). Building
                 # both removes the race: no build-time room knowledge
                 # is needed at all.
                 sonos_out,
@@ -431,7 +430,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             ]
         ),
         params=PipelineParams(
-            allow_interruptions=False,  # no pipecat barge-in — ours is the wake gate (030)
+            allow_interruptions=False,  # no pipecat barge-in — ours is the wake gate
         ),
         # Always-on ESP32 node: a quiet house is NOT a dead session. This is a
         # PipelineTask kwarg (NOT a PipelineParams field — putting it there
@@ -448,7 +447,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # turns "a client connected" into "the bedroom node is online".
         from dashboard import registry
         registry.mark_connected(client.pc_id)
-        # M6: register the OUTPUT TRANSPORT (direct data-channel wire),
+        # Register the OUTPUT TRANSPORT (direct data-channel wire),
         # not the pipeline task — node commands must not queue behind a
         # blocked intelligence. Same wire LedSender uses.
         registry.register_sender(client.pc_id, out)
@@ -467,7 +466,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # Dashboard command replies + liveness probes (firmware 1.1.0).
         # NOTE: the smallwebrtc transport registers "on_app_message" —
         # NOT "on_client_message" (that name is the RTVI processor's;
-        # using it silently never fires, measured 2026-09-29 18:10).
+        # using it silently never fires, measured 2026-09-29).
         # Signature is (message, sender) where sender IS the pc_id
         # string (transport.py:578 passes connection.pc_id directly) —
         # not a connection object.
@@ -482,7 +481,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
 
 def _reclaim_session() -> None:
-    """Reclaim a finished session's pipeline graph NOW (design note leak fix).
+    """Reclaim a finished session's pipeline graph NOW (per-session leak fix).
 
     Every session builds a fresh pipeline (wake model, Silero VAD, resamplers,
     WebRTC transport) that forms one big reference cycle, so refcounting can't

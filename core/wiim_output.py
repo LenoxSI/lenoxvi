@@ -2,14 +2,13 @@
 
 Sibling of sonos_output.py, same FrameProcessor contract (TTSStarted /
 TTSAudioRaw / TTSStopped → MP3 → clip server URL → play), but with WiiM
-semantics established by the 2026-10-04 arrival verify (design note
-correction):
+semantics established by the 2026-10-04 arrival verify:
 
   - playPromptUrl is a STUB on this firmware generation (Linkplay
     4.8.827634): acks OK, never fetches. NOT used.
   - Replies play via setPlayerCmd:play:<url> — proven to fetch and play
     the exact same clips the Sonos path uses (arrival test, mode 10).
-  - Interrupt semantics, ratified by the owner 2026-10-04: music stops when
+  - Interrupt semantics: music stops when
     she speaks, NO restore. Spotify Connect sessions are client-owned
     and unresumable by API; building a half-working restore would lie.
   - No duck holder: there's nothing to duck (the interrupt IS the duck).
@@ -58,7 +57,7 @@ def wiim_api(ip: str, cmd: str, timeout: float = 4.0) -> str:
 
     Runs on the pipeline's event loop — every caller wraps it in
     asyncio.to_thread (the API can stall if the unit naps; a stalled
-    voice pipeline is the M4/M5 lesson from the Opus review).
+    event loop stalls the whole voice pipeline).
     """
     url = f"https://{ip}/httpapi.asp?command={cmd}"
     with urllib.request.urlopen(url, timeout=timeout, context=_SSL_CTX) as r:
@@ -108,14 +107,14 @@ class WiiMOutput(FrameProcessor):
         wiim = cfg("wiim") or {}
         self._enabled = bool(wiim.get("enabled"))
         self._zone = wiim.get("default_zone")
-        self._volume = int(wiim.get("clip_volume", DEFAULT_CLIP_VOLUME))  # 041 L3: one default
+        self._volume = int(wiim.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
         self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
                               if isinstance(v, (int, float))}
         self._zones = dict(wiim.get("zones") or {})
-        # Clip server: process-wide singleton in sonos_output (Opus audit
-        # 2026-10-04, finding 2) — bound in setup() via shared_clip_server().
+        # Clip server: process-wide singleton in sonos_output — bound in
+        # setup() via shared_clip_server().
         self._clip_server = None
-        self._speech_epoch = 0  # Fix A: generation stamp; re-anchors only while current
+        self._speech_epoch = 0  # generation stamp; re-anchors only while current
 
     async def setup(self, setup):
         """Pipecat lifecycle hook — the ONLY reliable place to start the
@@ -179,7 +178,7 @@ class WiiMOutput(FrameProcessor):
             self._echo_gate.block(duration + 1.5)
 
         # MP3 (proven on this unit; WAV unreliable on LinkPlay firmware).
-        # WiiM hardware fade (the owner's ear, 2026-10-04): the Pro ramps
+        # WiiM hardware fade (heard by ear): the Pro ramps
         # volume in over the first ~1s of main-media playback and ramps
         # out at the end — long replies sound fine (ramp rides silence
         # while she's mid-sentence) but SHORT replies ramp in, peak, and
@@ -239,7 +238,7 @@ class WiiMOutput(FrameProcessor):
         except Exception as e:
             logger.error(f"wiim_output: play failed on {ip}: {e}")
             return
-        # ── Fix A (2026-10-05): LOAD-ANCHORED TIMERS ──
+        # ── LOAD-ANCHORED TIMERS ──
         # Same disease as SonosOutput: generation-anchored timers fired
         # early on the v4 dialogue lane. The play command just went out —
         # re-anchor the LED + wake gate NOW (echo gate already re-blocks
@@ -291,14 +290,14 @@ class WiiMOutput(FrameProcessor):
 
     # ── frame contract (same as SonosOutput) ─────────────────────────────
 
-    # ── B3 barge-in (design note) ────────────────────────────────────
+    # ── Wake-word barge-in ─────────────────────────────────────────────
 
     async def stop_current_clip(self) -> None:
         """Kill the sounding reply clip (wake-word barge-in). WiiM: a
         plain setPlayerCmd:stop. Idempotent: no clip, nothing to do."""
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
         self._cancel_end_of_speech()
-        # Echo-gate rider (030): the clip is dead — its duration gate must
+        # Echo-gate rider: the clip is dead — its duration gate must
         # not eat the interrupting question. relax() never extends a
         # lapsed gate, and text containment stays armed.
         if self._echo_gate is not None:
@@ -336,7 +335,7 @@ class WiiMOutput(FrameProcessor):
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
-                # Fix A (2026-10-05): load-anchored timers — the play call
+                # Load-anchored timers — the play call
                 # in _speak_to_wiim re-anchors LED + wake gate when the
                 # clip actually starts; this generation-time schedule is
                 # the fallback (task death). Epoch handoff = stale-guard.

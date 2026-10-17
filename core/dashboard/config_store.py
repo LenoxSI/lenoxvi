@@ -1,8 +1,8 @@
 """config_store — comment-preserving, atomic config.yaml writes for the
 dashboard.
 
-The dashboard edits the SAME config.yaml a human would hand-edit
-(design note): same keys, same precedence, developer hand-edits stay
+The dashboard edits the SAME config.yaml a human would hand-edit:
+same keys, same precedence, developer hand-edits stay
 possible and authoritative. ruamel.yaml round-trip mode preserves
 comments and formatting; writes are atomic (temp file + os.replace)
 and preceded by a single rolling backup (config.backup.yaml, gitignored).
@@ -72,7 +72,7 @@ def write_section(section: str, value: dict) -> dict:
 
 
 def write_sections(sections: dict) -> dict:
-    """M14 (design note, fixed 2026-10-08): write MULTIPLE sections in ONE
+    """Write MULTIPLE sections in ONE
     atomic pass — one backup, one tmp write, one cache refresh. The
     zone-delete flow used to do two write_section calls back-to-back; a
     crash between them left config.yaml with the zone gone but its

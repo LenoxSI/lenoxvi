@@ -2,7 +2,7 @@
 
 Sits after the TTS service in the pipeline, captures the spoken reply into an
 MP3 clip, serves it over LAN HTTP, and tells the zone's Sonos Port/Amp to play
-it as an audioClip overlay (ducks music without pausing it — design note).
+it as an audioClip overlay (ducks music without pausing it).
 
 Config (config.yaml):
     sonos:
@@ -50,7 +50,7 @@ class ClipServer:
 
     async def start(self):
         self._dir.mkdir(parents=True, exist_ok=True)
-        # M11 (design note, fixed 2026-10-08): a bind failure (EADDRINUSE —
+        # A bind failure (EADDRINUSE —
         # stale process, suite re-entry, port conflict) must NOT leave a
         # half-constructed runner behind: on the NEXT start() the
         # singleton's _runner would look "set up" while nothing listens,
@@ -84,7 +84,7 @@ class ClipServer:
         return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
 
-# ── process-wide singleton (Opus audit 2026-10-04, finding 2) ──
+# ── process-wide singleton ──
 # SonosOutput and WiiMOutput each carried their OWN class-level
 # _shared_clip_server, so two backends active at once raced for one
 # port: the second pipeline's setup() died with EADDRINUSE, and the
@@ -214,14 +214,14 @@ class SonosOutput(FrameProcessor):
         # TTSStopped reach it the moment speech starts/ends even while
         # HermesAgent is blocked on an intelligence call. The old speaking signal
         # (BotStartedSpeakingFrame at the wake gate) rides upstream frames
-        # and stalled behind the intelligence (2026-09-30 12:23 incident).
+        # and stalled behind the intelligence.
         self._wake_gate = wake_gate
         self._led = led
         # Duck holder (2026-09-30): the audioClip duck only held while a
         # REPLY clip sounded — the rest of the awake window (user speaking,
         # follow-up listening) ran at full music volume straight into an
-        # open mic, and VAD+STT transcribed lyrics as user turns (the
-        # "Nantucket." fragment, 12:23). While the wake gate is awake,
+        # open mic, and VAD+STT transcribed lyrics as user turns. While
+        # the wake gate is awake,
         # hold a SILENCE clip loaded on the reply zone: same duck, no
         # sound. Reply clips replace it; refresh keeps it alive; gate
         # close cancels it and the music unducks. Polls the gate's live
@@ -234,7 +234,7 @@ class SonosOutput(FrameProcessor):
         self._duck_logged_response = False
         # Reply clip id (from loadAudioClip response) — cancelled on gate
         # close so a still-sounding silence TAIL can't hold the duck after
-        # the conversation ends (M2, Opus review).
+        # the conversation ends.
         self._reply_clip_id = None
         # Monotonic time until which a REPLY clip is sounding — the holder
         # must not refresh silence over it (a loadAudioClip replaces the
@@ -259,7 +259,7 @@ class SonosOutput(FrameProcessor):
         sonos = cfg.get("sonos", {})
         self._enabled = bool(sonos.get("enabled"))
         self._zone = sonos.get("default_zone")
-        self._volume = int(sonos.get("clip_volume", DEFAULT_CLIP_VOLUME))  # 041 L3: one default
+        self._volume = int(sonos.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
         # Per-zone volume overrides (2026-10-04, dashboard slider): config
         # `sonos.zone_volumes: {<zone>: int}` is the durable copy; the live
         # layer (zone_volume_overrides below) lets the dashboard change a
@@ -283,13 +283,12 @@ class SonosOutput(FrameProcessor):
             try:
                 asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
             except RuntimeError:
-                # No event loop (sync/test context — exposed by the Opus
-                # audit suite 2026-10-04): construction must never crash
+                # No event loop (sync/test context — exposed by the
+                # test suite): construction must never crash
                 # the pipeline builder; pruning happens on next real loop.
                 SonosOutput._prune_task_started = False
                 logger.debug("sonos_output: no event loop at construction — prune task deferred")
-        # The clip server is a process-wide singleton (Opus audit
-        # 2026-10-04, finding 2): ONE server shared with WiiMOutput and
+        # The clip server is a process-wide singleton: ONE server shared with WiiMOutput and
         # the dashboard's test-clip lane. Constructing here only CREATES
         # it if absent; binding happens in async setup() via
         # shared_clip_server() — the constructor can't await. A missing
@@ -299,7 +298,7 @@ class SonosOutput(FrameProcessor):
         self._sample_rate = 24000
         self._channels = 1
         self._clip_count = 0
-        self._speech_epoch = 0  # Fix A: generation stamp; load-anchored timers re-anchor only while current
+        self._speech_epoch = 0  # generation stamp; load-anchored timers re-anchor only while current
         if not self._enabled:
             logger.info("sonos_output disabled in config.yaml")
         elif self._zone not in self._zones:
@@ -309,8 +308,8 @@ class SonosOutput(FrameProcessor):
         # legacy gear — and our playback path can't notice: we construct
         # SonosWebsocket(ip, player_id=uid) with the id from config, which
         # BYPASSES the library's AUDIO_CLIP capability check
-        # (get_player_id() short-circuits on a provided id; design note
-        # says "S2 Port/Amp only" but the real rule is the capability flag,
+        # (get_player_id() short-circuits on a provided id; an early reading
+        # said "S2 Port/Amp only" but the real rule is the capability flag,
         # per docs.sonos.com/reference/audioclip). Audit ONCE per process:
         # connect WITHOUT player_id (forcing the library to resolve the id
         # — and check AUDIO_CLIP — itself), cross-check the resolved id
@@ -333,7 +332,7 @@ class SonosOutput(FrameProcessor):
         # setup() is the guaranteed lifecycle hook in pipecat 1.11 —
         # FrameProcessor.start() is NOT auto-called for bare processors.
         await super().setup(setup)
-        # Singleton lane (Opus audit 2026-10-04, finding 2): one server
+        # Singleton lane: one server
         # per process, shared with WiiMOutput + the dashboard. Constructed
         # and bound HERE (or reused if WiiM/setup already bound it) —
         # never a second bind on the port.
@@ -345,7 +344,7 @@ class SonosOutput(FrameProcessor):
     async def cleanup(self):
         # Shared server: do NOT stop it here — other pipelines may still
         # reference it, and the bot process exit releases the port anyway.
-        # M13 (Opus review): the duck-holder task dies with THIS pipeline
+        # The duck-holder task dies with THIS pipeline
         # whatever ended it (EndFrame/error shutdown), not just CancelFrame.
         self._stop_duck_holder()
         await super().cleanup()
@@ -421,7 +420,7 @@ class SonosOutput(FrameProcessor):
         import lameenc
 
         pcm = b"\x00\x00" * (24000 * 30)  # 30s of silence, 16-bit mono
-        # M4: same blocking-encode rule — one-shot, but the first holder
+        # Same blocking-encode rule — one-shot, but the first holder
         # start happens on the pipeline's event loop.
         def _encode():
             encoder = lameenc.Encoder()
@@ -468,7 +467,7 @@ class SonosOutput(FrameProcessor):
                 if not awake:
                     if sw is not None:
                         # Gate closed: cancel the holder clip AND any
-                        # still-active reply-tail clip (M2 — an 8s tail
+                        # still-active reply-tail clip (an 8s tail
                         # sounding past the conversation would hold the
                         # duck), then drop the connection. The music
                         # unducks the moment no clip is active.
@@ -508,7 +507,7 @@ class SonosOutput(FrameProcessor):
                         sw = SonosWebsocket(
                             zone["ip"], player_id=zone["player_uid"]
                         )
-                        # H7 (Opus review): every Sonos call is bounded —
+                        # Every Sonos call is bounded —
                         # a hung player must never stall the holder.
                         await asyncio.wait_for(sw.connect(), timeout=5.0)
                     except Exception as e:
@@ -545,7 +544,7 @@ class SonosOutput(FrameProcessor):
                             sw.play_clip(url, volume=self._volume_for(zone_name or self._zone)), timeout=5.0
                         )
                     except Exception as e:
-                        # H7: the websocket may be dead (Sonos reboot, wifi
+                        # The websocket may be dead (Sonos reboot, wifi
                         # blip) — close and drop it so the NEXT tick
                         # reconnects instead of retrying on the corpse.
                         logger.warning(f"sonos_output: duck load failed: {e}")
@@ -609,7 +608,7 @@ class SonosOutput(FrameProcessor):
         return self._volume
 
     async def _speak_to_sonos(self, pcm: bytes, epoch: int | None = None) -> None:
-        # Unpadded speech duration (Fix A): every speech-window timer —
+        # Unpadded speech duration: every speech-window timer —
         # echo gate, end-of-speech LED, wake-gate cap — uses this one
         # number; the 8s duck-tail padding below extends the CLIP (and
         # the duck window, which measures it again at load), not the
@@ -621,7 +620,7 @@ class SonosOutput(FrameProcessor):
         # the mic will hear it off the zone speakers (no AEC by design).
         if self._echo_gate is not None:
             self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
-        # Duck-tail (M2, Opus review): pad 8s of silence onto the clip so
+        # Duck-tail: pad 8s of silence onto the clip so
         # the duck outlives her speech — the holder refreshes its own
         # silence over this tail (silence-for-silence, no seam). ONLY when
         # the holder is enabled AND the gate still holds the turn: with
@@ -644,10 +643,10 @@ class SonosOutput(FrameProcessor):
             return
         volume = self._volume_for(zone_name)
         # MP3, not WAV — the proven-working format for Sonos audioClip
-        # (design note; WAV is not in Sonos's documented supported set).
+        # (WAV is not in Sonos's documented supported set).
         import lameenc
 
-        # M4 (Opus review): lameenc encode is CPU-bound and blocks — it
+        # lameenc encode is CPU-bound and blocks — it
         # runs in a thread. This coroutine IS the voice pipeline's event
         # loop context: a blocking encode stalls audio ingest, OWW
         # scoring and the LEDs for the encode duration every reply.
@@ -674,13 +673,13 @@ class SonosOutput(FrameProcessor):
 
         sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
         try:
-            await asyncio.wait_for(sw.connect(), timeout=5.0)  # H7: bounded
+            await asyncio.wait_for(sw.connect(), timeout=5.0)  # bounded
             resp = await asyncio.wait_for(
                 sw.play_clip(url, volume=volume), timeout=5.0
             )
-            # ── Fix A (2026-10-05): LOAD-ANCHORED TIMERS ──
+            # ── LOAD-ANCHORED TIMERS ──
             # Generation-anchored timers fired early on the v4 dialogue
-            # lane (measured 12:12:46 gen → 12:12:49.6 load, 3.4s gap):
+            # lane (measured a 3.4s gap from generation to load):
             # end-of-speech LED flipped the ring to listening, the echo
             # gate reopened the mic, and note_speech capped the gate's
             # LOCKED safety release — all BEFORE her last syllable. The
@@ -699,7 +698,7 @@ class SonosOutput(FrameProcessor):
                         self._wake_gate.note_speech(duration)
                     except Exception:
                         pass  # gate hint must never break the reply
-            # M3 (Opus review): duck ownership starts HERE — the clip is
+            # Duck ownership starts HERE — the clip is
             # actually sounding on the player now, so this is the honest
             # start of the "reply owns the duck" window. (duration counts
             # the tail too, which is exactly what the player will play.)
@@ -714,7 +713,7 @@ class SonosOutput(FrameProcessor):
             except Exception:
                 pass
 
-    # ── B3 barge-in (design note) ────────────────────────────────────
+    # ── Wake-word barge-in ─────────────────────────────────────────────
 
     async def stop_current_clip(self) -> None:
         """Kill the sounding reply clip (wake-word barge-in). Idempotent:
@@ -726,7 +725,7 @@ class SonosOutput(FrameProcessor):
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
         self._cancel_end_of_speech()
         self._clip_active_until = 0.0
-        # Echo-gate rider (030): the clip is dead — its duration gate must
+        # Echo-gate rider: the clip is dead — its duration gate must
         # not eat the interrupting question. relax() never extends a
         # lapsed gate, and text containment stays armed.
         if self._echo_gate is not None:
@@ -782,7 +781,7 @@ class SonosOutput(FrameProcessor):
             if self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
-                # Fix A (2026-10-05): timers anchor at CLIP-LOAD time, set
+                # Timers anchor at CLIP-LOAD time, set
                 # inside _speak_to_sonos when play_clip returns. This
                 # generation-time schedule is the FALLBACK: it only stands
                 # if the speak task dies before loading (encode/zone/write
@@ -794,13 +793,13 @@ class SonosOutput(FrameProcessor):
                 if self._led:
                     # TTSStopped = GENERATION end, not playback end. ElevenLabs
                     # bursts the whole clip through the pipeline in <1s while
-                    # the Sonos sounds it for `duration` seconds (measured
-                    # 2026-09-30 15:16: cyan flashed 0.6s, then purple through
+                    # the Sonos sounds it for `duration` seconds (measured:
+                    # cyan flashed 0.6s, then purple through
                     # 18s of actual speech). Schedule the end-of-speaking LED
                     # for when the audio stops SOUNDING, not when frames stop.
                     duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
                     self._schedule_end_of_speech(duration + 0.5)  # Sonos load ~0.2 + tail
-                # M1: the wake gate's LOCKED safety cap tracks the REAL
+                # The wake gate's LOCKED safety cap tracks the REAL
                 # speech window (not its 30s fallback).
                 if self._wake_gate is not None:
                     try:
@@ -809,11 +808,11 @@ class SonosOutput(FrameProcessor):
                         )
                     except Exception:
                         pass  # gate hint must never break the reply
-                # Duck ownership (M3, Opus review): starts when the clip
+                # Duck ownership: starts when the clip
                 # actually LOADS on the player (in _speak_to_sonos), not
                 # here at generation end — the encode/write/connect/load
                 # chain can exceed any margin set this early. The load
-                # site re-anchors all speech timers (Fix A).
+                # site re-anchors all speech timers.
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm, epoch=gen))
             elif self._led:

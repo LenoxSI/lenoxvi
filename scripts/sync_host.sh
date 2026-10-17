@@ -22,7 +22,7 @@ scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 # Gitignored runtime files travel alongside the bundle — the host's
 # config.yaml/AGENTS.md/CLAUDE.md are NOT in git anymore (2026-09-20).
 #
-# CONFIG AUTHORITY (amended 2026-09-30, design note follow-up): the host's
+# CONFIG AUTHORITY: the host's
 # config.yaml is the LIVE one — the dashboard edits it at runtime. The
 # VM copy is a bootstrap/editing convenience ONLY. So: PULL host ->
 # VM first, then ship everything EXCEPT config.yaml. Never push config.

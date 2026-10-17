@@ -2,16 +2,16 @@
 # fetch_xmos_fw.sh — download the XMOS XVF3800 I2S-master firmware image
 # (the ONLY image the mic nodes will run; see README "Mic node hardware").
 #
-# WHY THIS IS A DOWNLOAD AND NOT A COMMITTED FILE (M15, Opus review):
+# WHY THIS IS A DOWNLOAD AND NOT A COMMITTED FILE:
 # the image is released by the reSpeaker project with NO LICENSE file —
 # redistributing it in this repo is not permitted. You fetch it from
 # upstream, same as a trained wake-word model.
 #
-# Source (measured, design note): reSpeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY
+# Source (measured):reSpeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY
 # → xmos_firmwares/i2s/application_xvf3800_i2s_master_v1.0.8_48k.bin
 # md5 a78df62809b03a7bec72bfa139a17521, 888,832 bytes.
 #
-# NEVER flash the slave image (16k) — boot lottery, 4 lost days (design note).
+# NEVER flash the slave image (16k) — boot lottery, 4 lost days.
 set -euo pipefail
 
 DEST="${1:-firmware/xvf3800/application_xvf3800_i2s_master_v1.0.8_48k.bin}"

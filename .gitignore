@@ -14,11 +14,11 @@ node_modules/
 # wake word models — stay local, never in GitHub
 *.onnx
 
-# agent-facing rule files — notes-backed, never GitHub
+# agent-facing rule files — kept privately, never GitHub
 AGENTS.md
 CLAUDE.md
-# brand design kit — PRIVATE (NAS master: the design kit).
-# Never GitHub, never in history (the owner, 2026-10-07). The React build bakes what
+# brand design kit — PRIVATE (master copy lives on the NAS).
+# Never GitHub, never in history. The React build bakes what
 # the page renders into dashboard-ui/dist; this folder stays local-only.
 design/
 # runtime config — template is config.example.yaml
@@ -30,7 +30,7 @@ config.backup.yaml
 # (dashboard upload / deploy_firmware.sh --track array|flex) — built images,
 # never committed
 # firmware/xvf3800 is fetched at bring-up (fetch_xmos_fw.sh) — the upstream
-# image ships no license, so it must not be committed (M15)
+# image ships no license, so it must not be committed
 certs/
 clips/
 firmware/array/

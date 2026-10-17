@@ -13,7 +13,7 @@ project(node_esp32 VERSION 1.1.0)); project names are array_esp32 /
 flex_esp32 since 1.2.9. esptool image_info v1 does NOT print
 the app version, so we parse it ourselves.
 
-M9 (design note): deploy_firmware.sh uses this so the SHIPPED manifest can
+deploy_firmware.sh uses this so the SHIPPED manifest can
 never disagree with the binary it ships — the bin is the truth, the
 script's counter is not.
 """

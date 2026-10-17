@@ -1,5 +1,5 @@
 # lenoxvi-bot.service.example — sanitized copy of the production unit
-# (Opus review H4: the real launch config lived only on the appliance
+# (the real launch config lived only on the appliance
 # host, untracked — a fresh clone had no way to run the bot as a
 # service). Adjust every <PLACEHOLDER> and the venv python version.
 #

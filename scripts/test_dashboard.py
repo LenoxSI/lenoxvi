@@ -110,7 +110,7 @@ def main():
         PIPECAT_HANDLER_HITS.append((request.url.path, str(exc.errors())))
         return _PJR(status_code=422, content=_pje({"detail": exc.errors()}))
 
-    # H5: guard.py requires an IP-literal Host (public-DNS hosts are the
+    # guard.py requires an IP-literal Host (public-DNS hosts are the
     # rebinding vector) — TestClient's default 'testserver' would 403.
     # raise_server_exceptions=False: a handler crash must surface as the
     # 500 the live app returns, not abort the suite.
@@ -120,7 +120,7 @@ def main():
     r = client.get("/dashboard")
     check("GET /dashboard -> 200 html", r.status_code == 200 and "dashboard" in r.text)
 
-    # 2026-10-16: page.html fallback DELETED (041 sweep) — dist/ missing
+    # 2026-10-16: page.html fallback DELETED — dist/ missing
     # must 404 naming the build step, never serve a stale page.
     # (REPO_CORE anchors this the same way __init__.py resolves ui_index:
     # parents[2] of core/dashboard/__init__.py == REPO_CORE.parent.)
@@ -183,7 +183,7 @@ def main():
     s = client.get("/api/dashboard/status").json()
     check("status shape", all(k in s for k in
           ("uptime_secs", "active_room", "last_wake", "rooms")), f"s={s}")
-    # H1 contract: bot.py passes THIS pipeline's room (room_for_pc) — the
+    # Contract: bot.py passes THIS pipeline's room (room_for_pc) — the
     # bare-call form is gone; a wake with no room records room=None.
     registry.note_wake("bedroom")
     s = client.get("/api/dashboard/status").json()
@@ -242,11 +242,11 @@ def main():
     else:
         print("[SKIP] no real zone in config — skipping live Sonos test")
 
-    # 8m. Opus smalls M10/M11/M12/M14 pins (design note, fixed 2026-10-08)
+    # 8m. Small-fix pins (fixed 2026-10-08)
     import importlib
     import config as _cfg_mod
     _saved_cwd = os.getcwd()
-    # M10: config resolves to the REPO ROOT when LVI_CONFIG is unset —
+    # Config resolves to the REPO ROOT when LVI_CONFIG is unset —
     # a different cwd must NOT silently read {}. We chdir to / and
     # check the resolved path is absolute + repo-anchored.
     _saved_os_config = os.environ.pop("LVI_CONFIG", None)
@@ -255,17 +255,17 @@ def main():
         # fresh import so CONFIG_PATH re-resolves without the env override
         importlib.reload(_cfg_mod)
         _cp = str(_cfg_mod.CONFIG_PATH)
-        check("M10 config path is repo-anchored (cwd-proof)",
+        check("config path is repo-anchored (cwd-proof)",
               "lenoxvi" in _cp and os.path.isabs(_cp)
               and _cp.endswith("config.yaml"), f"CONFIG_PATH={_cp}")
-        check("M10 config loads away from repo root",
+        check("config loads away from repo root",
               bool(_cfg_mod.cfg("tts")), f"tts={_cfg_mod.cfg('tts')}")
     finally:
         os.chdir(_saved_cwd)
         if _saved_os_config is not None:
             os.environ["LVI_CONFIG"] = _saved_os_config
         importlib.reload(_cfg_mod)  # restore the suite's throwaway config
-    # M11: a failed ClipServer.start() must NOT leave a half-bound
+    # A failed ClipServer.start() must NOT leave a half-bound
     # runner — simulate by double-starting on the same port: the
     # second singleton user reuses it (no EADDRINUSE), and a forced
     # raw second bind fails cleanly with the runner still reusable.
@@ -275,7 +275,7 @@ def main():
         _cs = await shared_clip_server()
         _first_runner = _cs._runner
         _again = await shared_clip_server()
-        check("M11 shared clip server is a true singleton",
+        check("shared clip server is a true singleton",
               _again is _cs and _cs._runner is _first_runner,
               f"first={_first_runner is not None} again-identity={_again is _cs}")
         # raw double-bind on the SAME interface + port as the singleton
@@ -284,17 +284,17 @@ def main():
         _raw = ClipServer(Path(tempfile.mkdtemp()), _cs._host_ip, _cs._port)
         try:
             await _raw.start()
-            check("M11 raw double-bind raises (no silent second server)", False,
+            check("raw double-bind raises (no silent second server)", False,
                   "raw start on a taken port unexpectedly succeeded")
             try:
                 await _raw.stop()
             except Exception:
                 pass
         except Exception:
-            check("M11 raw double-bind raises (no silent second server)", True, "")
-            check("M11 failed bind leaves no half-bound runner",
+            check("raw double-bind raises (no silent second server)", True, "")
+            check("failed bind leaves no half-bound runner",
                   _raw._runner is None, f"runner={_raw._runner}")
-        check("M11 singleton still healthy after a failed raw bind",
+        check("clip server singleton still healthy after a failed raw bind",
               _cs._runner is _first_runner, "")
 
     import asyncio as _aio
@@ -303,8 +303,8 @@ def main():
         _aio.run(_m11_pins())
     except RuntimeError as _re11:
         # running loop already exists (suite invoked under one) — hop on it
-        check("M11 pins ran under an existing loop", False, f"loop hop failed: {_re11}")
-    # M12: missing TTS secret fails construction with a CLEAR error
+        check("clip server pins ran under an existing loop", False, f"loop hop failed: {_re11}")
+    # Missing TTS secret fails construction with a CLEAR error
     # naming the variable (not a bare KeyError deep in pipecat).
     _saved_el = os.environ.pop("ELEVENLABS_API_KEY", None)
     _saved_dg = os.environ.pop("DEEPGRAM_API_KEY", None)
@@ -313,7 +313,7 @@ def main():
         importlib.reload(_cfg_mod)
         _prov = _cfg_mod.cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
         _need = "ELEVENLABS_API_KEY" if str(_prov).startswith("eleven") else None
-        check("M12 missing secret detected at construction (clear error shape)",
+        check("missing TTS secret detected at construction (clear error shape)",
               _need == "ELEVENLABS_API_KEY"
               and not os.environ.get("ELEVENLABS_API_KEY"),
               f"provider={_prov}")
@@ -324,53 +324,53 @@ def main():
             os.environ["DEEPGRAM_API_KEY"] = _saved_dg
         os.environ.pop("LVI_TTS_PROVIDER", None)
         importlib.reload(_cfg_mod)
-    # M14: zone DELETE with a dangling room mapping does ONE atomic
+    # Zone DELETE with a dangling room mapping does ONE atomic
     # multi-section write (zone gone + mapping cleaned, same pass).
-    # 041 H3: the probe WiiM zone carries NO player_uid — this used to
+    # The probe WiiM zone carries NO player_uid — this used to
     # need a fake RINCON because ZonePayload required a uid for every
     # backend (so the real UI's WiiM add 422'd every time).
     _r_add14 = client.post("/api/dashboard/zones", json={
         "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9"})
-    check("M14 probe zone add ok (wiim, no player_uid — 041 H3)",
+    check("probe zone add ok (wiim, no player_uid)",
           _r_add14.status_code == 200, f"status={_r_add14.status_code} body={_r_add14.text[:120]}")
     _wz14 = ((config_store.read_section("wiim") or {}).get("zones") or {}).get("m14_probe_zone")
-    check("H3 wiim zone written without a player_uid key",
+    check("wiim zone written without a player_uid key",
           isinstance(_wz14, dict) and "player_uid" not in _wz14, f"zone={_wz14}")
-    # 041 H3: the UI's exact pre-fix WiiM body (player_uid: '') is legal;
+    # The UI's exact pre-fix WiiM body (player_uid: '') is legal;
     # any stray value sent for wiim is dropped, never written.
     _r_h3 = client.post("/api/dashboard/zones", json={
         "name": "h3_probe_zone", "backend": "wiim", "ip": "127.0.0.8",
         "player_uid": ""})
-    check("H3 wiim zone add with empty player_uid ok",
+    check("wiim zone add with empty player_uid ok",
           _r_h3.status_code == 200, f"status={_r_h3.status_code} body={_r_h3.text[:120]}")
     client.delete("/api/dashboard/zones/h3_probe_zone")
     # Sonos still REQUIRES a real uid (validator, sonos-only).
     _r_h3s = client.post("/api/dashboard/zones", json={
         "name": "h3_sonos_nouid", "backend": "sonos", "ip": "127.0.0.7"})
-    check("H3 sonos zone without player_uid 422s",
+    check("sonos zone without player_uid 422s",
           _r_h3s.status_code == 422, f"status={_r_h3s.status_code} body={_r_h3s.text[:120]}")
     _r_h3t = client.post("/api/dashboard/zones", json={
         "name": "h3_sonos_short", "backend": "sonos", "ip": "127.0.0.7",
         "player_uid": "RINC"})
-    check("H3 sonos zone with short player_uid 422s",
+    check("sonos zone with short player_uid 422s",
           _r_h3t.status_code == 422, f"status={_r_h3t.status_code} body={_r_h3t.text[:120]}")
-    check("H3 rejected sonos probes never reached config",
+    check("rejected sonos probes never reached config",
           not ({"h3_sonos_nouid", "h3_sonos_short"}
                & set(((config_store.read_section("sonos") or {}).get("zones") or {}))),
           "")
     client.put("/api/dashboard/mapping", json={
         "room_zones": {"m14_probe_room": "m14_probe_zone"}})
     _del = client.delete("/api/dashboard/zones/m14_probe_zone")
-    check("M14 delete zone ok (with dangling mapping)",
+    check("delete zone ok (with dangling mapping)",
           _del.status_code == 200, f"status={_del.status_code} body={_del.text[:120]}")
-    check("M14 dangling room mapping dropped in the same write",
+    check("dangling room mapping dropped in the same write",
           _del.json().get("dropped_room_mappings") == ["m14_probe_room"],
           f"body={_del.text[:120]}")
     _probe = (config_store.read_section("room_zones") or {}).get("m14_probe_room")
-    check("M14 probe mapping actually gone from config",
+    check("probe mapping actually gone from config",
           _probe is None, f"room_zones m14_probe_room={_probe}")
 
-    # 041 M5: /mapping only runs soco name lookups on ?names=1, and only
+    # /mapping only runs soco name lookups on ?names=1, and only
     # for SONOS zones (the 5s UI poll used to hit every zone, WiiM
     # included, on every tick).
     from dashboard import routes as _routes_m5
@@ -379,13 +379,13 @@ def main():
     _routes_m5._sonos_names = lambda zones: (_m5_calls.append(sorted(zones)) or {k: k for k in zones})
     try:
         _rm = client.get("/api/dashboard/mapping")
-        check("041 M5 plain /mapping poll runs NO soco lookup and omits sonos_names",
+        check("plain /mapping poll runs NO soco lookup and omits sonos_names",
               _rm.status_code == 200 and not _m5_calls and "sonos_names" not in _rm.json(),
               f"calls={_m5_calls} keys={list(_rm.json())}")
         _rn = client.get("/api/dashboard/mapping?names=1")
         _wiim_keys_m5 = set(((config_store.read_section("wiim") or {}).get("zones") or {}))
         _sonos_keys_m5 = set(((config_store.read_section("sonos") or {}).get("zones") or {}))
-        check("041 M5 ?names=1 looks up Sonos zones only (never WiiM)",
+        check("?names=1 looks up Sonos zones only (never WiiM)",
               _rn.status_code == 200 and len(_m5_calls) == 1
               and set(_m5_calls[0]) == _sonos_keys_m5
               and not (set(_m5_calls[0]) & _wiim_keys_m5)
@@ -394,7 +394,7 @@ def main():
     finally:
         _routes_m5._sonos_names = _real_names_m5
 
-    # 041 L3: ONE volume truth. /mapping serves effective_volumes for every
+    # ONE volume truth. /mapping serves effective_volumes for every
     # zone through the same resolver as the test tone; each zone resolves
     # in its OWN backend section; one code default everywhere.
     import yaml as _yaml_l3
@@ -404,9 +404,9 @@ def main():
     _sonos_keys_l3 = set(((config_store.read_section("sonos") or {}).get("zones") or {}))
     _wiim_keys_l3 = set(((config_store.read_section("wiim") or {}).get("zones") or {}))
     _ev = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
-    check("041 L3 effective_volumes covers every zone (sonos ∪ wiim)",
+    check("effective_volumes covers every zone (sonos ∪ wiim)",
           bool(_ev) and set(_ev) == _sonos_keys_l3 | _wiim_keys_l3, f"ev={_ev}")
-    check("041 L3 effective volume == test-tone volume for every zone (one resolver)",
+    check("effective volume == test-tone volume for every zone (one resolver)",
           bool(_ev) and all(_ev[z] == _routes_l3._zone_test_volume(z, _routes_l3._backend_of(z)) for z in _ev), f"ev={_ev}")
     # backend isolation: a Sonos global change must not move a WiiM zone
     _sonos_sec_l3 = dict(config_store.read_section("sonos") or {})
@@ -417,7 +417,7 @@ def main():
         _ev2 = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
         _wiim_glob = (config_store.read_section("wiim") or {}).get("clip_volume")
         _wiim_expect = int(_wiim_glob) if _wiim_glob is not None else getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None)
-        check("041 L3 Sonos global moves Sonos zones only; WiiM resolves in its own section",
+        check("Sonos global moves Sonos zones only; WiiM resolves in its own section",
               bool(_ev2) and all(_ev2[z] == 61 for z in _sonos_keys_l3)
               and all(_ev2[z] == _wiim_expect for z in _wiim_keys_l3 if z not in _wo_l3._LIVE_WIIM_VOLUMES),
               f"ev2={_ev2} wiim_expect={_wiim_expect}")
@@ -426,7 +426,7 @@ def main():
             _z = sorted(_sonos_keys_l3)[0]
             _so_l3.zone_volume_overrides({_z: 13})
             _ev3 = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
-            check("041 L3 live slider override wins", _ev3.get(_z) == 13, f"ev3={_ev3}")
+            check("live slider override wins", _ev3.get(_z) == 13, f"ev3={_ev3}")
     finally:
         config_store.write_section("sonos", _sonos_sec_l3)
         _so_l3.zone_volume_overrides(_saved_live_l3)
@@ -435,7 +435,7 @@ def main():
     _cfg_l3 = SCRATCH / "l3-novol.yaml"
     _cfg_l3.write_text(_yaml_l3.safe_dump({"sonos": {"enabled": False, "zones": {}}}))
     _so_def = _so_l3.SonosOutput(config_path=str(_cfg_l3), echo_gate=None, zone_selector=lambda: None, led=None)
-    check("041 L3 SonosOutput default clip volume == DEFAULT_CLIP_VOLUME (was 70)",
+    check("SonosOutput default clip volume == DEFAULT_CLIP_VOLUME (was 70)",
           _so_def._volume == getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None) == 35,
           f"sonos={_so_def._volume} default={getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None)}")
 
@@ -448,13 +448,13 @@ def main():
         check("TTS GET never leaks key values",
               "api_key" not in t and not any("sk_" in str(v) for v in t.values()),
               f"keys={list(t)}")
-        # 041 M1: GET /tts serves the FULL accepted catalog per provider —
+        # GET /tts serves the FULL accepted catalog per provider —
         # the UI's only pick-list source (it hardcoded 12/40 Aura, 16/36
         # Flux). Every catalog entry must pass the server's own validation
         # (no I/O: validate the payload directly), so the list can never
         # offer a value the PUT rejects.
         _cat = t.get("catalog") or {}
-        check("041 M1 TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36)",
+        check("TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36)",
               len(_cat.get("elevenlabs", [])) == 2 and len(_cat.get("deepgram", [])) == 40
               and len(_cat.get("deepgram-flux", [])) == 36,
               str({k: len(v) for k, v in _cat.items()}))
@@ -472,7 +472,7 @@ def main():
                     _routes_m1._validate_tts_payload(_p)
                 except Exception as _e:
                     _m1_bad.append((_prov, _v, str(_e)[:40]))
-        check("041 M1 every catalog entry passes the server's own TTS validation",
+        check("every catalog entry passes the server's own TTS validation",
               not _m1_bad and sum(len(v) for v in _cat.values()) == 78, f"bad={_m1_bad[:3]}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
@@ -528,7 +528,7 @@ def main():
     r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram", "deepgram_voice": "aura-2-nonexistent-en"})
     check("TTS PUT rejects unknown Aura-2 voice", r.status_code == 422, f"status={r.status_code}")
-    # ONE provider, model picks the lane (the owner 12:05 + trim 13:20): only
+    # ONE provider, model picks the lane: only
     # flash_v2_5 and v4_turbo are in the menu — flash rides the Realtime
     # TTS WS, v4_turbo rides Text-to-Dialogue. v2/v3/v4-regular retired.
     r = client.put("/api/dashboard/tts", json={
@@ -544,7 +544,7 @@ def main():
         "provider": "elevenlabs", "deepgram_voice": "aura-2-zeus-en"})
     check("TTS PUT elevenlabs-without-voice_id rejected (422)",
           r.status_code == 422, f"status={r.status_code}")
-    # ONE provider, model picks the lane (the owner 12:05): v3/v4 models are
+    # ONE provider, model picks the lane: v3/v4 models are
     # legal on 'elevenlabs' (bot.py routes them to Text-to-Dialogue);
     # 'elevenlabs-v4' is gone. Round-trips must persist provider+model.
     r = client.put("/api/dashboard/tts", json={
@@ -575,8 +575,8 @@ def main():
 
     # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
     # runs on the same host as prod). LVI_RESTART_COMMAND used to override
-    # the command, but that env hook was a prod code-exec lane (Opus
-    # audit 2026-10-04) and is now deleted. The suite monkeypatches
+    # the command, but that env hook was a prod code-exec lane
+    # (found 2026-10-04) and is now deleted. The suite monkeypatches
     # subprocess.run IN THIS PROCESS so systemd-run never executes while
     # the route's code is fully exercised.
     real_run = subprocess.run
@@ -628,12 +628,12 @@ def main():
         _j_mut = _r_mut.json()
         ok = (_r_mut.status_code == 501
               and "physical mute button" in str(_j_mut.get("detail", ""))
-              and "1.2.11" in str(_j_mut.get("detail", ""))  # H4: what fixes it on array
+              and "1.2.11" in str(_j_mut.get("detail", ""))  # what fixes it on array
               and "1.1.0+ required" not in str(_j_mut.get("detail", "")))
         check("mute: unknown-cmd 501s with the per-line truth (no firmware lie)",
               ok, f"status={_r_mut.status_code} body={_r_mut.text[:140]}")
 
-        # 041 M3: restart + wifi check the node's ack — ok:false is a 502,
+        # Restart + wifi check the node's ack — ok:false is a 502,
         # never a lying 200. Replies are the real firmware strings
         # (cmd.cpp: restart "rebooting"; set_wifi "nvs error" /
         # "stored, connecting").
@@ -645,43 +645,43 @@ def main():
         _routes_mut.node_command.request = _fake_m3_request
         _m3_reply["restart"] = {"ok": False, "data": "busy"}
         _r = client.post("/api/dashboard/nodes/suite-mute-probe/restart")
-        check("M3 restart: node ok:false → 502 (041)",
+        check("restart: node ok:false → 502",
               _r.status_code == 502 and "busy" in _r.text, f"status={_r.status_code} body={_r.text[:120]}")
         _m3_reply["restart"] = {"ok": True, "data": "rebooting"}
         _r = client.post("/api/dashboard/nodes/suite-mute-probe/restart")
-        check("M3 restart: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
+        check("restart: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
         _m3_reply["set_wifi"] = {"ok": False, "data": "nvs error"}
         _r = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
                          json={"ssid": "suite-net", "password": "suite-secret-pw"})
-        check("M3 wifi: node ok:false → 502, password never echoed (041)",
+        check("wifi: node ok:false → 502, password never echoed",
               _r.status_code == 502 and "nvs error" in _r.text
               and "suite-secret-pw" not in _r.text,
               f"status={_r.status_code} body={_r.text[:120]}")
         _m3_reply["set_wifi"] = {"ok": True, "data": "stored, connecting"}
         _r = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
                          json={"ssid": "suite-net", "password": "suite-secret-pw"})
-        check("M3 wifi: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
+        check("wifi: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
 
-        # 041 M7: MutePayload.mute is REQUIRED — a body-less/empty POST
+        # MutePayload.mute is REQUIRED — a body-less/empty POST
         # must never mute a node (old default=True did).
         _m3_reply["set_mute"] = {"ok": True, "data": {"muted": True}}
         _r_e = client.post("/api/dashboard/nodes/suite-mute-probe/mute", json={})
         _r_n = client.post("/api/dashboard/nodes/suite-mute-probe/mute")
-        check("M7 mute: empty body / no body 422 (no default-True trap)",
+        check("mute: empty body / no body 422 (no default-True trap)",
               _r_e.status_code == 422 and _r_n.status_code == 422,
               f"empty={_r_e.status_code} none={_r_n.status_code}")
-        # H4: a successful set_mute updates the room record from the ACK
+        # A successful set_mute updates the room record from the ACK
         # (the node's truth), so /status agrees before the next push.
         _r_h4 = client.post("/api/dashboard/nodes/suite-mute-probe/mute", json={"mute": True})
         _rec_h4 = next((r for r in _reg_mut.known_rooms() if r["room"] == "suite-mute-probe"), {})
-        check("H4 set_mute ack updates the room record (muted=True)",
+        check("mute: set_mute ack updates the room record (muted=True)",
               _r_h4.status_code == 200 and _rec_h4.get("muted") is True,
               f"status={_r_h4.status_code} rec={_rec_h4}")
     finally:
         _routes_mut.node_command.request = _real_request
         _reg_mut.mark_disconnected("suite-mute-pc")
 
-    # 041 M7: extra="forbid" on EVERY write payload — a misspelled key
+    # extra="forbid" on EVERY write payload — a misspelled key
     # 422s instead of silently no-opping (the mapping-wipe bug's wider
     # cousin). Each body is otherwise VALID, so the extra key is the only
     # reason to reject; config.yaml must be byte-identical afterwards.
@@ -708,12 +708,12 @@ def main():
         _det = _rr.json().get("detail") if _rr.status_code == 422 else None
         if not (_rr.status_code == 422 and "extra_forbidden" in str(_det)):
             _m7_bad.append((_url, _rr.status_code, _rr.text[:80]))
-    check(f"M7 extra key 422s on all {len(_m7_cases)} write payloads (041)",
+    check(f"extra key 422s on all {len(_m7_cases)} write payloads",
           not _m7_bad, f"not forbidden: {_m7_bad}")
-    check("M7 forbidden writes left config.yaml byte-identical",
+    check("forbidden writes left config.yaml byte-identical",
           _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest() == _sha_m7, "")
 
-    # 045 follow-up (2026-10-16): the legacy manifest-only POST route is
+    # 2026-10-16: the legacy manifest-only POST route is
     # REMOVED — the upload route is the only manifest writer (version and
     # track come from the image itself, board-identity-guarded). A bare
     # manifest write could point the array track at anything.
@@ -747,7 +747,7 @@ def main():
           not [p for p, _ in PIPECAT_HANDLER_HITS if p.startswith("/api/dashboard")],
           f"hits={[p for p, _ in PIPECAT_HANDLER_HITS][:5]}")
 
-    # 9b2. Key-route hardening (Opus audit finding 1): the character-class
+    # 9b2. Key-route hardening: the character-class
     # pattern must reject newline injection (the old code-exec lane) and
     # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch
     # .env so the suite never touches a real key file.
@@ -777,7 +777,7 @@ def main():
     finally:
         os.environ.pop("LVI_ENV_FILE", None)
 
-    # 9b3. Clip server singleton (Opus audit finding 2): SonosOutput and
+    # 9b3. Clip server singleton: SonosOutput and
     # WiiMOutput must share ONE server. Two mixed-backend pipelines +
     # the dashboard test-clip lane must all resolve to the same object
     # with exactly ONE bind on the port. (Suite runs on port 8766 via
@@ -810,8 +810,8 @@ def main():
     check("clip server url_for works (quotes filenames)",
           _url.endswith("/probe.mp3") and _url.startswith("http://"), f"url={_url}")
 
-    # 9b4. Reply-time backend dispatch regression (Opus finding #6; the
-    # 2026-10-04 23:22 bedroom outage): bot.py must wire BOTH output
+    # 9b4. Reply-time backend dispatch regression (the
+    # 2026-10-04 bedroom outage): bot.py must wire BOTH output
     # backends into the pipeline UNCONDITIONALLY. The old build-time
     # ternary picked one backend before the offer tee correlated the
     # room, so a WiiM room could land on a Sonos-only pipeline and every
@@ -837,7 +837,7 @@ def main():
                         and isinstance(_sub.func, _ast.Name)
                         and _sub.func.id in ("SonosOutput", "WiiMOutput")):
                     _conditional.append(_sub.func.id)
-    # B3 (design note): the backends can be hoisted to variables before
+    # The backends can be hoisted to variables before
     # the Pipeline (the interrupt closure needs the objects) — accept the
     # hoisted form when BOTH constructors run unconditionally at module
     # scope of run_bot, no ternary anywhere.
@@ -852,9 +852,9 @@ def main():
     check("bot.py: BOTH output backends wired into the pipeline",
           set(_wired) == {"SonosOutput", "WiiMOutput"},
           f"wired={_wired} (dispatch must be reply-time, not build-time)")
-    check("bot.py: no build-time ternary picks the backend (23:22 outage shape)",
+    check("bot.py: no build-time ternary picks the backend (the bedroom-outage shape)",
           not _conditional, f"conditional={_conditional}")
-    # 9b11 rider (the 20:56 stub incident): the intelligence construction ternary
+    # 9b11 rider (the echo-stub incident): the intelligence construction ternary
     # must route BOTH live kinds (hermes, openclaw) to HermesAgent — a
     # kind the ternary doesn't know falls to the echo stub silently while
     # every agent-level suite check stays green. The dispatch is the
@@ -943,7 +943,7 @@ def main():
                   for r in _reg.known_rooms()),
           f"held={_reg._fw_by_pc} rooms={_reg.known_rooms()}")
 
-    # H4 (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
+    # Mute state (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
     # state — fw_push carries "muted" at connect, mute_push fires when an
     # array node's PHYSICAL button is pressed. Same race handling as fw.
     def _room_rec(name):
@@ -952,19 +952,19 @@ def main():
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
                     "ok": True, "data": {"fw": "1.2.11", "muted": True}}), "test-pc-h4")
-    check("H4 fw_push carries muted -> room record muted=True (direct room)",
+    check("mute: fw_push carries muted -> room record muted=True (direct room)",
           _room_rec("h4-direct-room").get("muted") is True, str(_room_rec("h4-direct-room")))
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
                     "ok": True, "data": {"muted": False}}), "test-pc-h4")
-    check("H4 mute_push (physical button) flips the room record to muted=False",
+    check("mute: mute_push (physical button) flips the room record to muted=False",
           _room_rec("h4-direct-room").get("muted") is False, str(_room_rec("h4-direct-room")))
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
                     "ok": True, "data": {"muted": "yes"}}), "test-pc-h4")
-    check("H4 mute_push with a non-bool muted is ignored (no change)",
+    check("mute: mute_push with a non-bool muted is ignored (no change)",
           _room_rec("h4-direct-room").get("muted") is False, str(_room_rec("h4-direct-room")))
-    check("H4 a node that never reported (old firmware) shows muted=None",
+    check("mute: a node that never reported (old firmware) shows muted=None",
           "muted" in _room_rec("fw-direct-room") and _room_rec("fw-direct-room")["muted"] is None,
           str(_room_rec("fw-direct-room")))
     # provisional-window race: push before the tee correlates the room
@@ -973,7 +973,7 @@ def main():
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "mute_push",
                     "ok": True, "data": {"muted": True}}), "test-pc-h4-race")
     _reg.note_offer("test-pc-h4-race", "h4-race-room")
-    check("H4 mute state survives the connect/tee race (held, promoted with room)",
+    check("mute: mute state survives the connect/tee race (held, promoted with room)",
           _room_rec("h4-race-room").get("muted") is True, str(_room_rec("h4-race-room")))
     # unbound pc_id (the fw=None race order): held, drained by note_offer
     node_command.on_message(
@@ -981,13 +981,13 @@ def main():
                     "ok": True, "data": {"fw": "1.2.11", "muted": True}}), "test-pc-h4-unbound")
     _held_h4 = _reg._muted_by_pc.get("test-pc-h4-unbound")
     _reg.note_offer("test-pc-h4-unbound", "h4-unbound-room")
-    check("H4 unbound-pc mute hold drained by note_offer (with the fw hold)",
+    check("mute: unbound-pc mute hold drained by note_offer (with the fw hold)",
           _held_h4 is True and "test-pc-h4-unbound" not in _reg._muted_by_pc
           and _room_rec("h4-unbound-room").get("muted") is True
           and _room_rec("h4-unbound-room").get("fw") == "1.2.11",
           f"held={_held_h4} rec={_room_rec('h4-unbound-room')}")
     _st_h4 = client.get("/api/dashboard/status").json()
-    check("H4 /status rooms[] carries muted",
+    check("mute: /status rooms[] carries muted",
           any(r.get("room") == "h4-direct-room" and r.get("muted") is False
               for r in _st_h4.get("rooms", [])), str(_st_h4.get("rooms"))[:200])
 
@@ -1022,13 +1022,13 @@ def main():
           any(r.get("room") == "line-unbound-room" and r.get("line") == "array"
               for r in _st_line.get("rooms", [])), str(_st_line.get("rooms"))[:200])
 
-    # 9b5b. Track-aware firmware upload (036 H-B): the image + manifest
+    # 9b5b. Track-aware firmware upload: the image + manifest
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
     # Flex .bin there would be OTA'd by an array node (cross-flash).
-    # Board identity (design note): real images carry exactly one OTA-track
+    # Board identity: real images carry exactly one OTA-track
     # URL format; the route refuses an image whose own track differs.
-    # 046 (2026-10-16): one track vocabulary (array | flex); 1.2.9+ images
+    # 2026-10-16: one track vocabulary (array | flex); 1.2.9+ images
     # also carry a per-line project name. "legacy" = array <=1.2.8's
     # track-less URL format (still a valid array witness on node_esp32).
     _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "array": b"%.*s/firmware/array/%s",
@@ -1073,8 +1073,8 @@ def main():
                           data={"track": "warp"})
         check("9b5b unknown track 400s (never a silent wrong dir)",
               _rb.status_code == 400, str(_rb.status_code))
-        # (c) 041 M2: NO default track — a track-less upload 422s and
-        # touches neither track's directory (reverses the 036 H-B
+        # (c) NO default track — a track-less upload 422s and
+        # touches neither track's directory (reverses the earlier
         # "default stays array" pin: no board identity in the image yet,
         # so a silent array default is a cross-flash accelerant).
         _snap5c = {t: (Path(f"firmware/{t}/version.json").read_text()
@@ -1083,9 +1083,9 @@ def main():
         _rc = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
-        check("9b5b M2 upload without track 422s (no silent array default; not pipecat's Stream-consumed 500)",
+        check("9b5b upload without track 422s (no silent array default; not pipecat's Stream-consumed 500)",
               _rc.status_code == 422 and "track" in _rc.text, f"{_rc.status_code} {_rc.text[:120]}")
-        check("9b5b M2 track-less upload left both manifests untouched",
+        check("9b5b track-less upload left both manifests untouched",
               all((Path(f"firmware/{t}/version.json").read_text()
                    if Path(f"firmware/{t}/version.json").exists() else None) == _snap5c[t]
                   for t in ("array", "flex")), str(_snap5c)[:120])
@@ -1099,7 +1099,7 @@ def main():
               and json.loads(Path("firmware/array/version.json").read_text())["version"] == "1.9.7",
               _rd.text[:120])
 
-        # 045: board identity — the image's own OTA-track marker must match
+        # Board identity — the image's own OTA-track marker must match
         # the declared track; every refusal leaves BOTH tracks' served
         # image + manifest byte-identical.
         def _snap045():
@@ -1114,37 +1114,37 @@ def main():
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "flex"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("045 Flex image declared for the ARRAY track -> 400, names the board",
+        check("9b5b Flex image declared for the ARRAY track -> 400, names the board",
               _re.status_code == 400 and "reSpeaker Flex firmware" in _re.text
               and "track 'flex'" in _re.text, f"{_re.status_code} {_re.text[:160]}")
         _rf = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "array"),
                                           "application/octet-stream")},
                           data={"track": "flex"})
-        check("045 array image declared for the FLEX track -> 400, names the board",
+        check("9b5b array image declared for the FLEX track -> 400, names the board",
               _rf.status_code == 400 and "array (XVF3800" in _rf.text
               and "track 'array'" in _rf.text, f"{_rf.status_code} {_rf.text[:160]}")
         _rg = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", None),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("045 image with NO track marker -> 400 (never guessed onto a track)",
+        check("9b5b image with NO track marker -> 400 (never guessed onto a track)",
               _rg.status_code == 400 and "can't tell which board" in _rg.text,
               f"{_rg.status_code} {_rg.text[:160]}")
         _rh = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", both=True),
                                           "application/octet-stream")},
                           data={"track": "flex"})
-        check("045 image with BOTH markers -> 400 (can't be trusted either way)",
+        check("9b5b image with BOTH markers -> 400 (can't be trusted either way)",
               _rh.status_code == 400 and "can't tell which board" in _rh.text,
               f"{_rh.status_code} {_rh.text[:160]}")
         _after045 = _snap045()
-        check("045 every refusal left both tracks' served image + manifest byte-identical",
+        check("9b5b every refusal left both tracks' served image + manifest byte-identical",
               _after045 == _before045,
               str([k for k in _before045 if _before045[k] != _after045.get(k)]))
         _leftover045 = [str(q) for t in ("array", "flex")
                         for q in Path(f"firmware/{t}").glob("*.uploading")]
-        check("045 every refusal cleaned up its .uploading temp", not _leftover045,
+        check("9b5b every refusal cleaned up its .uploading temp", not _leftover045,
               str(_leftover045))
 
         # deploy_firmware.sh's backstop uses the same helper via the CLI
@@ -1158,15 +1158,15 @@ def main():
             _cli[_lbl] = _sp045.run([sys.executable, _abv, "--track", str(_fp)],
                                     capture_output=True, text=True).stdout.strip()
             _fp.unlink()
-        check("045 app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
+        check("9b5b app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
               _cli == {"flex": "flex", "array": "array", "none": "", "both": ""}, str(_cli))
 
-        # 046 (2026-10-16): firmware names — one vocabulary, per-line files.
+        # 2026-10-16: firmware names — one vocabulary, per-line files.
         _rn = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("x.bin", _fake_image5b("1.9.4", "array"),
                                           "application/octet-stream")},
                           data={"track": "node"})
-        check("046 retired track name 'node' -> 400 naming array | flex",
+        check("9b5b retired track name 'node' -> 400 naming array | flex",
               _rn.status_code == 400 and "array | flex" in _rn.text, f"{_rn.status_code} {_rn.text[:120]}")
         # In-field images (<=1.2.8, project node_esp32) are still judged by
         # their URL marker: array legacy URL -> array, flex URL -> flex.
@@ -1174,13 +1174,13 @@ def main():
                           files={"file": ("old.bin", _fake_image5b("1.9.3", "legacy"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("046 legacy array image (node_esp32 + track-less URL) still uploads to array",
+        check("9b5b legacy array image (node_esp32 + track-less URL) still uploads to array",
               _rl.status_code == 200 and _rl.json().get("track") == "array", f"{_rl.status_code} {_rl.text[:120]}")
         _rlf = client.post("/api/dashboard/firmware/upload",
                            files={"file": ("oldf.bin", _fake_image5b("1.9.3", "flex", project=b"node_esp32"),
                                            "application/octet-stream")},
                            data={"track": "flex"})
-        check("046 legacy flex image (node_esp32 + flex URL) still uploads to flex",
+        check("9b5b legacy flex image (node_esp32 + flex URL) still uploads to flex",
               _rlf.status_code == 200 and _rlf.json().get("track") == "flex", f"{_rlf.status_code} {_rlf.text[:120]}")
         # A named image must agree with its own URL marker.
         _before046 = _snap045()
@@ -1196,7 +1196,7 @@ def main():
                            files={"file": ("alien.bin", _fake_image5b("1.9.2", "array", project=b"some_other_app"),
                                            "application/octet-stream")},
                            data={"track": "array"})
-        check("046 project name vs URL disagreement / unknown project -> 400, nothing written",
+        check("9b5b project name vs URL disagreement / unknown project -> 400, nothing written",
               all(r.status_code == 400 and "can't tell which board" in r.text for r in (_rm, _rm2, _rm3))
               and _snap045() == _before046,
               f"{_rm.status_code} {_rm2.status_code} {_rm3.status_code}")
@@ -1207,7 +1207,7 @@ def main():
                                           "application/octet-stream")},
                           data={"track": "array"})
         _man046 = json.loads(Path("firmware/array/version.json").read_text())
-        check("046 upload serves firmware/array/array_esp32.bin, manifest names it, stale node_esp32.bin removed",
+        check("9b5b upload serves firmware/array/array_esp32.bin, manifest names it, stale node_esp32.bin removed",
               _rs.status_code == 200 and _rs.json().get("filename") == "array_esp32.bin"
               and _man046 == {"version": "1.9.9", "filename": "array_esp32.bin"}
               and sorted(q.name for q in Path("firmware/array").glob("*.bin")) == ["array_esp32.bin"],
@@ -1216,12 +1216,12 @@ def main():
                            files={"file": ("f.bin", _fake_image5b("1.9.9", "flex"),
                                            "application/octet-stream")},
                            data={"track": "flex"})
-        check("046 flex upload serves firmware/flex/flex_esp32.bin",
+        check("9b5b flex upload serves firmware/flex/flex_esp32.bin",
               _rsf.status_code == 200 and _rsf.json().get("filename") == "flex_esp32.bin"
               and sorted(q.name for q in Path("firmware/flex").glob("*.bin")) == ["flex_esp32.bin"],
               _rsf.text[:120])
 
-        # 046: the OTA server (core/firmware_server.py) — first suite
+        # The OTA server (core/firmware_server.py) — first suite
         # coverage of the node-facing routes. Tracks point at this scratch.
         import firmware_server as _fws
         from fastapi import FastAPI as _FA046
@@ -1235,21 +1235,21 @@ def main():
             _legacy = _c046.get("/firmware/version")
             _arr = _c046.get("/firmware/array/version")
             _flx = _c046.get("/firmware/flex/version")
-            check("046 OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
+            check("9b5b OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
                   _legacy.status_code == 200 and _legacy.json() == _arr.json()
                   == {"version": "1.9.9", "filename": "array_esp32.bin"},
                   f"{_legacy.status_code} {_legacy.text[:80]} | {_arr.text[:80]}")
-            check("046 OTA: /firmware/flex/version serves the flex manifest",
+            check("9b5b OTA: /firmware/flex/version serves the flex manifest",
                   _flx.status_code == 200 and _flx.json() == {"version": "1.9.9", "filename": "flex_esp32.bin"},
                   _flx.text[:80])
             _lb = _c046.get("/firmware/array_esp32.bin")
             _tb = _c046.get("/firmware/array/array_esp32.bin")
-            check("046 OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
+            check("9b5b OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
                   _lb.status_code == 200 and _lb.content == _tb.content
                   == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
-            check("046 OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
+            check("9b5b OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
                   _c046.get("/firmware/node/version").status_code == 404, "")
-            check("046 OTA: path traversal out of a track dir 404s",
+            check("9b5b OTA: path traversal out of a track dir 404s",
                   _c046.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
         finally:
             _fws.FIRMWARE_TRACKS.clear()
@@ -1301,8 +1301,7 @@ def main():
         # (e) a NON-active model is deletable — upload a distinct-name
         # spare from the prod bytes, then delete it (200). Never touches
         # the real root copy: a suite must not delete production files
-        # (design note loaded-gun rule — and the dev host's root copy is
-        # the ONLY local model copy).
+        # (and the dev host's root copy is the ONLY local model copy).
         if prod.is_file():
             _r_sp = client.post("/api/dashboard/oww/models",
                             files={"file": ("zz_suite_probe.onnx", prod.read_bytes(), "application/octet-stream")})
@@ -1361,7 +1360,7 @@ def main():
     check("tuning write preserves wake.enabled (merge, not replace)",
           wake_after.get("enabled") is True, f"wake={wake_after}")
 
-    # 9b7. Load-anchored speech timers (Fix A, 2026-10-05): the v4
+    # 9b7. Load-anchored speech timers (2026-10-05): the v4
     # dialogue lane's gen->load gap made generation-anchored timers fire
     # early — end-of-speech LED flipped the ring to 'listening' mid-reply,
     # echo gate reopened the mic, note_speech capped the LOCKED release.
@@ -1577,7 +1576,7 @@ def main():
     else:
         print(f"[WARN] discovery endpoint returned {r.status_code}: {r.text[:120]}")
 
-    # 12. H5 guard: cross-origin mutation rejected, non-browser passes
+    # 12. Guard: cross-origin mutation rejected, non-browser passes
     r = client.put("/api/dashboard/mapping",
                    json={"room_zones": {"bedroom": "Dining Room"}},
                    headers={"Origin": "https://evil.example"})
@@ -1588,7 +1587,7 @@ def main():
     r = client.get("/api/dashboard/status", headers={"Origin": "https://evil.example"})
     check("guard: cross-origin READ stays open", r.status_code == 200, f"status={r.status_code}")
 
-    # 13. H5 token mode (env set -> mutations need the header)
+    # 13. Token mode (env set -> mutations need the header)
     os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
     try:
         r = client.put("/api/dashboard/mapping",
@@ -1601,10 +1600,10 @@ def main():
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
 
-    # 9b8. B3 epoch turns + wake-word barge-in (design note): turns
+    # 9b8. Epoch turns + wake-word barge-in: turns
     # run as background tasks (frame loop never blocks on the intelligence), a
     # new question supersedes (old reply discarded, no history write,
-    # ack spoken), and "Hey Willow" twice-confirmed during LOCKED fires
+    # ack spoken), and the wake word twice-confirmed during LOCKED fires
     # the interrupt + reopens the gate; backends stop their clips.
     if True:  # scope block
         import os as _os
@@ -1711,7 +1710,7 @@ def main():
                   f"fired={len(_fired8)} state={_wf8._state}")
             # knob OFF = today's behavior: even two frames never fire.
             # NOTE: pinned on the instance — the suite copies the LIVE
-            # config.yaml (which carries barge_in: true on the owner's rig),
+            # config.yaml (which carries barge_in: true on the dev rig),
             # so the config default can't be asserted hermetically here.
             async def _wake_probe_off():
                 fired = []
@@ -1732,7 +1731,7 @@ def main():
                   not _fired8b and _wf8b._state is _TurnState.LOCKED,
                   f"fired={len(_fired8b)} state={_wf8b._state}")
 
-            # ── 036 H-A pin: an ASYNC on_interrupt must actually run ──
+            # ── pin: an ASYNC on_interrupt must actually run ──
             # The production callback in bot.py is `async def`; the old
             # suite's sync lambda masked the never-awaited coroutine bug
             # (a bare call created it, nothing ran it, stop_current_clip
@@ -1756,7 +1755,7 @@ def main():
                 return wf, ran
 
             _wf8c, _ran8c = _asyncio.run(_wake_probe_async())
-            check("9b8 wake: ASYNC on_interrupt coroutine actually runs (036 H-A)",
+            check("9b8 wake: ASYNC on_interrupt coroutine actually runs",
                   len(_ran8c) == 1 and _wf8c._interrupt_task is not None
                   and _wf8c._interrupt_task.done(),
                   f"ran={len(_ran8c)} task={getattr(_wf8c, '_interrupt_task', 'missing')}")
@@ -1848,8 +1847,8 @@ def main():
                 else:
                     sys.modules["sonos_websocket"] = _saved_ws8
 
-            # 9b9. Frame passthrough (the 17:09 "you wont wake" outage): the
-            # B3 _run_turn extraction lost process_frame's final push_frame —
+            # 9b9. Frame passthrough (the "you wont wake" outage): the
+            # epoch-turn _run_turn extraction lost process_frame's final push_frame —
             # the agent ate EVERY frame, StartFrame never reached the sink,
             # PipelineWorker killed the session at +20s, and the node rode a
             # reconnect loop. Every processor MUST pass frames downstream.
@@ -1874,7 +1873,7 @@ def main():
                   f"forwarded={sum(1 for f in _frames2 if any(x is f for x in _seen2))}/{len(_frames2)}")
 
             # 9b10. Echo-gate relax on confirmed wakes and barge-ins (the
-            # 17:49:08 double-wake): a wake during a sounding clip must
+            # double-wake bug): a wake during a sounding clip must
             # shorten the gate's block to a tail so the follow-up question
             # lands; stop_current_clip must do the same; a lapsed gate
             # must never be extended. Text containment stays armed.
@@ -1927,7 +1926,7 @@ def main():
             check("9b10 echo: stop_current_clip relaxes the gate",
                   _stop_rem <= 0.6, f"remaining={_stop_rem:.2f}s")
 
-            # 9b11. Intelligence lane (design note): config round-trip
+            # 9b11. Intelligence lane: config round-trip
             # preserves intelligence.fillers (merge law), lane dispatch shapes
             # per kind, key fallback order + no-KeyError, key POST never
             # echoes material, test probe ok/error paths.
@@ -1970,7 +1969,7 @@ def main():
             _g2 = client.get("/api/dashboard/intelligence").json()
             check("9b11b GET returns urls map", _g2.get("urls", {}).get("openclaw")
                   == "http://127.0.0.1:18789/v1", str(_g2.get("urls"))[:120])
-            # Bare kind flip (036 M-3): no url in the payload — the route
+            # Bare kind flip: no url in the payload — the route
             # must restore THAT kind's remembered URL, not keep the other
             # kind's (which would point the lane at the wrong intelligence).
             _r3 = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
@@ -2040,7 +2039,7 @@ def main():
                 # strict key law (2026-10-08): NO cross-kind fallback —
                 # without LVI_OPENCLAW_KEY the openclaw lane must fail with
                 # a clear error naming its OWN variable, never silently
-                # auth with another intelligence's token (tonight's 401 lesson).
+                # auth with another intelligence's token (a real wrong-token 401).
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
                 for mod_name in ("hermes_agent",):
                     if mod_name in sys.modules:
@@ -2079,7 +2078,7 @@ def main():
                       _hm_body.get("conversation") and
                       _hm_hdr.get("x-hermes-session-key") == _hm_body.get("conversation"),
                       str(_hm_body)[:140])
-                # Bug-7 law (2026-10-07): keys are KIND-AWARE — the hermes
+                # Key rule: keys are KIND-AWARE — the hermes
                 # lane must auth with LVI_HERMES_KEY even when LVI_BRAIN_KEY
                 # (the OpenClaw token on the real rig) is also set. A kind
                 # flip must never cross the tokens.
@@ -2133,11 +2132,11 @@ def main():
                 _kbad = client.put("/api/dashboard/intelligence/key",
                                    json={"kind": "hermes", "api_key": "bad\nkey"})
                 check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
-                # design note H1 contract pins: kind is REQUIRED (no silent
+                # Contract pins: kind is REQUIRED (no silent
                 # guess from config), only shipped lanes, extra="forbid".
                 _knk = client.put("/api/dashboard/intelligence/key",
                                   json={"api_key": "suite-keymaterial-12345"})
-                check("9b11c key POST without kind 422s (041 H1)",
+                check("9b11c key POST without kind 422s",
                       _knk.status_code == 422, _knk.text[:120])
                 _kbk = client.put("/api/dashboard/intelligence/key",
                                   json={"kind": "claude",
@@ -2149,7 +2148,7 @@ def main():
                                         "api_key": "suite-keymaterial-12345"})
                 check("9b11c key POST extra field 422s (forbid)",
                       _kex.status_code == 422, _kex.text[:120])
-                # 036 M-2 + 041 H1 pin: the variable follows the PAYLOAD's
+                # Pin: the variable follows the PAYLOAD's
                 # kind, NOT config.yaml's. The UI-rebuilt 401: dropdown on
                 # OpenClaw, config still hermes, Save key → the OpenClaw
                 # token landed in LVI_HERMES_KEY. Cross each kind against
@@ -2171,7 +2170,7 @@ def main():
                     _kx2 = client.put("/api/dashboard/intelligence/key",
                                       json={"kind": "hermes",
                                             "api_key": "suite-keymaterial-12345"})
-                    check("9b11b key save follows payload kind, not config (041 H1)",
+                    check("9b11b key save follows payload kind, not config",
                           _wek_calls9 == ["LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"],
                           f"calls={_wek_calls9}")
                     check("9b11b key response names the variable written",
@@ -2190,7 +2189,7 @@ def main():
                     _os.environ["LVI_OPENCLAW_KEY"] = "suite-oc-token-123"
                     try:
                         _gk9 = client.get("/api/dashboard/intelligence").json()
-                        check("9b11c GET keys_set per kind (041 H1)",
+                        check("9b11c GET keys_set per kind",
                               _gk9.get("keys_set") == {"hermes": False, "openclaw": True}
                               and "suite-oc-token-123" not in str(_gk9),
                               str(_gk9.get("keys_set")))
@@ -2231,10 +2230,10 @@ def main():
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
-    # 9b12. Dead-TTS containment (the 2026-10-16 07:49 incident): with the
+    # 9b12. Dead-TTS containment (2026-10-16): with the
     # ElevenLabs websocket dead, her UNspoken weather answer still armed as
-    # echo text, and the owner's repeat question scored 71% bag-of-words overlap
-    # (5 of 7 words, only 'nantucket' content — s/the/on/today counted) —
+    # echo text, and the user's repeat question scored 71% bag-of-words overlap
+    # (5 of 7 words, only 'springfield' content — s/the/on/today counted) —
     # dropped as an "echo". Two fixes pinned here: the echo bar 0.6 -> 0.9
     # (an echo is her words coming back: nearly ALL transcript words must
     # be hers) and no phantom arming (a dead TTS makes no sound, so its
@@ -2246,7 +2245,7 @@ def main():
         TranscriptionFrame as _TF12, VADUserStartedSpeakingFrame as _VAD12,
     )
     from pipecat.processors.frame_processor import FrameDirection as _FD12
-    _ANS12 = ("It's overcast on Nantucket today, about 60 degrees but feels "
+    _ANS12 = ("It's overcast on Springfield today, about 60 degrees but feels "
               "like 48 with a stiff 21 mile-an-hour wind off the water. High "
               "of 65, low of 56, and about a third of a chance of rain, so "
               "maybe grab a jacket if you're heading out.")
@@ -2254,7 +2253,7 @@ def main():
     async def _c12_probe():
         _a = _ha12.HermesAgent(echo_gate=_eg12.EchoGate(),
                                room="suite-9b12", session_mode="fresh")
-        # the exact armed state at 07:49:10 — both fillers + the answer
+        # the exact armed state in that failure — both fillers + the answer
         # the dead TTS never actually spoke
         _a._echo_texts = ["On it.",
                           "Still on it — this one's a slow one.",
@@ -2265,18 +2264,18 @@ def main():
 
         _a.push_frame = _sink12
         await _a.process_frame(_VAD12(), _FD12.DOWNSTREAM)
-        await _a.process_frame(_TF12("What's the weather today on Nantucket?",
+        await _a.process_frame(_TF12("What's the weather today on Springfield?",
                                      "", 0, 0, 0), _FD12.DOWNSTREAM)
         return _a
 
     _a12 = _aio12.run(_c12_probe())
-    check("9b12 the 07:49 repeat question lands (was dropped as an echo)",
-          any("Nantucket" in t for t in _a12._buffer), f"buffer={_a12._buffer}")
+    check("9b12 the repeat question lands (was dropped as an echo)",
+          any("Springfield" in t for t in _a12._buffer), f"buffer={_a12._buffer}")
     check("9b12 same-topic repeat is NOT her echo (bar 0.6 -> 0.9)",
-          _a12._is_own_echo("What's the weather today on Nantucket?") is False,
+          _a12._is_own_echo("What's the weather today on Springfield?") is False,
           f"echo_texts={len(_a12._echo_texts)}")
     check("9b12 short same-topic follow-up is NOT her echo",
-          _a12._is_own_echo("and what about tomorrow on Nantucket") is False, "")
+          _a12._is_own_echo("and what about tomorrow on Springfield") is False, "")
     check("9b12 verbatim re-transcription of her reply IS caught",
           _a12._is_own_echo(_ANS12) is True, "")
     check("9b12 clipped tail of her reply IS caught",
@@ -2394,9 +2393,9 @@ def main():
           and hasattr(_bot13.ElevenLabsTTSService, "_push_tts_frames"),
           "Tracked* must sit on TTSTracked over a websocket TTS service")
 
-    # 9b14. 041 L9 — node-command error mapping: an in-flight duplicate is a
+    # 9b14. Node-command error mapping: an in-flight duplicate is a
     # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a
-    # bare transport timeout (empty detail — the 21:01 restart error shape)
+    # bare transport timeout (empty detail — the observed restart error shape)
     # now says half-open + self-heals instead of an empty string the UI
     # rendered as "Gateway Timeout".
     import asyncio as _aio14
@@ -2417,19 +2416,19 @@ def main():
         _nc14.request = _raising_request14(
             _InFlight14("'restart' already in flight for 'suite-9b14'"))
         _r14a = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14 L9: in-flight duplicate -> 409 Conflict (was a 504)",
+        check("9b14: in-flight duplicate -> 409 Conflict (was a 504)",
               _r14a.status_code == 409 and "already in flight" in _r14a.text,
               f"status={_r14a.status_code} body={_r14a.text[:80]}")
         _nc14.request = _raising_request14(TimeoutError())
         _r14b = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14 L9: bare timeout -> 504 with half-open + self-heal wording",
+        check("9b14: bare timeout -> 504 with half-open + self-heal wording",
               _r14b.status_code == 504 and "half-open" in _r14b.text
               and "10 min" in _r14b.text,
               f"status={_r14b.status_code} body={_r14b.text[:100]}")
         _nc14.request = _raising_request14(
             _NoLive14("no live session for room 'suite-9b14'"))
         _r14c = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14 L9: half-open session -> 504 naming the half-open shape",
+        check("9b14: half-open session -> 504 naming the half-open shape",
               _r14c.status_code == 504 and "half-open" in _r14c.text,
               f"status={_r14c.status_code} body={_r14c.text[:100]}")
     finally:
@@ -2456,10 +2455,10 @@ def main():
             _nc14.registry.sender_for_room = _saved_sender14
 
     _res14 = _aio14.run(_inflight_probe14())
-    check("9b14 L9: node_command raises CommandInFlight for a pending duplicate",
+    check("9b14: node_command raises CommandInFlight for a pending duplicate",
           _res14 == "inflight", f"result={_res14}")
 
-    # 9b15. 041 L4 — wake-model select keys on name + SOURCE: with the
+    # 9b15. Wake-model select keys on name + SOURCE: with the
     # same basename in root and models/, a name-only select always
     # resolved to the models/ copy — clicking the ROOT row silently
     # activated the other file. source=None keeps the legacy resolution.
@@ -2471,32 +2470,32 @@ def main():
     try:
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "root"})
-        check("9b15 L4: source=root activates the ROOT copy (collision)",
+        check("9b15: source=root activates the ROOT copy (collision)",
               r.status_code == 200 and r.json().get("model") == _l4_name,
               f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "models"})
-        check("9b15 L4: source=models activates the MODELS copy (collision)",
+        check("9b15: source=models activates the MODELS copy (collision)",
               r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
               f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
         r = client.put("/api/dashboard/oww/select", json={"model": _l4_name})
-        check("9b15 L4: no source keeps the legacy models-first resolution",
+        check("9b15: no source keeps the legacy models-first resolution",
               r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
               f"status={r.status_code} body={r.text[:80]}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": "suite-l4-missing.onnx", "source": "root"})
-        check("9b15 L4: unknown name+source combo 404s naming the source",
+        check("9b15: unknown name+source combo 404s naming the source",
               r.status_code == 404 and "root" in r.text,
               f"status={r.status_code} body={r.text[:80]}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "bogus"})
-        check("9b15 L4: source is a Literal (bogus source 422s)",
+        check("9b15: source is a Literal (bogus source 422s)",
               r.status_code == 422, f"status={r.status_code}")
     finally:
         _l4_root.unlink(missing_ok=True)
         (_l4_models / _l4_name).unlink(missing_ok=True)
 
-    # 043 (2026-10-15): session leak — dead sessions' pipeline graphs are one
+    # Session leak (2026-10-15) — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
     # deterministically when the pipeline ends, and the local STT closes the

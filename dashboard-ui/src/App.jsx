@@ -1,15 +1,15 @@
-// lenoxvi dashboard — app. Wireframe-C structure (design note):
+// lenoxvi dashboard — app. Wireframe-C structure:
 // single scrolling page, sticky header + section rail, no tabs.
 // Brand: dark theme default, one lime element leads, sentence case,
 // no emoji. Live data via the same /api/dashboard/* routes the old
 // page.html used — routes are the contract, every shape verified
-// against the live rig (2026-10-07 bug audit, 8 findings).
+// against the live rig.
 
 import { useEffect, useRef, useState } from 'react'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
-// design note M6 (2026-10-13): LVI_DASHBOARD_TOKEN on the bot makes every
+// LVI_DASHBOARD_TOKEN on the bot makes every
 // mutation 401 without X-Dashboard-Token (guard.py). The React port sent
 // a stored token but never ASKED for one — setting the token bricked
 // every save. On a mutation 401: prompt (once, shared across concurrent
@@ -95,7 +95,7 @@ function AppMsg({ msg }) {
 }
 
 /* ── restart lane ──────────────────────────────────────────── */
-// 041 L7: restartBot has three call sites (Overview's button + offerRestart
+// restartBot has three call sites (Overview's button + offerRestart
 // from the OWW and Voice save lanes) and the React `rebooting` state can
 // race the second caller — two concurrent restarts meant two transient
 // restart units and two 90s wait loops fighting over one message chip. A
@@ -149,7 +149,7 @@ const sec = s => s == null ? '—' :
 
 // last_seen / last_wake times arrive as epoch SECONDS (registry
 // time.time()) — never ms, never ISO. Never treat a missing value as
-// epoch zero (bug 5: "20,713d ago" = new Date(seconds-as-ms) → 1970).
+// epoch zero (the "20,713d ago" bug: = new Date(seconds-as-ms) → 1970).
 const fmtAgo = t => {
   if (!t) return '—'
   const ms = t > 1e12 ? t : t * 1000  // accept seconds or ms safely
@@ -276,9 +276,9 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
             // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
             // Inline styles — these are foreign brands, they don't earn design tokens.
             // Chip shows the brand only — the agent id lives in the Intelligence
-            // section (the owner 2026-10-08): strip " · <agent>" from the label.
+            // section: strip " · <agent>" from the label.
             const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
-            // 041 L10: only a real brand wears brand colors — the loading
+            // Only a real brand wears brand colors — the loading
             // placeholder ('—') used to render in Hermes white/blue.
             const s = brand === 'OpenClaw'
               ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
@@ -320,7 +320,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   // UI lies about a muted mic. One GET per mount, NOT per 5s poll (that
   // would spam the data channel). Older firmware omits 'muted' = false.
   //
-  // design note H4 (2026-10-13): ask once per CONNECTION, not once per mount.
+  // Ask once per CONNECTION, not once per mount.
   // The old latch never reset, so a node that rebooted (Restart button in
   // this same component) came back unmuted while the button still said
   // Muted — a privacy lie. Keyed on last_seen, NOT just online: registry
@@ -331,12 +331,12 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   // land before the new data channel is open.
   const askedAtRef = useRef(null)   // last_seen stamp of the connection we asked
   const triesRef = useRef(0)        // /info attempts for that connection
-  // 041 L1: bumped by every toggle — a slow /info reply that was sent
+  // Bumped by every toggle — a slow /info reply that was sent
   // BEFORE the toggle must never stomp the fresh ack state (the stamp
   // guard only covers connection changes, not in-room races).
   const muteSeqRef = useRef(0)
   const [infoTick, setInfoTick] = useState(0)  // bumped only by the retry timer
-  // H4 (firmware 1.2.11+): the node REPORTS its mute state (fw_push at
+  // Firmware 1.2.11+: the node REPORTS its mute state (fw_push at
   // connect, mute_push when an array node's physical button is pressed);
   // /status carries it as rooms[].muted. Follow it whenever it changes —
   // that's how a button press reaches this button within one 5s poll.
@@ -349,7 +349,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   }, [reportedMuted])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!online) { askedAtRef.current = null; return }
-    // H4: a node that REPORTS its mute state (1.2.11+) needs no ask — the
+    // A node that REPORTS its mute state (1.2.11+) needs no ask — the
     // reported value is the truth and a racing /info reply could stomp it.
     if (typeof reportedMuted === 'boolean') return
     const stamp = String(lastSeen ?? 'online')
@@ -359,7 +359,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
     triesRef.current += 1
     // Staleness = "a newer connection took over" (stamp moved), NOT effect
     // cleanup — StrictMode's dev double-invoke would cancel the only ask.
-    const seq = muteSeqRef.current  // 041 L1: staleness vs a toggle fired mid-flight
+    const seq = muteSeqRef.current  // staleness vs a toggle fired mid-flight
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
       .then(r => {
         if (askedAtRef.current !== stamp || muteSeqRef.current !== seq) return
@@ -387,7 +387,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
 
   const toggleMute = async () => {
     if (muteBusy) return
-    muteSeqRef.current++  // 041 L1: any /info in flight is now stale
+    muteSeqRef.current++  // any /info in flight is now stale
     setMuteBusy(true)
     setMsg(`Toggling mute on ${room}…`, 'pulse', 'Nodes')
     try {
@@ -520,7 +520,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
 }
 function Rooms({ status, mapping, setMsg, reloadAll }) {
   const [mapDraft, setMapDraft] = useState(null)
-  // Bug-class fix (2026-10-07 #3): the 5s poll refetches mapping and
+  // Bug-class fix: the 5s poll refetches mapping and
   // used to clobber unsaved select edits — dirty holds user drafts.
   const [mapDirty, setMapDirty] = useState(false)
   // Session-mode switches: optimistic pending until status confirms.
@@ -547,11 +547,11 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   }
 
   const zoneNames = Object.keys(mapping?.zones || {})
-  // design note H2 (2026-10-13): rows = mapped rooms ∪ connected nodes. Rows
+  // Rows = mapped rooms ∪ connected nodes. Rows
   // used to come from room_zones alone, so a node that had connected but
   // was never mapped had NO row — a fresh install could not map its first
-  // node from the React UI (regression vs page.html; also the 036 "third
-  // node can't onboard" residual). Mapped rooms keep config order;
+  // node from the React UI (regression vs page.html; also why a third
+  // node couldn't onboard). Mapped rooms keep config order;
   // unmapped nodes follow in registry order.
   const mappedRooms = Object.keys(mapping?.room_zones || {})
   const unmappedRooms = (status?.rooms || []).map(r => r.room)
@@ -564,7 +564,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     // room_zones key (MappingPayload contract, routes.py) — a bare
     // merged dict 422s (or worse: pre-forbid, silently wiped the
     // mapping via Pydantic's default_factory). Never unwrapped.
-    // 041 L2: spread the DRAFT map, not the server copy — the server
+    // Spread the DRAFT map, not the server copy — the server
     // copy dropped every OTHER row's unsaved pick the moment one row
     // saved. The draft holds synced server values + all row edits, so
     // one Save persists the whole visible map (and the full-dict
@@ -602,7 +602,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     {unmapped && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
                   </td>
                   <td className="px-4 py-2">
-                    {/* Empty placeholder (041 H2): without it an unmapped row
+                    {/* Empty placeholder: without it an unmapped row
                         DISPLAYS the first zone while its value is '' — a
                         fake selection that Save would reject as "pick a zone". */}
                     <select value={zone}
@@ -698,7 +698,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
 function ZoneList({ mapping, setMsg, reloadAll }) {
   const [discovered, setDiscovered] = useState(null)
   const [newZone, setNewZone] = useState({ name: '', backend: 'sonos', ip: '', player_uid: '' })
-  // design note L3 (2026-10-13): the slider shows what the zone ACTUALLY
+  // The slider shows what the zone ACTUALLY
   // plays at — the server's effective_volumes (live > per-zone > the
   // zone's own backend global > one code default). The old `?? 70`
   // fallback here disagreed with the backends (35) and showed WiiM zones
@@ -726,7 +726,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
   const addZone = async () => {
     if (!newZone.name.trim()) { setMsg('Zone name required.', 'err', 'Zones'); return }
     try {
-      // player_uid is Sonos-only (041 H3) — WiiM zones send none at all.
+      // player_uid is Sonos-only — WiiM zones send none at all.
       const body = { name: newZone.name, backend: newZone.backend, ip: newZone.ip }
       if (newZone.backend === 'sonos') body.player_uid = newZone.player_uid
       await api('/api/dashboard/zones', { method: 'POST', json: body })
@@ -841,7 +841,7 @@ function VolSlider({ name, initial, onCommit }) {
         onMouseUp={() => onCommit(name, val)}
         onTouchEnd={() => onCommit(name, val)}
         onKeyUp={e => {
-          // 041 L5: only VALUE-MOVING keys commit — the old bare
+          // Only VALUE-MOVING keys commit — the old bare
           // onKeyUp fired on Tab too, so walking the form with the
           // keyboard PUTed an unchanged volume into config.
           if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
@@ -859,9 +859,9 @@ function VolSlider({ name, initial, onCommit }) {
 function FirmwarePanel({ status, setMsg, reloadAll }) {
   const [fwFile, setFwFile] = useState(null)
   const [pushing, setPushing] = useState(false)
-  // 041 M2 (2026-10-13): NO default track — a preselected line made the
+  // NO default track — a preselected line made the
   // dangerous choice the lazy one. The server also refuses an image whose
-  // own identity names the other line (design note). Push stays disabled
+  // own identity names the other line. Push stays disabled
   // until chosen.
   const [fwTrack, setFwTrack] = useState('')
   // After a push: which online nodes to nudge. NOTHING pre-checked — the
@@ -986,7 +986,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
   useEffect(() => { load() }, [])
 
   const select = async () => {
-    // 041 L4: the dropdown value is the row's full path — resolve the
+    // The dropdown value is the row's full path — resolve the
     // ROW (basename + source) so a same-basename root/models/
     // collision activates the exact copy the picker named; a name-only
     // select always resolved to the models/ copy.
@@ -1081,7 +1081,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     </Section>
   )
 }
-// design note M1 (2026-10-13): pick-lists come from GET /tts `catalog` —
+// Pick-lists come from GET /tts `catalog` —
 // the server's accepted values, one owner. The UI used to hardcode its
 // own copies (12 of 40 Aura, 16 of 36 Flux): most voices were unpickable
 // and a configured aura-2-zeus-en couldn't display.
@@ -1100,7 +1100,7 @@ const savedFor = (t, p) =>
 function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
   const [model, setModel] = useState(null)
-  // Bug-class fix (2026-10-07 #3): the 5s poll refetches tts state and
+  // Bug-class fix: the 5s poll refetches tts state and
   // resyncing from server would clobber the user's in-progress provider
   // selection. The server is the source of truth for the FIRST sync
   // only; after that, drafts are local until saved.
@@ -1110,7 +1110,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   // a drag in progress); committed on Save via the same DOM read.
   const [fluxSpeed, setFluxSpeed] = useState(1.0)
   const [fluxExpr, setFluxExpr] = useState(1)
-  // 041 L8: a Flux knob rides the save ONLY if the server had one set
+  // A Flux knob rides the save ONLY if the server had one set
   // (editing it) or the user actually moved the slider. An untouched
   // placeholder on an unset knob used to be written as an explicit
   // config value — pinning Flux to numbers nobody chose.
@@ -1133,8 +1133,8 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
     }
   }, [tts, ttsSynced])
 
-  // bug 8 fix: switching provider resets the model menu to that
-  // provider's own list — and (041 M1) lands on THAT provider's saved
+  // Switching provider resets the model menu to that
+  // provider's own list — and lands on THAT provider's saved
   // value when it has one, not blindly on the first entry.
   const catalog = tts?.catalog || {}
   const options = catalog[provider] || []
@@ -1157,7 +1157,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       body.deepgram_voice = model
     } else if (provider === 'deepgram-flux') {
       body.deepgram_flux_voice = model
-      // 041 L8: knobs ride ONLY when the server had one (an edit) or
+      // Knobs ride ONLY when the server had one (an edit) or
       // the user moved the slider — an untouched placeholder on an
       // unset knob writes nothing (the route's None = leave-as-is).
       if (fluxTouched.current.speed || tts?.deepgram_flux_speed != null)
@@ -1275,7 +1275,7 @@ const TUNING_FIELDS = [
 
 function Tuning({ tuning, setMsg, setRebooting }) {
   const [vals, setVals] = useState({})
-  // design note M4 (2026-10-13): dirty-set saves. Save used to send ALL six
+  // Dirty-set saves. Save used to send ALL six
   // knobs from a sync-once draft — nudging one slider rewrote the other
   // five with whatever this tab loaded, clobbering edits made elsewhere
   // (another tab, another device). Now: Save sends only touched knobs, and
@@ -1345,7 +1345,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // the server exactly once (draft law); save still reads the DOM.
   const [intKind, setIntKind] = useState('hermes')
   const [intSynced, setIntSynced] = useState(false)
-  // Per-kind URL memory (2026-10-08, 036 M-3): the two lanes live at
+  // Per-kind URL memory (2026-10-08): the two lanes live at
   // different addresses. The field carries a PER-KIND DRAFT — switching
   // kinds files the current text under the outgoing kind and loads the
   // incoming kind's draft (or empty). The old urlTouched latch never
@@ -1398,7 +1398,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
           <div className="flex items-center gap-2 flex-wrap flex-1">
             <input id="int-key" type="password" placeholder="paste key…"
               className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
-            {/* design note H1: chip reflects the kind ON SCREEN (keys_set per kind) */}
+            {/* Chip reflects the kind ON SCREEN (keys_set per kind) */}
             {intelligence?.keys_set?.[intKind] ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
           </div>
         </Field>
@@ -1408,7 +1408,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             const key = keyEl.value.trim()
             if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
             try {
-              // design note H1: send the kind on screen — the server writes THAT
+              // Send the kind on screen — the server writes THAT
               // kind's variable, never the one config.yaml happens to hold.
               const r = await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { kind: intKind, api_key: key } })
               keyEl.value = ''  // don't leave the pasted key sitting in the DOM
@@ -1471,7 +1471,7 @@ export default function App() {
   const [rebooting, setRebooting] = useState(false)
   const active = useActiveSection()
 
-  // design note M5 (2026-10-13): poll hygiene. One refresh cycle at a time —
+  // Poll hygiene. One refresh cycle at a time —
   // a call that lands mid-cycle doesn't stack a second wave of 5 GETs
   // (slow /mapping used to pile them up); it marks the cycle dirty and
   // gets the CURRENT cycle's promise, which loops once more so a save's

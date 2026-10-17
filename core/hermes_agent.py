@@ -177,7 +177,7 @@ class _SessionStash:
 
 _session_stash = _SessionStash()
 
-# Reasoning-preamble meter (design note): [count] as a mutable cell so the
+# Reasoning-preamble meter: [count] as a mutable cell so the
 # lane can count leaks without rebinding a module global per hit.
 _PREAMBLE_HITS = [0]
 
@@ -192,7 +192,7 @@ class HermesAgent(FrameProcessor):
         from config import cfg_env
 
         self._url = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://<intelligence-host>:8642/v1")
-        # Intelligence lane (design note): intelligence.kind picks the request
+        # Intelligence lane: intelligence.kind picks the request
         # shape. hermes = today's api_server contract; openclaw = OpenClaw
         # Gateway (model "openclaw/<agent>", x-openclaw-session-key, no
         # `conversation` field). The UI calls this "Intelligence" — the
@@ -201,16 +201,16 @@ class HermesAgent(FrameProcessor):
         self._agent = ""
         if self._kind == "openclaw":
             self._agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", "") or "")
-        # Missing key is NOT a construction brick (audit finding #4 class, the provider-
+        # Missing key is NOT a construction brick (the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
-        # Key law (bug-7 + naming law, strict 2026-10-08): each lane reads
+        # Key rule (strict): each lane reads
         # EXACTLY ONE variable — hermes → LVI_HERMES_KEY, openclaw →
-        # LVI_OPENCLAW_KEY. No cross-kind fallback: a fallback chain is
-        # what turned tonight's missing LVI_HERMES_KEY into a silent
+        # LVI_OPENCLAW_KEY. No cross-kind fallback: a fallback chain once
+        # turned a missing LVI_HERMES_KEY into a silent
         # wrong-token 401 outage instead of one honest error line
-        # (fail-loud law, same as the mapping-wipe fix). Future lanes
-        # follow the naming law: LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a
+        # (fail-loud rule, same as the mapping-wipe fix). Future lanes
+        # follow the naming rule: LVI_CLAUDE_KEY, LVI_CUSTOM_KEY — a
         # lane's key names its intelligence, and it reads only its own.
         _KEY_VAR = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
         self._key_var = _KEY_VAR.get(self._kind)
@@ -246,7 +246,7 @@ class HermesAgent(FrameProcessor):
         self._last_user_text: str = ""
         self._last_user_time: float = 0.0
         self._dedup_window: float = float(cfg_env("intelligence", "dedup_window", "LVI_DEDUP_WINDOW", 10.0))
-        # B3 epoch turns (design note): one live turn per pipeline,
+        # Epoch turns: one live turn per pipeline,
         # spawned as a background task; a new question supersedes.
         self._turn_task: asyncio.Task | None = None
         self._turn_epoch: int = 0
@@ -265,7 +265,7 @@ class HermesAgent(FrameProcessor):
         # it arrives (duration gates lose the race when her Sonos reply talks
         # over the mic and whisper transcribes late; measured live 2026-09-15).
         self._echo_texts: list[str] = []
-        # Dead-TTS phantom arming (2026-10-16 07:49 incident): echo texts
+        # Dead-TTS phantom arming: echo texts
         # exist so a late transcript of her SPEECH can be dropped. A dead
         # TTS service makes no sound — nothing handed to it can echo back —
         # so bot.py wires the tracked service's is_usable here and those
@@ -306,9 +306,9 @@ class HermesAgent(FrameProcessor):
 
         An echo is her reply re-transcribed by the mic — so nearly ALL of
         the transcript's words must be words she actually spoke. The old
-        0.6 bar was stopword-blind (2026-10-16 07:49 incident): the owner's
-        repeat "What's the weather today on Nantucket?" scored 71% against
-        her weather ANSWER — 5 of 7 words, only 'nantucket' content; s,
+        0.6 bar was stopword-blind: a user's
+        repeat "What's the weather today on <town>?" scored 71% against
+        her weather ANSWER — 5 of 7 words, only the town name content; s,
         the, on, today all counted as echo evidence — and the question
         died as an "echo" while TTS was down. 0.9 keeps verbatim and
         clipped-tail echoes caught (they are ~100% subsets of her words)
@@ -342,7 +342,7 @@ class HermesAgent(FrameProcessor):
     def _ask_hermes(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
-        Intelligence lane (design note): kind=openclaw reshapes the request —
+        Intelligence lane: kind=openclaw reshapes the request —
         model "openclaw/<agent>" addresses the agent, x-openclaw-session-key
         carries sticky continuity, and the Hermes-only `conversation` field
         is omitted. kind=hermes keeps today's contract (conversation +
@@ -389,7 +389,7 @@ class HermesAgent(FrameProcessor):
             # dashboard-visible session continuity on THIS header, not
             # the body's `conversation` field — the label in the body
             # alone left voice sessions invisible in the Hermes admin
-            # dash (the owner's audit need). With the header, sticky rooms
+            # dash (the operator needs to audit them). With the header, sticky rooms
             # merge into ONE long-lived dashboard session per room and
             # fresh pipelines get one session per connection — both
             # visible and auditable. Requires API_SERVER_KEY on the
@@ -404,7 +404,7 @@ class HermesAgent(FrameProcessor):
             data = json.loads(r.read())
         reply = data["choices"][0]["message"]["content"].strip()
         usage = data.get("usage", {})
-        # Reasoning-preamble meter (design note §5 layer 2): the OpenClaw agent
+        # Reasoning-preamble meter: the OpenClaw agent
         # on GLM 5.3 intermittently merges planning text into `content`
         # (measured live 2026-10-05, 2 of 8 spike calls). A voice assistant
         # speaks content verbatim — so MEASURE, never silently strip (no
@@ -476,11 +476,11 @@ class HermesAgent(FrameProcessor):
                     else:
                         self._last_user_text = text
                         self._last_user_time = now
-                        # ── B3 epoch turns (design note) ──
+                        # ── Epoch turns ──
                         # The intelligence call runs as a BACKGROUND task; the
                         # frame loop returns immediately and never
-                        # blocks on a slow intelligence (the 12:12 collision
-                        # and the 09-30 stuck-LED class share this root
+                        # blocks on a slow intelligence (filler/reply
+                        # collisions and stuck LEDs share this root
                         # cause). A new question supersedes: old task
                         # cancelled, its late reply discarded by the
                         # epoch check at every await, no history write.
@@ -520,17 +520,17 @@ class HermesAgent(FrameProcessor):
                             # interrupt here still gets its announcement.
                             self._supersede_ack_ts = 0.0
 
-        # EVERY frame passes through (B3 regression, 2026-10-05 17:09):
+        # EVERY frame passes through (a past regression):
         # this line was lost in the _run_turn extraction churn — the agent
         # ate StartFrame, PipelineWorker timed out at +20s, and the node
         # rode a reconnect loop ("you wont wake"). Non-negotiable.
         await self.push_frame(frame, direction)
 
     async def _run_turn(self, text: str, epoch: int) -> None:
-        """One turn as a background task (design note). Every await
+        """One turn as a background task. Every await
         checks the epoch — a superseded turn discards its reply, skips
         the history write, and dies quietly. CancelledError propagates
-        (task.cancel from the supersede path); everything else is the H3
+        (task.cancel from the supersede path); everything else is the
         broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
         try:
@@ -569,7 +569,7 @@ class HermesAgent(FrameProcessor):
             reply = _strip_tags(reply)
             self._register_echo(reply)
             # A failed call never reached the intelligence — don't write the
-            # exchange into server-side history (Opus rider).
+            # exchange into server-side history.
             if not failed:
                 self._history.append({"role": "user", "content": text})
                 self._history.append({"role": "assistant", "content": reply})
@@ -582,7 +582,7 @@ class HermesAgent(FrameProcessor):
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
         except Exception as e:
-            # H3 (Opus review 2026-09-30): the intelligence can fail at ANY
+            # The intelligence can fail at ANY
             # point; ONE broad catch guards the whole turn — the last
             # defense before user-facing silence. A superseded turn that
             # fails is still superseded: no history write either way.

@@ -34,11 +34,11 @@ class EchoGate:
         self._blocked_until = max(self._blocked_until, time.monotonic() + seconds)
 
     def relax(self, tail: float = 0.5) -> None:
-        """Shorten an active block to a small tail (wake/barge-in rider,
-        design note). A confirmed WAKE means the human is talking on
+        """Shorten an active block to a small tail (wake/barge-in rider).
+        A confirmed WAKE means the human is talking on
         purpose — the duration gate must not eat their follow-up question
-        (measured live 17:49:08: "Hey Willow" during a sounding filler, the
-        question died in the gate, the owner had to wake twice). The tail keeps
+        (measured live: a wake during a sounding filler, the
+        question died in the gate, the user had to wake twice). The tail keeps
         a sliver of margin for the clip's fade-out; text containment
         (_is_own_echo, which holds her spoken texts) stays armed as the
         smart layer against her own voice. Never extends a lapsed gate."""

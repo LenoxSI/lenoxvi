@@ -5,7 +5,7 @@ pipecat's own /api/* routes. The HTML page (page.html) is a thin skin
 over these; a restyle or a host-side integration consumes the same
 endpoints.
 
-No auth by ratified design (design note): LAN-only page. Anyone on
+No auth by design: LAN-only page. Anyone on
 the LAN can read status and edit mappings — accepted risk.
 """
 
@@ -72,7 +72,7 @@ class _DashboardRoute(APIRoute):
 
 
 router = APIRouter(prefix="/api/dashboard", route_class=_DashboardRoute)
-# H5: every mutating route gets the Origin/Host guard (+optional
+# Every mutating route gets the Origin/Host guard (+optional
 # LVI_DASHBOARD_TOKEN check) — see guard.py.
 GUARD = [Depends(mutation_guard)]
 
@@ -90,15 +90,15 @@ class MappingPayload(BaseModel):
 
 
 class SessionModePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     mode: str = Field(pattern="^(fresh|sticky)$")
 
 
 class ZonePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
-    # design note H3 (2026-10-13): player_uid is a SONOS concept (RINCON_…).
+    # player_uid is a SONOS concept (RINCON_…).
     # It used to be required for every backend with min_length=8, while the
     # UI sends '' for WiiM — so adding a WiiM zone from the dashboard 422'd
     # every time, and the suite papered over it with a fake RINCON.
@@ -155,11 +155,10 @@ async def status():
                              stt_cfg.get("model") or "large-v3-turbo"),
         "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
                                 tts_cfg.get("provider") or "elevenlabs"),
-        # Intelligence (design note): rig-facts label — same cfg_env chain
+        # Intelligence: rig-facts label — same cfg_env chain
         # the agent reads, so the dashboard shows what will actually be
         # constructed. Config section, env vars, and UI all say
-        # "intelligence" since the 2026-10-08 sweep — one name,
-        # everywhere (the owner's naming law).
+        # "intelligence" — one name, everywhere (naming rule).
         "intelligence": _intelligence_label(),
         "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
@@ -203,11 +202,11 @@ def _wiim_cfg() -> dict:
 def _sonos_names(zones: dict) -> dict:
     """Live player_name per zone key (soco, per-IP). Missing/unreachable
     players just don't get a name — the config key still displays.
-    Display-only (design note amendment 2026-09-30): the Sonos-side
+    Display-only: the Sonos-side
     name shows verbatim for mapping UX; routing stays keyed on the
     config key + UID so a Sonos-side rename can't orphan a mapping.
-    SYNC soco network calls — caller MUST run this in a thread (M5,
-    Opus review: this is the voice pipeline's event loop)."""
+    SYNC soco network calls — caller MUST run this in a thread (this
+    is the voice pipeline's event loop)."""
     out = {}
     for key, z in zones.items():
         ip = (z or {}).get("ip")
@@ -240,15 +239,15 @@ async def get_mapping(names: bool = False):
         "zone_volumes": {**(cfg("sonos", "zone_volumes") or {}),
                          **(cfg("wiim", "zone_volumes") or {})},
         "clip_volume": cfg("sonos", "clip_volume"),
-        # 041 L3: what each zone ACTUALLY plays at — the slider's only
+        # What each zone ACTUALLY plays at — the slider's only
         # source (the UI's own `?? 70` fallback disagreed with the backends).
         "effective_volumes": {z: effective_zone_volume(z) for z in zones},
     }
-    # 041 M5 (2026-10-13): Sonos display names are OPT-IN (?names=1). The
+    # Sonos display names are OPT-IN (?names=1). The
     # React UI polls /mapping every 5s and never reads them, yet every poll
     # ran soco network calls against EVERY zone — including WiiM IPs,
     # which a Sonos client can't answer (an offline player = a timeout per
-    # poll). Sonos zones only. Still threaded when asked (note-028 M5: this
+    # poll). Sonos zones only. Still threaded when asked (this
     # is the voice pipeline's event loop).
     if names:
         out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
@@ -298,13 +297,13 @@ async def discover_zones():
         raise HTTPException(status_code=503, detail="soco not installed")
     found = []
     try:
-        # M5: soco UPnP discovery blocks 5s+ — off the event loop.
+        # soco UPnP discovery blocks 5s+ — off the event loop.
         for z in await asyncio.to_thread(soco.discover, timeout=5) or []:
             try:
                 # soco API (0.31.4): SoCo has NO .model_name attribute —
                 # model lives in get_speaker_info()["model_name"] (a
                 # per-device UPnP call, so it rides the SAME thread as
-                # discovery; M5). player_name IS a direct attribute
+                # discovery). player_name IS a direct attribute
                 # (cached from get_speaker_info). The first cut read
                 # z.model_name, which raised AttributeError per device —
                 # the swallow-all handler turned "found the Port" into
@@ -321,8 +320,8 @@ async def discover_zones():
                         "name": z.player_name,
                         "uid": z.uid,
                         "model": model,
-                        # The proven audioClip path is S2 Port/Amp only
-                        # (design note); everything else is at the
+                        # The proven audioClip path is S2 Port/Amp only;
+                        # everything else is at the
                         # user's own risk and labeled as such.
                         "supported": model_norm in ("Port", "Amp"),
                     }
@@ -337,7 +336,7 @@ async def discover_zones():
 
 
 class ZoneVolumePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     volume: int = Field(ge=0, le=100)
 
 
@@ -429,7 +428,7 @@ async def delete_zone(name: str):
             raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
         zones = _wiim_zones()
         del zones[name]
-        # M14: ONE atomic multi-section write — the old back-to-back
+        # ONE atomic multi-section write — the old back-to-back
         # write_section pair was non-atomic (crash between them left a
         # deleted zone with dangling room mappings) and churned two
         # backups. Sections dict preserves every OTHER key untouched.
@@ -479,8 +478,7 @@ def _test_tone_pcm() -> bytes:
 
 
 async def _clip_server():
-    """The process-wide clip server singleton (Opus audit 2026-10-04,
-    finding 2): the same ONE server the output backends bind in their
+    """The process-wide clip server singleton: the same ONE server the output backends bind in their
     setup() — never a second bind, never an orphan the next pipeline
     can't reuse."""
     from sonos_output import shared_clip_server
@@ -497,7 +495,7 @@ async def test_zone(name: str):
 
     server = await _clip_server()
     pcm = _test_tone_pcm()
-    # M4: lameenc encode blocks — off the event loop (Opus review).
+    # lameenc encode blocks — off the event loop.
     def _encode():
         enc = lameenc.Encoder()
         enc.set_bit_rate(96)
@@ -569,7 +567,7 @@ async def test_zone(name: str):
 
 
 def effective_zone_volume(name: str, backend: str | None = None) -> int:
-    """THE volume a clip in `name` plays at (design note L3, 2026-10-13):
+    """THE volume a clip in `name` plays at:
     live override (dashboard slider) > `<backend>.zone_volumes` >
     `<backend>.clip_volume` > DEFAULT_CLIP_VOLUME — resolved in the zone's
     OWN backend section (the UI used to show WiiM zones Sonos's global).
@@ -601,13 +599,13 @@ def _zone_test_volume(name: str, backend: str) -> int:
 
 
 class WifiPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     ssid: str = Field(min_length=1, max_length=32)
     password: str = Field(min_length=1, max_length=63)
 
 
 class NamePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     name: str = Field(min_length=1, max_length=31, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -626,11 +624,11 @@ _HALF_OPEN_HINT = (
 
 async def _node_cmd(room: str, cmd: str, args: dict | None = None,
                     timeout: float = 12.0):
-    """One node command with honest HTTP mapping (041 L9).
+    """One node command with honest HTTP mapping.
 
     An in-flight duplicate is a CONFLICT: 409, never the old 504 that
     the UI rendered as a naked 'Gateway Timeout'. A bare transport
-    timeout (empty detail — the 21:01 restart error shape) and a
+    timeout (empty detail — the bare restart error shape) and a
     half-open session both say WHAT happened and that it self-heals."""
     try:
         return await node_command.request(room, cmd, args, timeout)
@@ -651,7 +649,7 @@ async def _node_cmd(room: str, cmd: str, args: dict | None = None,
 async def restart_node(room: str):
     _room_online(room)
     reply = await _node_cmd(room, "restart", timeout=8.0)
-    # 041 M3: a node that answers ok:false did NOT restart — 502, never a
+    # A node that answers ok:false did NOT restart — 502, never a
     # lying 200 (same contract as scan/name/mute/info).
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"restart failed: {reply.get('data')}")
@@ -678,7 +676,7 @@ async def set_node_wifi(room: str, payload: WifiPayload):
     reply = await _node_cmd(room, "set_wifi",
                             {"ssid": payload.ssid, "pass": payload.password},
                             timeout=8.0)
-    # 041 M3: the immediate ack is ok:false when the node REJECTED the creds
+    # The immediate ack is ok:false when the node REJECTED the creds
     # before trying them (fw cmd.cpp: "missing ssid/pass", "nvs error") —
     # the UI used to show "Wi-Fi applying…" on a 200 for a node that
     # applied nothing. Only ok:true ("stored, rebooting to verify"; older
@@ -699,21 +697,21 @@ async def set_node_name(room: str, payload: NamePayload):
 
 
 class MutePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
-    # 041 M7: REQUIRED — the old default=True meant a body-less POST muted
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
+    # REQUIRED — the old default=True meant a body-less POST muted
     # a node. The UI always sends an explicit bool.
     mute: bool
 
 
 @router.post("/nodes/{room}/mute", dependencies=GUARD)
 async def set_node_mute(room: str, payload: MutePayload):
-    """Mic mute. Flex since 1.1.0; BOTH lines since firmware 1.2.11 (H4,
-    2026-10-16): persisted on the node (survives reboot/OTA), and on an
+    """Mic mute. Flex since 1.1.0; BOTH lines since firmware 1.2.11
+    (2026-10-16): persisted on the node (survives reboot/OTA), and on an
     array node it drives the same XMOS pin as the physical Mute button
     (red LED). The node echoes its resulting state in the ack; the room
     record follows it (and follows physical presses via mute_push).
 
-    Per-line truth (2026-10-09, the lying-error incident): an array node
+    Per-line truth (an earlier error message here was misleading): an array node
     older than 1.2.11 answers 'unknown cmd' — the message says what fixes
     it for BOTH lines without guessing which one is asking."""
     _room_online(room)
@@ -815,11 +813,11 @@ _DEEPGRAM_FLUX_VOICES = (
 )
 
 
-# the owner's trim (2026-10-05): flash for speed, v4 turbo for expression.
+# Model trim: flash for speed, v4 turbo for expression.
 # MUST match TTSPayload.model's pattern (suite pins it).
 _ELEVENLABS_MODELS = ("eleven_flash_v2_5", "eleven_v4_turbo")
 
-# design note M1 (2026-10-13): the dashboard's pick-lists come FROM HERE via
+# The dashboard's pick-lists come FROM HERE via
 # GET /tts — the UI used to hardcode its own copies (12 of 40 Aura, 16 of
 # 36 Flux), so most accepted voices were unpickable and a configured
 # aura-2-zeus-en couldn't even display. One catalog, one owner.
@@ -831,11 +829,11 @@ TTS_CATALOG = {
 
 
 class TTSPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
                           pattern="^(elevenlabs|deepgram|deepgram-flux)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
-    # the owner's trim (2026-10-05 13:20): flash for reliability/speed, v4
+    # Model trim: flash for reliability/speed, v4
     # turbo for expressiveness — v2/v3/v4-regular have no use case in a
     # voice assistant (v2 legacy, v3 superseded by v4, v4-regular is the
     # slow non-Turbo bake).
@@ -848,7 +846,7 @@ class TTSPayload(BaseModel):
     # default means "don't touch" on partial updates.
     deepgram_flux_speed: float | None = Field(default=None, ge=0.5, le=1.5)
     deepgram_flux_expressivity: int | None = Field(default=None, ge=-2, le=2)
-    # ElevenLabs flash-v2.5 knobs (the owner 2026-10-07 22:49): speed 0.7–1.2,
+    # ElevenLabs flash-v2.5 knobs: speed 0.7–1.2,
     # stability 0.0–1.0 (lower = expressive, higher = consistent). Absent
     # = None = ElevenLabs defaults — never a made-up value. The v3/v4
     # dialogue lane deliberately has no knobs (ElevenLabs guidance).
@@ -873,13 +871,13 @@ def _validate_tts_payload(p: TTSPayload) -> None:
 
 
 class TTSKeyPayload(BaseModel):
-    # Character-class pattern (Opus audit 2026-10-04, finding 1): no
+    # Character-class pattern: no
     # newlines/quotes/backslashes — a `\n` in the value let a key PUT
     # smuggle a WHOLE extra env var into .env (e.g. LVI_RESTART_COMMAND),
     # which the next restart would execute. Alphanumeric + _ . - only.
     # Verified against the three real production keys before shipping:
     # all pass (2026-10-04).
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     api_key: str = Field(min_length=8, max_length=256,
                          pattern=r"^[A-Za-z0-9_.\-]+$")
 
@@ -901,7 +899,7 @@ async def get_tts():
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
-        # 041 M1: the accepted values per provider — the UI's only source
+        # The accepted values per provider — the UI's only source
         # for its pick-lists (elevenlabs = model ids; deepgram* = voices).
         "catalog": TTS_CATALOG,
         "note": "provider/voice/model apply on next bot restart; keys apply "
@@ -947,7 +945,7 @@ async def put_tts(payload: TTSPayload):
 async def _write_env_key(var: str, value: str) -> bool:
     """Replace-or-append `var=value` in .env. Returns True if replaced.
 
-    Atomic write + 0600 (Opus audit 2026-10-04): write_text created a
+    Atomic write + 0600: write_text created a
     missing .env as 0644, and a crash mid-write could truncate it.
     TTSKeyPayload's character-class pattern is the upstream defense
     against newline smuggling — this is the belt to that suspenders.
@@ -997,8 +995,8 @@ class IntelligencePayload(BaseModel):
     # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
     # conversation field). Claude / custom OpenAI-compatible endpoints
     # are DESIGNED FOR (same envelope, URL+key+model) but not shipped —
-    # the pattern 422s them until their lanes exist (design note).
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    # the pattern 422s them until their lanes exist.
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     kind: str = Field(pattern="^(hermes|openclaw)$")
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
@@ -1019,17 +1017,16 @@ INTELLIGENCE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_K
 
 
 class IntelligenceKeyPayload(BaseModel):
-    # design note H1 (2026-10-13): the key is saved for the kind the user is
+    # The key is saved for the kind the user is
     # LOOKING AT, not the kind config.yaml holds. The old route derived the
     # variable from saved config, so picking OpenClaw in the dropdown and
     # saving its token on a hermes-configured install wrote the OpenClaw
-    # token into LVI_HERMES_KEY — the 401-incident failure mode, rebuilt
+    # token into LVI_HERMES_KEY — the wrong-token 401 failure mode, rebuilt
     # by the UI. kind is REQUIRED (no default = no silent guess) and
     # extra="forbid" so a misspelled field 422s instead of no-opping.
     model_config = ConfigDict(extra="forbid")
     kind: Literal["hermes", "openclaw"]
-    # Same character-class law as TTSKeyPayload (Opus audit 2026-10-04
-    # finding 1): no newlines/quotes/backslashes — a `\n` in a key PUT
+    # Same character-class law as TTSKeyPayload: no newlines/quotes/backslashes — a `\n` in a key PUT
     # must never smuggle a second env var into .env.
     api_key: str = Field(min_length=8, max_length=256,
                          pattern=r"^[A-Za-z0-9_.\-]+$")
@@ -1045,7 +1042,7 @@ async def get_intelligence():
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (a fallback turned a missing key into a silent
     # wrong-token outage once). key_kind names the variable.
-    # keys_set (design note H1): status for EVERY kind, so the UI chip shows
+    # keys_set: status for EVERY kind, so the UI chip shows
     # the key of the kind on screen, not the kind in config.
     _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
     return {
@@ -1074,7 +1071,7 @@ async def put_intelligence(payload: IntelligencePayload):
         urls[payload.kind] = payload.url
         current["urls"] = urls
     else:
-        # Bare kind flip (036 M-3): restore THAT kind's remembered URL
+        # Bare kind flip: restore THAT kind's remembered URL
         # when one exists — keeping the old kind's URL would point the
         # new lane at the wrong intelligence (api_server vs Gateway).
         remembered = (current.get("urls") or {}).get(payload.kind)
@@ -1101,11 +1098,10 @@ async def put_intelligence(payload: IntelligencePayload):
 
 @router.put("/intelligence/key", dependencies=GUARD)
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
-    """Intelligence API key → .env, kind-aware (036 M-2 / bug-7 law +
-    the 2026-10-08 naming law: each intelligence's key names what it is):
+    """Intelligence API key → .env, kind-aware (naming law: each intelligence's key names what it is):
     hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — the ONE variable
     that lane reads (strict law: no fallbacks, no cross-kind). The kind
-    comes from the PAYLOAD (design note H1) — the kind the user is saving a
+    comes from the PAYLOAD — the kind the user is saving a
     key for — never from saved config. Never echoed; the response names
     the variable so the UI can say where the key went."""
     kind = payload.kind
@@ -1193,7 +1189,7 @@ async def post_intelligence_test():
 # the user manager owns it, not us, so it fires 2s after the response
 # completes.
 #
-# LVI_RESTART_COMMAND is GONE from prod (Opus audit 2026-10-04, finding 1):
+# LVI_RESTART_COMMAND is GONE from prod:
 # it was a generic "run this command" hook readable from .env, and the
 # newline-injection bug (since fixed at TTSKeyPayload) could have armed
 # it. The test suite now monkeypatches subprocess.run for this route
@@ -1232,7 +1228,7 @@ async def restart_bot():
 
 
 class VoiceTuningPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     wake_threshold: float | None = Field(default=None, ge=0.30, le=0.60)
     wake_awake_timeout: float | None = Field(default=None, ge=5.0, le=60.0)
     vad_confidence: float | None = Field(default=None, ge=0.30, le=0.90)
@@ -1297,9 +1293,9 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
 
 
 class OWWModelPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # 041 M7: misspelled keys 422, never no-op
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     model: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+\.onnx$")
-    # 041 L4: the source disambiguates a same-basename root/models/
+    # The source disambiguates a same-basename root/models/
     # collision — without it the route resolved models/-first and a
     # click on the ROOT row silently activated the models/ copy.
     # None = legacy resolution (models first, root fallback).
@@ -1330,7 +1326,7 @@ def _oww_current() -> str:
 
 def _oww_validate(data: bytes) -> None:
     """Load-and-one-test-inference against the SAME library and shape the
-    pipeline feeds (loaded-gun rule, design note: a model that can't run
+    pipeline feeds (loaded-gun rule: a model that can't run
     never lands on disk, so a restart can never wake-brick the bot)."""
     import onnxruntime as ort
     import io
@@ -1406,7 +1402,7 @@ async def oww_select_model(payload: OWWModelPayload):
     """Point wake.model at an uploaded model (applies on next restart).
     Merges into the wake section — threshold/awake_timeout survive.
 
-    041 L4: `source` keys the EXACT file the panel row named — with the
+    `source` keys the EXACT file the panel row named — with the
     same basename in both root and models/, a name-only select always
     resolved to the models/ copy and a click on the root row silently
     activated the other file. None keeps the legacy resolution."""
@@ -1465,11 +1461,11 @@ async def oww_delete_model(name: str, source: str = ""):
 @router.post("/firmware/upload", dependencies=GUARD)
 async def upload_firmware(
     file: UploadFile = File(...),
-    # 041 M2 (2026-10-13): REQUIRED — no default. The old Form("node")
+    # REQUIRED — no default. The old Form("node")
     # silently staged a track-less upload onto the ARRAY line; with no
-    # board identity in the image yet (fw design note M4), a Flex .bin
+    # board identity in the image yet, a Flex .bin
     # landing there gets OTA'd by an array node and kills it. A missing
-    # track is a 422, never a guess. (Reverses the 036 H-B "legacy
+    # track is a 422, never a guess. (Reverses the earlier "legacy
     # callers stay array" default — its only caller was the dead
     # page.html, which never sent a track.)
     track: str = Form(...),
@@ -1481,7 +1477,7 @@ async def upload_firmware(
     atomically in the same step: no typed-version mismatch is
     possible (manual version entry removed 2026-09-29).
 
-    Track-aware (036 H-B): the uploader declares which hardware line
+    Track-aware: the uploader declares which hardware line
     the image is for (array | flex — the one track vocabulary, 2026-10-16);
     the image and manifest land in that track's directory ONLY, under the
     track's own file name (array_esp32.bin / flex_esp32.bin). A Flex .bin
@@ -1498,7 +1494,7 @@ async def upload_firmware(
     dest = dest_dir / f"{track}_esp32.bin"  # fixed served name (manifest points here)
     size = 0
     # Stage to a temp file FIRST: a rejected upload must never clobber
-    # the currently-served good image (loaded-gun rule, design note).
+    # the currently-served good image (loaded-gun rule).
     tmp = dest.with_suffix(".bin.uploading")
     with open(tmp, "wb") as f:
         while chunk := await file.read(1024 * 1024):
@@ -1526,7 +1522,7 @@ async def upload_firmware(
             status_code=400,
             detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
         )
-    # Board identity (design note, 2026-10-15; project names 2026-10-16): the
+    # Board identity: the
     # image proves its line — compiled-in OTA URL format, plus the project
     # name on 1.2.9+ images (core/firmware_image.py). Refuse a mismatch
     # BEFORE the swap — the served image and manifest stay untouched.
@@ -1564,9 +1560,9 @@ async def upload_firmware(
             "track": track}
 
 
-# 045 follow-up (2026-10-16): the legacy POST /firmware/version route is
+# The legacy POST /firmware/version route is
 # REMOVED. It wrote the array manifest with any version string and no
 # binary — a hand-crafted manifest could point the track at a version
 # that was never validated (or never uploaded). The upload route above is
 # the only manifest writer now: version AND track come from the image
-# itself, guarded by the 045 board-identity check.
+# itself, guarded by the board-identity check.

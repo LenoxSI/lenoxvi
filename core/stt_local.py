@@ -47,10 +47,10 @@ def preload_shared_model(model: str, device: str, compute_type: str) -> None:
     """Load + warm the shared Whisper model at bot STARTUP (sync, before the
     server runs), instead of lazily on the first voice turn.
 
-    Why (2026-10-15, TODO "RSS step"): the lazy load happened inside a heap
+    Why: the lazy load happened inside a heap
     fragmented by hours of sessions, so its transient peak stuck as RSS. At
     startup the heap is fresh, the warm-up pulls cuBLAS/CUDA in too, and
-    malloc_trim returns the peak. Bonus: the first "Hey Willow" of the day no
+    malloc_trim returns the peak. Bonus: the first wake of the day no
     longer waits ~2.5 s for the model. Failure is non-fatal — the lazy path in
     ensure_model() still works."""
     if LocalWhisperSTTService._shared_model is not None:
@@ -136,7 +136,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         AsyncOpenAI/httpx2 client in __init__ even though this service never
         calls OpenAI. Left alone, it is closed only by the openai SDK's
         finalizer when GC eventually reclaims the session — a stray
-        aclose() task scheduled per dead session (design note). Close it at teardown,
+        aclose() task scheduled per dead session. Close it at teardown,
         bounded so a hung close can never stall pipeline shutdown.
         """
         await super().cleanup()

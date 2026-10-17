@@ -4,7 +4,7 @@ Served by the bot process itself (the pipecat runner's FastAPI app on
 :7860) — same registration pattern as core/firmware_server.py. No
 extra process, no new ports, no build step.
 
-Design contract (design note, ratified 2026-09-29):
+Design contract:
 - The page is the prebuilt React app in dashboard-ui/dist. The old
   page.html thin JSON skin was deleted 2026-10-16 (dead since the
   HeroUI port, actively wrong vs the API). Endpoints are the stable
@@ -62,13 +62,13 @@ def register_dashboard(app) -> None:
     app.add_middleware(OfferTeeMiddleware)
     app.include_router(router)
 
-    # HeroUI rebuild (2026-10-07, design note): FastAPI serves the
+    # HeroUI rebuild (2026-10-07): FastAPI serves the
     # prebuilt React app from dashboard-ui/dist — a fresh clone needs
     # zero node toolchain (dist/ is committed; the build stays dev-side,
     # npm run build in dashboard-ui/).
-    # 2026-10-16: the legacy page.html fallback is DELETED (041 sweep) —
+    # 2026-10-16: the legacy page.html fallback is DELETED —
     # dead since the dist/ commit and actively wrong vs the API (its
-    # intelligence key save omits `kind`; M7 extra=forbid 422s it). A
+    # intelligence key save omits `kind`; extra=forbid 422s it). A
     # clone without dist/ gets an honest 404 naming the build step,
     # never a stale page that lies about the API.
     ui_index = Path(__file__).resolve().parents[2] / "dashboard-ui" / "dist" / "index.html"

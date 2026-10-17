@@ -1,10 +1,10 @@
 """guard — browser-borne request protection for the dashboard's mutating
-routes (Opus review H5, 2026-10-01).
+routes.
 
 Threat model, honestly scoped:
-- The LAN is TRUSTED by ratified design (design note): anyone on it can
+- The LAN is TRUSTED by design: anyone on it can
   read status and edit mappings. No auth for them.
-- The BROWSER is not fully trusted: a malicious page the owner visits can
+- The BROWSER is not fully trusted: a malicious page the operator visits can
   script `fetch("https://<lan-ip>:7860/api/dashboard/firmware/upload",
   {method: "POST", body: fd})` — multipart counts as a CORS "simple
   request", so no preflight happens and the browser fires it blind. That
@@ -16,7 +16,7 @@ Threat model, honestly scoped:
   here (rebinding needs a public-DNS hostname in Host, which check 2
   rejects).
 - Non-browser callers (curl, scripts, Home Assistant) send no Origin and
-  pass — the API-first contract (design note) is unchanged.
+  pass — the API-first contract is unchanged.
 
 Optional token (LVI_DASHBOARD_TOKEN in .env): if set, mutating routes
 additionally require `X-Dashboard-Token` to match. For LAN-only installs

@@ -6,7 +6,7 @@ doesn't transcribe chatter and nothing can reach the intelligence. The wake
 listener itself always hears everything.
 
 Turn semantics (plan of record, 2026-09-15):
-- IDLE: audio feeds OWW only. "Hey Willow" (score >= threshold) -> AWAKE.
+- IDLE: audio feeds OWW only. The wake phrase (score >= threshold) -> AWAKE.
 - AWAKE: audio flows to VAD/STT (the intelligence works normally). Falls back to
   IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity.
 - LOCKED: bot speaking. STT is gated; the wake listener is still fed
@@ -51,7 +51,7 @@ class TurnState(Enum):
 class WakeWordFilter(FrameProcessor):
     """Wake-word gate + turn lock. Non-audio frames always pass through.
 
-    Per-pipeline OWW model (H2, Opus review 2026-10-01): each pipeline
+    Per-pipeline OWW model: each pipeline
     gets its OWN Model instance — OWW keeps rolling audio buffers, and a
     class-shared model mixed concurrent sessions' audio (false/missed
     wakes) while reset() calls fought each other. Model construction is
@@ -60,7 +60,7 @@ class WakeWordFilter(FrameProcessor):
     """
 
     _shared_oww = None  # class-level: cached model FILE path (published by first setup)
-    _oww_lock = asyncio.Lock()  # serializes concurrent Model() inits (H2)
+    _oww_lock = asyncio.Lock()  # serializes concurrent Model() inits
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
                  echo_gate=None, on_wake=None, led=None, on_interrupt=None,
@@ -70,15 +70,15 @@ class WakeWordFilter(FrameProcessor):
         super().__init__(**kwargs)
         # Direct LED wire (led_state.LedSender): wake/sleep notifications
         # must NOT ride the pipeline — they stall behind a blocked intelligence
-        # (2026-09-30 12:23: oww-sleeping sat 27s in the queue while the
+        # (observed: oww-sleeping sat 27s in the queue while the
         # node's ring held stale purple). None = no LED (tests/rig).
         self._led = led
-        # B3 wake-word barge-in (design note): fires on_interrupt when
+        # Wake-word barge-in: fires on_interrupt when
         # the wake score clears threshold TWICE consecutively during
         # LOCKED. Default OFF (wake.barge_in config knob) — with the knob
         # off, this filter is bit-for-bit the old behavior.
         self._on_interrupt = on_interrupt
-        self._interrupt_task: asyncio.Task | None = None  # design note H-A: held ref so the task can't be GC'd
+        self._interrupt_task: asyncio.Task | None = None  # held ref so the task can't be GC'd
         self._barge_in = str(cfg_env("wake", "barge_in", "LVI_BARGE_IN", "false")) \
             .strip().lower() in (True, 1, "1", "true", "yes", "on")
         self._interrupt_chain = 0
@@ -110,14 +110,14 @@ class WakeWordFilter(FrameProcessor):
         self._last_activity = time.monotonic()
         # Window forensics (2026-10-03): track what the MIC delivered
         # during an AWAKE window so a speechless close can name its own
-        # cause. 2026-10-03 09:00:25: wake 0.98, then 7s of silence —
+        # cause. Observed: wake 0.98, then 7s of silence —
         # VAD never fired and nothing in the journal could say whether
         # the track stalled or the speech was below VAD thresholds.
         self._awake_frames = 0
         self._awake_peak = 0
         self._awake_echo_blocked = False
         self._vad_fired = False
-        # M1 (Opus review): LOCKED safety cap — monotonic time after which
+        # LOCKED safety cap — monotonic time after which
         # LOCKED releases itself if BotStoppedSpeakingFrame never arrives
         # (TTS error mid-stream). SonosOutput refines it via note_speech()
         # when it knows the real clip duration; 30s is the fallback.
@@ -125,7 +125,7 @@ class WakeWordFilter(FrameProcessor):
 
     async def setup(self, setup):
         await super().setup(setup)
-        # H2 (Opus review): ONE Model PER PIPELINE. The old class-shared
+        # ONE Model PER PIPELINE. The old class-shared
         # model mixed two sessions' audio in the same rolling buffers
         # from different threads (false/missed wakes — even single-node,
         # the ~22s zombie window ran two pipelines through one model),
@@ -155,7 +155,7 @@ class WakeWordFilter(FrameProcessor):
 
     def note_speech(self, seconds: float) -> None:
         """SonosOutput reports how long the loaded clip will actually
-        sound (M1): the LOCKED safety cap tracks the real speech window
+        sound: the LOCKED safety cap tracks the real speech window
         instead of the 30s fallback. Must be cheap and never raise into
         the reply path."""
         self._speech_until = time.monotonic() + seconds + 2.0
@@ -195,10 +195,10 @@ class WakeWordFilter(FrameProcessor):
                     self._awake_echo_blocked = False
                     self._vad_fired = False
                     logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
-                    # Echo-gate rider (design note): a confirmed wake
+                    # Echo-gate rider: a confirmed wake
                     # means the human intends to speak — relax the duration
-                    # gate to a tail so their question isn't eaten (the
-                    # 17:49:08 double-wake). Text containment stays armed.
+                    # gate to a tail so their question isn't eaten (a
+                    # user once had to wake twice). Text containment stays armed.
                     if self._echo_gate is not None:
                         try:
                             self._echo_gate.relax()
@@ -214,7 +214,7 @@ class WakeWordFilter(FrameProcessor):
                     break
                 elif (self._barge_in and self._state is TurnState.LOCKED
                       and score >= self._threshold):
-                    # B3 wake-word barge-in (design note): "Hey Willow"
+                    # Wake-word barge-in: the wake phrase
                     # mid-speech kills her clip and reopens the mic. Two
                     # consecutive over-threshold frames must clear (a
                     # 160ms confirm — same discipline as the IDLE wake:
@@ -230,7 +230,7 @@ class WakeWordFilter(FrameProcessor):
                         logger.info(
                             f"wake_word: BARGE-IN (score {score:.2f}, "
                             f"2-frame confirm) -> AWAKE")
-                        # Echo-gate rider (030): same rule as a normal
+                        # Echo-gate rider: same rule as a normal
                         # wake — the human is talking on purpose; the
                         # dead clip's duration gate must not eat their
                         # next words.
@@ -240,7 +240,7 @@ class WakeWordFilter(FrameProcessor):
                             except Exception:
                                 pass
                         if self._on_interrupt:
-                            # B3 barge-in (design note H-A): bot.py's callback
+                            # Barge-in: bot.py's callback
                             # is an async def — a bare call only created the
                             # coroutine and never ran it (the same class as
                             # the queue_frame trap). Schedule it on the
@@ -270,7 +270,7 @@ class WakeWordFilter(FrameProcessor):
             # duration + margin; clips play ASYNC after the bot's browser
             # audio ends — observed live 2026-09-15).
             if self._state is TurnState.LOCKED:
-                # M1 (Opus review): the only other exit from LOCKED is
+                # The only other exit from LOCKED is
                 # BotStoppedSpeakingFrame — a TTS error mid-stream can
                 # swallow it and leave the mic deaf (and the duck held)
                 # until reconnect. Safety cap: release to AWAKE when the
@@ -331,7 +331,7 @@ class WakeWordFilter(FrameProcessor):
 
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
-            self._speech_until = now + 30.0  # M1 fallback cap; SonosOutput refines via note_speech
+            self._speech_until = now + 30.0  # fallback cap; SonosOutput refines via note_speech
             logger.debug("wake_word: LOCKED (bot speaking)")
             # Speaking LED now fires from SonosOutput's real-time TTS
             # frames (led_state direct wire) — this frame itself arrives
@@ -353,7 +353,7 @@ class WakeWordFilter(FrameProcessor):
                 # NON-audio frames only — if audio had been flowing, the
                 # audio-path timeout above would have fired first. Zero
                 # delivered frames here = the WebRTC track itself stalled
-                # (the 2026-10-02 18:33 "No audio frame received" shape).
+                # (the "No audio frame received" shape).
                 logger.info(
                     f"wake_word: -> IDLE (timeout, no audio path) — window forensics: "
                     f"frames={self._awake_frames} peak={self._awake_peak} "

@@ -49,7 +49,7 @@ esac
 # happens to be checked out. A different branch (an old per-line branch, a
 # feature branch) is refused: it could carry the other line's code. Backstops
 # after the build: the image's own identity must match $TRACK (below), and a
-# 1.2.9+ node refuses an image named for the other line (fw M4).
+# 1.2.9+ node refuses an image named for the other line.
 FW_BRANCH="main"
 FW_CUR=$(git -C "$FW_REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached HEAD)")
 if [ "$FW_CUR" != "$FW_BRANCH" ]; then
@@ -67,7 +67,7 @@ if [ -n "$(git -C "$FW_REPO" status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 # libpeer is gitignored and shared by both lines; its patches are load-bearing
-# (0003 = the data-channel handshake, design note). The fetch script verifies
+# (0003 = the data-channel handshake). The fetch script verifies
 # pin + patch stack and refuses a hand-edited tree.
 if [ -f "$FW_REPO/scripts/fetch_libpeer.sh" ]; then
   bash "$FW_REPO/scripts/fetch_libpeer.sh" || { echo "FATAL: deps/libpeer check failed"; exit 1; }
@@ -112,7 +112,7 @@ unset LOG_DATACHANNEL_MESSAGES
 # Fresh config from sdkconfig.defaults on EVERY build, one per line, inside
 # its build dir. The repo-root sdkconfig is generated once and then wins over
 # sdkconfig.defaults (an explicit "is not set" line survives a defaults
-# change) — the M5 watchdog flip would have shipped with watchdogs still OFF.
+# change) — a watchdog-enable change in defaults would have shipped with watchdogs still OFF.
 # The image must equal the committed defaults, nothing else.
 SDKCFG="$FW_REPO/build/$TRACK/sdkconfig"
 mkdir -p "$FW_REPO/build/$TRACK"
@@ -146,17 +146,17 @@ PYEOF
 BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 
 # ── 2. Version bump ────────────────────────────────────────────────────────
-# M9 (design note, fixed 2026-10-08): the .bin EMBEDS its own version
+# The .bin EMBEDS its own version
 # (esp_app_desc_t, project(VERSION) at build time) — the binary is the
 # truth, this script's counter is not. We read the bin's version and
 # GATE on it: refuse to ship a build whose embedded version disagrees
-# with the manifest we're about to write. Kills the note-016 class
+# with the manifest we're about to write. Kills the mismatch class
 # (manifest/binary mismatch = the node re-flashes the same fw every
 # boot) and the botched-bake class (forgot to bump CMakeLists — the
 # script used to silently ship the old version under a new number).
 BIN_VER=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" "$BIN")
 echo "==> binary self-reports version: ${BIN_VER:-<none>}"
-# Board identity (design note): the image's compiled-in OTA URL names its own
+# Board identity: the image's compiled-in OTA URL names its own
 # track. Backstop to the branch guard — never publish an image whose own
 # track isn't the one we're about to stage it on.
 BIN_TRACK=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" --track "$BIN")
@@ -199,10 +199,10 @@ cat > "$VFILE" <<EOF
 EOF
 echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
 
-# ── M9 gate: the bin's embedded version MUST equal the manifest's ──────────
+# ── Version gate: the bin's embedded version MUST equal the manifest's ─────
 # A mismatch means CMakeLists wasn't bumped (botched bake) or the build
 # picked up a stale artifact. Shipping it re-flashes the same firmware
-# every boot (design note) or mislabels a deploy. Either way: STOP.
+# every boot or mislabels a deploy. Either way: STOP.
 if [ -z "$BIN_VER" ]; then
   echo "FATAL: no embedded version found in $BIN — not an lenoxvi app image?"; exit 1
 fi

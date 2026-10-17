@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-# M10 (design note, fixed 2026-10-08): config.yaml lives at the REPO ROOT,
+# config.yaml lives at the REPO ROOT,
 # next to bot.py — never relative to whatever cwd the process happens
 # to run from. A relative "config.yaml" silently resolved to {} when
 # anything ran from another directory (the suite caught it via its own
@@ -31,11 +31,11 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = os.getenv("LVI_CONFIG", str(_REPO_ROOT / "config.yaml"))
 
 # Code default for a speaker zone's voice-clip volume when config has no
-# `<backend>.clip_volume` (design note L3, 2026-10-13). ONE value for every
+# `<backend>.clip_volume`. ONE value for every
 # reader — sonos_output had 70, wiim_output/dashboard 35, the React UI 70,
 # so a config missing the key played Sonos at 70 while the slider showed
-# something else. 35 = the direct-path value the owner ear-tuned 2026-10-04
-# (70 was the obsolete through-the-Triad-matrix value, design note).
+# something else. 35 = the direct-path value, tuned by ear 2026-10-04
+# (70 was the obsolete through-the-Triad-matrix value).
 DEFAULT_CLIP_VOLUME = 35
 
 

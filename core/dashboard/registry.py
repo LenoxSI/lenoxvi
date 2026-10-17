@@ -1,6 +1,6 @@
 """registry — runtime node/room state for the dashboard (process memory).
 
-Identity model (measured 2026-09-29 against the live stack; design note):
+Identity model (measured 2026-09-29 against the live stack):
 - The mic node's firmware bakes a `room` string into every /api/offer
   JSON body (its zone-routing key, set at firmware build time). It sends
   NO per-device id and NO pc_id — pipecat generates pc_id SERVER-SIDE
@@ -33,9 +33,9 @@ _boot_time = None
 _active_room = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
-_out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire, M6)
+_out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
-_muted_by_pc = {}  # pc_id -> mic mute state (H4; held the same way as fw)
+_muted_by_pc = {}  # pc_id -> mic mute state (held the same way as fw)
 _line_by_pc = {}  # pc_id -> board line "array"|"flex" (firmware 1.2.19+; held the same way)
 NODE_LINES = ("array", "flex")
 _last_wake = None  # {"time": ts, "room": str|None}
@@ -48,7 +48,7 @@ def _evict_other_sessions(pc_id, room):
     """Single live session per room: when pc_id claims `room`, drop any
     OLDER pc_id still mapped to it (and its sender). The node re-offers
     before pipecat reaps its dead session (~22s zombie window) —
-    measured 2026-09-29 19:11: rename/scan queued into the dead
+    measured: rename/scan queued into the dead
     session's task and 504'd while the live session sat idle."""
     if not pc_id or not room or room == PROVISIONAL:
         return
@@ -58,7 +58,7 @@ def _evict_other_sessions(pc_id, room):
         _out_by_pc.pop(p, None)
         if stale:
             logger.info(f"registry: evicted stale session {p[:24]}… from room '{room}'")
-    # M8 (Opus review): two DIFFERENT nodes claiming the same room name
+    # Two DIFFERENT nodes claiming the same room name
     # is a config problem (both built with the default PIPECAT_ROOM, or
     # a rename raced) — they'd evict each other into a reconnect loop.
     # A stale-zombie eviction is normal churn; a collision between two
@@ -83,8 +83,7 @@ def mark_boot():
     # — sync_host.sh rsyncs the repo to ~/projects/lenoxvi on the
     # appliance). Falls back to "unknown" if git is missing or this is
     # not a checkout (stranger clones still get a dashboard, per the
-    # public-flip rule). Not a static string on purpose (the owner's ask
-    # 2026-10-04): the statusbar shows the ACTUAL installed version,
+    # public-flip rule). Not a static string on purpose: the statusbar shows the ACTUAL installed version,
     # including -N-g<hash> drift past a tag.
     global _version
     try:
@@ -151,7 +150,7 @@ def note_line(pc_id: str, line: str) -> None:
 
 
 def note_muted(pc_id: str, muted: bool) -> None:
-    """H4 (2026-10-16, firmware 1.2.11+): the node's mic-mute state, from
+    """Firmware 1.2.11+: the node's mic-mute state, from
     fw_push (connect) or mute_push (an array node's PHYSICAL button was
     pressed). Same provisional-window handling as note_firmware: held by
     pc_id until note_offer binds the room."""
@@ -190,8 +189,8 @@ def _drain_held(pc_id, label) -> None:
 
 def note_tts(room: str | None, provider: str, usable: bool) -> None:
     """Tracked TTS services (bot.py TTSTracked) report pipecat's
-    usability verdict for THIS pipeline's room (2026-10-16 room-b
-    silent incident): a websocket death marks a service permanently
+    usability verdict for THIS pipeline's room (silent-TTS
+    incident): a websocket death marks a service permanently
     unusable — the node keeps hearing while replies silently vanish,
     and nothing on the dashboard said so. Room None/PROVISIONAL is
     ignored (browser sessions have no room TTS worth reporting)."""
@@ -262,8 +261,8 @@ def mark_disconnected(pc_id):
     if not room:
         # Unknown pc_id: a stale session from before this boot, or a
         # duplicate disconnect. Don't touch room state — a newer session
-        # may own the room right now (measured 2026-09-29: new session
-        # connected 17:59:06, zombie reaped 17:99:31, dashboard lied).
+        # may own the room right now (measured: new session connected,
+        # the zombie was reaped after it, dashboard lied).
         return
     # Only mark offline if NO other live pc_id still claims this room —
     # pipecat reaps zombie sessions after the replacement connected.
@@ -278,7 +277,7 @@ def mark_disconnected(pc_id):
 
 def note_wake(room: str | None = None):
     """Called by the wake gate on IDLE -> AWAKE (sync, cheap). Room is
-    THIS pipeline's room (H1: passed by bot.py from room_for_pc — the
+    THIS pipeline's room (passed by bot.py from room_for_pc — the
     old global-active-room read routed replies to the last-connected
     room, wrong the moment a second node exists). None/unknown keeps
     the wake record but marks the room unknown."""
@@ -289,9 +288,9 @@ def note_wake(room: str | None = None):
 def sender_for_room(room: str):
     """(output_transport, pc_id) for the node currently connected in
     `room`, or (None, None). The output transport sends on that node's
-    data channel DIRECTLY (send_message — no pipeline, M6 2026-10-01):
+    data channel DIRECTLY (send_message — no pipeline):
     commands must not queue behind a blocked intelligence (same stall class
-    as the LED fix, Opus review M6). LAST match wins: with eviction
+    as the LED fix). LAST match wins: with eviction
     there's at most one, but if a stale mapping ever survives, the
     newest session is the one that can actually hear us."""
     found = (None, None)
@@ -313,7 +312,7 @@ def room_for_pc(pc_id: str):
 def register_sender(pc_id: str, out) -> None:
     """bot.py hands the OUTPUT TRANSPORT over at connect so node_command
     can send on that node's data channel without touching the pipeline
-    (M6: queue_frame enters at the pipeline source and queues behind a
+    (queue_frame enters at the pipeline source and queues behind a
     blocked HermesAgent — restart/scan 504'd during 40s intelligence calls)."""
     _out_by_pc[pc_id] = out
 
@@ -370,7 +369,7 @@ def known_rooms():
                 # in-session).
                 "tts_provider": rec.get("tts_provider"),
                 "tts_usable": rec.get("tts_usable"),
-                # H4 (firmware 1.2.11+): mic mute — None = this node never
+                # Firmware 1.2.11+: mic mute — None = this node never
                 # reported it (older firmware); the dashboard then asks
                 # get_info instead.
                 "muted": rec.get("muted"),

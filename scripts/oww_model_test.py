@@ -1,7 +1,7 @@
-"""Headless test: does the Hey_Willow OWW model load and behave?
+"""Headless test: does the wake-word OWW model (MODEL below) load and behave?
 
 Feed 10s of synthetic noise (no wake word) — scores must stay LOW.
-We cannot synthesize a positive without real 'Hey Willow' audio, so the
+We cannot synthesize a positive without real wake-phrase audio, so the
 positive case is validated by a live test.
 """
 
