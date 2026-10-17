@@ -73,7 +73,7 @@ if [ -f "$FW_REPO/scripts/fetch_libpeer.sh" ]; then
   bash "$FW_REPO/scripts/fetch_libpeer.sh" || { echo "FATAL: deps/libpeer check failed"; exit 1; }
 fi
 echo "==> firmware source: $FW_BRANCH @ $(git -C "$FW_REPO" rev-parse --short HEAD)"
-# Test hook: scripts/test_deploy_guard.sh runs the preflight matrix with no
+# Test hook: tests/test_deploy_guard.sh runs the preflight matrix with no
 # credentials, no build and no publish.
 if [ "${DEPLOY_PREFLIGHT_ONLY:-}" = "1" ]; then
   echo "==> preflight OK (DEPLOY_PREFLIGHT_ONLY) — stopping before the build"

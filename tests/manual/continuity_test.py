@@ -12,11 +12,11 @@ import urllib.request
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 # URL from the same config surface the bot uses (config.yaml intelligence.url >
 # LVI_HERMES_URL env), not env-only — .env is secrets-only by rule.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "core"))
 from config import cfg_env
 
 URL = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://localhost:8642/v1") + "/chat/completions"

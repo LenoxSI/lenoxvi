@@ -1168,7 +1168,7 @@ def main():
 
         # deploy_firmware.sh's backstop uses the same helper via the CLI
         import subprocess as _sp045
-        _abv = str(Path(__file__).resolve().parent / "app_bin_version.py")
+        _abv = str(REPO_CORE.parent / "scripts" / "app_bin_version.py")
         _cli = {}
         for _lbl, _img in (("flex", _fake_image5b("1.9.5", "flex")), ("array", _fake_image5b("1.9.5", "array")),
                            ("none", _fake_image5b("1.9.5", None)), ("both", _fake_image5b("1.9.5", both=True))):

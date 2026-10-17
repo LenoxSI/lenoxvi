@@ -1193,7 +1193,7 @@ async def post_intelligence_test():
 # it was a generic "run this command" hook readable from .env, and the
 # newline-injection bug (since fixed at TTSKeyPayload) could have armed
 # it. The test suite now monkeypatches subprocess.run for this route
-# instead — see scripts/test_dashboard.py.
+# instead — see tests/test_dashboard.py.
 
 
 @router.post("/restart", dependencies=GUARD)

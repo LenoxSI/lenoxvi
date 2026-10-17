@@ -5,7 +5,7 @@
 # DEPLOY_PREFLIGHT_ONLY=1: no credentials, no build, no publish, and the real
 # checkout is never modified.
 #
-#   ./scripts/test_deploy_guard.sh        # exits non-zero on any mismatch
+#   ./tests/test_deploy_guard.sh          # exits non-zero on any mismatch
 set -uo pipefail
 
 LVI_LOCAL="${LVI_LOCAL:-$HOME/projects/lenoxvi}"

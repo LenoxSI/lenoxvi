@@ -32,8 +32,8 @@ harness — the dashboard's job is operating the rig, not talking to it.
     sticky rooms via `x-openclaw-session-key`) — the second intelligence;
     `stub` — deterministic echo intelligence for bench/dev runs (the code
     default when `intelligence.kind` is unset — a misconfigured deploy
-    answers with canned lines). Keys are strict per-kind (naming law,
-    2026-10-08): `hermes` reads `LVI_HERMES_KEY`, `openclaw` reads
+    answers with canned lines). Keys are strict per-kind:
+    `hermes` reads `LVI_HERMES_KEY`, `openclaw` reads
     `LVI_OPENCLAW_KEY` — no cross-kind fallback; a missing key fails the
     turn with a clear message instead of bricking construction.
   - `intelligence_stub.py` — the stub intelligence's implementation (canned lines)
@@ -45,24 +45,34 @@ harness — the dashboard's job is operating the rig, not talking to it.
   - `led_state.py` — node ring-LED state machine
   - `firmware_server.py` — `/firmware/*` OTA delivery for mic nodes
   - `dashboard/` — the operator surface (see below)
-- `scripts/` — ops & bench tests (each has a header comment explaining what it does)
+- `scripts/` — ops tools (each has a header comment explaining what it does)
   - `restart.sh` — systemd wrapper: restarts the bot unit on the
     appliance host (no flags)
   - `sync_host.sh` — bundle-based repo sync VM → host (no creds on hosts)
   - `deploy_firmware.sh` — build + version + ship a node firmware OTA (VM-side)
+  - `app_bin_version.py` — reads the version/line baked into a firmware image
+  - `fetch_xmos_fw.sh` — fetches the XMOS image at node bring-up
   - `serial_watch.py` — node serial capture (survives replug)
   - `make-cert.sh <bot-host-LAN-IP>` — self-signed HTTPS certs for the bot
+- `tests/` — automated checks, safe to run any time
   - `test_dashboard.py` — **the permanent offline suite** (red-line
     discipline: every bug class gets a check; runs on the appliance
     venv in a scratch dir, never restarts the real bot, never deletes
-    prod files). Sections 9b3–9b11 cover TTS lane dispatch,
-    load-anchored speech timers, epoch turns + barge-in, passthrough, echo-gate relax,
-    and the Intelligence lane.
-- `firmware/` — node firmware images + OTA manifests
+    prod files). Covers the dashboard API, TTS lane dispatch,
+    load-anchored speech timers, epoch turns + barge-in, passthrough,
+    echo-gate relax, and the Intelligence lane.
+  - `containment_test.py`, `wake_phrase_test.py` — echo-containment and
+    wake-phrase filtering (run from the repo root)
+  - `test_deploy_guard.sh` — deploy_firmware.sh preflight matrix
+  - `manual/` — **live probes**: they use real hardware or services
+    (GPU, wake model, intelligence API, a speaker — `sonos_output_test`
+    plays a tone on the configured zone). Run deliberately, not in CI.
+- `firmware/` — node firmware images + OTA manifests (gitignored)
   - `xvf3800/` — XMOS image fetched via `scripts/fetch_xmos_fw.sh` at
     bring-up (upstream ships **no license** — the binary is not
     redistributed here; see the script header for md5 + provenance)
-  - `node/` — scp-populated at deploy time by `deploy_firmware.sh`
+  - `array/`, `flex/` — one OTA track per node line, filled at deploy
+    time by `deploy_firmware.sh --track array|flex` or a dashboard upload
     (empty in a fresh clone by design); served by firmware_server
 - `deploy/lenoxvi-bot.service.example` — sanitized systemd user unit
   (launch flags, `.env` loading, CUDA LD_LIBRARY_PATH for whisper's
@@ -102,7 +112,7 @@ comment-preserving read-merge-write, applies on next bot restart):
 - **Zones / Nodes / Room→zone mapping** — rooms, mic nodes, speaker zones
 - **Firmware** — node image push, FW version column
 
-The suite (`scripts/test_dashboard.py`) exercises every panel through
+The suite (`tests/test_dashboard.py`) exercises every panel through
 its TestClient: config round-trips (comment preservation), guard rails,
 422 shapes, lane dispatch (openclaw → `openclaw/<agent>` +
 session-key header; hermes round-trip restores conversation + Hermes
