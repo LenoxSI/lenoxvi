@@ -74,8 +74,6 @@ harness — the dashboard's job is operating the rig, not talking to it.
   per-machine) and edit. Precedence: `config.yaml` > `LVI_*` env var >
   code default (`core/config.py`). Secrets stay in `.env`. Edit +
   `scripts/restart.sh` to apply — no rebuild.
-- `docs/plans/` — committed implementation plans (writing-plans
-  discipline)
 - `logs/` — gitignored runtime logs (the bot logs to journald:
   `journalctl --user -u lenoxvi-bot`)
 
