@@ -1379,7 +1379,6 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
-            <option value="claude" disabled>Claude — coming soon</option>
             <option value="openai" disabled>Custom OpenAI-compatible — coming soon</option>
           </select>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>

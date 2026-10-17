@@ -993,9 +993,9 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
 class IntelligencePayload(BaseModel):
     # hermes = today's api_server contract; openclaw = OpenClaw Gateway
     # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
-    # conversation field). Claude / custom OpenAI-compatible endpoints
-    # are DESIGNED FOR (same envelope, URL+key+model) but not shipped —
-    # the pattern 422s them until their lanes exist.
+    # conversation field). Custom OpenAI-compatible endpoints are
+    # DESIGNED FOR (same envelope, URL+key+model) but not shipped — the
+    # pattern 422s them until that lane exists.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     kind: str = Field(pattern="^(hermes|openclaw)$")
     url: str | None = Field(default=None, max_length=200,
