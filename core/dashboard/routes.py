@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
+import intelligence_target
 
 import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
@@ -129,10 +130,11 @@ def _intelligence_label() -> str:
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or "hermes") or "hermes")
     if kind == "openclaw":
-        agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT",
-                            intelligence_cfg.get("agent") or "") or "")
+        agent = intelligence_target.agent_for(intelligence_cfg, "openclaw") \
+            or str(_getenv("LVI_INTELLIGENCE_AGENT") or "")
         return f"OpenClaw · {agent}" if agent else "OpenClaw"
-    return "Hermes"
+    agent = intelligence_target.agent_for(intelligence_cfg, "hermes")
+    return f"Hermes · {agent}" if agent else "Hermes"
 
 
 @router.get("/status")
@@ -899,6 +901,9 @@ async def get_tts():
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
+        # First 4 characters of a set key, so a wrong key is recognisable.
+        "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
+        "deepgram_key_hint": intelligence_target.key_hint(_saved_env().get("DEEPGRAM_API_KEY")),
         # The accepted values per provider — the UI's only source
         # for its pick-lists (elevenlabs = model ids; deepgram* = voices).
         "catalog": TTS_CATALOG,
@@ -940,6 +945,27 @@ async def put_tts(payload: TTSPayload):
         raise HTTPException(status_code=409, detail=str(e))
     logger.info(f"dashboard: tts config saved (provider={payload.provider}) — applies on next restart")
     return {"ok": True, "provider": payload.provider}
+
+
+def _env_path():
+    from pathlib import Path as _Path
+    return _Path(os.getenv("LVI_ENV_FILE",
+                           _Path(__file__).resolve().parent.parent.parent / ".env"))
+
+
+def _saved_env() -> dict:
+    """Process env overlaid with what .env holds NOW, so key status and
+    hints show a key the moment it is saved (the voice agent itself still
+    reads the process env, at the next restart). Read-only."""
+    view = dict(os.environ)
+    try:
+        for ln in _env_path().read_text().splitlines():
+            k, sep, v = ln.partition("=")
+            if sep and k and not k.lstrip().startswith("#"):
+                view[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return view
 
 
 async def _write_env_key(var: str, value: str) -> bool:
@@ -1004,6 +1030,8 @@ class IntelligencePayload(BaseModel):
     # the UI can offer the right one back on switch. `url` itself stays
     # the live value the agent reads — this map is recall, not truth.
     urls: dict[str, str] | None = Field(default=None)
+    # The agent for THIS kind: an OpenClaw agent id, or a Hermes profile
+    # ("default" = the main agent). Filed under intelligence.agents[kind].
     agent: str | None = Field(default=None, min_length=1, max_length=64,
                               pattern=r"^[A-Za-z0-9_.-]+$")
 
@@ -1024,6 +1052,11 @@ class IntelligenceKeyPayload(BaseModel):
     # extra="forbid" so a misspelled field 422s instead of no-opping.
     model_config = ConfigDict(extra="forbid")
     kind: Literal["hermes", "openclaw"]
+    # Hermes profiles each have their own key (LVI_HERMES_KEY_<AGENT>);
+    # omitted or "default" = the kind's base variable. OpenClaw agents share
+    # one Gateway token, so agent is ignored there.
+    agent: str | None = Field(default=None, min_length=1, max_length=64,
+                              pattern=r"^[A-Za-z0-9_.-]+$")
     # Same character-class law as TTSKeyPayload: no newlines/quotes/backslashes — a `\n` in a key PUT
     # must never smuggle a second env var into .env.
     api_key: str = Field(min_length=8, max_length=256,
@@ -1034,6 +1067,7 @@ class IntelligenceKeyPayload(BaseModel):
 async def get_intelligence():
     """Current Intelligence config + key status. Never returns the key."""
     import os as _os
+    _env = _saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or "hermes"
     # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
@@ -1045,12 +1079,18 @@ async def get_intelligence():
     _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
     return {
         "kind": kind,
-        "url": intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL"),
+        "url": intelligence_cfg.get("url") or _env.get("LVI_HERMES_URL"),
         "urls": intelligence_cfg.get("urls") or {},
         "agent": intelligence_cfg.get("agent"),
-        "key_set": bool(_os.getenv(_kv)),
-        "keys_set": {k: bool(_os.getenv(v)) for k, v in INTELLIGENCE_KEY_VARS.items()},
-        "key_kind": _kv.lower() if _os.getenv(_kv) else None,
+        # Live agent per kind (hermes "default" = the main agent).
+        "agents": {k: (intelligence_target.agent_for(intelligence_cfg, k)
+                       or ("default" if k == "hermes" else None))
+                   for k in INTELLIGENCE_KEY_VARS},
+        "key_set": bool(_env.get(_kv)),
+        "keys_set": {k: bool(_env.get(v)) for k, v in INTELLIGENCE_KEY_VARS.items()},
+        "key_hints": {k: intelligence_target.key_hint(_env.get(v))
+                      for k, v in INTELLIGENCE_KEY_VARS.items()},
+        "key_kind": _kv.lower() if _env.get(_kv) else None,
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
@@ -1083,8 +1123,12 @@ async def put_intelligence(payload: IntelligencePayload):
                 merged[k] = v
         current["urls"] = merged
     if payload.agent is not None:
-        current["agent"] = payload.agent
-    if payload.kind == "openclaw" and not current.get("agent"):
+        agents = dict(current.get("agents") or {})
+        agents[payload.kind] = payload.agent
+        current["agents"] = agents
+        if payload.kind == "openclaw":
+            current["agent"] = payload.agent  # legacy key, read by older builds
+    if payload.kind == "openclaw" and not intelligence_target.agent_for(current, "openclaw"):
         raise HTTPException(status_code=422, detail="openclaw needs an agent id (intelligence.agent)")
     try:
         config_store.write_section("intelligence", current)
@@ -1103,10 +1147,11 @@ async def put_intelligence_key(payload: IntelligenceKeyPayload):
     key for — never from saved config. Never echoed; the response names
     the variable so the UI can say where the key went."""
     kind = payload.kind
-    var = INTELLIGENCE_KEY_VARS[kind]
+    var = intelligence_target.key_var(kind, payload.agent or "")
     replaced = await _write_env_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
-    return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind}
+    return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind,
+            "key_hint": intelligence_target.key_hint(payload.api_key)}
 
 
 def _intelligence_probe(intelligence_cfg: dict) -> dict:
@@ -1118,14 +1163,16 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     import urllib.request as _rq
     import urllib.error as _ue
     kind = intelligence_cfg.get("kind") or "hermes"
-    url = (intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "").rstrip("/")
+    agent = intelligence_target.agent_for(intelligence_cfg, kind)
+    url = intelligence_target.request_url(
+        kind, intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "", agent)
     # Key law (strict, 2026-10-08): each kind reads EXACTLY ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (this probe previously read the now-DELETED
     # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
     # caught in the 2026-10-08 brain→intelligence sweep).
-    _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
-    key = _os.getenv(_kv) or ""
+    _kv = intelligence_target.key_var(kind, agent) or "LVI_HERMES_KEY"
+    key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:
         return {"ok": False, "error": "no url configured"}
     if not key:
@@ -1140,7 +1187,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"unreachable: {type(e).__name__}"}
     if kind == "openclaw":
-        model = "openclaw/" + (intelligence_cfg.get("agent") or "")
+        model = "openclaw/" + agent
         body = {"model": model, "stream": False, "max_tokens": 16,
                 "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
     else:
@@ -1163,6 +1210,31 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         return {"ok": False, "error": f"gateway error: HTTP {e.code}"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}"}
+
+
+class IntelligenceAgentsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["hermes", "openclaw"]
+    # The URL on screen (may be unsaved); omitted = that kind's saved URL.
+    url: str | None = Field(default=None, max_length=200,
+                             pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+
+
+@router.post("/intelligence/agents", dependencies=GUARD)
+async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
+    """List the agents the provider offers, each with key status + hint.
+    OpenClaw: its /v1/models. Hermes: the profiles on its gateway (the
+    Hermes dashboard's public status route; falls back to the default
+    agent). Never returns a key. POST + GUARD: it makes outbound requests."""
+    icfg = dict(config_store.read_section("intelligence") or {})
+    url = payload.url or (icfg.get("urls") or {}).get(payload.kind) \
+        or (icfg.get("url") if (icfg.get("kind") or "hermes") == payload.kind else None) or ""
+    result = await asyncio.to_thread(
+        intelligence_target.discover_agents, payload.kind, url, _saved_env(), 4.0,
+        icfg.get("hermes_status_url") if payload.kind == "hermes" else None)
+    result["selected"] = intelligence_target.agent_for(icfg, payload.kind) \
+        or ("default" if payload.kind == "hermes" else None)
+    return result
 
 
 @router.post("/intelligence/test", dependencies=GUARD)

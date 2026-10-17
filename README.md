@@ -102,10 +102,13 @@ comment-preserving read-merge-write, applies on next bot restart):
 - **Bot control** — restart the bot (with restart countdown popup)
 - **TTS** — provider (ElevenLabs / Deepgram / Deepgram Flux), model
   (flash v2.5 / v4 turbo), voice, API keys (never rendered back)
-- **Intelligence** — provider picker (Hermes / OpenClaw), per-kind fields — API URL
-  (provider-agnostic, shown for every kind: a stranger's Hermes lives
-  at their URL), agent id (OpenClaw only), API key set ✓, Test
-  connection (health + one minimal completion, latency)
+- **Intelligence** — provider picker (Hermes / OpenClaw), an agent
+  dropdown filled from the provider (OpenClaw: its `/v1/models`; Hermes:
+  the profiles on a multiplexing gateway, read from the Hermes
+  dashboard's status page — falls back to the default agent), API URL
+  (provider-agnostic: a stranger's Hermes lives at their URL), API key
+  (a saved key shows its first 4 characters), Test connection (health +
+  one minimal completion, latency)
 - **Voice Tuning** — filler/pause tunables
 - **Wake Word Model (OWW)** — trained wake-word model management
 - **Zones / Nodes / Room→zone mapping** — rooms, mic nodes, speaker zones

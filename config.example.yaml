@@ -66,7 +66,11 @@ intelligence:
                         # openclaw config set gateway.http.endpoints.chatCompletions.enabled true
   # kind: openclaw
   #   url: http://<openclaw-host>:18789/v1   # the Gateway (with /v1)
-  #   agent: <your-agent-id>                 # e.g. lenoxvi-test
+  # agents:               # the agent per kind (the dashboard's agent dropdown)
+  #   openclaw: <your-agent-id>   # model becomes openclaw/<agent>
+  #   hermes: default             # or a profile name on a multiplexing Hermes
+  #                               # gateway: turns go to <base>/p/<profile>/v1
+  #                               # with that profile's own key (see .env.example)
   url: http://<intelligence-host>:8642/v1
   model: hermes-agent
   max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards

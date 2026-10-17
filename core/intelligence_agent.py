@@ -193,7 +193,7 @@ class IntelligenceAgent(FrameProcessor):
                  room: str = None, session_mode: str = "fresh",
                  tts_is_usable=None, **kwargs):
         super().__init__(**kwargs)
-        from config import cfg_env
+        from config import cfg, cfg_env
 
         self._url = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://<intelligence-host>:8642/v1")
         # Intelligence lane: intelligence.kind picks the request
@@ -202,9 +202,15 @@ class IntelligenceAgent(FrameProcessor):
         # `conversation` field). The UI calls this "Intelligence" — the
         # word "intelligence" never reaches the dashboard.
         self._kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").lower()
-        self._agent = ""
-        if self._kind == "openclaw":
-            self._agent = str(cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", "") or "")
+        # Agent per kind (intelligence_target.agent_for): openclaw addresses
+        # it in the model field; hermes routes a named profile to
+        # <base>/p/<agent>/v1 with that profile's own key.
+        import intelligence_target as _it
+        _icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
+                 "agents": cfg("intelligence", "agents") or {}}
+        self._agent = _it.agent_for(_icfg, self._kind) if self._kind in _it.BASE_KEY_VARS else ""
+        if self._kind in _it.BASE_KEY_VARS:
+            self._url = _it.request_url(self._kind, self._url, self._agent)
         # Missing key is NOT a construction brick (the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
@@ -216,8 +222,9 @@ class IntelligenceAgent(FrameProcessor):
         # (fail-loud rule, same as the mapping-wipe fix). A new lane
         # follows the same rule: its key names its intelligence
         # (LVI_<KIND>_KEY), and it reads only its own.
-        _KEY_VAR = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
-        self._key_var = _KEY_VAR.get(self._kind)
+        # A named Hermes profile reads its own variable,
+        # LVI_HERMES_KEY_<AGENT> (Hermes rejects the default key on /p/<x>/).
+        self._key_var = _it.key_var(self._kind, self._agent)
         self._key = (os.getenv(self._key_var)
                      if self._key_var else None)
         if not self._key and self._kind != "stub":

@@ -222,6 +222,28 @@ function Switch({ checked, onChange, title }) {
   )
 }
 
+// API key box: a saved key shows its first 4 characters (the server's
+// masked hint), so users can see WHICH key is set when troubleshooting.
+// Focus selects the hint; typing replaces it (hidden). The hint is never
+// sent back as a key — readKey() returns '' until the box is edited.
+// Remount it (React key) after a save to show the new hint.
+function KeyInput({ id, hint, placeholder }) {
+  const [dirty, setDirty] = useState(false)
+  const [val, setVal] = useState('')
+  return (
+    <input id={id} data-dirty={dirty ? '1' : '0'} type={dirty ? 'password' : 'text'}
+      value={dirty ? val : (hint || '')} placeholder={placeholder} autoComplete="off" spellCheck={false}
+      title={hint ? 'Saved key (first 4 characters shown). Paste a new key to replace it.' : undefined}
+      onFocus={e => { if (!dirty) e.target.select() }}
+      onChange={e => { setDirty(true); setVal(e.target.value) }}
+      className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
+  )
+}
+const readKey = (id) => {
+  const el = document.getElementById(id)
+  return el && el.dataset.dirty === '1' ? el.value.trim() : ''
+}
+
 /* ── rail ──────────────────────────────────────────────────── */
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
@@ -1099,6 +1121,7 @@ const savedFor = (t, p) =>
 
 function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
+  const [ttsKeyEpoch, setTtsKeyEpoch] = useState(0)  // remounts the key box after a save
   const [model, setModel] = useState(null)
   // Bug-class fix: the 5s poll refetches tts state and
   // resyncing from server would clobber the user's in-progress provider
@@ -1228,22 +1251,21 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
           )}
           <Field label="API key">
             <div className="flex items-center gap-2 flex-wrap flex-1">
-              <input id="tts-key" type="password"
-                placeholder={provider === 'elevenlabs'
-                  ? (tts?.elevenlabs_key_set ? 'key set ✓' : 'paste ElevenLabs key…')
-                  : (tts?.deepgram_key_set ? 'key set ✓' : 'paste Deepgram key…')}
-                className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
+              <KeyInput id="tts-key" key={`tts-${provider}-${ttsKeyEpoch}`}
+                hint={provider === 'elevenlabs' ? tts?.elevenlabs_key_hint : tts?.deepgram_key_hint}
+                placeholder={provider === 'elevenlabs' ? 'paste ElevenLabs key…' : 'paste Deepgram key…'} />
             </div>
           </Field>
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <button className={BTN_DEFAULT} onClick={async () => {
-              const key = document.getElementById('tts-key').value.trim()
-              if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'TTS'); return }
+              const key = readKey('tts-key')
+              if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'TTS'); return }
               const route = provider === 'elevenlabs'
                 ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
               try {
                 await api(route, { method: 'PUT', json: { api_key: key } })
-                setMsg('Key saved to .env — applies on next bot restart.', 'ok', 'TTS')
+                setMsg('Key saved — applies on next bot restart.', 'ok', 'TTS')
+                setTtsKeyEpoch(n => n + 1)
                 reloadAll()
               } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
             }}>Save key</button>
@@ -1352,13 +1374,38 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // reset, so one manual edit disabled swapping forever and a save
   // filed the wrong URL under the kind.
   const urlDrafts = useRef({})   // {hermes: url, openclaw: url}
+  // Agents: per-kind selection (like URLs) + the provider's discovered
+  // list. Discovery runs server-side (keys never reach the browser) on
+  // first sync, on provider switch, on URL change, and on the refresh
+  // button. Each entry carries key status + the masked key hint.
+  const [intAgent, setIntAgent] = useState('')
+  const agentDrafts = useRef({})  // {hermes: 'default', openclaw: '<agent>'}
+  const [found, setFound] = useState({})  // kind -> {agents, note, selected, loading}
+  const lastDiscoverUrl = useRef({})
+  const [keyEpoch, setKeyEpoch] = useState(0)  // remounts the key box after a save
+  const discover = async (kind, url) => {
+    lastDiscoverUrl.current[kind] = url || ''
+    setFound(f => ({ ...f, [kind]: { ...(f[kind] || {}), loading: true } }))
+    const body = { kind }
+    if (/^https?:\/\//.test(url || '')) body.url = url
+    try {
+      const r = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: body })
+      setFound(f => ({ ...f, [kind]: { ...r, loading: false } }))
+    } catch (e) {
+      setFound(f => ({ ...f, [kind]: { agents: [], note: 'Agent list failed: ' + e.message, loading: false } }))
+    }
+  }
   useEffect(() => {
     if (intelligence && !intSynced) {
-      setIntKind(intelligence.kind || 'hermes')
+      const kind = intelligence.kind || 'hermes'
+      setIntKind(kind)
       const d = { ...(intelligence.urls || {}) }
-      if (intelligence.url) d[intelligence.kind || 'hermes'] = intelligence.url
+      if (intelligence.url) d[kind] = intelligence.url
       urlDrafts.current = d
+      agentDrafts.current = { ...(intelligence.agents || {}) }
+      setIntAgent(agentDrafts.current[kind] || '')
       setIntSynced(true)
+      discover(kind, d[kind])
     }
   }, [intelligence, intSynced])
   const switchKind = (kind) => {
@@ -1367,50 +1414,79 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
       urlDrafts.current[intKind] = urlEl.value.trim()  // file the outgoing kind's draft
       urlEl.value = urlDrafts.current[kind] || ''      // always swap — per-kind context
     }
+    agentDrafts.current[intKind] = agentSel
+    setIntAgent(agentDrafts.current[kind] || '')
     setIntKind(kind)
+    discover(kind, urlDrafts.current[kind])
   }
+  const agentList = found[intKind]?.agents || []
+  // Nothing picked for this kind yet: the saved one, else the first listed.
+  const agentSel = intAgent || found[intKind]?.selected || agentList[0]?.id || ''
+  const agentEntry = agentList.find(a => a.id === agentSel)
+  const keyHint = agentEntry ? agentEntry.key_hint : intelligence?.key_hints?.[intKind]
+  const agentNote = found[intKind]?.note
   return (
     <>
     <Section id="system" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Provider / API URL / agent">
+        <Field label="Provider / agent / API URL">
           <select id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
-            className={`${INPUT_CLS} w-[220px]`}>
+            className={`${INPUT_CLS} w-[160px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
           </select>
+          <select id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
+            title={intKind === 'openclaw'
+              ? 'Agents on this OpenClaw Gateway (its /v1/models).'
+              : 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.'}
+            className={`${INPUT_CLS} w-[220px] font-mono`}>
+            {!agentSel && <option value="">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}
+            {agentList.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.id}{intKind === 'hermes' && !a.key_set ? ' — no key' : ''}
+              </option>
+            ))}
+            {agentSel && !agentList.some(a => a.id === agentSel) && (
+              <option value={agentSel}>{agentSel} (not found)</option>
+            )}
+          </select>
+          <button type="button" className={BTN_DEFAULT} title="Refresh the agent list"
+            aria-label="Refresh the agent list"
+            onClick={() => discover(intKind, document.getElementById('int-url')?.value.trim())}>
+            {found[intKind]?.loading ? '…' : '⟳'}
+          </button>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<intelligence-host>:8642/v1"
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
+            onBlur={e => {
+              const u = e.target.value.trim()
+              if (u !== (lastDiscoverUrl.current[intKind] || '')) discover(intKind, u)
+            }}
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
-          <span className="text-[12px] font-medium text-[var(--muted)]">agent</span>
-          <input id="int-agent" defaultValue={intelligence?.agent || ''} placeholder="lenoxvi-test"
-            disabled={intKind !== 'openclaw'}
-            title={intKind === 'openclaw'
-              ? 'OpenClaw agent id — the model field becomes openclaw/<agent>.'
-              : 'OpenClaw only — the Hermes lane addresses by URL, no agent id.'}
-            className={`${INPUT_CLS} w-[180px] font-mono`} />
         </Field>
+        {agentNote ? <div className="text-[12px] text-[var(--muted)] -mt-2">{agentNote}</div> : null}
         <Field label="API key">
           <div className="flex items-center gap-2 flex-wrap flex-1">
-            <input id="int-key" type="password" placeholder="paste key…"
-              className={`${INPUT_CLS} flex-1 min-w-[280px]`} />
-            {/* Chip reflects the kind ON SCREEN (keys_set per kind) */}
-            {intelligence?.keys_set?.[intKind] ? <span className="text-[12px] text-[var(--muted)]">key set ✓</span> : null}
+            <KeyInput id="int-key" key={`int-${intKind}-${agentSel}-${keyEpoch}`} hint={keyHint}
+              placeholder={intKind === 'hermes' && agentSel && agentSel !== 'default'
+                ? `paste the ${agentSel} profile's API key…` : 'paste key…'} />
           </div>
         </Field>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <button className={BTN_DEFAULT} onClick={async () => {
-            const keyEl = document.getElementById('int-key')
-            const key = keyEl.value.trim()
-            if (!key) { setMsg('Nothing to save — no key entered.', 'muted', 'Intelligence'); return }
+            const key = readKey('int-key')
+            if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'Intelligence'); return }
             try {
-              // Send the kind on screen — the server writes THAT
-              // kind's variable, never the one config.yaml happens to hold.
-              const r = await api('/api/dashboard/intelligence/key', { method: 'PUT', json: { kind: intKind, api_key: key } })
-              keyEl.value = ''  // don't leave the pasted key sitting in the DOM
-              setMsg(`Key saved to ${r?.var || '.env'} — applies on next bot restart.`, 'ok', 'Intelligence')
+              // Send the kind (and Hermes profile) on screen — the server
+              // writes THAT key, never the one config.yaml happens to hold.
+              const named = intKind === 'hermes' && agentSel && agentSel !== 'default'
+              const json = { kind: intKind, api_key: key, ...(named ? { agent: agentSel } : {}) }
+              await api('/api/dashboard/intelligence/key', { method: 'PUT', json })
+              setKeyEpoch(n => n + 1)  // fresh box: shows the new key's hint, drops the typed value
+              const who = intKind === 'openclaw' ? 'OpenClaw' : `Hermes · ${agentSel || 'default'}`
+              setMsg(`Key saved for ${who} — applies on next bot restart.`, 'ok', 'Intelligence')
+              discover(intKind, document.getElementById('int-url')?.value.trim())
               reloadAll()
             } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
           }}>Save key</button>
@@ -1435,9 +1511,8 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <button className={BTN_PRIMARY} onClick={async () => {
               const kind = document.getElementById('int-kind').value
               const url = document.getElementById('int-url').value.trim()
-              const agent = document.getElementById('int-agent').value.trim()
               const body = { kind, url }
-              if (kind === 'openclaw') body.agent = agent
+              if (agentSel) body.agent = agentSel
               // Ship the full per-kind recall map so the backend files
               // the other kind's URL too (swap-on-switch memory).
               const mem = { ...urlDrafts.current, [kind]: url }
