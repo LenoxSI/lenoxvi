@@ -320,6 +320,277 @@ shape, wired = asyncio.run(_wrap_real())
 check("050 wrap_with_fallback: real switcher, Failover, [primary, pocket], primary active", shape)
 check("050 wrap_with_fallback: switch event reaches on_switched", wired)
 
+
+# ── 050 review fixes ──────────────────────────────────────────────────
+
+
+def _run(coro_fn, default):
+    """Run one async probe; an exception (e.g. API not there yet) = default."""
+    try:
+        return asyncio.run(coro_fn())
+    except Exception as e:  # noqa: BLE001
+        print(f"   (probe {coro_fn.__name__} raised {type(e).__name__}: {str(e)[:90]})")
+        return default
+
+
+# R1 (critical): WAN-dead boot. A REAL ElevenLabs service pointed at a refused
+# port, inside a real switcher, inside a real pipeline: the failed first
+# connect must fail over to Pocket and the next speak must come out of Pocket.
+async def _wan_dead_boot():
+    from pipecat.frames.frames import EndFrame, TTSAudioRawFrame, TTSSpeakFrame
+    from pipecat.pipeline.pipeline import Pipeline
+    from pipecat.pipeline.runner import PipelineRunner
+    from pipecat.pipeline.worker import PipelineTask, PipelineParams
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+    from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+    class Prim(Mixin, ElevenLabsTTSService):
+        _tts_provider = "elevenlabs"
+
+    class Sink(FrameProcessor):
+        def __init__(self):
+            super().__init__()
+            self.audio = 0
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TTSAudioRawFrame):
+                self.audio += 1
+            await self.push_frame(frame, direction)
+
+    prim = Prim(api_key="suite-key-not-real", voice_id="suite-voice",
+                url="ws://127.0.0.1:9")
+    stand = tp.make_service(mixin=Mixin, voice="alba")
+
+    async def q(f):
+        pass
+
+    sw = tf.wrap_with_fallback(prim, stand, room=None, queue_frame=q, cooldown=30.0)
+    sink = Sink()
+    task = PipelineTask(Pipeline([sw, sink]), params=PipelineParams(), idle_timeout_secs=None)
+    runner = PipelineRunner(handle_sigint=False)
+    run = asyncio.create_task(runner.run(task))
+    await asyncio.sleep(2.0)
+    active_after_boot = sw.strategy.active_service
+    await task.queue_frame(TTSSpeakFrame("hello from the standby"))
+    await asyncio.sleep(1.5)
+    await task.queue_frame(EndFrame())
+    try:
+        await asyncio.wait_for(run, 10)
+    except Exception:
+        run.cancel()
+    getattr(tf, "close_fallback", tf.cancel_recovery)(sw)
+    return active_after_boot is stand, sink.audio, prim.is_usable
+
+
+_r1_active, _r1_audio, _r1_prim_usable = _run(_wan_dead_boot, (False, 0, True))
+check("050 R1 WAN-dead boot: failed first connect fails over to Pocket", _r1_active)
+check("050 R1 WAN-dead boot: the next speak comes out of Pocket", _r1_audio > 0, f"audio frames={_r1_audio}")
+check("050 R1 WAN-dead boot: primary marked unusable", _r1_prim_usable is False)
+
+
+async def _r1_guard():
+    calls = []
+
+    class P(FakeSvc):
+        async def push_error(self, msg, *a, force_treat_as_permanent=False, **k):
+            calls.append(force_treat_as_permanent)
+
+    p, k = P("el", "elevenlabs"), FakeSvc("pk", "pocket")
+    sw = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_closed=False,
+                               strategy=types.SimpleNamespace(active_service=k))
+    await tf.on_primary_connection_error(sw, "refused")    # Pocket active: a probe failing
+    sw.strategy.active_service = p
+    p.is_usable = False
+    await tf.on_primary_connection_error(sw, "refused")    # already unusable
+    p.is_usable = True
+    await tf.on_primary_connection_error(sw, "refused")    # active + usable: escalate
+    return calls
+
+
+check("050 R1 connection error escalates ONLY when primary is active + usable",
+      _run(_r1_guard, None) == [True], "")
+
+
+# R3 (minor): no switch-back while Pocket is still generating.
+async def _r3():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+    p.revive_ok = True
+    idle_checks, req = [], []
+
+    def idle():
+        idle_checks.append(1)
+        return len(idle_checks) >= 3
+
+    async def request(svc):
+        req.append(len(idle_checks))
+
+    async def fsleep(s):
+        pass
+
+    await tf.recover(p, request, 30.0, sleep=fsleep, reachable=None,
+                     pocket_idle=idle, is_active=lambda: True)
+    return req
+
+
+check("050 R3 switch-back waits until Pocket is idle", _run(_r3, None) == [3])
+
+
+# R4 (minor): a refused switch keeps recovery going.
+async def _r4():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+    p.revive_ok = True
+    req = []
+    active = {"v": False}
+
+    async def request(svc):
+        req.append(1)
+        if len(req) == 2:
+            active["v"] = True
+
+    async def fsleep(s):
+        pass
+
+    ok = await tf.recover(p, request, 30.0, sleep=fsleep, reachable=None,
+                          pocket_idle=lambda: True, is_active=lambda: active["v"],
+                          confirm_secs=0.05)
+    return ok, len(req)
+
+
+check("050 R4 refused switch-back retries until the primary is really active",
+      _run(_r4, None) == (True, 2))
+
+
+# R5 (minor): a closed session never probes.
+async def _r5():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+
+    async def request(svc):
+        pass
+
+    async def fsleep(s):
+        pass
+
+    ok = await tf.recover(p, request, 30.0, sleep=fsleep, reachable=None,
+                          closed=lambda: True)
+    sw = types.SimpleNamespace(_lenoxvi_recovery=None, _lenoxvi_closed=False)
+    tf.close_fallback(sw)
+    return ok, p.revives, sw._lenoxvi_closed
+
+
+check("050 R5 closed session: recovery exits without probing + close flag set",
+      _run(_r5, None) == (False, 0, True))
+
+
+# R7 (minor): while the primary's host is unreachable, no websocket probes.
+async def _r7():
+    p = FakeSvc("el", "elevenlabs")
+    p.is_usable = False
+    n = {"i": 0}
+
+    async def fsleep(s):
+        n["i"] += 1
+        if n["i"] > 5:
+            raise asyncio.CancelledError
+
+    async def unreachable():
+        return False
+
+    async def request(svc):
+        pass
+
+    try:
+        await tf.recover(p, request, 30.0, sleep=fsleep, reachable=unreachable)
+    except asyncio.CancelledError:
+        pass
+    return p.revives
+
+
+check("050 R7 unreachable primary host: zero websocket probes (no log spam)", _run(_r7, None) == 0)
+_pe = getattr(tf, "_primary_endpoint", lambda o: "missing")
+check("050 R7 endpoint derived from the service URL",
+      _pe(types.SimpleNamespace(_url="wss://api.example.test")) == ("api.example.test", 443)
+      and _pe(types.SimpleNamespace(_url="ws://127.0.0.1:9")) == ("127.0.0.1", 9)
+      and _pe(types.SimpleNamespace()) is None)
+
+
+# R9 (minor): cooldown clamped.
+async def _r9_real():
+    prim = tp.make_service(mixin=Mixin, voice="alba", provider_label="elevenlabs")
+    stand = tp.make_service(mixin=Mixin, voice="alba")
+
+    async def q(f):
+        pass
+
+    return tf.wrap_with_fallback(prim, stand, room=None, queue_frame=q, cooldown=-5)._lenoxvi_cooldown
+
+
+check("050 R9 negative revive cooldown clamped to >= 1 s", (_run(_r9_real, -1) or -1) >= 1.0)
+
+
+# R10 (minor): primary health notes suppressed while Pocket is active.
+async def _r10():
+    import dashboard.registry as reg
+    orig = reg.note_tts
+    reg.note_tts = lambda *a: None
+    try:
+        p, k = FakeSvc("el", "elevenlabs"), FakeSvc("pk", "pocket")
+
+        async def q(f):
+            pass
+
+        sw = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_room=None, _lenoxvi_queue=q,
+                                   _lenoxvi_cooldown=30.0, _lenoxvi_recovery=None,
+                                   _lenoxvi_closed=False,
+                                   strategy=types.SimpleNamespace(active_service=k))
+        await tf.on_switched(sw, k)
+        during = getattr(p, "_tts_note_suppressed", None)
+        tf.cancel_recovery(sw)
+        await tf.on_switched(sw, p)
+        after = getattr(p, "_tts_note_suppressed", None)
+        return during, after
+    finally:
+        reg.note_tts = orig
+
+
+check("050 R10 primary health notes suppressed during fallback, restored after",
+      _run(_r10, None) == (True, False))
+
+
+# R6 (minor): a bad clone voice falls back to the default, Pocket stays up.
+class _BadVoiceModel(FakeModel):
+    def get_state_for_audio_prompt(self, voice):
+        if str(voice).endswith(".wav"):
+            raise FileNotFoundError(voice)
+        return {"voice": voice}
+
+
+_orig_load = FakeTTSModel.load_model
+FakeTTSModel.load_model = staticmethod(lambda **kw: _BadVoiceModel())
+tp._reset_for_tests()
+try:
+    _r6 = tp.make_service(mixin=Mixin, voice="/missing/clone.wav")
+except Exception:
+    _r6 = None
+check("050 R6 bad .wav voice: Pocket still loads, falls back to alba",
+      _r6 is not None and _r6._voice_state == {"voice": "alba"} and tp._load_failed is False,
+      f"svc={_r6} failed={tp._load_failed}")
+FakeTTSModel.load_model = _orig_load
+tp._reset_for_tests()
+
+
+# R8 (minor): repeated warnings log once per process.
+_r8_lines = []
+from loguru import logger as _lg  # noqa: E402
+_sink = _lg.add(lambda m: _r8_lines.append(str(m)), level="WARNING")
+for _ in range(2):
+    getattr(tp, "warn_once", lambda k, m: None)("suite-key", "suite warning")
+_lg.remove(_sink)
+check("050 R8 warn_once logs a repeated warning once", sum("suite warning" in s for s in _r8_lines) == 1)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)

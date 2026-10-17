@@ -628,7 +628,22 @@ def main():
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "flux"})
         check("050 PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
+        # R2: a saved fallback must never lock the panel when Pocket goes
+        # missing later — re-sending the SAME fallback isn't a new request.
+        client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                               "deepgram_voice": "aura-2-thalia-en",
+                                               "fallback": "pocket"})
         _tp050.pocket_available = lambda: False
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-zeus-en",
+                                                   "fallback": "pocket"})
+        check("050 R2 saved fallback + Pocket missing: other edits still save",
+              r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
+                                                   "deepgram_voice": "aura-2-thalia-en",
+                                                   "fallback": "off"})
+        check("050 R2 saved fallback + Pocket missing: fallback can be turned off",
+              r.status_code == 200, f"{r.status_code}")
         t = client.get("/api/dashboard/tts").json()
         check("050 GET /tts reports pocket_installed false when missing",
               t.get("pocket_installed") is False, f"{t.get('pocket_installed')}")
@@ -2886,8 +2901,12 @@ def main():
     check("050 bot.py: pocket preload at startup, before main(), non-fatal",
           _pk_pre != -1 and _pk_pre < _main_src.rfind("main()")
           and "pocket preload failed" in _main_src)
-    check("050 bot.py: recovery task cancelled at session end",
-          "cancel_recovery(" in _main_src)
+    check("050 bot.py: fallback closed at session end AND on client disconnect",
+          _main_src.count("close_fallback(") >= 2, f"count={_main_src.count('close_fallback(')}")
+    check("050 bot.py: TTSTracked skips health notes while the fallback speaks",
+          "_tts_note_suppressed" in _main_src)
+    check("050 bot.py: repeated per-session Pocket warnings go through warn_once",
+          _main_src.count("warn_once(") >= 2, f"count={_main_src.count('warn_once(')}")
     check("050 bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
           "tts_primary = tts" in _main_src)
     import stt_local as _sttR
