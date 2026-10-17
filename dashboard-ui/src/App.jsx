@@ -826,10 +826,13 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
           </select>
           <input className={`${INPUT_CLS} w-[185px] font-mono`} placeholder="ip"
             value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
-          <input className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… (sonos only)"
-            disabled={newZone.backend !== 'sonos'}
-            title={newZone.backend === 'sonos' ? 'Sonos RINCON player UID' : 'Sonos only — not used by WiiM zones'}
-            value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
+          {/* Sonos only: WiiM zones have no player UID, so the field is
+              not shown at all (a greyed-out box read as "fill me in"). */}
+          {newZone.backend === 'sonos' && (
+            <input className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… player UID"
+              title="Sonos RINCON player UID"
+              value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
+          )}
         </div>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <button className={BTN_DEFAULT} onClick={discover}>
