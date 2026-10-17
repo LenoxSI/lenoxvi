@@ -102,8 +102,7 @@ comment-preserving read-merge-write, applies on next bot restart):
 - **Bot control** — restart the bot (with restart countdown popup)
 - **TTS** — provider (ElevenLabs / Deepgram / Deepgram Flux), model
   (flash v2.5 / v4 turbo), voice, API keys (never rendered back)
-- **Intelligence** — provider picker (Hermes / OpenClaw; custom
-  OpenAI-compatible designed-for), per-kind fields — API URL
+- **Intelligence** — provider picker (Hermes / OpenClaw), per-kind fields — API URL
   (provider-agnostic, shown for every kind: a stranger's Hermes lives
   at their URL), agent id (OpenClaw only), API key set ✓, Test
   connection (health + one minimal completion, latency)

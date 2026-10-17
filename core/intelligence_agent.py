@@ -213,9 +213,9 @@ class IntelligenceAgent(FrameProcessor):
         # LVI_OPENCLAW_KEY. No cross-kind fallback: a fallback chain once
         # turned a missing LVI_HERMES_KEY into a silent
         # wrong-token 401 outage instead of one honest error line
-        # (fail-loud rule, same as the mapping-wipe fix). Future lanes
-        # follow the naming rule (e.g. LVI_CUSTOM_KEY) — a
-        # lane's key names its intelligence, and it reads only its own.
+        # (fail-loud rule, same as the mapping-wipe fix). A new lane
+        # follows the same rule: its key names its intelligence
+        # (LVI_<KIND>_KEY), and it reads only its own.
         _KEY_VAR = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
         self._key_var = _KEY_VAR.get(self._kind)
         self._key = (os.getenv(self._key_var)

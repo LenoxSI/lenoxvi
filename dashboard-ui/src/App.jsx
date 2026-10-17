@@ -1379,7 +1379,6 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} w-[220px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
-            <option value="openai" disabled>Custom OpenAI-compatible — coming soon</option>
           </select>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<intelligence-host>:8642/v1"
