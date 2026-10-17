@@ -2226,6 +2226,203 @@ def main():
             finally:
                 _routes9._write_env_key = _saved_wek9
 
+            # 9b16. Agent picker + masked key hints (2026-10-17): agents
+            # discovered per provider, remembered per kind; a Hermes profile
+            # routes to <base>/p/<agent>/v1 with ITS OWN key; set keys show
+            # their first 4 characters, never more.
+            import intelligence_target as _it12
+            import threading as _th12
+            import http.server as _hs12
+            _h12 = _it12.key_hint
+            _M12 = "\u2022" * 8
+            check("9b16 key_var: hermes default -> LVI_HERMES_KEY, profile -> LVI_HERMES_KEY_<AGENT>, openclaw shares one",
+                  _it12.key_var("hermes", "") == "LVI_HERMES_KEY"
+                  and _it12.key_var("hermes", "default") == "LVI_HERMES_KEY"
+                  and _it12.key_var("hermes", "home-helper") == "LVI_HERMES_KEY_HOME_HELPER"
+                  and _it12.key_var("openclaw", "lenoxvi-test") == "LVI_OPENCLAW_KEY", "")
+            check("9b16 request_url: hermes profile -> /p/<agent>/v1; default + openclaw unchanged",
+                  _it12.request_url("hermes", "http://h:8642/v1", "home-helper") == "http://h:8642/p/home-helper/v1"
+                  and _it12.request_url("hermes", "http://h:8642/v1/", "default") == "http://h:8642/v1"
+                  and _it12.request_url("hermes", "http://h:8642/p/old/v1", "home-helper") == "http://h:8642/p/home-helper/v1"
+                  and _it12.request_url("openclaw", "http://o:18789", "x") == "http://o:18789", "")
+            check("9b16 legacy top-level agent never reroutes Hermes (kind hermes + agent lenoxvi-test)",
+                  _it12.agent_for({"agent": "lenoxvi-test"}, "hermes") == ""
+                  and _it12.agent_for({"agent": "lenoxvi-test"}, "openclaw") == "lenoxvi-test"
+                  and _it12.agent_for({"agents": {"hermes": "default"}}, "hermes") == ""
+                  and _it12.agent_for({"agents": {"hermes": "home-helper"}}, "hermes") == "home-helper", "")
+            check("9b16 key hint: first 4 + fixed-length mask; short keys show no characters; unset -> None",
+                  _h12("abcdefghijklmnop") == "abcd" + _M12
+                  and _h12("abcdefghijklmnopqrstuvwxyz0123456789") == "abcd" + _M12
+                  and _h12("short1234") == _M12 and _h12("") is None and _h12(None) is None, "")
+
+            class _H12(_hs12.BaseHTTPRequestHandler):
+                routes = {}
+                def do_GET(self):
+                    fn = self.routes.get(self.path)
+                    if fn is None:
+                        self.send_response(404); self.end_headers(); return
+                    code, body = fn(self)
+                    self.send_response(code)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(body).encode())
+                def log_message(self, *a):
+                    pass
+            _srv12 = _hs12.ThreadingHTTPServer(("127.0.0.1", 0), _H12)
+            _port12 = _srv12.server_address[1]
+            _th12.Thread(target=_srv12.serve_forever, daemon=True).start()
+            _auth12 = []
+            def _models12(h):
+                _auth12.append(h.headers.get("Authorization"))
+                return 200, {"object": "list", "data": [
+                    {"id": "openclaw"}, {"id": "openclaw/default"}, {"id": "openclaw/suite-a"},
+                    {"id": "openclaw/bad agent"}, {"id": "gpt-4o"}]}
+            _H12.routes = {
+                "/v1/models": _models12,
+                "/api/status": lambda h: (200, {"profiles": ["home-helper", "default", "parked-one", "../evil"],
+                                                "parked_profiles": ["parked-one"]})}
+            _env12 = {"LVI_OPENCLAW_KEY": "ockey-abcdefghijkl", "LVI_HERMES_KEY": "hmkey-abcdefghijkl"}
+            _saved_port12 = _it12.HERMES_STATUS_PORT
+            _saved_env12 = {k: _os.environ.get(k) for k in
+                            ("LVI_OPENCLAW_KEY", "LVI_HERMES_KEY", "LVI_HERMES_KEY_HOME_HELPER")}
+            _saved_open12 = _urq9.urlopen
+            try:
+                _oc12 = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", _env12)
+                check("9b16 openclaw discovery: openclaw/<agent> ids only, invalid names dropped, token sent",
+                      [a["id"] for a in _oc12["agents"]] == ["default", "suite-a"]
+                      and _auth12[-1] == "Bearer ockey-abcdefghijkl", str(_oc12)[:200])
+                _oc12b = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}/v1", _env12)
+                check("9b16 openclaw discovery: URL with or without /v1",
+                      [a["id"] for a in _oc12b["agents"]] == ["default", "suite-a"], str(_oc12b)[:120])
+                _hm12 = _it12.discover_agents("hermes", "http://ignored/v1", _env12,
+                                              status_url=f"http://127.0.0.1:{_port12}/api/status")
+                check("9b16 hermes discovery: profiles from status, default first, parked + invalid dropped",
+                      [a["id"] for a in _hm12["agents"]] == ["default", "home-helper"]
+                      and _hm12["source"] == "hermes-status", str(_hm12)[:200])
+                _by12 = {a["id"]: a for a in _hm12["agents"]}
+                check("9b16 hermes discovery: per-profile key status (default set, profile unset)",
+                      _by12["default"]["key_set"] and not _by12["home-helper"]["key_set"]
+                      and _by12["home-helper"]["key_hint"] is None, str(_by12)[:200])
+                check("9b16 discovery never returns key material (hint = first 4 only)",
+                      "abcdefghijkl" not in json.dumps([_oc12, _hm12])
+                      and _by12["default"]["key_hint"] == "hmke" + _M12, "")
+                _hd12 = _it12.discover_agents("hermes", "http://127.0.0.1:9/v1", _env12, timeout=1.0,
+                                              status_url="http://127.0.0.1:9/api/status")
+                check("9b16 hermes discovery: dashboard down -> default agent + honest note",
+                      [a["id"] for a in _hd12["agents"]] == ["default"] and _hd12["source"] == "fallback"
+                      and "default agent only" in (_hd12.get("note") or ""), str(_hd12)[:200])
+                _nk12 = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", {})
+                check("9b16 openclaw discovery without a key says so",
+                      _nk12["agents"] == [] and "key" in (_nk12.get("note") or ""), str(_nk12))
+
+                # route: kind validated, URL override, hermes via the status port
+                _os.environ["LVI_OPENCLAW_KEY"] = "ockey-abcdefghijkl"
+                _os.environ["LVI_HERMES_KEY"] = "hmkey-abcdefghijkl"
+                _it12.HERMES_STATUS_PORT = _port12
+                _ra12 = client.post("/api/dashboard/intelligence/agents",
+                                    json={"kind": "openclaw", "url": f"http://127.0.0.1:{_port12}"})
+                check("9b16 POST /intelligence/agents openclaw: agents + selected",
+                      _ra12.status_code == 200 and [a["id"] for a in _ra12.json()["agents"]] == ["default", "suite-a"]
+                      and "selected" in _ra12.json(), _ra12.text[:200])
+                _rh12 = client.post("/api/dashboard/intelligence/agents",
+                                    json={"kind": "hermes", "url": "http://127.0.0.1:1/v1"})
+                check("9b16 POST /intelligence/agents hermes: profiles via the status port, no key material",
+                      _rh12.status_code == 200 and [a["id"] for a in _rh12.json()["agents"]] == ["default", "home-helper"]
+                      and "abcdefghijkl" not in _rh12.text, _rh12.text[:200])
+                _rb12 = client.post("/api/dashboard/intelligence/agents", json={"kind": "claude"})
+                _rb12b = client.post("/api/dashboard/intelligence/agents", json={"kind": "hermes", "url": "file:///etc"})
+                check("9b16 POST /intelligence/agents: unknown kind + non-http URL 422",
+                      _rb12.status_code == 422 and _rb12b.status_code == 422, f"{_rb12.status_code} {_rb12b.status_code}")
+
+                # PUT: agent filed under its kind; legacy key only for openclaw
+                client.put("/api/dashboard/intelligence", json={"kind": "openclaw", "agent": "suite-a"})
+                client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "home-helper"})
+                _c12 = _yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
+                check("9b16 PUT files the agent per kind (hermes never overwrites openclaw's)",
+                      (_c12.get("agents") or {}).get("hermes") == "home-helper"
+                      and (_c12.get("agents") or {}).get("openclaw") == "suite-a"
+                      and _c12.get("agent") == "suite-a", str(_c12.get("agents")) + " agent=" + str(_c12.get("agent")))
+                _g12 = client.get("/api/dashboard/intelligence").json()
+                check("9b16 GET agents per kind + first-4 key hints, never the key",
+                      _g12.get("agents") == {"hermes": "home-helper", "openclaw": "suite-a"}
+                      and (_g12.get("key_hints") or {}).get("openclaw") == "ocke" + _M12
+                      and "abcdefghijkl" not in json.dumps(_g12), str(_g12)[:240])
+
+                # the voice agent: profile turn -> /p/home-helper/v1 with the profile's key
+                _urls12 = []
+                def _fake_open12(req, timeout=None):
+                    _urls12.append((req.full_url, {k.lower(): v for k, v in req.headers.items()}))
+                    if req.data is None:  # the probe's health GET
+                        return _FakeResp9(b"{}")
+                    return _fake_open9(req, timeout)
+                _os.environ["LVI_HERMES_KEY_HOME_HELPER"] = "helper-key-not-real-123"
+                if "intelligence_agent" in sys.modules:
+                    del sys.modules["intelligence_agent"]
+                import intelligence_agent as _ia12
+                _urq9.urlopen = _fake_open12
+                _a12 = _ia12.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
+                _a12._ask_intelligence("hi")
+                check("9b16 hermes profile turn: /p/home-helper/v1 + LVI_HERMES_KEY_HOME_HELPER",
+                      _urls12[-1][0].endswith("/p/home-helper/v1/chat/completions")
+                      and _urls12[-1][1].get("authorization") == "Bearer helper-key-not-real-123",
+                      f"{_urls12[-1][0]} {_urls12[-1][1].get('authorization')}")
+                client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "default"})
+                if "intelligence_agent" in sys.modules:
+                    del sys.modules["intelligence_agent"]
+                import intelligence_agent as _ia12b
+                _a12b = _ia12b.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
+                _a12b._ask_intelligence("hi")
+                check("9b16 hermes default agent: configured URL + LVI_HERMES_KEY (unchanged behaviour)",
+                      "/p/" not in _urls12[-1][0]
+                      and _urls12[-1][1].get("authorization") == "Bearer hmkey-abcdefghijkl", _urls12[-1][0])
+
+                # Test probe: the saved profile's URL + key
+                _urls12.clear()
+                _routes9._intelligence_probe({"kind": "hermes", "url": "http://127.0.0.1:1/v1",
+                                              "agents": {"hermes": "home-helper"}})
+                check("9b16 Test probe uses the profile URL + its key",
+                      any(u.endswith("/p/home-helper/v1/chat/completions")
+                          and h.get("authorization") == "Bearer helper-key-not-real-123" for u, h in _urls12),
+                      str([u for u, _ in _urls12]))
+                _urq9.urlopen = _saved_open12
+
+                # key save: per-profile variable, hint back, never the key
+                _wek12 = []
+                async def _fake_wek12(var, value):
+                    _wek12.append(var)
+                    return True
+                _routes9._write_env_key = _fake_wek12
+                try:
+                    _kp12 = client.put("/api/dashboard/intelligence/key", json={
+                        "kind": "hermes", "agent": "home-helper", "api_key": "helperkey-abcdefghijkl"})
+                    _kp12b = client.put("/api/dashboard/intelligence/key", json={
+                        "kind": "openclaw", "agent": "suite-a", "api_key": "oc-token-abcdefghijkl"})
+                    _kp12c = client.put("/api/dashboard/intelligence/key", json={
+                        "kind": "hermes", "agent": "default", "api_key": "hm-token-abcdefghijkl"})
+                    check("9b16 key save: hermes profile -> its own var; openclaw ignores agent; default -> base",
+                          _wek12 == ["LVI_HERMES_KEY_HOME_HELPER", "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"], str(_wek12))
+                    check("9b16 key save returns the first-4 hint, never the key",
+                          _kp12.json().get("key_hint") == "help" + _M12
+                          and "abcdefghijkl" not in _kp12.text + _kp12b.text + _kp12c.text, _kp12.text[:160])
+                    _kb12 = client.put("/api/dashboard/intelligence/key", json={
+                        "kind": "hermes", "agent": "../x", "api_key": "helperkey-abcdefghijkl"})
+                    check("9b16 key save: invalid agent name 422s", _kb12.status_code == 422, str(_kb12.status_code))
+                finally:
+                    _routes9._write_env_key = _saved_wek9
+                _t12 = client.get("/api/dashboard/tts").json()
+                check("9b16 TTS GET carries key hints (first 4 or null), never a key",
+                      "elevenlabs_key_hint" in _t12 and "deepgram_key_hint" in _t12, str(_t12)[:160])
+            finally:
+                _urq9.urlopen = _saved_open12
+                _it12.HERMES_STATUS_PORT = _saved_port12
+                _srv12.shutdown()
+                for _k12, _v12 in _saved_env12.items():
+                    if _v12 is None:
+                        _os.environ.pop(_k12, None)
+                    else:
+                        _os.environ[_k12] = _v12
+                client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "default"})
+
             # (f) test route: monkeypatched probe path — ok + error
             _saved_probe9 = _routes9._intelligence_probe
             _routes9._intelligence_probe = lambda cfg: {"ok": True,
