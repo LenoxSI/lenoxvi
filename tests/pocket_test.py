@@ -405,6 +405,8 @@ async def _r1_guard():
     await tf.on_primary_connection_error(sw, "refused")    # already unusable
     p.is_usable = True
     await tf.on_primary_connection_error(sw, "refused")    # active + usable: escalate
+    p._websocket = object()
+    await tf.on_primary_connection_error(sw, "blip")       # live socket: pipecat's own reconnects handle it
     return calls
 
 

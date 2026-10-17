@@ -144,6 +144,11 @@ async def on_primary_connection_error(switcher, error) -> None:
         return
     if switcher.strategy.active_service is not primary or not primary.is_usable:
         return
+    # Only when there is NO socket (the connect itself failed). Errors on a
+    # live socket also fire this event; pipecat's own reconnects (then its
+    # permanent verdict) handle those — a blip must not cost a voice switch.
+    if getattr(primary, "_websocket", None) is not None:
+        return
     logger.warning(f"tts fallback: {primary._tts_provider} unreachable ({error}) — "
                    "marking it down")
     await primary.push_error(f"{primary._tts_provider} unreachable: {error}",
