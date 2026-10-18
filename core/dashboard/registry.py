@@ -37,8 +37,8 @@ _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
 _muted_by_pc = {}  # pc_id -> mic mute state (held the same way as fw)
-_line_by_pc = {}  # pc_id -> board line "array"|"flex" (firmware 1.2.19+; held the same way)
-NODE_LINES = ("array", "flex")
+_line_by_pc = {}  # pc_id -> board line "array"|"flex"|"waveshare" (firmware 1.2.19+; held the same way)
+NODE_LINES = ("array", "flex", "waveshare")
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
@@ -137,8 +137,8 @@ def note_firmware(pc_id: str, version: str) -> None:
 def note_line(pc_id: str, line: str) -> None:
     """fw_push (firmware 1.2.19+) names the board line the image was built
     for — the same compiled-in track the OTA board guard uses — so the
-    Nodes table can label each node's hardware. Only the two real lines
-    are accepted (anything else is dropped, not displayed). Same
+    Nodes table can label each node's hardware. Only the real lines
+    (NODE_LINES) are accepted (anything else is dropped, not displayed). Same
     provisional-window handling as note_firmware."""
     if line not in NODE_LINES:
         return

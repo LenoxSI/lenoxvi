@@ -19,6 +19,7 @@ line. Two independent witnesses:
    image will fetch its own updates from is the track it belongs on:
 
        flex           "%.*s/firmware/flex/%s"
+       waveshare      "%.*s/firmware/waveshare/%s"
        array >=1.2.9  "%.*s/firmware/array/%s"
        array <=1.2.8  "%.*s/firmware/%s"        (legacy URL, still served)
 
@@ -28,18 +29,20 @@ name the same line; a `node_esp32` image is judged by its marker alone (the
 flex 1.2.8 images). Anything else is None — never guessed onto a track.
 """
 
-TRACKS = ("array", "flex")
+TRACKS = ("array", "flex", "waveshare")
 
-TRACK_LABEL = {"array": "array (XVF3800 mic-array board)", "flex": "reSpeaker Flex"}
+TRACK_LABEL = {"array": "array (XVF3800 mic-array board)", "flex": "reSpeaker Flex",
+               "waveshare": "Waveshare ESP32-S3-AUDIO"}
 
 # esp_app_desc_t rides right after the 24-byte image header + 8-byte first
 # segment header: magic at byte 32, version[32] at 48, project_name[32] at 80.
 _DESC_MAGIC = b"\x32\x54\xcd\xab"
-_PROJECT_TRACK = {b"array_esp32": "array", b"flex_esp32": "flex"}
+_PROJECT_TRACK = {b"array_esp32": "array", b"flex_esp32": "flex", b"waveshare_esp32": "waveshare"}
 _LEGACY_PROJECT = b"node_esp32"
 
 _MARKERS = (
     (b"%.*s/firmware/flex/%s", "flex"),
+    (b"%.*s/firmware/waveshare/%s", "waveshare"),
     (b"%.*s/firmware/array/%s", "array"),
     (b"%.*s/firmware/%s", "array"),     # array <=1.2.8 — legacy URL
 )
@@ -53,7 +56,7 @@ def project_name(data: bytes) -> bytes | None:
 
 
 def image_track(data: bytes) -> str | None:
-    """'array' or 'flex' when the image proves its line; None otherwise."""
+    """'array', 'flex' or 'waveshare' when the image proves its line; None otherwise."""
     found = [track for mark, track in _MARKERS if mark in data]
     if len(found) != 1:
         return None                      # no marker, or more than one

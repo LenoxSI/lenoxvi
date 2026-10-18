@@ -164,6 +164,12 @@ const fmtAgo = t => {
 const esc = s => String(s ?? '')
 
 const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
+// Line badge per node: the hardware behind each firmware line (fw_push `line`).
+const LINE_TITLE = {
+  array: 'reSpeaker XVF3800 mic array (LED ring, physical mute button)',
+  flex: 'reSpeaker Flex (XVF3800, no LED ring or button)',
+  waveshare: 'Waveshare ESP32-S3-AUDIO (bench mic; no LED ring or button yet)',
+}
 const BTN = 'rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50'
 const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]`
 const BTN_PRIMARY = `${BTN} bg-[var(--accent)] text-[var(--accent-foreground)]`
@@ -689,9 +695,9 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                   <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
                   <td className="px-4 py-2 font-mono text-[13px]">
                     {esc(r.fw) || '—'}
-                    {(r.line === 'array' || r.line === 'flex') && (
+                    {LINE_TITLE[r.line] && (
                       <span
-                        title={r.line === 'array' ? 'reSpeaker XVF3800 mic array (LED ring, physical mute button)' : 'reSpeaker Flex (XVF3800, no LED ring or button)'}
+                        title={LINE_TITLE[r.line]}
                         className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
                         {r.line}
                       </span>
@@ -901,22 +907,23 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
   // so it never guesses; restarting the other line's node is harmless
   // (it reads its own track) but costs that room its voice for ~15s.
   const [pickup, setPickup] = useState(null)  // {version, track, rooms: {room: bool}}
-  const trackLabel = t => (t === 'flex' ? 'FLEX' : 'ARRAY')
+  const trackLabel = t => (t || '').toUpperCase()
 
   const push = async () => {
     if (!fwFile) { setMsg('Pick a .bin to push.', 'err', 'Firmware'); return }
     if (!fwTrack) { setMsg('Pick the hardware line (track) this .bin is for.', 'err', 'Firmware'); return }
     // Filename hint: warn (never block) when the name says the other line.
     const fname = fwFile.name.toLowerCase()
-    const hintsFlex = fname.includes('flex')
-    // (node_esp32.bin was BOTH lines' build name before 1.2.9 — never a hint.)
-    const hintsArray = /array|respeaker-xvf/.test(fname) && !hintsFlex
-    const mismatch = (fwTrack === 'array' && hintsFlex) || (fwTrack === 'flex' && hintsArray)
+    // (node_esp32.bin was BOTH XVF lines' build name before 1.2.9 — never a hint.)
+    const hinted = fname.includes('waveshare') ? 'waveshare'
+      : fname.includes('flex') ? 'flex'
+      : /array|respeaker-xvf/.test(fname) ? 'array' : null
+    const mismatch = hinted !== null && hinted !== fwTrack
     if (!window.confirm(
       `Push ${fwFile.name} to the ${trackLabel(fwTrack)} track?\n\n` +
       `Every ${trackLabel(fwTrack).toLowerCase()} node OTAs this image on its next check. ` +
       `Wrong line = dead node (USB rescue).` +
-      (mismatch ? `\n\n⚠ The filename looks like a ${hintsFlex ? 'FLEX' : 'ARRAY'} build, but you picked ${trackLabel(fwTrack)}.` : '')))
+      (mismatch ? `\n\n⚠ The filename looks like a ${trackLabel(hinted)} build, but you picked ${trackLabel(fwTrack)}.` : '')))
       return
     setPushing(true)
     setPickup(null)
@@ -968,6 +975,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
             <option value="" disabled>pick a line…</option>
             <option value="array">array</option>
             <option value="flex">flex</option>
+            <option value="waveshare">waveshare</option>
           </select>
           <input type="file" accept=".bin" className="text-[13px]"
             onChange={e => setFwFile(e.target.files?.[0] || null)} />

@@ -36,6 +36,7 @@ FIRMWARE_ROOT = Path(__file__).resolve().parent.parent / "firmware"
 FIRMWARE_TRACKS = {
     "array": FIRMWARE_ROOT / "array",
     "flex": FIRMWARE_ROOT / "flex",
+    "waveshare": FIRMWARE_ROOT / "waveshare",
 }
 LEGACY_TRACK = "array"   # what the track-less legacy URLs serve (see docstring)
 

@@ -1670,15 +1670,15 @@ async def upload_firmware(
     possible (manual version entry removed 2026-09-29).
 
     Track-aware: the uploader declares which hardware line
-    the image is for (array | flex — the one track vocabulary, 2026-10-16);
+    the image is for (array | flex | waveshare — one track vocabulary);
     the image and manifest land in that track's directory ONLY, under the
-    track's own file name (array_esp32.bin / flex_esp32.bin). A Flex .bin
+    track's own file name (<track>_esp32.bin). A Flex .bin
     on the array track gets OTA'd by an array node and kills it
     (cross-flash, AGENTS.md law). A wrong track is an honest 400, not a
     silent dead node."""
     if track not in firmware_image.TRACKS:
         raise HTTPException(status_code=400,
-                            detail=f"unknown track '{track}' (array | flex)")
+                            detail=f"unknown track '{track}' ({' | '.join(firmware_image.TRACKS)})")
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
     dest_dir = Path(f"firmware/{track}")

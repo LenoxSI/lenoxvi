@@ -33,7 +33,7 @@ def app_version(bin_path: str) -> tuple[str, str] | None:
 
 
 def app_track(bin_path: str) -> str | None:
-    """'array' / 'flex' / None — the image's own track (core/firmware_image.py)."""
+    """'array' / 'flex' / 'waveshare' / None — the image's own track (core/firmware_image.py)."""
     import os
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))

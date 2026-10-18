@@ -18,14 +18,16 @@
 #   ./scripts/deploy_firmware.sh --track array                  # patch bump
 #   ./scripts/deploy_firmware.sh --track flex minor             # 1.0.1 -> 1.1.0
 #   ./scripts/deploy_firmware.sh --track array --version 1.2.0
-# Track law: one name per line, everywhere. Both lines build from the
+# Track law: one name per line, everywhere. Every line builds from the
 # firmware repo's `main` branch (2026-10-16 branch fold), chosen by -DBOARD:
 #   array  XVF3800 mic-array board  -DBOARD=array  tags array-vX.Y.Z
 #          build/array/array_esp32.bin -> firmware/array/ (/firmware/array/*;
 #          the legacy /firmware/version URL also serves this track)
 #   flex   reSpeaker Flex           -DBOARD=flex   tags flex-vX.Y.Z
 #          build/flex/flex_esp32.bin   -> firmware/flex/  (/firmware/flex/*)
-# NEVER stage one line's build on the other's track: that node would
+#   waveshare  Waveshare ESP32-S3-AUDIO  -DBOARD=waveshare  tags waveshare-vX.Y.Z
+#          build/waveshare/waveshare_esp32.bin -> firmware/waveshare/
+# NEVER stage one line's build on another line's track: that node would
 # cross-flash itself and boot the wrong hardware config.
 set -euo pipefail
 
@@ -34,13 +36,13 @@ LVI_LOCAL="${LVI_LOCAL:-$HOME/projects/lenoxvi}"
 LVI_HOST="${LVI_HOST:-lenoxvi}"
 
 if [ "${1:-}" != "--track" ] || [ -z "${2:-}" ]; then
-  echo "FATAL: --track array|flex is required (no default line — a wrong guess cross-flashes a node)"
+  echo "FATAL: --track array|flex|waveshare is required (no default line — a wrong guess cross-flashes a node)"
   exit 1
 fi
 TRACK="$2"; shift 2
 case "$TRACK" in
-  array|flex) LVI_REMOTE_DIR="projects/lenoxvi/firmware/$TRACK" ;;
-  *) echo "FATAL: unknown track '$TRACK' (array|flex)"; exit 1 ;;
+  array|flex|waveshare) LVI_REMOTE_DIR="projects/lenoxvi/firmware/$TRACK" ;;
+  *) echo "FATAL: unknown track '$TRACK' (array|flex|waveshare)"; exit 1 ;;
 esac
 
 # ── 0. Preflight: the checkout must be the firmware repo's `main` ──────────
@@ -108,6 +110,8 @@ source "$HOME/esp-idf/export.sh" >/dev/null
 # this line used to ENABLE it on every script build, 2026-10-13). Also
 # protects against a value inherited from the caller's shell.
 unset LOG_DATACHANNEL_MESSAGES
+# Same for the bench-only mic-level serial log: never in a published image.
+unset MIC_LEVEL_LOG
 # Fresh config from sdkconfig.defaults on EVERY build, one per line, inside
 # its build dir. The repo-root sdkconfig is generated once and then wins over
 # sdkconfig.defaults (an explicit "is not set" line survives a defaults
