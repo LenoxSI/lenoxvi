@@ -3208,6 +3208,115 @@ def main():
     check("051 config.example sets the public default name explicitly (Jarvis)",
           "\n  name: Jarvis" in _ex051)
 
+    # ── 053 built-in speaker zone (routes) ───────────────────────────
+    import yaml as _y053
+    from dashboard import node_command as _nc053
+
+    def _cfg053():
+        return _y053.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
+
+    _sent053 = []
+    _real_send053 = _nc053.send_to_room
+    _nc053.send_to_room = lambda room, p: _sent053.append((room, p)) or True
+    _zones053 = list(client.get("/api/dashboard/mapping").json()["zones"])
+    _shared053 = _zones053[0]
+    _base_rz053 = dict(_cfg053().get("room_zones") or {})
+    try:
+        for _nm in ("builtin", "Builtin"):
+            _r = client.post("/api/dashboard/zones", json={"name": _nm, "backend": "wiim", "ip": "192.0.2.53"})
+            check(f"053 zone add refuses the reserved name {_nm!r}",
+                  _r.status_code == 400 and "reserved" in _r.text, f"{_r.status_code} {_r.text[:120]}")
+        registry.mark_connected("pc-053xvf")
+        registry.note_offer("pc-053xvf", "suite-xvf053")
+        registry.note_line("pc-053xvf", "array")
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-xvf053": "builtin"}})
+        check("053 mapping: builtin refused for a node without a speaker (private rule, server-side)",
+              _r.status_code == 400 and "speaker" in _r.text, f"{_r.status_code} {_r.text[:120]}")
+
+        registry.mark_connected("pc-053ws")
+        registry.note_offer("pc-053ws", "suite-ws053")
+        registry.note_line("pc-053ws", "waveshare")
+        _st = {r["room"]: r for r in client.get("/api/dashboard/status").json()["rooms"]}
+        check("053 /status rooms carry speaker", _st.get("suite-ws053", {}).get("speaker") is True
+              and _st.get("suite-xvf053", {}).get("speaker") is False, str(_st.get("suite-ws053")))
+
+        _m = client.get("/api/dashboard/mapping").json()
+        check("053 GET mapping lists speaker rooms with volume + resolved zone",
+              _m.get("speakers", {}).get("suite-ws053") == {"volume": 40, "zone": "builtin", "online": True,
+                                                            "speaker_ok": None},
+              str(_m.get("speakers")))
+        check("053 GET mapping: built-in never appears as a shared zone", "builtin" not in _m["zones"])
+
+        _sent053.clear()
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+        check("053 mapping: builtin accepted for the speaker node", _r.status_code == 200, _r.text[:120])
+        check("053 mapping write lands in config", _cfg053()["room_zones"].get("suite-ws053") == "builtin")
+        check("053 mapping PUT syncs the speaker node (enabled)",
+              ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 40}) in _sent053, str(_sent053))
+
+        _sent053.clear()
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": _shared053}})
+        check("053 remap to a shared zone -> node told to stay silent (never both)",
+              _r.status_code == 200
+              and ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 40}) in _sent053, str(_sent053))
+
+        _sent053.clear()
+        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": 55})
+        check("053 volume PUT ok + written to node_speaker.volumes",
+              _r.status_code == 200 and (_cfg053().get("node_speaker") or {}).get("volumes", {}).get("suite-ws053") == 55,
+              f"{_r.status_code} {_r.text[:120]}")
+        check("053 volume PUT pushes set_speaker with the new volume",
+              _sent053 and _sent053[-1] == ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 55}),
+              str(_sent053))
+        for _bad in (101, -1, "loud"):
+            _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": _bad})
+            check(f"053 volume PUT refuses {_bad!r}", _r.status_code == 422, str(_r.status_code))
+        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-xvf053", "volume": 50})
+        check("053 volume PUT 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
+
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+        check("053 test clip 409s when the node's replies go to a shared zone",
+              _r.status_code == 409 and "shared zone" in _r.text, f"{_r.status_code} {_r.text[:120]}")
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+        check("053 test clip 409s when the node has no live session",
+              _r.status_code == 409 and "offline" in _r.text, f"{_r.status_code} {_r.text[:120]}")
+
+        class _Out053:
+            def __init__(self):
+                self.frames = []
+
+            async def queue_frame(self, frame, direction=None):
+                self.frames.append(frame)
+        _o053 = _Out053()
+        _real_sfr053 = registry.sender_for_room
+        registry.sender_for_room = lambda room: (_o053, "pc-053ws") if room == "suite-ws053" else (None, None)
+        try:
+            _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+        finally:
+            registry.sender_for_room = _real_sfr053
+        _f = _o053.frames[0] if _o053.frames else None
+        check("053 test clip queues the tone into THAT node's output transport only",
+              _r.status_code == 200 and _f is not None and type(_f).__name__ == "OutputAudioRawFrame"
+              and _f.sample_rate == 24000 and _f.num_channels == 1 and len(_f.audio) > 0,
+              f"{_r.status_code} {_r.text[:120]} frames={len(_o053.frames)}")
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvf053"})
+        check("053 test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
+
+        # a rename carries the speaker volume with the zone mapping
+        _nc053.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
+                                      "data": {"name": "suite-ws053b"}}), "pc-053ws")
+        _c = _cfg053()
+        check("053 rename carries the speaker volume (and the mapping) to the new name",
+              (_c.get("node_speaker") or {}).get("volumes", {}).get("suite-ws053b") == 55
+              and "suite-ws053" not in (_c.get("node_speaker") or {}).get("volumes", {})
+              and _c["room_zones"].get("suite-ws053b") == "builtin",
+              str(_c.get("node_speaker")))
+    finally:
+        _nc053.send_to_room = _real_send053
+        registry.mark_disconnected("pc-053ws")
+        registry.mark_disconnected("pc-053xvf")
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")

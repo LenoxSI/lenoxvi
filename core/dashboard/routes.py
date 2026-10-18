@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
 import intelligence_target
+import node_speaker
 import tts_pocket
 import wake_name
 
@@ -253,6 +254,15 @@ async def get_mapping(names: bool = False):
     # which a Sonos client can't answer (an offline player = a timeout per
     # poll). Sonos zones only. Still threaded when asked (this
     # is the voice pipeline's event loop).
+    # speaker nodes — their private built-in zone (never in "zones").
+    online = {r["room"]: r for r in registry.known_rooms()}
+    out["speakers"] = {
+        room: {"volume": node_speaker.volume_for(room, cfg("node_speaker", "volumes")),
+               "zone": node_speaker.zone_for(room),
+               "online": bool(online.get(room, {}).get("online")),
+               "speaker_ok": online.get(room, {}).get("speaker_ok")}
+        for room in registry.speaker_rooms()
+    }
     if names:
         out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
     return out
@@ -270,7 +280,16 @@ async def put_mapping(payload: MappingPayload):
         )
     zones = _all_zones()
     # Validate BEFORE writing: every mapped zone must exist (either backend).
-    bad = {r: z for r, z in payload.room_zones.items() if z not in zones}
+    # `builtin` is a node's own speaker — only for a node that has one.
+    no_spk = sorted(r for r, z in payload.room_zones.items()
+                    if z == node_speaker.BUILTIN and not registry.has_speaker(r))
+    if no_spk:
+        raise HTTPException(
+            status_code=400,
+            detail=f"room(s) {no_spk} have no built-in speaker",
+        )
+    bad = {r: z for r, z in payload.room_zones.items()
+           if z not in zones and z != node_speaker.BUILTIN}
     if bad:
         raise HTTPException(
             status_code=400,
@@ -286,7 +305,67 @@ async def put_mapping(payload: MappingPayload):
         diff = config_store.write_section("room_zones", clean)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    # exactly one output sounds a reply — tell every speaker node
+    # whether it's now the one (a full-dict PUT can map OR unmap it).
+    node_speaker.sync_all(registry.speaker_rooms())
     return {"ok": True, "room_zones": clean, "changed": diff["before"] != diff["after"]}
+
+
+# ── node speaker (a node's built-in speaker zone) ────────────────
+
+
+class NodeSpeakerVolumePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    room: str = Field(min_length=1, max_length=64)
+    volume: int = Field(ge=0, le=100, strict=True)
+
+
+class NodeSpeakerRoomPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    room: str = Field(min_length=1, max_length=64)
+
+
+def _speaker_room_or_404(room: str) -> str:
+    room = room.strip()
+    if not registry.has_speaker(room):
+        raise HTTPException(status_code=404, detail=f"'{room}' has no built-in speaker")
+    return room
+
+
+@router.put("/node-speaker/volume", dependencies=GUARD)
+async def put_node_speaker_volume(payload: NodeSpeakerVolumePayload):
+    room = _speaker_room_or_404(payload.room)
+    section = dict(config_store.read_section("node_speaker") or {})
+    volumes = {**(section.get("volumes") or {}), room: payload.volume}
+    try:
+        config_store.write_section("node_speaker", {**section, "volumes": volumes})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    sent = node_speaker.sync(room)
+    return {"ok": True, "room": room, "volume": payload.volume, "sent": sent}
+
+
+@router.post("/node-speaker/test", dependencies=GUARD)
+async def test_node_speaker(payload: NodeSpeakerRoomPayload):
+    """Play the test tone on a node's own speaker — queued into THAT
+    node's output transport only (no Sonos/WiiM). Only when its replies
+    actually go to the built-in speaker (otherwise the node is told to stay
+    silent and the tone would vanish)."""
+    room = _speaker_room_or_404(payload.room)
+    if node_speaker.zone_for(room) != node_speaker.BUILTIN:
+        raise HTTPException(status_code=409,
+                            detail=f"'{room}' replies go to a shared zone, not its built-in speaker")
+    out, _pc = registry.sender_for_room(room)
+    if out is None:
+        raise HTTPException(status_code=409, detail=f"'{room}' is offline")
+    from pipecat.frames.frames import OutputAudioRawFrame
+
+    pcm = _test_tone_pcm()
+    gate = registry.gate()
+    if gate is not None:
+        gate.block(len(pcm) / (2 * 24000) + 1.5)  # same margin as the zone test
+    await out.queue_frame(OutputAudioRawFrame(audio=pcm, sample_rate=24000, num_channels=1))
+    return {"ok": True, "room": room}
 
 
 # ── zones ────────────────────────────────────────────────────────────
@@ -394,6 +473,8 @@ async def add_zone(payload: ZonePayload):
     name = payload.name.strip()
     if not name or "." in name or ":" in name:
         raise HTTPException(status_code=400, detail="bad zone name")
+    if node_speaker.is_reserved_zone_name(name):
+        raise HTTPException(status_code=400, detail=f"'{name}' is reserved (a node's built-in speaker)")
     # Collision check across BOTH backends: one merged namespace (the
     # mapping routes and the room_zones config key see one zone list).
     if name in _all_zones():

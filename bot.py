@@ -351,9 +351,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         room = _pipeline_room()
         if not room or room == "unknown":
             return None
-        from config import cfg
-        mapped = (cfg("room_zones") or {}).get(room)
-        return mapped  # None -> default zone fallback in the output backend
+        # mapped zone, else a speaker node's own speaker ("builtin"),
+        # else None -> default zone fallback in the output backend.
+        import node_speaker
+        return node_speaker.resolve_zone(room, node_speaker._room_zones(),
+                                         node_speaker._has_speaker(room))
 
     def _on_wake():
         dash_registry.note_wake(_pipeline_room(), heard_key=_room)
@@ -445,6 +447,10 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     wiim_out = WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
                           wake_gate=wake_filter, led=led)
     _outputs.extend([sonos_out, wiim_out])
+    # echo gate for replies on a node's built-in speaker (the audio
+    # itself already rides transport.output() to the node).
+    from node_speaker_output import NodeSpeakerOutput
+    node_spk_out = NodeSpeakerOutput(echo_gate=gate, zone_selector=_reply_zone)
 
     # Arm the hot standby: ServiceSwitcher([primary, pocket], Failover).
     # The recovery loop queues its switch-back frame through the task,
@@ -490,6 +496,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 # is needed at all.
                 sonos_out,
                 wiim_out,
+                node_spk_out,
                 out,
             ]
         ),

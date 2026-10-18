@@ -47,6 +47,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from node_speaker import BUILTIN
+
 # Shared SSL context: the WiiM serves a self-signed cert on 443.
 _SSL_CTX = ssl._create_unverified_context()
 _SSL_CTX.set_ciphers("ALL:@SECLEVEL=0")  # match pywiim: old TLS on LinkPlay firmware
@@ -165,6 +167,9 @@ class WiiMOutput(FrameProcessor):
             except Exception as e:
                 logger.debug(f"wiim_output: zone_selector failed: {e}")
         zone = self._zones.get(zone_name)
+        if zone_name == BUILTIN:  # the node's own speaker plays it
+            logger.debug("wiim_output: reply zone is the node's built-in speaker, skipping")
+            return
         if not zone:
             logger.warning(f"wiim_output: zone '{zone_name}' not in wiim zones {list(self._zones)}, skipping")
             return

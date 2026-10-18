@@ -150,6 +150,15 @@ def on_message(message, pc_id: str) -> None:
         # firmware 1.2.19+: fw_push names the board line (registry.NODE_LINES).
         if isinstance(info, dict) and isinstance(info.get("line"), str):
             registry.note_line(pc_id, info["line"])
+            # a speaker node boots with its speaker disabled — tell it
+            # whether to play replies once its room is bound.
+            import node_speaker
+
+            if info["line"] in node_speaker.SPEAKER_LINES:
+                try:
+                    asyncio.get_running_loop().create_task(node_speaker.sync_pc(pc_id))
+                except RuntimeError:
+                    pass
         # Firmware 1.2.11+: fw_push also carries the node's mute state.
         if isinstance(info, dict) and isinstance(info.get("muted"), bool):
             registry.note_muted(pc_id, info["muted"])
@@ -193,7 +202,18 @@ def on_message(message, pc_id: str) -> None:
                     f"node_command: rename carried mapping '{old}' -> '{new}' "
                     f"(zone '{mapping[new]}')"
                 )
+            # the built-in speaker's volume is keyed by room too.
+            spk = dict(config_store.read_section("node_speaker") or {})
+            vols = dict(spk.get("volumes") or {})
+            if old in vols:
+                vols[new] = vols.pop(old)
+                config_store.write_section("node_speaker", {**spk, "volumes": vols})
+                logger.info(f"node_command: rename carried speaker volume '{old}' -> '{new}'")
         registry.relabel_room(pc_id, info)
+
+    # the speaker's per-boot health rides every set_speaker reply.
+    if cmd == "set_speaker" and isinstance(data.get("data"), dict):
+        registry.note_speaker_ok(pc_id, data["data"].get("speaker_ok"))
 
     if fut and not fut.done():
         fut.set_result(data)

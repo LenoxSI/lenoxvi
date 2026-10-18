@@ -38,6 +38,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from node_speaker import BUILTIN
+
 
 class ClipServer:
     """Tiny LAN HTTP server so Sonos players can fetch TTS clips."""
@@ -638,6 +640,9 @@ class SonosOutput(FrameProcessor):
             except Exception as e:  # routing hint must never break the reply
                 logger.debug(f"sonos_output: zone_selector failed: {e}")
         zone = self._zones.get(zone_name)
+        if zone_name == BUILTIN:  # the node's own speaker plays it
+            logger.debug("sonos_output: reply zone is the node's built-in speaker, skipping")
+            return
         if not zone:
             logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
             return

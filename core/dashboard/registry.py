@@ -150,6 +150,27 @@ def note_line(pc_id: str, line: str) -> None:
     rec["line"] = line
 
 
+def has_speaker(room) -> bool:
+    """The node in `room` has a built-in speaker (its board line is one
+    of node_speaker.SPEAKER_LINES). Unknown room / unknown line -> False."""
+    from node_speaker import SPEAKER_LINES
+    rec = _known_rooms.get(room) if room else None
+    return bool(rec) and rec.get("line") in SPEAKER_LINES
+
+
+def speaker_rooms() -> list:
+    return sorted(r for r in _known_rooms if r != PROVISIONAL and has_speaker(r))
+
+
+def note_speaker_ok(pc_id: str, ok) -> None:
+    """The node's set_speaker reply says whether its speaker came up
+    this boot (None until it answers)."""
+    room = _room_by_pc.get(pc_id)
+    if not room or room == PROVISIONAL or not isinstance(ok, bool):
+        return
+    _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})["speaker_ok"] = ok
+
+
 def note_muted(pc_id: str, muted: bool) -> None:
     """Firmware 1.2.11+: the node's mic-mute state, from
     fw_push (connect) or mute_push (an array node's PHYSICAL button was
@@ -399,6 +420,10 @@ def known_rooms():
                 # reported it (older firmware); the dashboard then asks
                 # get_info instead.
                 "muted": rec.get("muted"),
+                # built-in speaker (board line) + whether it came up
+                # this boot (set_speaker reply; None = not answered yet).
+                "speaker": has_speaker(room),
+                "speaker_ok": rec.get("speaker_ok"),
             }
         )
     return sorted(out, key=lambda r: r["room"])
