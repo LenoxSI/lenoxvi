@@ -1072,16 +1072,14 @@ function WakeNameCard({ setMsg }) {
     <Section title="Wake name"
       note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <Field label="Name" between>
-          <div className="flex items-center gap-2">
-            <input id="wake-name" className={`${INPUT_CLS} w-[200px]`} maxLength={30} placeholder="not set"
+        <div className="grid md:grid-cols-[auto_1fr_auto] gap-x-8 gap-y-4 items-start">
+          <Field label="Wake name">
+            <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
               value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
             <button className={BTN_DEFAULT}
-              onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Save</button>
-          </div>
-        </Field>
-        <Field label="Also heard as" between>
-          <div className="flex flex-wrap items-center gap-2">
+              onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Set wake word</button>
+          </Field>
+          <Field label="Also heard as">
             {aliases.map(a => (
               <span key={a} data-alias={a}
                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
@@ -1091,15 +1089,13 @@ function WakeNameCard({ setMsg }) {
               </span>
             ))}
             {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
-          </div>
-        </Field>
-        <Field label="Spelling hint" between>
-          <div className="flex items-center gap-2">
+          </Field>
+          <Field label="Spelling hint">
             <Switch checked={!!w.bias_wake_name} title="Hint the name to speech-to-text"
               onChange={v => save({ bias_wake_name: v }, `Spelling hint ${v ? 'on' : 'off'} — live now.`)} />
             <span className="text-[12px] text-[var(--muted)]">hint the name to speech-to-text</span>
-          </div>
-        </Field>
+          </Field>
+        </div>
         <div className="grid gap-1">
           <div className="text-[12px] uppercase tracking-wide text-[var(--muted)]">Heard right after a wake</div>
           {(w.recent || []).length === 0 &&
