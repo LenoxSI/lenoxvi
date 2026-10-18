@@ -847,12 +847,14 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                     {!sp?.online && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] border border-[var(--separator)]">offline</span>}
                     {sp?.speaker_ok === false && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--danger)] border border-[var(--danger)]">speaker fault</span>}
                   </div>
-                  <div className="text-[12px] text-[var(--muted)]">
-                    {inUse ? 'Mic pauses while it speaks.' : `Not in use — replies go to ${esc(sp?.zone) || 'the default zone'}.`}
-                  </div>
+                  {!inUse && (
+                    <div className="text-[12px] text-[var(--muted)]">
+                      {`Not in use — replies go to ${esc(sp?.zone) || 'the default zone'}.`}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-2">
-                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">node</span>
+                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">ESP32</span>
                 </td>
                 <td className="px-4 py-2">
                   <VolSlider name={room} initial={sp?.volume} onCommit={saveSpeakerVolume} />

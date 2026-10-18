@@ -12,6 +12,9 @@ The two version streams are independent.
 - Dashboard: the Nodes table no longer shows a `speaker` chip (the built-in
   speaker lives in Zones and the mapping dropdown); the waveshare line chip's
   tooltip reads "Waveshare esp32-s3-audio board (built-in speaker option)".
+- Dashboard: a node's built-in speaker row in Zones shows an `ESP32` backend
+  chip (was `node`) and no "Mic pauses while it speaks." note; the
+  "Not in use — replies go to …" note stays.
 
 ## [0.6.5] — 2026-10-18 — Built-in speaker zone, Pocket TTS, wake name from config
 
