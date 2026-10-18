@@ -1015,6 +1015,7 @@ function WakeNameCard({ setMsg }) {
   const [w, setW] = useState(null)
   const [loadErr, setLoadErr] = useState('')
   const [draft, setDraft] = useState(null)   // local name draft once edited
+  const [aliasDraft, setAliasDraft] = useState('')   // the "add a spelling" box
   const aliasRef = useRef(null)              // latest aliases: quick clicks never lose one
   // A poll that overlapped any save (started during one, or a save began/ended
   // while it was out) carries stale data and is dropped.
@@ -1059,14 +1060,18 @@ function WakeNameCard({ setMsg }) {
     ? <Section title="Wake name"><div className="text-[13px] text-[var(--muted)]">Couldn't load wake settings: {esc(loadErr)}</div></Section>
     : null
   const aliases = w.heard_as || []
-  const addAlias = word => {
+  // One path for a clicked word and a typed spelling; true only when saved.
+  const addAlias = async word => {
     const a = aliasFrom(word)
     const current = aliasRef.current ?? aliases
-    if (a === (w.name || '').toLowerCase() || current.includes(a)) return
-    if (!ALIAS_OK.test(a)) { setMsg(`'${word}' can't be an alias — letters, spaces, ' or - only.`, 'err', 'Wake name'); return }
-    if (ALIAS_RESERVED.has(a)) { setMsg(`'${a}' is a filler word — as an alias it would swallow real commands.`, 'err', 'Wake name'); return }
-    save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)
+    if (!a) return false
+    if (a === (w.name || '').toLowerCase()) { setMsg(`'${a}' is the wake name itself.`, 'err', 'Wake name'); return false }
+    if (current.includes(a)) { setMsg(`'${a}' is already there.`, 'err', 'Wake name'); return false }
+    if (!ALIAS_OK.test(a)) { setMsg(`'${word}' can't be an alias — letters, spaces, ' or - only.`, 'err', 'Wake name'); return false }
+    if (ALIAS_RESERVED.has(a)) { setMsg(`'${a}' is a filler word — as an alias it would swallow real commands.`, 'err', 'Wake name'); return false }
+    return save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)
   }
+  const addTyped = async () => { if (await addAlias(aliasDraft)) setAliasDraft('') }
   const hhmm = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return (
     <Section title="Wake name"
@@ -1089,6 +1094,10 @@ function WakeNameCard({ setMsg }) {
               </span>
             ))}
             {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
+            <input id="wake-alias" className={`${INPUT_CLS} w-[160px]`} maxLength={30} placeholder="add a spelling"
+              value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
+            <button className={BTN_DEFAULT} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
           </Field>
         </div>
         <div className="grid gap-1">
