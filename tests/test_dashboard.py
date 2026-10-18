@@ -2975,6 +2975,72 @@ def main():
         _ctR.CDLL = _orig_cdll
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
+    # 051 heard-after-wake buffer (registry): first transcript after a wake only
+    from dashboard import registry as _reg051
+    _reg051._RECENT_HEARD.clear()
+    _reg051._WAKE_PENDING.clear()
+    _reg051.note_heard("kitchen", "no wake before this", False)
+    check("051 a transcript without a wake is not recorded", _reg051.recent_heard() == [])
+    _reg051.note_wake("kitchen")
+    _reg051.note_heard("kitchen", "Hey Linux.", True)
+    _reg051.note_heard("kitchen", "second transcript", False)
+    _rh051 = _reg051.recent_heard()
+    check("051 only the FIRST transcript after a wake is recorded, with room + dropped flag",
+          len(_rh051) == 1 and _rh051[0]["text"] == "Hey Linux." and _rh051[0]["dropped"] is True
+          and _rh051[0]["room"] == "kitchen", str(_rh051))
+    _reg051.note_wake("kitchen")
+    _reg051._WAKE_PENDING["kitchen"] -= 600
+    _reg051.note_heard("kitchen", "ten minutes later", False)
+    check("051 a transcript outside the 30 s window is not recorded", len(_reg051.recent_heard()) == 1)
+    _reg051.note_wake("den")
+    _reg051.note_heard("kitchen", "other room", False)
+    check("051 a wake in one room doesn't capture another room's transcript",
+          len(_reg051.recent_heard()) == 1)
+    for _i051 in range(15):
+        _reg051.note_wake("den")
+        _reg051.note_heard("den", f"t{_i051}", False)
+    check("051 recent list capped at 10, newest first",
+          len(_reg051.recent_heard()) == 10 and _reg051.recent_heard()[0]["text"] == "t14")
+
+    # 051 /wake API — name + aliases + bias apply live (no restart)
+    import wake_name as _wn051b
+    _secs051 = config_store.read_sections(["wake", "stt"])
+    _wake_bak051 = dict(_secs051.get("wake") or {})
+    _stt_bak051 = dict(_secs051.get("stt") or {})
+    try:
+        r = client.get("/api/dashboard/wake")
+        _w051 = r.json() if r.status_code == 200 else {}
+        check("051 GET /wake shape",
+              r.status_code == 200 and {"name", "name_source", "heard_as", "recent",
+                                        "bias_wake_name", "model"} <= set(_w051)
+              and _w051["recent"] and _w051["recent"][0]["text"] == "t14", str(_w051)[:200])
+        r = client.put("/api/dashboard/wake",
+                       json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
+        check("051 PUT /wake applies live: name + normalised, de-duplicated aliases",
+              r.status_code == 200 and _wn051b.effective_name() == ("Computer", "set")
+              and _wn051b.aliases() == ["komputer", "compute her"]
+              and _wn051b.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
+        _stt_mid051 = dict(config_store.read_section("stt") or {})
+        check("051 PUT /wake without bias leaves the stt section untouched", _stt_mid051 == _stt_bak051)
+        for _bad051 in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
+                        {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "linux"},
+                        {"heard_as": ["x" * 31]}]:
+            r = client.put("/api/dashboard/wake", json=_bad051)
+            _k051 = list(_bad051)[0]
+            check(f"051 PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
+                  r.status_code == 422, f"{r.status_code}")
+        check("051 rejected PUTs changed nothing", _wn051b.effective_name() == ("Computer", "set"))
+        r = client.put("/api/dashboard/wake", json={"name": ""})
+        check("051 empty name clears back to the derived name",
+              r.status_code == 200 and _wn051b.effective_name()[1] in ("model", "default")
+              and "name" not in (config_store.read_section("wake") or {}), r.text[:120])
+        r = client.put("/api/dashboard/wake", json={"bias_wake_name": True})
+        check("051 bias switch saves to stt.bias_wake_name and applies live",
+              r.status_code == 200 and _wn051b.bias_enabled() is True
+              and (config_store.read_section("stt") or {}).get("bias_wake_name") is True, r.text[:120])
+    finally:
+        config_store.write_sections({"wake": _wake_bak051, "stt": _stt_bak051})
+
     # 051 Whisper hotword: passed (name only) only when the bias switch is on
     import stt_local as _stt051
     import wake_name as _wn051
@@ -3021,6 +3087,10 @@ def main():
     import intelligence_agent as _ia051
     check("051 intelligence drop-filter delegates to wake_name",
           "wake_name" in _insp051.getsource(_ia051._is_wake_phrase_only))
+    _ia_src051 = _insp051.getsource(_ia051)
+    check("051 intelligence records the first transcript after a wake, fail-open",
+          "note_heard(self._room, text, dropped)" in _ia_src051
+          and "heard-after-wake note failed" in _ia_src051)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
