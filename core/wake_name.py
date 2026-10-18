@@ -7,9 +7,9 @@ the config cache is cleared on every dashboard write, so name and alias edits
 apply without a restart. Only the wake MODEL needs a restart (it loads at
 startup).
 
-Name, in priority order: wake.name if set; else derived from the model
-(stock key "hey_jarvis" -> "Jarvis", custom "Hey_Computer_1-0.onnx" ->
-"Computer"); else "Jarvis".
+The name comes ONLY from wake.name (the dashboard's Wake name card or a hand
+edit) — never guessed from the model file. Unset = no name: the drop-filter
+uses the heard-as aliases alone and there is no speech-to-text hint.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from pathlib import Path
 STOCK_MODELS: tuple[str, ...] = ("hey_jarvis", "hey_mycroft", "alexa")
 STOCK_LICENSE = "CC BY-NC-SA 4.0 (non-commercial)"
 DEFAULT_MODEL = "hey_jarvis"
-DEFAULT_NAME = "Jarvis"
 BIAS_DEFAULT = False          # set by the speech-to-text bias measurement
 
 _PREFIX = r"(?:(?:hey|ok|okay|hi)\s*)?,?\s*"
@@ -60,32 +59,9 @@ def resolve_model(value: str | None = None) -> str:
     return v
 
 
-def derive_name(model: str) -> str | None:
-    stem = Path(str(model)).name
-    stem = re.sub(r"\.(onnx|tflite)$", "", stem)
-    stem = re.sub(r"_v\d[\d.]*$", "", stem)
-    toks = [t for t in re.split(r"[_\-\s.]+", stem) if t]
-    while toks and toks[0].lower() in _LEADING:
-        toks.pop(0)
-    for t in toks:
-        if t.isalpha():
-            return t.capitalize()
-    for t in toks:                      # mixed token: hal9000 -> "Hal"
-        m = re.match(r"[^\W\d_]{2,}", t)
-        if m:
-            return m.group(0).capitalize()
-    return None
-
-
-def effective_name() -> tuple[str, str]:
-    """(name, source) with source one of "set", "model", "default"."""
-    name = " ".join(str(_wake().get("name") or "").split())
-    if name:
-        return name, "set"
-    derived = derive_name(model_value())
-    if derived:
-        return derived, "model"
-    return DEFAULT_NAME, "default"
+def name() -> str:
+    """wake.name, whitespace tidied; "" when unset."""
+    return " ".join(str(_wake().get("name") or "").split())
 
 
 def valid_term(s: str) -> bool:
@@ -112,23 +88,27 @@ def aliases() -> list[str]:
             if not reserved_term(a)]
 
 
-def _pattern() -> re.Pattern:
+def _pattern() -> re.Pattern | None:
     # Whole-utterance only: an alias can drop a BARE "Hey <alias>." and never
     # a real sentence that happens to contain the word.
-    name = effective_name()[0].lower()
-    terms = [name] + [a for a in aliases() if a != name]
+    n = name().lower()
+    terms = ([n] if n else []) + [a for a in aliases() if a != n]
+    if not terms:
+        return None                     # no name, no aliases: never drop
     alts = "|".join(r"\s+".join(re.escape(p) for p in t.split()) for t in terms)
     return re.compile(rf"^\s*{_PREFIX}(?:{alts})\s*[.!?]?\s*$", re.IGNORECASE)
 
 
 def is_wake_phrase_only(text: str) -> bool:
-    return bool(_pattern().match(text or ""))
+    pat = _pattern()
+    return bool(pat and pat.match(text or ""))
 
 
 def hotwords() -> str:
     """Speech-to-text hint: the NAME only. Aliases are mis-spellings —
-    hinting them would push transcripts toward the wrong spelling."""
-    return effective_name()[0]
+    hinting them would push transcripts toward the wrong spelling. "" when no
+    name is set (callers skip the hint)."""
+    return name()
 
 
 def bias_enabled() -> bool:

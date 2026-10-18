@@ -7,7 +7,7 @@ sys.path.insert(0, "core")
 
 import wake_name  # noqa: E402
 
-wake_name._wake = lambda: {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["linux", "yellow"]}
+wake_name._wake = lambda: {"name": "Willow", "heard_as": ["linux", "yellow"]}
 
 from intelligence_agent import _is_wake_phrase_only  # noqa: E402
 

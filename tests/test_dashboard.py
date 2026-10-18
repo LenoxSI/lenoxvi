@@ -3033,13 +3033,14 @@ def main():
         r = client.get("/api/dashboard/wake")
         _w051 = r.json() if r.status_code == 200 else {}
         check("051 GET /wake shape",
-              r.status_code == 200 and {"name", "name_source", "heard_as", "recent",
+              r.status_code == 200 and {"name", "heard_as", "recent",
                                         "bias_wake_name", "model"} <= set(_w051)
+              and "name_source" not in _w051
               and _w051["recent"] and _w051["recent"][0]["text"] == "t14", str(_w051)[:200])
         r = client.put("/api/dashboard/wake",
                        json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
         check("051 PUT /wake applies live: name + normalised, de-duplicated aliases",
-              r.status_code == 200 and _wn051b.effective_name() == ("Computer", "set")
+              r.status_code == 200 and _wn051b.name() == "Computer"
               and _wn051b.aliases() == ["komputer", "compute her"]
               and _wn051b.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
         _stt_mid051 = dict(config_store.read_section("stt") or {})
@@ -3051,22 +3052,23 @@ def main():
             _k051 = list(_bad051)[0]
             check(f"051 PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
-        check("051 rejected PUTs changed nothing", _wn051b.effective_name() == ("Computer", "set"))
+        check("051 rejected PUTs changed nothing", _wn051b.name() == "Computer")
         for _bad051 in [["okay"], ["Stop"], ["linux", "hey"]]:
             r = client.put("/api/dashboard/wake", json={"heard_as": _bad051})
             check(f"051 R-M2 PUT /wake rejects filler-word alias {_bad051} (422)",
                   r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/wake", json={"name": "Zoë", "heard_as": ["zoey"]})
         check("051 R-M5 accented name accepted", r.status_code == 200
-              and _wn051b.effective_name() == ("Zoë", "set"), f"{r.status_code} {r.text[:120]}")
+              and _wn051b.name() == "Zoë", f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "   "})
         check("051 R-M7 a whitespace-only name clears (same as empty)",
               r.status_code == 200 and "name" not in (config_store.read_section("wake") or {}),
               f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "Computer"})
         r = client.put("/api/dashboard/wake", json={"name": ""})
-        check("051 empty name clears back to the derived name",
-              r.status_code == 200 and _wn051b.effective_name()[1] in ("model", "default")
+        check("051 empty name clears it (no name — never guessed from the model)",
+              r.status_code == 200 and _wn051b.name() == "" and r.json().get("name") == ""
+              and client.get("/api/dashboard/wake").json().get("name") == ""
               and "name" not in (config_store.read_section("wake") or {}), r.text[:120])
         r = client.put("/api/dashboard/wake", json={"bias_wake_name": True})
         check("051 bias switch saves to stt.bias_wake_name and applies live",
@@ -3105,6 +3107,15 @@ def main():
         _off051 = dict(_cap051)
     finally:
         _wn051._stt_bias, _wn051._wake = _orig_bias051, _orig_wake051
+    try:
+        _wn051._wake = lambda: {"heard_as": ["komputer"]}
+        _wn051._stt_bias = lambda: True
+        _aio051.run(_svc051._transcribe(b"RIFF"))
+        _noname051 = dict(_cap051)
+    finally:
+        _wn051._stt_bias, _wn051._wake = _orig_bias051, _orig_wake051
+    check("051 no name set -> no hotword even with the bias on", "hotwords" not in _noname051,
+          str(_noname051))
     check("051 Whisper gets hotwords=<name> (never an alias) only when the bias is on",
           _on051.get("hotwords") == "Computer" and "hotwords" not in _off051
           and _on051.get("beam_size") == 1, f"on={_on051} off={_off051}")
@@ -3132,8 +3143,8 @@ def main():
     check("051 R-M8 registry pairs wake and transcript via heard_key",
           _reg051.recent_heard()[0]["text"] == "keyed by build-time room")
     _ex051 = (_root051 / "config.example.yaml").read_text()
-    check("051 R-I1 config.example leaves wake.name unset (derived from the model)",
-          "\n  name:" not in _ex051 and "# name:" in _ex051)
+    check("051 config.example sets the public default name explicitly (Jarvis)",
+          "\n  name: Jarvis" in _ex051)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()

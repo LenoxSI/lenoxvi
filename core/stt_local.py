@@ -161,7 +161,8 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             import wake_name
             # Optional spelling hint: the wake NAME only (stt.bias_wake_name,
             # read per call so a dashboard toggle applies live).
-            kw = {"hotwords": wake_name.hotwords()} if wake_name.bias_enabled() else {}
+            hint = wake_name.hotwords() if wake_name.bias_enabled() else ""
+            kw = {"hotwords": hint} if hint else {}
             segments, info = self._fw_model.transcribe(
                 io.BytesIO(audio),
                 language=self._language,

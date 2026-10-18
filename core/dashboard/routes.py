@@ -1570,7 +1570,7 @@ async def oww_select_model(payload: OWWModelPayload):
 
 class WakePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
-    name: str | None = Field(default=None, max_length=30)   # "" = clear (derive from model)
+    name: str | None = Field(default=None, max_length=30)   # "" = clear (no name)
     heard_as: list[str] | None = Field(default=None, max_length=20)
     bias_wake_name: bool | None = None
 
@@ -1589,11 +1589,10 @@ class WakePayload(BaseModel):
 
 @router.get("/wake")
 async def get_wake():
-    """The wake name card: effective name + where it came from, the
-    heard-as aliases, what speech-to-text heard right after recent wakes,
-    and the spelling-hint switch."""
-    name, source = wake_name.effective_name()
-    return {"name": name, "name_source": source, "heard_as": wake_name.aliases(),
+    """The wake name card: the name (wake.name, "" if unset), the heard-as
+    aliases, what speech-to-text heard right after recent wakes, and the
+    spelling-hint switch."""
+    return {"name": wake_name.name(), "heard_as": wake_name.aliases(),
             "recent": registry.recent_heard(), "bias_wake_name": wake_name.bias_enabled(),
             "model": wake_name.model_value()}
 
@@ -1626,8 +1625,7 @@ async def put_wake(payload: WakePayload):
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
         logger.info(f"dashboard: wake {'/'.join(sorted(touched))} saved — live, no restart")
-    name, _ = wake_name.effective_name()
-    return {"ok": True, "name": name, "heard_as": wake_name.aliases(),
+    return {"ok": True, "name": wake_name.name(), "heard_as": wake_name.aliases(),
             "bias_wake_name": wake_name.bias_enabled()}
 
 

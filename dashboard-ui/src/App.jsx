@@ -1004,7 +1004,6 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
 // Wake name card: what the house is called, the spellings speech-to-text
 // writes for it, and what it heard right after recent wakes — click a word
 // to add it as a heard-as alias. Everything here applies live (no restart).
-const WAKE_SRC = { set: 'set here', model: 'from model file', default: 'default' }
 // Trim edge punctuation only; anything else outside letters/'/- means the
 // word can't be an alias as-is (R2D2 must not silently become "rd").
 const aliasFrom = word => word.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
@@ -1044,7 +1043,7 @@ function WakeNameCard({ setMsg }) {
     inflight.current += 1
     try {
       const r = await api('/api/dashboard/wake', { method: 'PUT', json: body })
-      setW(prev => ({ ...prev, ...r, name_source: 'name' in body ? (body.name ? 'set' : 'model') : prev?.name_source }))
+      setW(prev => ({ ...prev, ...r }))
       aliasRef.current = r.heard_as || aliasRef.current
       setMsg(note || 'Saved — live now.', 'ok', 'Wake name')
       return true
@@ -1075,9 +1074,8 @@ function WakeNameCard({ setMsg }) {
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Name" between>
           <div className="flex items-center gap-2">
-            <input id="wake-name" className={`${INPUT_CLS} w-[200px]`} maxLength={30}
+            <input id="wake-name" className={`${INPUT_CLS} w-[200px]`} maxLength={30} placeholder="not set"
               value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
-            <span className="text-[12px] text-[var(--muted)]">{WAKE_SRC[w.name_source] || ''}</span>
             <button className={BTN_DEFAULT}
               onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Save</button>
           </div>

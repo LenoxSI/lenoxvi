@@ -199,7 +199,7 @@ class WakeWordFilter(FrameProcessor):
                     self._awake_peak = 0
                     self._awake_echo_blocked = False
                     self._vad_fired = False
-                    logger.info(f"wake_word: {wake_name.effective_name()[0].upper()} (score {score:.2f}) -> AWAKE")
+                    logger.info(f"wake_word: {(wake_name.name() or 'wake word').upper()} (score {score:.2f}) -> AWAKE")
                     # Echo-gate rider: a confirmed wake
                     # means the human intends to speak — relax the duration
                     # gate to a tail so their question isn't eaten (a

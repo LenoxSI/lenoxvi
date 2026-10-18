@@ -22,28 +22,19 @@ CFG = {"wake": {}, "bias": None}
 wn._wake = lambda: CFG["wake"]
 wn._stt_bias = lambda: CFG["bias"]
 
-# derivation
-check("051 derive: stock hey_jarvis -> Jarvis", wn.derive_name("hey_jarvis") == "Jarvis")
-check("051 derive: alexa -> Alexa", wn.derive_name("alexa") == "Alexa")
-check("051 derive: custom Hey_Willow_1-0.onnx -> Willow",
-      wn.derive_name("models/Hey_Willow_1-0.onnx") == "Willow")
-check("051 derive: bundled path hey_jarvis_v0.1.onnx -> Jarvis",
-      wn.derive_name("/x/hey_jarvis_v0.1.onnx") == "Jarvis")
-check("051 derive: no alphabetic token -> None", wn.derive_name("1234.onnx") is None)
-
+# the name comes ONLY from wake.name (dashboard text box or a hand edit)
 CFG["wake"] = {}
-check("051 effective: nothing set -> Jarvis (from the stock default model)",
-      wn.effective_name() == ("Jarvis", "model"), str(wn.effective_name()))
+check("051 name: unset -> empty (never guessed)", wn.name() == "", repr(wn.name()))
 CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx"}
-check("051 effective: custom model, no name -> derived",
-      wn.effective_name() == ("Willow", "model"), str(wn.effective_name()))
-CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "name": "Computer"}
-check("051 effective: explicit name wins", wn.effective_name() == ("Computer", "set"))
-CFG["wake"] = {"model": "9999.onnx"}
-check("051 effective: underivable -> default", wn.effective_name() == ("Jarvis", "default"))
+check("051 name: a model filename is never used as the name", wn.name() == "", repr(wn.name()))
+CFG["wake"] = {"model": "hey_jarvis"}
+check("051 name: a stock model doesn't name the house either", wn.name() == "", repr(wn.name()))
+CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "name": "  Bill  "}
+check("051 name: wake.name used, whitespace tidied", wn.name() == "Bill", repr(wn.name()))
+check("051 no derivation helpers left", not hasattr(wn, "derive_name") and not hasattr(wn, "effective_name"))
 
 # regex — identical behaviour for this rig's shape of config
-CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["Linux", "yellow", "linux"]}
+CFG["wake"] = {"name": "Willow", "heard_as": ["Linux", "yellow", "linux"]}
 check("051 aliases normalised + de-duplicated", wn.aliases() == ["linux", "yellow"], str(wn.aliases()))
 for t in ["Hey Linux.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay yellow.", "hi willow",
           "Hey, Willow."]:
@@ -78,8 +69,16 @@ CFG["wake"] = {}
 check("051 absent model -> hey_jarvis bundled", wn.resolve_model().endswith("hey_jarvis_v0.1.onnx"))
 
 # hotword = name only
-CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["linux"]}
+CFG["wake"] = {"name": "Willow", "heard_as": ["linux"]}
 check("051 hotword is the name only (never an alias)", wn.hotwords() == "Willow", wn.hotwords())
+CFG["wake"] = {"heard_as": ["linux"]}
+check("051 no name -> no hotword", wn.hotwords() == "")
+check("051 no name -> aliases still drop, nothing else does",
+      wn.is_wake_phrase_only("hey linux") and not wn.is_wake_phrase_only("hey")
+      and not wn.is_wake_phrase_only(""))
+CFG["wake"] = {}
+check("051 no name and no aliases -> the filter never drops",
+      not wn.is_wake_phrase_only("hey") and not wn.is_wake_phrase_only("Hey Jarvis."))
 CFG["bias"] = None
 check("051 bias default", wn.bias_enabled() is wn.BIAS_DEFAULT)
 CFG["bias"] = False
@@ -88,18 +87,16 @@ CFG["bias"] = True
 check("051 bias on honoured", wn.bias_enabled() is True)
 
 # --- review fixes ---
-check("051 R-M6 derive: mixed token keeps its leading letters (hal9000 -> Hal)",
-      wn.derive_name("hal9000.onnx") == "Hal", str(wn.derive_name("hal9000.onnx")))
 check("051 R-M5 accented names are valid; digits/punctuation still rejected",
       wn.valid_term("José") and wn.valid_term("Zoë") and wn.valid_term("Chloé")
       and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
 check("051 R-M2 filler words are reserved (never aliases)",
       all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
       and not wn.reserved_term("linux") and not wn.reserved_term("yellow"))
-CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["linux"]}
+CFG["wake"] = {"name": "Willow", "heard_as": ["linux"]}
 check("051 R-M9 a leading comma with no prefix still drops (', Willow.')",
       wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Linux."))
-CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["okay", "linux"]}
+CFG["wake"] = {"name": "Willow", "heard_as": ["okay", "linux"]}
 check("051 R-M2 a reserved word hand-edited into heard_as is ignored by the filter",
       not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey linux"))
 
