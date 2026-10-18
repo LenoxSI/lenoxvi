@@ -1087,7 +1087,7 @@ function WakeNameCard({ setMsg }) {
           <Field label="Also heard as">
             {aliases.map(a => (
               <span key={a} data-alias={a}
-                className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
                 {esc(a)}
                 <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
                   onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
