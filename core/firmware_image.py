@@ -12,8 +12,9 @@ array node has no way to boot Flex firmware), so an image must PROVE its
 line. Two independent witnesses:
 
 1. Project name (esp_app_desc_t.project_name, from CMake `project()`):
-   `array_esp32` / `flex_esp32` since firmware 1.2.9. Older images of BOTH
-   lines say `node_esp32` and can't be told apart by name.
+   `array_esp32` / `flex_esp32` since firmware 1.2.9, `waveshare_esp32` from
+   the start. Older images of BOTH XVF lines say `node_esp32` and can't be
+   told apart by name.
 
 2. OTA URL format (ota.cpp FW_URL_FMT, compiled in per line) — the track an
    image will fetch its own updates from is the track it belongs on:

@@ -386,7 +386,7 @@ def known_rooms():
                 "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
                 "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
-                # board line "array"|"flex" (fw_push, 1.2.19+); None =
+                # board line, one of NODE_LINES (fw_push, 1.2.19+); None =
                 # older firmware that doesn't say.
                 "line": rec.get("line"),
                 # TTS health (2026-10-16): None until this room's

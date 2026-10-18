@@ -4,6 +4,7 @@ One directory per firmware line (track), named like everything else:
 
     firmware/array/version.json + array_esp32.bin   array line (XVF3800 mic-array)
     firmware/flex/version.json  + flex_esp32.bin    flex line (reSpeaker Flex)
+    firmware/waveshare/version.json + waveshare_esp32.bin  waveshare line (Waveshare ESP32-S3-AUDIO)
 
 A node's OTA client (lenoxvi-firmware/src/ota.cpp) GETs its track's manifest,
 {PIPECAT_SMALLWEBRTC_URL minus /api/offer}/firmware/<track>/version:

@@ -147,7 +147,7 @@ def on_message(message, pc_id: str) -> None:
         if fw:
             registry.note_firmware(pc_id, str(fw))
             logger.info(f"node_command: <- {pc_id[:24]}… fw_push: running {fw}")
-        # firmware 1.2.19+: fw_push names the board line (array|flex).
+        # firmware 1.2.19+: fw_push names the board line (registry.NODE_LINES).
         if isinstance(info, dict) and isinstance(info.get("line"), str):
             registry.note_line(pc_id, info["line"])
         # Firmware 1.2.11+: fw_push also carries the node's mute state.

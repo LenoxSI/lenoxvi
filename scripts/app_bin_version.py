@@ -10,7 +10,7 @@ segment:
 
 Verified live 2026-10-08 against a built flex image (reports 1.1.0 from
 project(node_esp32 VERSION 1.1.0)); project names are array_esp32 /
-flex_esp32 since 1.2.9. esptool image_info v1 does NOT print
+flex_esp32 since 1.2.9, waveshare_esp32 for the waveshare line. esptool image_info v1 does NOT print
 the app version, so we parse it ourselves.
 
 deploy_firmware.sh uses this so the SHIPPED manifest can
