@@ -1133,6 +1133,14 @@ def main():
                     "ok": True, "data": {"fw": "1.2.19", "line": "node"}}), "test-pc-line")
     check("line: an unknown line ('node') is dropped, not displayed",
           _room_rec("line-direct-room").get("line") == "flex", str(_room_rec("line-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.29", "line": "waveshare"}}), "test-pc-line")
+    check("052 line: fw_push line='waveshare' is recorded (third line)",
+          _room_rec("line-direct-room").get("line") == "waveshare", str(_room_rec("line-direct-room")))
+    node_command.on_message(
+        json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                    "ok": True, "data": {"fw": "1.2.19", "line": "flex"}}), "test-pc-line")
     check("line: a node that never said (older firmware) shows line=None",
           "line" in _room_rec("fw-direct-room") and _room_rec("fw-direct-room")["line"] is None,
           str(_room_rec("fw-direct-room")))
@@ -1161,9 +1169,9 @@ def main():
     # also carry a per-line project name. "legacy" = array <=1.2.8's
     # track-less URL format (still a valid array witness on node_esp32).
     _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "array": b"%.*s/firmware/array/%s",
-               "legacy": b"%.*s/firmware/%s"}
+               "legacy": b"%.*s/firmware/%s", "waveshare": b"%.*s/firmware/waveshare/%s"}
     _PROJ5B = {"flex": b"flex_esp32", "array": b"array_esp32", "legacy": b"node_esp32",
-               None: b"node_esp32"}
+               "waveshare": b"waveshare_esp32", None: b"node_esp32"}
 
     def _fake_image5b(ver: str, board: str | None = "array", both: bool = False,
                       project: bytes | None = None) -> bytes:
@@ -1233,7 +1241,7 @@ def main():
         # image + manifest byte-identical.
         def _snap045():
             out = {}
-            for t in ("array", "flex"):
+            for t in ("array", "flex", "waveshare"):
                 for f in ("version.json", f"{t}_esp32.bin"):
                     q = Path(f"firmware/{t}/{f}")
                     out[f"{t}/{f}"] = q.read_bytes() if q.exists() else None
@@ -1350,13 +1358,43 @@ def main():
               and sorted(q.name for q in Path("firmware/flex").glob("*.bin")) == ["flex_esp32.bin"],
               _rsf.text[:120])
 
+        # 052: third line `waveshare` (Waveshare ESP32-S3-AUDIO bench board).
+        _rw = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("w.bin", _fake_image5b("1.9.9", "waveshare"),
+                                          "application/octet-stream")},
+                          data={"track": "waveshare"})
+        check("052 waveshare upload serves firmware/waveshare/waveshare_esp32.bin",
+              _rw.status_code == 200 and _rw.json().get("track") == "waveshare"
+              and _rw.json().get("filename") == "waveshare_esp32.bin"
+              and json.loads(Path("firmware/waveshare/version.json").read_text())
+              == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
+              and sorted(q.name for q in Path("firmware/waveshare").glob("*.bin")) == ["waveshare_esp32.bin"],
+              f"{_rw.status_code} {_rw.text[:120]}")
+        _before052 = _snap045()
+        _x = [client.post("/api/dashboard/firmware/upload",
+                          files={"file": (f"x{i}.bin", _fake_image5b("1.9.1", img), "application/octet-stream")},
+                          data={"track": trk})
+              for i, (img, trk) in enumerate((("waveshare", "array"), ("waveshare", "flex"),
+                                              ("array", "waveshare"), ("flex", "waveshare"),
+                                              ("legacy", "waveshare")))]
+        check("052 cross-line uploads refused both ways (waveshare<->array/flex, legacy array) — 400, nothing written",
+              all(r.status_code == 400 for r in _x) and _snap045() == _before052,
+              f"{[r.status_code for r in _x]} {_x[0].text[:100]}")
+        _rlie = client.post("/api/dashboard/firmware/upload",
+                            files={"file": ("lie.bin", _fake_image5b("1.9.1", "waveshare", project=b"flex_esp32"),
+                                            "application/octet-stream")},
+                            data={"track": "waveshare"})
+        check("052 waveshare URL + another line's project name -> 400 (name and URL must agree)",
+              _rlie.status_code == 400 and "can't tell which board" in _rlie.text, f"{_rlie.status_code} {_rlie.text[:100]}")
+
         # The OTA server (core/firmware_server.py) — first suite
         # coverage of the node-facing routes. Tracks point at this scratch.
         import firmware_server as _fws
         from fastapi import FastAPI as _FA046
         _saved_tracks046 = dict(_fws.FIRMWARE_TRACKS)
         _fws.FIRMWARE_TRACKS.update({"array": Path("firmware/array").resolve(),
-                                     "flex": Path("firmware/flex").resolve()})
+                                     "flex": Path("firmware/flex").resolve(),
+                                     "waveshare": Path("firmware/waveshare").resolve()})
         try:
             _app046 = _FA046()
             _fws.register_firmware_routes(_app046)
@@ -1376,6 +1414,16 @@ def main():
             check("9b5b OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
                   _lb.status_code == 200 and _lb.content == _tb.content
                   == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
+            _wsv = _c046.get("/firmware/waveshare/version")
+            _wsb = _c046.get("/firmware/waveshare/waveshare_esp32.bin")
+            check("052 OTA: /firmware/waveshare/version + bin serve the waveshare track",
+                  _wsv.status_code == 200 and _wsv.json() == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
+                  and _wsb.status_code == 200
+                  and _wsb.content == Path("firmware/waveshare/waveshare_esp32.bin").read_bytes(),
+                  f"{_wsv.status_code} {_wsv.text[:80]} {_wsb.status_code}")
+            check("052 OTA: the real FIRMWARE_TRACKS table names waveshare",
+                  "waveshare" in _saved_tracks046
+                  and _saved_tracks046["waveshare"].name == "waveshare", str(list(_saved_tracks046)))
             check("9b5b OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
                   _c046.get("/firmware/node/version").status_code == 404, "")
             check("9b5b OTA: path traversal out of a track dir 404s",

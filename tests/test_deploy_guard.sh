@@ -38,16 +38,19 @@ run() {  # run <expect PASS|REFUSE> <label> <track> [repo]
 git -C "$T/fw" checkout -q main
 run PASS   "array track, checkout on main"                        array
 run PASS   "flex track, checkout on main"                         flex
+run PASS   "waveshare track, checkout on main"                    waveshare
 
 git -C "$T/fw" checkout -q some-other-branch
 run REFUSE "array track, checkout on another branch"              array
 run REFUSE "flex track, checkout on another branch"               flex
+run REFUSE "waveshare track, checkout on another branch"          waveshare
 git -C "$T/fw" checkout -q main
 
 # Old track name and missing --track: refused, never defaulted to a line.
 run REFUSE "retired track name 'node' (renamed array)"           node
+run REFUSE "unknown track name 'wave' (no fuzzy match)"         wave
 out=$(FW_REPO="$T/fw" DEPLOY_PREFLIGHT_ONLY=1 bash "$DEPLOY" 2>&1); rc=$?
-if [ $rc -ne 0 ] && grep -q -- "--track array|flex is required" <<<"$out"; then
+if [ $rc -ne 0 ] && grep -q -- "--track array|flex|waveshare is required" <<<"$out"; then
   printf '[PASS] %-58s -> %s\n' "no --track at all (no default line)" REFUSE
 else
   printf '[FAIL] %-58s -> rc=%s (expected REFUSE)\n' "no --track at all (no default line)" "$rc"; fail=1
@@ -77,6 +80,7 @@ if [ -n "$(git -C "$FW_REAL" status --porcelain --untracked-files=no)" ]; then
 elif [ "$REAL_BRANCH" = "main" ]; then
   run PASS "REAL checkout (main): array track" array "$FW_REAL"
   run PASS "REAL checkout (main): flex track"  flex  "$FW_REAL"
+  run PASS "REAL checkout (main): waveshare track" waveshare "$FW_REAL"
 else
   run REFUSE "REAL checkout ($REAL_BRANCH): array track" array "$FW_REAL"
   run REFUSE "REAL checkout ($REAL_BRANCH): flex track"  flex  "$FW_REAL"
