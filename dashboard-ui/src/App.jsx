@@ -1001,6 +1001,100 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
     </Section>
   )
 }
+// Wake name card: what the house is called, the spellings speech-to-text
+// writes for it, and what it heard right after recent wakes — click a word
+// to add it as a heard-as alias. Everything here applies live (no restart).
+const WAKE_SRC = { set: 'set here', model: 'from model file', default: 'default' }
+const aliasFrom = word => word.toLowerCase().replace(/[^a-z' -]/g, '').trim()
+
+function WakeNameCard({ setMsg }) {
+  const [w, setW] = useState(null)
+  const [loadErr, setLoadErr] = useState('')
+  const [draft, setDraft] = useState(null)   // local name draft once edited
+  useEffect(() => {
+    // Poll for the heard-after-wake list; state is set only from the
+    // async result, and a load error shows inline (no toast every 5 s).
+    let alive = true
+    const tick = () => api('/api/dashboard/wake')
+      .then(j => { if (alive) { setW(j); setLoadErr('') } })
+      .catch(e => { if (alive) setLoadErr(e.message) })
+    tick()
+    const t = setInterval(tick, 5000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  const save = async (body, note) => {
+    try {
+      const r = await api('/api/dashboard/wake', { method: 'PUT', json: body })
+      setW(prev => ({ ...prev, ...r, name_source: 'name' in body ? (body.name ? 'set' : 'model') : prev?.name_source }))
+      setMsg(note || 'Saved — live now.', 'ok', 'Wake name')
+    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Wake name') }
+  }
+  if (!w) return loadErr
+    ? <Section title="Wake name"><div className="text-[13px] text-[var(--muted)]">Couldn't load wake settings: {esc(loadErr)}</div></Section>
+    : null
+  const aliases = w.heard_as || []
+  const addAlias = word => {
+    const a = aliasFrom(word)
+    if (!/^[a-z][a-z' -]{0,29}$/.test(a) || a === (w.name || '').toLowerCase() || aliases.includes(a)) return
+    save({ heard_as: [...aliases, a] }, `Added '${a}' — live now.`)
+  }
+  const hhmm = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return (
+    <Section title="Wake name"
+      note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
+      <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <Field label="Name" between>
+          <div className="flex items-center gap-2">
+            <input id="wake-name" className={`${INPUT_CLS} w-[200px]`} maxLength={30}
+              value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
+            <span className="text-[12px] text-[var(--muted)]">{WAKE_SRC[w.name_source] || ''}</span>
+            <button className={BTN_DEFAULT}
+              onClick={async () => { await save({ name: (draft ?? w.name ?? '').trim() }); setDraft(null) }}>Save</button>
+          </div>
+        </Field>
+        <Field label="Also heard as" between>
+          <div className="flex flex-wrap items-center gap-2">
+            {aliases.map(a => (
+              <span key={a} data-alias={a}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
+                {esc(a)}
+                <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
+                  onClick={() => save({ heard_as: aliases.filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
+              </span>
+            ))}
+            {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
+          </div>
+        </Field>
+        <Field label="Spelling hint" between>
+          <div className="flex items-center gap-2">
+            <Switch checked={!!w.bias_wake_name} title="Hint the name to speech-to-text"
+              onChange={v => save({ bias_wake_name: v }, `Spelling hint ${v ? 'on' : 'off'} — live now.`)} />
+            <span className="text-[12px] text-[var(--muted)]">hint the name to speech-to-text</span>
+          </div>
+        </Field>
+        <div className="grid gap-1">
+          <div className="text-[12px] uppercase tracking-wide text-[var(--muted)]">Heard right after a wake</div>
+          {(w.recent || []).length === 0 &&
+            <div className="text-[13px] text-[var(--muted)]">Nothing yet — say the wake word. Kept in memory only.</div>}
+          {(w.recent || []).map((r, i) => (
+            <div key={`${r.time}-${i}`} data-heard="" className="flex flex-wrap items-center gap-1 text-[14px] py-1 border-t border-[var(--separator)]">
+              <span className="text-[12px] text-[var(--muted)] w-[44px]">{hhmm(r.time)}</span>
+              <span className="font-mono text-[12px] text-[var(--muted)] mr-2">{esc(r.room || '?')}</span>
+              {String(r.text || '').split(/\s+/).filter(Boolean).map((word, j) => (
+                <button key={j} type="button" title="Add as an alias"
+                  className="rounded-md px-1 hover:bg-[var(--default)] cursor-pointer"
+                  onClick={() => addAlias(word)}>{esc(word)}</button>
+              ))}
+              {r.dropped &&
+                <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] border border-[var(--separator)]">dropped</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 function OwwPanel({ setMsg, setRebooting, reloadAll }) {
   const [models, setModels] = useState([])
   const [sel, setSel] = useState('')
@@ -1336,6 +1430,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
       </Section>
 
       <Tuning tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} />
+      <WakeNameCard setMsg={setMsg} />
       <OwwPanel setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
     </>
   )
