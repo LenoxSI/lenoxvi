@@ -158,11 +158,16 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         loop = asyncio.get_running_loop()
 
         def _run():
+            import wake_name
+            # Optional spelling hint: the wake NAME only (stt.bias_wake_name,
+            # read per call so a dashboard toggle applies live).
+            kw = {"hotwords": wake_name.hotwords()} if wake_name.bias_enabled() else {}
             segments, info = self._fw_model.transcribe(
                 io.BytesIO(audio),
                 language=self._language,
                 beam_size=1,
                 vad_filter=False,  # pipecat's Silero VAD already gates segments
+                **kw,
             )
             text = " ".join(s.text.strip() for s in segments).strip()
             return text, info.language
