@@ -170,7 +170,7 @@ const BUILTIN = 'builtin'
 const LINE_TITLE = {
   array: 'reSpeaker XVF3800 mic array (LED ring, physical mute button)',
   flex: 'reSpeaker Flex (XVF3800, no LED ring or button)',
-  waveshare: 'Waveshare ESP32-S3-AUDIO (bench mic; no LED ring or button yet)',
+  waveshare: 'Waveshare esp32-s3-audio board (built-in speaker option)',
 }
 const BTN = 'rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50'
 const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]`
@@ -712,13 +712,6 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         title={LINE_TITLE[r.line]}
                         className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
                         {r.line}
-                      </span>
-                    )}
-                    {r.speaker && (
-                      <span data-speaker-badge
-                        title={r.speaker_ok === false ? 'Built-in speaker did not start on this boot' : 'Has a built-in speaker'}
-                        className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium border ${r.speaker_ok === false ? 'text-[var(--danger)] border-[var(--danger)]' : 'text-[var(--muted)] border-[var(--separator)]'}`}>
-                        speaker
                       </span>
                     )}
                   </td>
