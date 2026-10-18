@@ -1,10 +1,15 @@
-"""Verify the wake-phrase-only regex: drop bare wake words, keep commands."""
+"""Wake-phrase-only filter with this rig's shape of config: drop bare wake
+words, keep commands. The name comes from config (wake_name), never code."""
 
 import sys
 
 sys.path.insert(0, "core")
 
-from intelligence_agent import _is_wake_phrase_only
+import wake_name  # noqa: E402
+
+wake_name._wake = lambda: {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["linux", "yellow"]}
+
+from intelligence_agent import _is_wake_phrase_only  # noqa: E402
 
 should_drop = ["Hey Linux.", "hey willow", "Willow.", "ok willow!", "Hey Willow?",
                "okay yellow.", "hi willow"]
