@@ -1,6 +1,6 @@
 """051 — wake_name module pins (host venv).
 
-Patches wake_name._wake / wake_name._stt_bias instead of touching config files.
+Patches wake_name._wake instead of touching config files.
 Run: cd tests && ~/venvs/lenoxvi/bin/python wake_name_test.py <path-to-core>
 """
 import sys
@@ -18,9 +18,8 @@ def check(name, cond, detail=""):
 
 import wake_name as wn  # noqa: E402
 
-CFG = {"wake": {}, "bias": None}
+CFG = {"wake": {}}
 wn._wake = lambda: CFG["wake"]
-wn._stt_bias = lambda: CFG["bias"]
 
 # the name comes ONLY from wake.name (dashboard text box or a hand edit)
 CFG["wake"] = {}
@@ -68,24 +67,16 @@ check("051 custom path passes through", wn.resolve_model("models/x.onnx") == "mo
 CFG["wake"] = {}
 check("051 absent model -> hey_jarvis bundled", wn.resolve_model().endswith("hey_jarvis_v0.1.onnx"))
 
-# hotword = name only
-CFG["wake"] = {"name": "Willow", "heard_as": ["linux"]}
-check("051 hotword is the name only (never an alias)", wn.hotwords() == "Willow", wn.hotwords())
+# no speech-to-text hint any more (removed: failed its accuracy bar; aliases do the job)
+check("051 no spelling-hint helpers left",
+      not any(hasattr(wn, x) for x in ("hotwords", "bias_enabled", "_stt_bias", "BIAS_DEFAULT")))
 CFG["wake"] = {"heard_as": ["linux"]}
-check("051 no name -> no hotword", wn.hotwords() == "")
 check("051 no name -> aliases still drop, nothing else does",
       wn.is_wake_phrase_only("hey linux") and not wn.is_wake_phrase_only("hey")
       and not wn.is_wake_phrase_only(""))
 CFG["wake"] = {}
 check("051 no name and no aliases -> the filter never drops",
       not wn.is_wake_phrase_only("hey") and not wn.is_wake_phrase_only("Hey Jarvis."))
-CFG["bias"] = None
-check("051 bias default", wn.bias_enabled() is wn.BIAS_DEFAULT)
-CFG["bias"] = False
-check("051 bias off honoured", wn.bias_enabled() is False)
-CFG["bias"] = True
-check("051 bias on honoured", wn.bias_enabled() is True)
-
 # --- review fixes ---
 check("051 R-M5 accented names are valid; digits/punctuation still rejected",
       wn.valid_term("José") and wn.valid_term("Zoë") and wn.valid_term("Chloé")

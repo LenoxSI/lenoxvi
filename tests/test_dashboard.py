@@ -3024,7 +3024,7 @@ def main():
     check("051 recent list capped at 2, newest first",
           [r["text"] for r in _reg051.recent_heard()] == ["t14", "t13"], str(_reg051.recent_heard()))
 
-    # 051 /wake API — name + aliases + bias apply live (no restart)
+    # 051 /wake API — name + aliases apply live (no restart)
     import wake_name as _wn051b
     _secs051 = config_store.read_sections(["wake", "stt"])
     _wake_bak051 = dict(_secs051.get("wake") or {})
@@ -3033,9 +3033,8 @@ def main():
         r = client.get("/api/dashboard/wake")
         _w051 = r.json() if r.status_code == 200 else {}
         check("051 GET /wake shape",
-              r.status_code == 200 and {"name", "heard_as", "recent",
-                                        "bias_wake_name", "model"} <= set(_w051)
-              and "name_source" not in _w051
+              r.status_code == 200 and {"name", "heard_as", "recent", "model"} <= set(_w051)
+              and "name_source" not in _w051 and "bias_wake_name" not in _w051
               and _w051["recent"] and _w051["recent"][0]["text"] == "t14", str(_w051)[:200])
         r = client.put("/api/dashboard/wake",
                        json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
@@ -3044,7 +3043,7 @@ def main():
               and _wn051b.aliases() == ["komputer", "compute her"]
               and _wn051b.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
         _stt_mid051 = dict(config_store.read_section("stt") or {})
-        check("051 PUT /wake without bias leaves the stt section untouched", _stt_mid051 == _stt_bak051)
+        check("051 PUT /wake never touches the stt section", _stt_mid051 == _stt_bak051)
         for _bad051 in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
                         {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "linux"},
                         {"heard_as": ["x" * 31]}]:
@@ -3071,16 +3070,17 @@ def main():
               and client.get("/api/dashboard/wake").json().get("name") == ""
               and "name" not in (config_store.read_section("wake") or {}), r.text[:120])
         r = client.put("/api/dashboard/wake", json={"bias_wake_name": True})
-        check("051 bias switch saves to stt.bias_wake_name and applies live",
-              r.status_code == 200 and _wn051b.bias_enabled() is True
-              and (config_store.read_section("stt") or {}).get("bias_wake_name") is True, r.text[:120])
+        check("051 the removed spelling-hint field is rejected (422), stt untouched",
+              r.status_code == 422 and dict(config_store.read_section("stt") or {}) == _stt_bak051,
+              f"{r.status_code}")
     finally:
         config_store.write_sections({"wake": _wake_bak051, "stt": _stt_bak051})
 
-    # 051 Whisper hotword: passed (name only) only when the bias switch is on
+    # 051 Whisper never gets a wake-name hint (spelling hint removed)
     import stt_local as _stt051
     import wake_name as _wn051
     import asyncio as _aio051
+    import inspect as _insp051h
     _cap051 = {}
 
     class _FW051:
@@ -3096,29 +3096,15 @@ def main():
     async def _noop051():
         return None
     _svc051.ensure_model = _noop051
-    _orig_bias051, _orig_wake051 = _wn051._stt_bias, _wn051._wake
+    _orig_wake051 = _wn051._wake
     try:
         _wn051._wake = lambda: {"name": "Computer", "heard_as": ["komputer"]}
-        _wn051._stt_bias = lambda: True
         _aio051.run(_svc051._transcribe(b"RIFF"))
-        _on051 = dict(_cap051)
-        _wn051._stt_bias = lambda: False
-        _aio051.run(_svc051._transcribe(b"RIFF"))
-        _off051 = dict(_cap051)
     finally:
-        _wn051._stt_bias, _wn051._wake = _orig_bias051, _orig_wake051
-    try:
-        _wn051._wake = lambda: {"heard_as": ["komputer"]}
-        _wn051._stt_bias = lambda: True
-        _aio051.run(_svc051._transcribe(b"RIFF"))
-        _noname051 = dict(_cap051)
-    finally:
-        _wn051._stt_bias, _wn051._wake = _orig_bias051, _orig_wake051
-    check("051 no name set -> no hotword even with the bias on", "hotwords" not in _noname051,
-          str(_noname051))
-    check("051 Whisper gets hotwords=<name> (never an alias) only when the bias is on",
-          _on051.get("hotwords") == "Computer" and "hotwords" not in _off051
-          and _on051.get("beam_size") == 1, f"on={_on051} off={_off051}")
+        _wn051._wake = _orig_wake051
+    check("051 Whisper never gets a hotword hint, even with a name set",
+          "hotwords" not in _cap051 and _cap051.get("beam_size") == 1
+          and "hotwords" not in _insp051h.getsource(_stt051), str(_cap051))
 
     # 051 sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
     import inspect as _insp051

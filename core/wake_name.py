@@ -9,13 +9,12 @@ startup).
 
 The name comes ONLY from wake.name (the dashboard's Wake name card or a hand
 edit) — never guessed from the model file. Unset = no name: the drop-filter
-uses the heard-as aliases alone and there is no speech-to-text hint.
+uses the heard-as aliases alone. Aliases are never sent to speech-to-text.
 """
 from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
 
 # Pre-trained wake models registered in openwakeword 0.4.0's own `models`
 # table (bundled in its wheel; CC BY-NC-SA 4.0, non-commercial). lenoxvi never
@@ -23,7 +22,6 @@ from pathlib import Path
 STOCK_MODELS: tuple[str, ...] = ("hey_jarvis", "hey_mycroft", "alexa")
 STOCK_LICENSE = "CC BY-NC-SA 4.0 (non-commercial)"
 DEFAULT_MODEL = "hey_jarvis"
-BIAS_DEFAULT = False          # set by the speech-to-text bias measurement
 
 _PREFIX = r"(?:(?:hey|ok|okay|hi)\s*)?,?\s*"
 # A letter (any script: José, Zoë), then letters, spaces, ' or -; max 30.
@@ -37,11 +35,6 @@ RESERVED = _LEADING | {"stop", "yes", "no", "cancel"}
 def _wake() -> dict:
     from config import cfg
     return cfg("wake") or {}
-
-
-def _stt_bias():
-    from config import cfg
-    return cfg("stt", "bias_wake_name")
 
 
 def model_value() -> str:
@@ -102,17 +95,3 @@ def _pattern() -> re.Pattern | None:
 def is_wake_phrase_only(text: str) -> bool:
     pat = _pattern()
     return bool(pat and pat.match(text or ""))
-
-
-def hotwords() -> str:
-    """Speech-to-text hint: the NAME only. Aliases are mis-spellings —
-    hinting them would push transcripts toward the wrong spelling. "" when no
-    name is set (callers skip the hint)."""
-    return name()
-
-
-def bias_enabled() -> bool:
-    v = _stt_bias()
-    if v is None or v == "":
-        return BIAS_DEFAULT
-    return str(v).strip().lower() in ("1", "true", "yes", "on")

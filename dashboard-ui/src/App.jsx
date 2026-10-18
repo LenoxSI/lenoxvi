@@ -1072,7 +1072,7 @@ function WakeNameCard({ setMsg }) {
     <Section title="Wake name"
       note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        <div className="grid md:grid-cols-[auto_1fr_auto] gap-x-8 gap-y-4 items-start">
+        <div className="grid md:grid-cols-[auto_1fr] gap-x-8 gap-y-4 items-start">
           <Field label="Wake name">
             <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
               value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
@@ -1089,11 +1089,6 @@ function WakeNameCard({ setMsg }) {
               </span>
             ))}
             {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
-          </Field>
-          <Field label="Spelling hint">
-            <Switch checked={!!w.bias_wake_name} title="Hint the name to speech-to-text"
-              onChange={v => save({ bias_wake_name: v }, `Spelling hint ${v ? 'on' : 'off'} — live now.`)} />
-            <span className="text-[12px] text-[var(--muted)]">hint the name to speech-to-text</span>
           </Field>
         </div>
         <div className="grid gap-1">
