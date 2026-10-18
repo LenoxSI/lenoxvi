@@ -132,15 +132,13 @@ def _pick_filler(pool: list[str]) -> str:
 
 
 # Standalone wake-phrase transcriptions (the wake word repeated after the
-# gate opened — observed live 2026-09-15: "Hey Linux." went to the intelligence).
-# If the utterance is just the wake phrase, it's not a command: drop it.
-_WAKE_PHRASE_RE = re.compile(
-    r"^\s*(hey|ok|okay|hi)?\s*,?\s*(willow|linux|yellow)\s*[.!?]?\s*$", re.IGNORECASE
-)
-
-
+# gate opened — observed live: a bare, mis-spelled "Hey <name>." went to the
+# intelligence). If the utterance is just the wake phrase, it's not a command:
+# drop it. The name, its heard-as spellings and the whole-utterance match live
+# in wake_name (config-driven, applies live).
 def _is_wake_phrase_only(text: str) -> bool:
-    return bool(_WAKE_PHRASE_RE.match(text))
+    import wake_name
+    return wake_name.is_wake_phrase_only(text)
 
 
 class _SessionStash:

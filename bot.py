@@ -1,6 +1,6 @@
 """lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
 
-Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord "Hey Willow") ->
+Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord) ->
 Silero VAD -> local faster-whisper STT -> intelligence (IntelligenceAgent via config.yaml
 intelligence.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
 (voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.

@@ -37,7 +37,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-WAKE_MODEL = "Hey_Willow_1-0.onnx"
+import wake_name
+
+# Stock default (bundled with openwakeword); config wake.model overrides.
+WAKE_MODEL = wake_name.DEFAULT_MODEL
 WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
 AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
 
@@ -87,9 +90,11 @@ class WakeWordFilter(FrameProcessor):
         # turn (room-aware reply routing); must be cheap and must never
         # raise into the pipeline.
         self._on_wake = on_wake
-        # Model path: config.yaml wake.model > LVI_WAKE_MODEL env > the repo-root
-        # default (a trained .onnx; gitignored — see config.example.yaml).
-        self._model_path = str(Path(cfg_env("wake", "model", "LVI_WAKE_MODEL", model_path) or model_path))
+        # Model: config.yaml wake.model > LVI_WAKE_MODEL env > the stock default.
+        # A stock key (hey_jarvis, ...) resolves to the file bundled with
+        # openwakeword; anything else is a path to your own .onnx.
+        self._model_path = str(Path(wake_name.resolve_model(
+            str(cfg_env("wake", "model", "LVI_WAKE_MODEL", model_path) or model_path))))
         # threshold: config.yaml wake.threshold > LVI_WAKE_THRESHOLD > code default
         _default_thresh = WAKE_THRESHOLD if threshold is None else threshold
         _thresh = cfg_env("wake", "threshold", "LVI_WAKE_THRESHOLD", str(_default_thresh))
@@ -194,7 +199,7 @@ class WakeWordFilter(FrameProcessor):
                     self._awake_peak = 0
                     self._awake_echo_blocked = False
                     self._vad_fired = False
-                    logger.info(f"wake_word: HEY WILLOW (score {score:.2f}) -> AWAKE")
+                    logger.info(f"wake_word: {wake_name.effective_name()[0].upper()} (score {score:.2f}) -> AWAKE")
                     # Echo-gate rider: a confirmed wake
                     # means the human intends to speak — relax the duration
                     # gate to a tail so their question isn't eaten (a

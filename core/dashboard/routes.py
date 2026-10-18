@@ -33,6 +33,7 @@ from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
 import intelligence_target
 import tts_pocket
+import wake_name
 
 import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
@@ -1424,8 +1425,8 @@ def _oww_active_path() -> Path:
     code default) as a full resolved path — path-exact, so two files
     with the same basename (root vs models/) are distinct."""
     wake = config_store.read_section("wake") or {}
-    return Path(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
-                            wake.get("model") or wake_word.WAKE_MODEL))).resolve()
+    return Path(wake_name.resolve_model(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
+                                                    wake.get("model") or wake_name.DEFAULT_MODEL)))).resolve()
 
 
 def _oww_current() -> str:

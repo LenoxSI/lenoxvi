@@ -1336,7 +1336,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
 
 const TUNING_FIELDS = [
   ['wake_threshold', 'Wake sensitivity', 0.30, 0.60, 0.01,
-    'OWW score needed to wake (real Hey-Willow lands 0.84–1.00; TV audio fired 0.40–0.51).'],
+    'OWW score needed to wake. Real wakes usually score well above TV/ad audio — tune by ear.'],
   ['wake_awake_timeout', 'Awake timeout (s)', 5, 60, 1,
     'Seconds of silence before she stops listening.'],
   ['vad_confidence', 'VAD confidence', 0.30, 0.90, 0.05,
