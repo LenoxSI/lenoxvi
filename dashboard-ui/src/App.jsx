@@ -1078,13 +1078,25 @@ function WakeNameCard({ setMsg }) {
       note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="grid md:grid-cols-[auto_1fr] gap-x-8 gap-y-4 items-start">
-          <Field label="Wake name">
-            <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
-              value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
-            <button className={BTN_DEFAULT}
-              onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Set wake word</button>
-          </Field>
+          {/* Left: name, and the "add a spelling" box directly beneath it —
+              same widths, so both pairs line up edge to edge. */}
+          <div className="grid gap-2">
+            <Field label="Wake name">
+              <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
+                value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
+              <button className={`${BTN_DEFAULT} w-[136px]`}
+                onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Set wake word</button>
+            </Field>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input id="wake-alias" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="add a spelling"
+                value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
+              <button className={`${BTN_DEFAULT} w-[136px]`} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
+            </div>
+          </div>
           <Field label="Also heard as">
+            {/* min height = the input row's, so chips center on the wake name row */}
+            <div className="flex items-center gap-2 flex-wrap min-h-[37px]">
             {aliases.map(a => (
               <span key={a} data-alias={a}
                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
@@ -1094,12 +1106,10 @@ function WakeNameCard({ setMsg }) {
               </span>
             ))}
             {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
-            <input id="wake-alias" className={`${INPUT_CLS} w-[160px]`} maxLength={30} placeholder="add a spelling"
-              value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
-            <button className={BTN_DEFAULT} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
+            </div>
           </Field>
         </div>
+
         <div className="grid gap-1">
           <div className="text-[12px] uppercase tracking-wide text-[var(--muted)]">Heard right after a wake</div>
           {(w.recent || []).length === 0 &&
