@@ -1465,6 +1465,28 @@ def main():
             r = client.delete("/api/dashboard/oww/models/hey_jarvis?source=stock")
             check("051 a stock model can't be deleted (409), package file untouched",
                   r.status_code == 409 and os.path.isfile(_pkg051), f"{r.status_code}")
+            # R-M10: a broken stock entry must not hide the custom rows
+            import wake_name as _wn051r
+            _orig_res051 = _wn051r.resolve_model
+
+            def _boom051(value=None):
+                if value in _wn051r.STOCK_MODELS:
+                    raise KeyError(value)
+                return _orig_res051(value)
+            _wn051r.resolve_model = _boom051
+            _probe051 = Path(models_dir) / "zz_custom_probe.onnx"
+            _probe051.write_bytes(b"x" * 2048)   # listing doesn't validate contents
+            try:
+                r = client.get("/api/dashboard/oww/models")
+                _ok051 = r.status_code == 200
+                _rows_b051 = r.json().get("models", []) if _ok051 else []
+            finally:
+                _wn051r.resolve_model = _orig_res051
+                _probe051.unlink(missing_ok=True)
+            check("051 R-M10 OWW list survives a broken stock entry (custom rows still listed)",
+                  _ok051 and any(m["source"] != "stock" for m in _rows_b051)
+                  and not any(m["source"] == "stock" for m in _rows_b051),
+                  f"{r.status_code} {str(_rows_b051)[:160]}")
         finally:
             config_store.write_section("wake", _wake051)
     finally:
@@ -3030,6 +3052,18 @@ def main():
             check(f"051 PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
         check("051 rejected PUTs changed nothing", _wn051b.effective_name() == ("Computer", "set"))
+        for _bad051 in [["okay"], ["Stop"], ["linux", "hey"]]:
+            r = client.put("/api/dashboard/wake", json={"heard_as": _bad051})
+            check(f"051 R-M2 PUT /wake rejects filler-word alias {_bad051} (422)",
+                  r.status_code == 422, f"{r.status_code}")
+        r = client.put("/api/dashboard/wake", json={"name": "Zoë", "heard_as": ["zoey"]})
+        check("051 R-M5 accented name accepted", r.status_code == 200
+              and _wn051b.effective_name() == ("Zoë", "set"), f"{r.status_code} {r.text[:120]}")
+        r = client.put("/api/dashboard/wake", json={"name": "   "})
+        check("051 R-M7 a whitespace-only name clears (same as empty)",
+              r.status_code == 200 and "name" not in (config_store.read_section("wake") or {}),
+              f"{r.status_code} {r.text[:120]}")
+        r = client.put("/api/dashboard/wake", json={"name": "Computer"})
         r = client.put("/api/dashboard/wake", json={"name": ""})
         check("051 empty name clears back to the derived name",
               r.status_code == 200 and _wn051b.effective_name()[1] in ("model", "default")
@@ -3091,6 +3125,15 @@ def main():
     check("051 intelligence records the first transcript after a wake, fail-open",
           "note_heard(self._room, text, dropped)" in _ia_src051
           and "heard-after-wake note failed" in _ia_src051)
+    check("051 R-M8 the wake is keyed by the SAME room the intelligence records under",
+          "note_wake(_pipeline_room(), heard_key=_room)" in _main_src, "bot.py _on_wake")
+    _reg051.note_wake("den", heard_key="unknown")
+    _reg051.note_heard("unknown", "keyed by build-time room", False)
+    check("051 R-M8 registry pairs wake and transcript via heard_key",
+          _reg051.recent_heard()[0]["text"] == "keyed by build-time room")
+    _ex051 = (_root051 / "config.example.yaml").read_text()
+    check("051 R-I1 config.example leaves wake.name unset (derived from the model)",
+          "\n  name:" not in _ex051 and "# name:" in _ex051)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()

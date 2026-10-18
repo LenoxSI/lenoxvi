@@ -87,6 +87,22 @@ check("051 bias off honoured", wn.bias_enabled() is False)
 CFG["bias"] = True
 check("051 bias on honoured", wn.bias_enabled() is True)
 
+# --- review fixes ---
+check("051 R-M6 derive: mixed token keeps its leading letters (hal9000 -> Hal)",
+      wn.derive_name("hal9000.onnx") == "Hal", str(wn.derive_name("hal9000.onnx")))
+check("051 R-M5 accented names are valid; digits/punctuation still rejected",
+      wn.valid_term("José") and wn.valid_term("Zoë") and wn.valid_term("Chloé")
+      and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
+check("051 R-M2 filler words are reserved (never aliases)",
+      all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
+      and not wn.reserved_term("linux") and not wn.reserved_term("yellow"))
+CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["linux"]}
+check("051 R-M9 a leading comma with no prefix still drops (', Willow.')",
+      wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Linux."))
+CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "heard_as": ["okay", "linux"]}
+check("051 R-M2 a reserved word hand-edited into heard_as is ignored by the filter",
+      not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey linux"))
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)
