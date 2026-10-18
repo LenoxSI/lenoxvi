@@ -110,7 +110,8 @@ comment-preserving read-merge-write, applies on next bot restart):
   (a saved key shows its first 4 characters), Test connection (health +
   one minimal completion, latency)
 - **Voice Tuning** — filler/pause tunables
-- **Wake Word Model (OWW)** — trained wake-word model management
+- **Wake Word Model (OWW)** — stock + trained wake-word models: upload,
+  select, delete (stock models are selectable, never deletable)
 - **Zones / Nodes / Room→zone mapping** — rooms, mic nodes, speaker zones
 - **Firmware** — node image push, FW version column
 
@@ -144,15 +145,36 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
    `ELEVENLABS_API_KEY`, `LVI_TTS_VOICE_ID`, `LVI_HERMES_KEY` (or
    `LVI_OPENCLAW_KEY` for the OpenClaw lane), `DEEPGRAM_API_KEY` (optional
    alternative provider)
-4. Wake-word model: a trained `.onnx` at repo root (gitignored — train
-   your own with [openWakeWord], or set `wake.enabled: false` in
-   config.yaml until you have one). Point `wake.model` at it if the
-   name differs from the default.
+4. Wake word: works out of the box with **"Hey Jarvis"**, a stock model
+   that ships inside the openwakeword package (see [Wake word](#wake-word)).
 5. `bash scripts/make-cert.sh <bot-host-LAN-IP>` (mic access needs HTTPS)
 6. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/client`
    (run from the repo root — config and clips paths are relative)
 
 [openWakeWord]: https://github.com/dscripka/openWakeWord
+
+## Wake word
+
+The default wake word is **"Hey Jarvis"** (`wake.model: hey_jarvis`). It is
+one of openWakeWord's pre-trained models, which install with the
+`openwakeword` package — lenoxvi does not ship or host any model file. The
+stock choices are `hey_jarvis`, `hey_mycroft` and `alexa`, selectable in the
+dashboard's Wake Word Model panel.
+
+**License:** openWakeWord's code is Apache-2.0, but its pre-trained models
+are **CC BY-NC-SA 4.0 — non-commercial use only**. Fine for a home; for
+anything commercial, train your own.
+
+**Your own wake word (recommended):** train a model with openWakeWord's
+training notebook (see the [openWakeWord] README), upload the `.onnx` in the
+dashboard's Wake Word Model panel, set it active, and restart. Community
+model collections exist too — check each model's license before using it.
+
+**The name:** `wake.name` is what the house is called. Leave it unset and
+it is derived from the model (`hey_jarvis` → "Jarvis", `Hey_Computer.onnx` →
+"Computer"). Speech-to-text sometimes mis-spells a rare name; add those
+spellings to `wake.heard_as` (or click them in the dashboard's Wake name
+card) so a bare "Hey <name>." is dropped instead of answered.
 
 ## Local TTS (optional): Pocket TTS
 

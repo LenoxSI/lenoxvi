@@ -1024,7 +1024,9 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     // select always resolved to the models/ copy.
     const row = models.find(m => m.path === sel)
     const name = row?.name || sel.split('/').pop()
-    if (!name || !name.endsWith('.onnx')) { setMsg('No model selected.', 'err', 'Wake word model'); return }
+    // Stock rows are pre-trained models bundled with openwakeword,
+    // selected by KEY (no .onnx name).
+    if (!name || (row?.source !== 'stock' && !name.endsWith('.onnx'))) { setMsg('No model selected.', 'err', 'Wake word model'); return }
     const body = { model: name, ...(row?.source ? { source: row.source } : {}) }
     try {
       await api('/api/dashboard/oww/select', { method: 'PUT', json: body })
@@ -1068,7 +1070,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
               onChange={e => setSel(e.target.value)}>
               {models.map(m => (
                 <option key={m.path} value={m.path}>
-                  {esc(m.name)}{m.source === 'root' ? ' (root)' : ''}
+                  {esc(m.name)}{m.source === 'root' ? ' (root)' : m.source === 'stock' ? ' (stock)' : ''}
                 </option>
               ))}
               {models.length === 0 && <option value="">no models found</option>}
@@ -1097,10 +1099,15 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
               {models.map(m => (
                 <tr key={m.path} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(m.name)}</td>
-                  <td className="px-4 py-2">{esc(m.source)}</td>
+                  <td className="px-4 py-2">
+                    {esc(m.source)}
+                    {m.source === 'stock' &&
+                      <div className="text-[12px] text-[var(--muted)]">{esc(m.license || 'non-commercial')}</div>}
+                  </td>
                   <td className="px-4 py-2 font-mono text-[13px]">{((m.size || 0) / 1024).toFixed(0)} KB</td>
                   <td className="px-4 py-2 text-right">
-                    <button className={BTN_DANGER} onClick={() => del(m.name, m.source)}>Delete</button>
+                    {m.source !== 'stock' &&
+                      <button className={BTN_DANGER} onClick={() => del(m.name, m.source)}>Delete</button>}
                   </td>
                 </tr>
               ))}

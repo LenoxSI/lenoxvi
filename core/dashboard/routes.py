@@ -1403,12 +1403,22 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
 
 class OWWModelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
-    model: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+\.onnx$")
+    model: str = Field(min_length=1, max_length=64)
     # The source disambiguates a same-basename root/models/
     # collision — without it the route resolved models/-first and a
     # click on the ROOT row silently activated the models/ copy.
     # None = legacy resolution (models first, root fallback).
-    source: Literal["root", "models"] | None = None
+    # "stock" = a pre-trained model bundled with openwakeword, by key.
+    source: Literal["root", "models", "stock"] | None = None
+
+    @model_validator(mode="after")
+    def _check_model(self):
+        if self.source == "stock":
+            if self.model not in wake_name.STOCK_MODELS:
+                raise ValueError(f"unknown stock model (one of {', '.join(wake_name.STOCK_MODELS)})")
+        elif not re.match(r"^[A-Za-z0-9_.-]+\.onnx$", self.model):
+            raise ValueError("model must be a .onnx file name")
+        return self
 
 
 def _oww_dir() -> Path:
@@ -1479,6 +1489,13 @@ async def oww_list_models():
                         "source": "models" if f.parent != Path(".") else "root",
                         "path": str(f.resolve()),
                         "selected": f.resolve() == active})
+    # Stock pre-trained models ship inside the openwakeword package:
+    # selectable by key, never deletable, licence shown (non-commercial).
+    for key in wake_name.STOCK_MODELS:
+        p = Path(wake_name.resolve_model(key))
+        out.append({"name": key, "size": p.stat().st_size if p.is_file() else 0,
+                    "source": "stock", "license": wake_name.STOCK_LICENSE,
+                    "path": str(p.resolve()), "selected": p.resolve() == active})
     return {"models": out, "current": active.name}
 
 
@@ -1516,7 +1533,11 @@ async def oww_select_model(payload: OWWModelPayload):
     resolved to the models/ copy and a click on the root row silently
     activated the other file. None keeps the legacy resolution."""
     name = payload.model
-    if payload.source is not None:
+    if payload.source == "stock":
+        # The KEY goes into config (resolved at load time), so the
+        # config stays portable across installs and venv paths.
+        path = name
+    elif payload.source is not None:
         path = (_oww_dir() if payload.source == "models" else Path(".")) / name
         if not path.is_file():
             raise HTTPException(
@@ -1546,6 +1567,9 @@ async def oww_delete_model(name: str, source: str = ""):
     resolve RIGHT NOW (path-exact) can never be deleted — a same-named
     spare (root vs models/) stays deletable. `source` disambiguates
     same-basename copies when present (?source=root|models)."""
+    if source == "stock" or name in wake_name.STOCK_MODELS:
+        raise HTTPException(status_code=409,
+                            detail="stock models ship with openwakeword and can't be deleted")
     if not re.match(r"^[A-Za-z0-9_.-]+\.onnx$", name):
         raise HTTPException(status_code=400, detail="bad model name")
     active = _oww_active_path()
