@@ -146,6 +146,18 @@ if seen == 0 or bad:
     sys.exit(1)
 print(f"==> WiFi credentials: empty in all {seen} defines (NVS supplies them)")
 PYEOF
+# Bench-only debug options never ship: serial mic-level log and data-channel
+# message logging (the latter prints set_wifi passwords). Both are unset
+# above; this proves the build obeyed.
+python3 - "$FW_REPO/build/$TRACK/compile_commands.json" <<'PYEOF' || { echo "FATAL: built image carries a bench-only debug option — not publishing"; exit 1; }
+import json, sys
+cmds = [c.get("command", "") for c in json.load(open(sys.argv[1]))]
+hits = sorted({k for c in cmds for k in ("-DMIC_LEVEL_LOG", "-DLOG_DATACHANNEL_MESSAGES") if k in c})
+if hits:
+    print("    found: " + ", ".join(hits))
+    sys.exit(1)
+print("==> bench-only debug options: none")
+PYEOF
 BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 
 # ── 2. Version bump ────────────────────────────────────────────────────────
