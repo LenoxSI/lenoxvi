@@ -165,6 +165,8 @@ const esc = s => String(s ?? '')
 
 const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
 // Line badge per node: the hardware behind each firmware line (fw_push `line`).
+// A node's own speaker as a reply zone (server: node_speaker.BUILTIN).
+const BUILTIN = 'builtin'
 const LINE_TITLE = {
   array: 'reSpeaker XVF3800 mic array (LED ring, physical mute button)',
   flex: 'reSpeaker Flex (XVF3800, no LED ring or button)',
@@ -585,8 +587,12 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   const unmappedRooms = (status?.rooms || []).map(r => r.room)
     .filter(r => r && !mappedRooms.includes(r))
   const roomRows = [...mappedRooms, ...unmappedRooms]
+  // Speaker nodes (server-side: board line) get their own built-in speaker
+  // as a private zone. Unmapped = that speaker, by default.
+  const speakers = mapping?.speakers || {}
+  const zoneLabel = z => (z === BUILTIN ? 'Built-in speaker' : z)
   const saveMapping = async room => {
-    const zone = mapDraft?.[room]
+    const zone = mapDraft?.[room] ?? (speakers[room] ? BUILTIN : undefined)
     if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
     // PUT /mapping takes the FULL room_zones dict WRAPPED in a
     // room_zones key (MappingPayload contract, routes.py) — a bare
@@ -601,7 +607,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
-      setMsg(`${room} → ${zone} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
+      setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
       reloadAll()
     } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
   }
@@ -621,13 +627,14 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
             </thead>
             <tbody>
               {roomRows.map(room => {
-                const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? ''
+                const hasSpeaker = !!speakers[room]
                 const unmapped = !mapping?.room_zones?.[room]
+                const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? (hasSpeaker ? BUILTIN : '')
                 return (
                 <tr key={room} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">
                     {esc(room)}
-                    {unmapped && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
+                    {unmapped && !hasSpeaker && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
                   </td>
                   <td className="px-4 py-2">
                     {/* Empty placeholder: without it an unmapped row
@@ -636,8 +643,10 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     <select value={zone}
                       onChange={e => { setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
                       className={`${INPUT_CLS} w-[200px]`}>
-                      {(zone === '' || !zoneNames.includes(zone)) &&
+                      {(zone === '' || (!zoneNames.includes(zone) && !(hasSpeaker && zone === BUILTIN))) &&
                         <option value="" disabled>{zoneNames.length ? 'pick a zone…' : 'add a zone below first'}</option>}
+                      {hasSpeaker && <option value={BUILTIN}>{unmapped ? 'Built-in speaker (default)' : 'Built-in speaker'}</option>}
+                      {hasSpeaker && zoneNames.length > 0 && <option disabled value="__sep">──────────</option>}
                       {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>
                   </td>
@@ -700,6 +709,13 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         title={LINE_TITLE[r.line]}
                         className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
                         {r.line}
+                      </span>
+                    )}
+                    {r.speaker && (
+                      <span data-speaker-badge
+                        title={r.speaker_ok === false ? 'Built-in speaker did not start on this boot' : 'Has a built-in speaker'}
+                        className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium border ${r.speaker_ok === false ? 'text-[var(--danger)] border-[var(--danger)]' : 'text-[var(--muted)] border-[var(--separator)]'}`}>
+                        speaker
                       </span>
                     )}
                   </td>
@@ -771,6 +787,21 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
     } catch (e) { setMsg('Zone add failed: ' + e.message, 'err', 'Zones') }
   }
 
+  const speakers = mapping?.speakers || {}
+  const saveSpeakerVolume = async (room, vol) => {
+    try {
+      const r = await api('/api/dashboard/node-speaker/volume', { method: 'PUT', json: { room, volume: vol } })
+      setMsg(`${room} built-in speaker: volume ${r.volume} — live, no restart.`, 'ok', 'Zones')
+      reloadAll()
+    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones') }
+  }
+  const testSpeaker = async room => {
+    try {
+      await api('/api/dashboard/node-speaker/test', { method: 'POST', json: { room } })
+      setMsg(`Test clip playing on ${room}'s built-in speaker.`, 'ok', 'Zones')
+    } catch (e) { setMsg('Test clip failed: ' + e.message, 'err', 'Zones') }
+  }
+
   const testClip = async name => {
     try {
       await api(`/api/dashboard/zones/${encodeURIComponent(name)}/test`, { method: 'POST', json: {} })
@@ -808,6 +839,36 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                 </td>
               </tr>
             ))}
+            {/* A node's built-in speaker: private to that node, appears by
+                itself, no edit/delete. */}
+            {Object.entries(speakers).map(([room, sp]) => {
+              const inUse = sp?.zone === BUILTIN
+              return (
+              <tr key={`spk:${room}`} data-speaker-zone={room} className="border-t border-[var(--separator)]">
+                <td className="px-4 py-2">
+                  <div>
+                    {esc(room)} <span className="text-[var(--muted)]">· built-in</span>
+                    {!sp?.online && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] border border-[var(--separator)]">offline</span>}
+                    {sp?.speaker_ok === false && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--danger)] border border-[var(--danger)]">speaker fault</span>}
+                  </div>
+                  <div className="text-[12px] text-[var(--muted)]">
+                    {inUse ? 'Mic pauses while it speaks.' : `Not in use — replies go to ${esc(sp?.zone) || 'the default zone'}.`}
+                  </div>
+                </td>
+                <td className="px-4 py-2">
+                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">node</span>
+                </td>
+                <td className="px-4 py-2">
+                  <VolSlider name={room} initial={sp?.volume} onCommit={saveSpeakerVolume} />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <button className={BTN_DEFAULT} disabled={!inUse || !sp?.online}
+                    title={!inUse ? 'Map this node to its built-in speaker first' : (!sp?.online ? 'Node is offline' : undefined)}
+                    onClick={() => testSpeaker(room)}>Play test clip</button>
+                </td>
+              </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
