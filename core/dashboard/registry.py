@@ -23,6 +23,7 @@ Persistence split:
 """
 
 import time
+from collections import deque
 from pathlib import Path
 
 from loguru import logger
@@ -283,6 +284,29 @@ def note_wake(room: str | None = None):
     the wake record but marks the room unknown."""
     global _last_wake
     _last_wake = {"time": time.time(), "room": room}
+    _WAKE_PENDING[room or "unknown"] = time.time()
+
+
+# Heard-after-wake: the FIRST final transcript within HEARD_WINDOW_S of a wake
+# in the same room — what speech-to-text made of the wake phrase. Shown on the
+# dashboard's Wake name card so a new mis-spelling becomes a one-click alias.
+# In memory only (never written to disk), last 10, cleared on restart.
+HEARD_WINDOW_S = 30.0
+_RECENT_HEARD: deque = deque(maxlen=10)
+_WAKE_PENDING: dict = {}
+
+
+def note_heard(room: str | None, text: str, dropped: bool) -> None:
+    """Record `text` if it's the first transcript since this room's wake."""
+    t = _WAKE_PENDING.pop(room or "unknown", None)
+    if t is None or time.time() - t > HEARD_WINDOW_S:
+        return
+    _RECENT_HEARD.appendleft({"time": time.time(), "room": room,
+                              "text": str(text)[:200], "dropped": bool(dropped)})
+
+
+def recent_heard() -> list:
+    return list(_RECENT_HEARD)
 
 
 def sender_for_room(room: str):

@@ -474,7 +474,13 @@ class IntelligenceAgent(FrameProcessor):
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             if text:
-                if _is_wake_phrase_only(text):
+                dropped = _is_wake_phrase_only(text)
+                try:
+                    from dashboard import registry as _reg
+                    _reg.note_heard(self._room, text, dropped)
+                except Exception:
+                    logger.opt(exception=True).debug("heard-after-wake note failed")
+                if dropped:
                     logger.info(f"intelligence_agent: dropped wake-phrase-only [{text}]")
                 else:
                     now = time.monotonic()
