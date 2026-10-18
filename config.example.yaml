@@ -40,6 +40,10 @@ stt:
   device: cuda
   compute_type: float16
   # language: en         # unset = auto-detect per utterance
+  # bias_wake_name: false # hint the wake name to speech-to-text. Off by
+  #                       # default: it fixes the name's spelling but can
+  #                       # rewrite sound-alike words in normal speech
+  #                       # (tests/manual/stt_bias_eval.py measures it)
 
 # ── Text-to-speech ───────────────────────────────────────────────────────
 # Provider dropdown (dashboard Settings tab): elevenlabs | deepgram-flux |
