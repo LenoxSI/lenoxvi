@@ -276,7 +276,7 @@ def mark_disconnected(pc_id):
         rec["last_seen"] = time.time()
 
 
-def note_wake(room: str | None = None):
+def note_wake(room: str | None = None, heard_key: str | None = None):
     """Called by the wake gate on IDLE -> AWAKE (sync, cheap). Room is
     THIS pipeline's room (passed by bot.py from room_for_pc — the
     old global-active-room read routed replies to the last-connected
@@ -284,7 +284,9 @@ def note_wake(room: str | None = None):
     the wake record but marks the room unknown."""
     global _last_wake
     _last_wake = {"time": time.time(), "room": room}
-    _WAKE_PENDING[room or "unknown"] = time.time()
+    # heard_key: the room key the pipeline's intelligence records transcripts
+    # under (captured at build time) — so wake and transcript always pair.
+    _WAKE_PENDING[(heard_key if heard_key is not None else room) or "unknown"] = time.time()
 
 
 # Heard-after-wake: the FIRST final transcript within HEARD_WINDOW_S of a wake

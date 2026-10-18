@@ -356,7 +356,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         return mapped  # None -> default zone fallback in the output backend
 
     def _on_wake():
-        dash_registry.note_wake(_pipeline_room())
+        dash_registry.note_wake(_pipeline_room(), heard_key=_room)
 
     # Session mode for THIS pipeline's room (fresh default; sticky rooms
     # keep conversation memory across reconnects/restarts — config

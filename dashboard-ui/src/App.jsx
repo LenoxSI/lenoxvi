@@ -1005,29 +1005,56 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
 // writes for it, and what it heard right after recent wakes — click a word
 // to add it as a heard-as alias. Everything here applies live (no restart).
 const WAKE_SRC = { set: 'set here', model: 'from model file', default: 'default' }
-const aliasFrom = word => word.toLowerCase().replace(/[^a-z' -]/g, '').trim()
+// Trim edge punctuation only; anything else outside letters/'/- means the
+// word can't be an alias as-is (R2D2 must not silently become "rd").
+const aliasFrom = word => word.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
+  .replace(/[\u2018\u2019]/g, "'")
+const ALIAS_OK = /^\p{L}[\p{L}' -]{0,29}$/u
+const ALIAS_RESERVED = new Set(['hey', 'ok', 'okay', 'hi', 'stop', 'yes', 'no', 'cancel'])
 
 function WakeNameCard({ setMsg }) {
   const [w, setW] = useState(null)
   const [loadErr, setLoadErr] = useState('')
   const [draft, setDraft] = useState(null)   // local name draft once edited
+  const aliasRef = useRef(null)              // latest aliases: quick clicks never lose one
+  // A poll that overlapped any save (started during one, or a save began/ended
+  // while it was out) carries stale data and is dropped.
+  const saveGen = useRef(0)                  // bumps on every save start and end
+  const inflight = useRef(0)                 // saves currently in flight
   useEffect(() => {
     // Poll for the heard-after-wake list; state is set only from the
     // async result, and a load error shows inline (no toast every 5 s).
     let alive = true
-    const tick = () => api('/api/dashboard/wake')
-      .then(j => { if (alive) { setW(j); setLoadErr('') } })
-      .catch(e => { if (alive) setLoadErr(e.message) })
+    const tick = () => {
+      const gen = saveGen.current
+      return api('/api/dashboard/wake')
+        .then(j => {
+          if (!alive || gen !== saveGen.current || inflight.current > 0) return
+          setW(j); setLoadErr(''); aliasRef.current = j.heard_as || []
+        })
+        .catch(e => { if (alive) setLoadErr(e.message) })
+    }
     tick()
     const t = setInterval(tick, 5000)
     return () => { alive = false; clearInterval(t) }
   }, [])
   const save = async (body, note) => {
+    if (body.heard_as) aliasRef.current = body.heard_as
+    saveGen.current += 1
+    inflight.current += 1
     try {
       const r = await api('/api/dashboard/wake', { method: 'PUT', json: body })
       setW(prev => ({ ...prev, ...r, name_source: 'name' in body ? (body.name ? 'set' : 'model') : prev?.name_source }))
+      aliasRef.current = r.heard_as || aliasRef.current
       setMsg(note || 'Saved — live now.', 'ok', 'Wake name')
-    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Wake name') }
+      return true
+    } catch (e) {
+      setMsg('Save failed: ' + e.message, 'err', 'Wake name')
+      return false
+    } finally {
+      inflight.current -= 1
+      saveGen.current += 1
+    }
   }
   if (!w) return loadErr
     ? <Section title="Wake name"><div className="text-[13px] text-[var(--muted)]">Couldn't load wake settings: {esc(loadErr)}</div></Section>
@@ -1035,8 +1062,11 @@ function WakeNameCard({ setMsg }) {
   const aliases = w.heard_as || []
   const addAlias = word => {
     const a = aliasFrom(word)
-    if (!/^[a-z][a-z' -]{0,29}$/.test(a) || a === (w.name || '').toLowerCase() || aliases.includes(a)) return
-    save({ heard_as: [...aliases, a] }, `Added '${a}' — live now.`)
+    const current = aliasRef.current ?? aliases
+    if (a === (w.name || '').toLowerCase() || current.includes(a)) return
+    if (!ALIAS_OK.test(a)) { setMsg(`'${word}' can't be an alias — letters, spaces, ' or - only.`, 'err', 'Wake name'); return }
+    if (ALIAS_RESERVED.has(a)) { setMsg(`'${a}' is a filler word — as an alias it would swallow real commands.`, 'err', 'Wake name'); return }
+    save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)
   }
   const hhmm = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return (
@@ -1049,7 +1079,7 @@ function WakeNameCard({ setMsg }) {
               value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
             <span className="text-[12px] text-[var(--muted)]">{WAKE_SRC[w.name_source] || ''}</span>
             <button className={BTN_DEFAULT}
-              onClick={async () => { await save({ name: (draft ?? w.name ?? '').trim() }); setDraft(null) }}>Save</button>
+              onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Save</button>
           </div>
         </Field>
         <Field label="Also heard as" between>
@@ -1059,7 +1089,7 @@ function WakeNameCard({ setMsg }) {
                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
                 {esc(a)}
                 <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
-                  onClick={() => save({ heard_as: aliases.filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
+                  onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
               </span>
             ))}
             {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}

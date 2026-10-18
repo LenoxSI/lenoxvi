@@ -1435,8 +1435,11 @@ def _oww_active_path() -> Path:
     code default) as a full resolved path — path-exact, so two files
     with the same basename (root vs models/) are distinct."""
     wake = config_store.read_section("wake") or {}
-    return Path(wake_name.resolve_model(str(cfg_env("wake", "model", "LVI_WAKE_MODEL",
-                                                    wake.get("model") or wake_name.DEFAULT_MODEL)))).resolve()
+    value = str(cfg_env("wake", "model", "LVI_WAKE_MODEL", wake.get("model") or wake_name.DEFAULT_MODEL))
+    try:
+        return Path(wake_name.resolve_model(value)).resolve()
+    except Exception:                   # stock key but openwakeword broken: never 500 the panel
+        return Path(value).resolve()
 
 
 def _oww_current() -> str:
@@ -1492,7 +1495,11 @@ async def oww_list_models():
     # Stock pre-trained models ship inside the openwakeword package:
     # selectable by key, never deletable, licence shown (non-commercial).
     for key in wake_name.STOCK_MODELS:
-        p = Path(wake_name.resolve_model(key))
+        try:
+            p = Path(wake_name.resolve_model(key))
+        except Exception as e:          # openwakeword missing/broken: keep custom rows
+            logger.warning(f"dashboard: stock wake model '{key}' unavailable ({e})")
+            continue
         out.append({"name": key, "size": p.stat().st_size if p.is_file() else 0,
                     "source": "stock", "license": wake_name.STOCK_LICENSE,
                     "path": str(p.resolve()), "selected": p.resolve() == active})
@@ -1569,10 +1576,14 @@ class WakePayload(BaseModel):
 
     @model_validator(mode="after")
     def _check_terms(self):
-        if self.name and not wake_name.valid_term(self.name):
+        if self.name and self.name.strip() and not wake_name.valid_term(self.name.strip()):
             raise ValueError("name: a letter, then letters, spaces, ' or - (max 30)")
-        if self.heard_as is not None and not all(wake_name.valid_term(a) for a in self.heard_as):
-            raise ValueError("heard_as: each a letter, then letters, spaces, ' or - (max 30)")
+        if self.heard_as is not None:
+            if not all(wake_name.valid_term(a) for a in self.heard_as):
+                raise ValueError("heard_as: each a letter, then letters, spaces, ' or - (max 30)")
+            bad = [a for a in self.heard_as if wake_name.reserved_term(a)]
+            if bad:
+                raise ValueError(f"heard_as: '{bad[0]}' is a filler word — it would swallow real commands")
         return self
 
 

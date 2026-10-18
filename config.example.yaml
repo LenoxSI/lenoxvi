@@ -22,8 +22,9 @@ wake:
   model: hey_jarvis      # a stock model bundled with openwakeword (hey_jarvis,
                          # hey_mycroft, alexa — CC BY-NC-SA 4.0, non-commercial)
                          # OR a path to your own trained .onnx (see README)
-  name: Jarvis           # what the house is called; derived from the model
-                         # when unset (Hey_Computer.onnx -> "Computer")
+  # name: Jarvis         # what the house is called; unset = derived from
+                         # the model (hey_mycroft -> "Mycroft",
+                         # Hey_Computer.onnx -> "Computer")
   heard_as: []           # other spellings speech-to-text writes for the name;
                          # a bare "Hey <one of these>." is dropped, not answered
 

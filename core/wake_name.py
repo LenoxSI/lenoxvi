@@ -26,9 +26,13 @@ DEFAULT_MODEL = "hey_jarvis"
 DEFAULT_NAME = "Jarvis"
 BIAS_DEFAULT = False          # set by the speech-to-text bias measurement
 
-_PREFIX = r"(?:(?:hey|ok|okay|hi)\s*,?\s*)?"
-_TERM_RE = re.compile(r"^[A-Za-z][A-Za-z '\-]{0,29}$")
+_PREFIX = r"(?:(?:hey|ok|okay|hi)\s*)?,?\s*"
+# A letter (any script: José, Zoë), then letters, spaces, ' or -; max 30.
+_TERM_RE = re.compile(r"^[^\W\d_](?:[^\W\d_]|[ '\-]){0,29}$")
 _LEADING = {"hey", "ok", "okay", "hi"}
+# Words that must never become an alias: as a whole-utterance drop they would
+# silently swallow a real one-word command ("Stop.").
+RESERVED = _LEADING | {"stop", "yes", "no", "cancel"}
 
 
 def _wake() -> dict:
@@ -66,6 +70,10 @@ def derive_name(model: str) -> str | None:
     for t in toks:
         if t.isalpha():
             return t.capitalize()
+    for t in toks:                      # mixed token: hal9000 -> "Hal"
+        m = re.match(r"[^\W\d_]{2,}", t)
+        if m:
+            return m.group(0).capitalize()
     return None
 
 
@@ -85,6 +93,10 @@ def valid_term(s: str) -> bool:
     return bool(_TERM_RE.match(str(s or "")))
 
 
+def reserved_term(s: str) -> bool:
+    return " ".join(str(s or "").split()).lower() in RESERVED
+
+
 def normalise_aliases(items) -> list[str]:
     out: list[str] = []
     for a in items or []:
@@ -96,7 +108,8 @@ def normalise_aliases(items) -> list[str]:
 
 def aliases() -> list[str]:
     raw = _wake().get("heard_as") or []
-    return normalise_aliases([raw] if isinstance(raw, str) else raw)
+    return [a for a in normalise_aliases([raw] if isinstance(raw, str) else raw)
+            if not reserved_term(a)]
 
 
 def _pattern() -> re.Pattern:
