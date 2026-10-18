@@ -2975,6 +2975,40 @@ def main():
         _ctR.CDLL = _orig_cdll
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
+    # 051 Whisper hotword: passed (name only) only when the bias switch is on
+    import stt_local as _stt051
+    import wake_name as _wn051
+    import asyncio as _aio051
+    _cap051 = {}
+
+    class _FW051:
+        def transcribe(self, audio, **kw):
+            _cap051.clear()
+            _cap051.update(kw)
+            return iter([]), type("I", (), {"language": "en"})()
+
+    _svc051 = _stt051.LocalWhisperSTTService.__new__(_stt051.LocalWhisperSTTService)
+    _svc051._fw_model = _FW051()
+    _svc051._language = None
+
+    async def _noop051():
+        return None
+    _svc051.ensure_model = _noop051
+    _orig_bias051, _orig_wake051 = _wn051._stt_bias, _wn051._wake
+    try:
+        _wn051._wake = lambda: {"name": "Computer", "heard_as": ["komputer"]}
+        _wn051._stt_bias = lambda: True
+        _aio051.run(_svc051._transcribe(b"RIFF"))
+        _on051 = dict(_cap051)
+        _wn051._stt_bias = lambda: False
+        _aio051.run(_svc051._transcribe(b"RIFF"))
+        _off051 = dict(_cap051)
+    finally:
+        _wn051._stt_bias, _wn051._wake = _orig_bias051, _orig_wake051
+    check("051 Whisper gets hotwords=<name> (never an alias) only when the bias is on",
+          _on051.get("hotwords") == "Computer" and "hotwords" not in _off051
+          and _on051.get("beam_size") == 1, f"on={_on051} off={_off051}")
+
     # 051 sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
     import inspect as _insp051
     _root051 = REPO_CORE.parent
