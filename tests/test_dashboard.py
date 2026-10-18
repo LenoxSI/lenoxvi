@@ -1136,6 +1136,15 @@ def main():
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
                     "ok": True, "data": {"fw": "1.2.29", "line": "waveshare"}}), "test-pc-line")
+    import firmware_image as _fwi052t, firmware_server as _fws052t
+    check("052 the three track tables agree (firmware_image.TRACKS == registry.NODE_LINES == firmware_server.FIRMWARE_TRACKS)",
+          tuple(_fwi052t.TRACKS) == tuple(_reg.NODE_LINES) and set(_fws052t.FIRMWARE_TRACKS) == set(_fwi052t.TRACKS)
+          and set(_fwi052t.TRACK_LABEL) == set(_fwi052t.TRACKS),
+          f"{_fwi052t.TRACKS} {_reg.NODE_LINES} {list(_fws052t.FIRMWARE_TRACKS)} {list(_fwi052t.TRACK_LABEL)}")
+    _gi052 = (Path(__file__).resolve().parent.parent / ".gitignore").read_text().splitlines()
+    check("052 every firmware track dir is gitignored (built images never committed)",
+          all(f"firmware/{t}/" in _gi052 for t in _fwi052t.TRACKS),
+          str([t for t in _fwi052t.TRACKS if f"firmware/{t}/" not in _gi052]))
     check("052 line: fw_push line='waveshare' is recorded (third line)",
           _room_rec("line-direct-room").get("line") == "waveshare", str(_room_rec("line-direct-room")))
     node_command.on_message(
@@ -1386,6 +1395,25 @@ def main():
                             data={"track": "waveshare"})
         check("052 waveshare URL + another line's project name -> 400 (name and URL must agree)",
               _rlie.status_code == 400 and "can't tell which board" in _rlie.text, f"{_rlie.status_code} {_rlie.text[:100]}")
+
+        # 052 review: identity is decided by the image itself (not just "unknown track" 400s).
+        import firmware_image as _fwi052
+        check("052 image_track: a waveshare image identifies as 'waveshare'; a waveshare URL with an array name is None",
+              _fwi052.image_track(_fake_image5b("1.9.1", "waveshare")) == "waveshare"
+              and _fwi052.image_track(_fake_image5b("1.9.1", "waveshare", project=b"array_esp32")) is None
+              and _fwi052.image_track(_fake_image5b("1.9.1", "array")) == "array",
+              "")
+        _xw = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("xw.bin", _fake_image5b("1.9.1", "waveshare"), "application/octet-stream")},
+                          data={"track": "array"})
+        _xa = client.post("/api/dashboard/firmware/upload",
+                          files={"file": ("xa.bin", _fake_image5b("1.9.1", "array"), "application/octet-stream")},
+                          data={"track": "waveshare"})
+        check("052 cross-line refusal names both lines (waveshare->array, array->waveshare)",
+              _xw.status_code == 400 and "Waveshare ESP32-S3-AUDIO firmware" in _xw.text and "array (XVF3800" in _xw.text
+              and _xa.status_code == 400 and "array (XVF3800 mic-array board) firmware" in _xa.text
+              and "Waveshare ESP32-S3-AUDIO track" in _xa.text,
+              f"{_xw.status_code} {_xw.text[:140]} | {_xa.status_code} {_xa.text[:140]}")
 
         # The OTA server (core/firmware_server.py) — first suite
         # coverage of the node-facing routes. Tracks point at this scratch.

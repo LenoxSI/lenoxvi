@@ -84,6 +84,7 @@ elif [ "$REAL_BRANCH" = "main" ]; then
 else
   run REFUSE "REAL checkout ($REAL_BRANCH): array track" array "$FW_REAL"
   run REFUSE "REAL checkout ($REAL_BRANCH): flex track"  flex  "$FW_REAL"
+  run REFUSE "REAL checkout ($REAL_BRANCH): waveshare track" waveshare "$FW_REAL"
 fi
 
 [ $fail -eq 0 ] && echo "ALL GUARD CASES PASSED" || echo "GUARD TEST FAILED"
