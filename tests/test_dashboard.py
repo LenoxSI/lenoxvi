@@ -1438,6 +1438,35 @@ def main():
             check("oww: non-active spare uploads and deletes cleanly",
                   _r_sp.status_code == 200 and _r_spdel.status_code == 200,
                   f"upload={_r_sp.status_code} delete={_r_spdel.status_code}")
+        # 051 stock models: listed with their licence, selectable by key,
+        # never deletable. Restores wake.model afterwards.
+        _wake051 = dict(config_store.read_section("wake") or {})
+        try:
+            _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
+            _stock051 = [m for m in _rows051 if m.get("source") == "stock"]
+            check("051 OWW list carries the 3 stock models with their licence",
+                  sorted(m["name"] for m in _stock051) == ["alexa", "hey_jarvis", "hey_mycroft"]
+                  and all("NC" in (m.get("license") or "") for m in _stock051)
+                  and all(m.get("size", 0) > 0 for m in _stock051), str(_stock051)[:240])
+            r = client.put("/api/dashboard/oww/select", json={"model": "hey_mycroft", "source": "stock"})
+            _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
+            check("051 selecting a stock model writes the key and marks it active",
+                  r.status_code == 200
+                  and (config_store.read_section("wake") or {}).get("model") == "hey_mycroft"
+                  and any(m["name"] == "hey_mycroft" and m["selected"] for m in _rows051),
+                  f"{r.status_code} {r.text[:120]}")
+            r = client.put("/api/dashboard/oww/select", json={"model": "not_a_stock", "source": "stock"})
+            check("051 unknown stock key rejected (422)", r.status_code == 422, f"{r.status_code}")
+            r = client.put("/api/dashboard/oww/select", json={"model": "hey_jarvis"})
+            check("051 a stock key without source=stock is still rejected (422)",
+                  r.status_code == 422, f"{r.status_code}")
+            import openwakeword as _oww051
+            _pkg051 = _oww051.models["hey_jarvis"]["model_path"]
+            r = client.delete("/api/dashboard/oww/models/hey_jarvis?source=stock")
+            check("051 a stock model can't be deleted (409), package file untouched",
+                  r.status_code == 409 and os.path.isfile(_pkg051), f"{r.status_code}")
+        finally:
+            config_store.write_section("wake", _wake051)
     finally:
         os.environ.pop("LVI_MODELS_DIR", None)
         shutil.rmtree(models_dir, ignore_errors=True)
