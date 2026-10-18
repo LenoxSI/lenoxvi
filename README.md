@@ -5,7 +5,7 @@ house-wide voice assistant with any intelligence you want:
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
     intelligence lane (Hermes / OpenClaw / …) → ElevenLabs TTS →
-    speaker reply in the room's zone (Sonos / WiiM)
+    speaker reply in the room's zone (Sonos / WiiM / the node's own speaker)
 
 ## What it does
 
@@ -71,8 +71,9 @@ harness — the dashboard's job is operating the rig, not talking to it.
   - `xvf3800/` — XMOS image fetched via `scripts/fetch_xmos_fw.sh` at
     bring-up (upstream ships **no license** — the binary is not
     redistributed here; see the script header for md5 + provenance)
-  - `array/`, `flex/` — one OTA track per node line, filled at deploy
-    time by `deploy_firmware.sh --track array|flex` or a dashboard upload
+  - `array/`, `flex/`, `waveshare/` — one OTA track per node line, filled
+    at deploy time by `deploy_firmware.sh --track array|flex|waveshare` or a
+    dashboard upload
     (empty in a fresh clone by design); served by firmware_server
 - `deploy/lenoxvi-bot.service.example` — sanitized systemd user unit
   (launch flags, `.env` loading, CUDA LD_LIBRARY_PATH for whisper's
@@ -113,6 +114,7 @@ comment-preserving read-merge-write, applies on next bot restart):
 - **Wake Word Model (OWW)** — stock + trained wake-word models: upload,
   select, delete (stock models are selectable, never deletable)
 - **Zones / Nodes / Room→zone mapping** — rooms, mic nodes, speaker zones
+  (a node with a built-in speaker can use it as its own private zone)
 - **Firmware** — node image push, FW version column
 
 The suite (`tests/test_dashboard.py`) exercises every panel through

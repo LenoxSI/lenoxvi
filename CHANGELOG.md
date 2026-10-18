@@ -8,6 +8,82 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.6.5] — 2026-10-18 — Built-in speaker zone, Pocket TTS, wake name from config
+
+A third firmware line with a node that can answer from its own speaker, a
+local text-to-speech engine that also stands in when the cloud voice is
+down, and a wake name that comes from config instead of the code.
+
+- Companion firmware (separate version stream): `array-v1.2.29` /
+  `flex-v1.2.29` — audio-loop health counters and a reboot black box in
+  `get_info`. `waveshare-v1.2.33` — first releases of the Waveshare
+  ESP32-S3-AUDIO line (mic, LED ring, built-in speaker).
+
+### Added
+- **Built-in speaker as a reply zone.** A node whose board has a speaker
+  (the `waveshare` line) can answer from it. Its room's dropdown offers
+  "Built-in speaker" (stored as the reserved zone value `builtin`); only that
+  node can use it, and the server refuses it for any other room. An unmapped
+  speaker node replies on its own speaker by default, resolved at run time
+  without writing config. Exactly one output sounds each reply: the bot tells
+  the node whether to play (`set_speaker {enabled, volume}`) after it
+  connects and whenever its mapping or volume changes, and Sonos/WiiM skip a
+  `builtin` reply. A node counts as a speaker only after it confirms its
+  speaker works in that session, so older firmware or a failed speaker keeps
+  replies on the shared zones. Volume lives in `node_speaker.volumes`
+  (default 40); the Zones table shows a `<room> · built-in` row with a
+  volume slider, a test clip and offline / speaker-fault chips, and the
+  Nodes table a `speaker` badge.
+- **Third firmware line `waveshare`.** Upload, OTA track
+  (`firmware/waveshare/`, `/firmware/waveshare/*`), line chip and
+  `deploy_firmware.sh --track waveshare`, with the same cross-line refusal
+  as `array` and `flex`.
+- **Pocket TTS.** An optional local text-to-speech provider (`provider:
+  pocket`, CPU) and a local hot standby behind a cloud provider
+  (`tts.fallback: pocket`): when the cloud voice can't connect, replies
+  switch to Pocket and switch back once it recovers. The dashboard offers the
+  provider, its voice list, the fallback and its voice, and shows a fallback
+  chip while it is in use. Install with `requirements-pocket.txt`.
+- **Wake name card.** The name the house answers to (`wake.name`) and the
+  other spellings speech-to-text writes for it (`wake.heard_as`) are set
+  from the dashboard and apply live. The last two transcripts heard after a
+  wake are listed with one-click "add as spelling"; filler words (stop, yes,
+  no, cancel, hey, ok) are never accepted as spellings. `GET/PUT
+  /api/dashboard/wake`.
+- **Stock openWakeWord models** (`hey_jarvis`, `hey_mycroft`, `alexa`) are
+  selectable in the wake-model panel and can't be deleted; their licence is
+  shown. The public default is Hey Jarvis (CC BY-NC-SA 4.0, non-commercial).
+- **Intelligence agent picker.** Agents are discovered per provider, with
+  masked hints for which key each one uses and a per-profile key save.
+
+### Fixed
+- The TTS fallback fires when the primary can't connect at all, and only
+  when the primary has no socket, so a brief blip on a live connection never
+  switches voices.
+- Adding a WiiM zone no longer shows the Sonos player-UID field.
+
+### Changed
+- The wake name comes only from `wake.name` — never from the model file
+  name — and nothing in the code names the house. Unset means no name: the
+  wake-phrase-only drop filter then works from `wake.heard_as` alone.
+- `deploy_firmware.sh` refuses to publish an image built with a bench-only
+  debug option (mic-level log, data-channel logging).
+- Dashboard: TTS and tuning commit buttons read "Save"; "Test saved config"
+  sits bottom-left; API key Save buttons sit beside their key boxes; the
+  spelling box and chips sit under the wake name.
+- `scripts/` holds operations tools only; the automated suite lives in
+  `tests/` and live hardware probes in `tests/manual/`.
+
+### Removed
+- The Claude and custom OpenAI-compatible intelligence placeholders.
+
+### Upgrading
+- Set `wake.name` (and any `wake.heard_as` spellings) to match your wake
+  word — earlier versions had a name built in. See `config.example.yaml`.
+- Pocket TTS is optional: `pip install -r requirements-pocket.txt`, then
+  pick it in the TTS panel.
+- `.env.example` now lists `LVI_OPENCLAW_KEY` next to `LVI_HERMES_KEY`.
+
 ## [0.6.4] — 2026-10-17 — Node-reported mute, board line, safer firmware pipeline
 
 The server side of the firmware 1.2.9 → 1.2.26 cleanup series. Nodes now
