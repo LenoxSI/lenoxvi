@@ -292,9 +292,9 @@ def note_wake(room: str | None = None, heard_key: str | None = None):
 # Heard-after-wake: the FIRST final transcript within HEARD_WINDOW_S of a wake
 # in the same room — what speech-to-text made of the wake phrase. Shown on the
 # dashboard's Wake name card so a new mis-spelling becomes a one-click alias.
-# In memory only (never written to disk), last 10, cleared on restart.
+# In memory only (never written to disk), last 2, cleared on restart.
 HEARD_WINDOW_S = 30.0
-_RECENT_HEARD: deque = deque(maxlen=10)
+_RECENT_HEARD: deque = deque(maxlen=2)
 _WAKE_PENDING: dict = {}
 
 

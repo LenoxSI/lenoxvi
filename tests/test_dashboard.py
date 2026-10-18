@@ -3021,8 +3021,8 @@ def main():
     for _i051 in range(15):
         _reg051.note_wake("den")
         _reg051.note_heard("den", f"t{_i051}", False)
-    check("051 recent list capped at 10, newest first",
-          len(_reg051.recent_heard()) == 10 and _reg051.recent_heard()[0]["text"] == "t14")
+    check("051 recent list capped at 2, newest first",
+          [r["text"] for r in _reg051.recent_heard()] == ["t14", "t13"], str(_reg051.recent_heard()))
 
     # 051 /wake API — name + aliases + bias apply live (no restart)
     import wake_name as _wn051b
