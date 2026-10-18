@@ -584,8 +584,10 @@ def main():
         check("050 GET /tts catalog.pocket = 21 presets, alba first",
               (t.get("catalog", {}).get("pocket") or [None])[0] == "alba"
               and len(t["catalog"]["pocket"]) == 21, f"{t.get('catalog', {}).get('pocket')}")
+        _pv050 = ((__import__("yaml").safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
+                   .get("tts") or {}).get("pocket_voice") or "alba")
         check("050 GET /tts reports pocket_installed + pocket_voice + fallback",
-              t.get("pocket_installed") is True and t.get("pocket_voice") == "alba"
+              t.get("pocket_installed") is True and t.get("pocket_voice") == _pv050
               and "fallback" in t,
               str({k: t.get(k) for k in ("pocket_installed", "pocket_voice", "fallback")}))
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "vera"})
@@ -2943,6 +2945,19 @@ def main():
     finally:
         _ctR.CDLL = _orig_cdll
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
+
+    # 051 sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
+    import inspect as _insp051
+    _root051 = REPO_CORE.parent
+    _swept051 = [_root051 / "bot.py", _root051 / "README.md", _root051 / "config.example.yaml"]
+    _swept051 += list(REPO_CORE.rglob("*.py")) + list((_root051 / "dashboard-ui" / "src").rglob("*.jsx"))
+    _hits051 = sorted({str(p.relative_to(_root051)) for p in _swept051
+                       if p.is_file() and "willow" in p.read_text(errors="ignore").lower()})
+    check("051 sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
+          not _hits051, f"hits={_hits051}")
+    import intelligence_agent as _ia051
+    check("051 intelligence drop-filter delegates to wake_name",
+          "wake_name" in _insp051.getsource(_ia051._is_wake_phrase_only))
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
