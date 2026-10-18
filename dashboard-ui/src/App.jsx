@@ -1462,7 +1462,7 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
             </Field>
           )}
           <div className="flex items-center justify-end gap-4 flex-wrap">
-            <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
+            <button className={BTN_PRIMARY} onClick={saveTTS}>Save</button>
           </div>
         </div>
       </Section>
@@ -1546,7 +1546,7 @@ function Tuning({ tuning, setMsg, setRebooting }) {
         <div className="flex justify-end">
           <button className={BTN_PRIMARY} onClick={save} disabled={!dirtyFields.length}
             title={dirtyFields.length ? `Saves only the ${dirtyFields.length} knob(s) you changed (•).` : 'Move a slider first.'}>
-            {dirtyFields.length ? `Save tuning (${dirtyFields.length})` : 'Save tuning'}
+            {dirtyFields.length ? `Save (${dirtyFields.length})` : 'Save'}
           </button>
         </div>
       </div>
@@ -1683,8 +1683,8 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
               }}>Save key</button>
           </div>
         </Field>
-        <div className="flex items-center justify-end gap-4 flex-wrap">
-          <div className="flex gap-2 flex-wrap">
+        {/* Footer: secondary action bottom-left, green commit bottom-right */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
             <button id="btn-int-test" className={BTN_DEFAULT}
               onClick={async ev => {
                 const btn = ev.currentTarget
@@ -1718,7 +1718,6 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
                 offerRestart(setMsg, setRebooting)
               } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
             }}>Save</button>
-          </div>
         </div>
       </div>
     </Section>
