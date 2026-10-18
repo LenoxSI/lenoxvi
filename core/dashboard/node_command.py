@@ -195,25 +195,39 @@ def on_message(message, pc_id: str) -> None:
             from . import config_store
 
             mapping = dict(config_store.read_section("room_zones") or {})
+            # the built-in speaker's volume is keyed by room too.
+            spk = dict(config_store.read_section("node_speaker") or {})
+            vols = dict(spk.get("volumes") or {})
+            writes = {}
             if old in mapping:
                 mapping[new] = mapping.pop(old)
-                config_store.write_section("room_zones", mapping)
+                writes["room_zones"] = mapping
                 logger.info(
                     f"node_command: rename carried mapping '{old}' -> '{new}' "
                     f"(zone '{mapping[new]}')"
                 )
-            # the built-in speaker's volume is keyed by room too.
-            spk = dict(config_store.read_section("node_speaker") or {})
-            vols = dict(spk.get("volumes") or {})
             if old in vols:
                 vols[new] = vols.pop(old)
-                config_store.write_section("node_speaker", {**spk, "volumes": vols})
+                writes["node_speaker"] = {**spk, "volumes": vols}
                 logger.info(f"node_command: rename carried speaker volume '{old}' -> '{new}'")
+            if writes:
+                config_store.write_sections(writes)  # one atomic pass
         registry.relabel_room(pc_id, info)
+        if old and new and old != new:
+            # The new name may carry a different mapping: re-tell the node
+            # whether it plays (never both outputs, never neither).
+            import node_speaker
+
+            node_speaker.sync(new)
 
     # the speaker's per-boot health rides every set_speaker reply.
-    if cmd == "set_speaker" and isinstance(data.get("data"), dict):
-        registry.note_speaker_ok(pc_id, data["data"].get("speaker_ok"))
+    if (cmd == "set_speaker" and isinstance(data.get("data"), dict)
+            and registry.note_speaker_ok(pc_id, data["data"].get("speaker_ok"))):
+            # First proof this session: the probe went out disabled — now
+            # send the real state (its mapping may be the built-in speaker).
+            import node_speaker
+
+            node_speaker.sync(registry.room_for_pc(pc_id))
 
     if fut and not fut.done():
         fut.set_result(data)

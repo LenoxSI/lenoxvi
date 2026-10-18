@@ -3236,6 +3236,10 @@ def main():
         registry.mark_connected("pc-053ws")
         registry.note_offer("pc-053ws", "suite-ws053")
         registry.note_line("pc-053ws", "waveshare")
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+        check("053 R-I4 builtin refused until the node has PROVEN its speaker (set_speaker ack)",
+              _r.status_code == 400, f"{_r.status_code} {_r.text[:120]}")
+        registry.note_speaker_ok("pc-053ws", True)
         _st = {r["room"]: r for r in client.get("/api/dashboard/status").json()["rooms"]}
         check("053 /status rooms carry speaker", _st.get("suite-ws053", {}).get("speaker") is True
               and _st.get("suite-xvf053", {}).get("speaker") is False, str(_st.get("suite-ws053")))
@@ -3243,7 +3247,7 @@ def main():
         _m = client.get("/api/dashboard/mapping").json()
         check("053 GET mapping lists speaker rooms with volume + resolved zone",
               _m.get("speakers", {}).get("suite-ws053") == {"volume": 40, "zone": "builtin", "online": True,
-                                                            "speaker_ok": None},
+                                                            "speaker_ok": True},
               str(_m.get("speakers")))
         check("053 GET mapping: built-in never appears as a shared zone", "builtin" not in _m["zones"])
 
@@ -3303,7 +3307,48 @@ def main():
         _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvf053"})
         check("053 test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
 
+        # R-I3 deleting the zone a speaker room was mapped to re-syncs it
+        # (the mapping drops -> the default is its own speaker again)
+        _rz = client.post("/api/dashboard/zones", json={"name": "zdel053", "backend": "wiim", "ip": "192.0.2.54"})
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "zdel053"}})
+        _sent053.clear()
+        _rd = client.delete("/api/dashboard/zones/zdel053")
+        check("053 R-I3 zone delete re-syncs speaker rooms (now back on their own speaker)",
+              _rz.status_code == 200 and _rd.status_code == 200
+              and ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 55}) in _sent053,
+              f"add={_rz.status_code} del={_rd.status_code} sent={_sent053}")
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+
+        # R-M6 room keys are stripped BEFORE the speaker/zone checks
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, " suite-ws053 ": "builtin"}})
+        check("053 R-M6 a padded room key validates as the stripped room",
+              _r.status_code == 200 and _cfg053()["room_zones"].get("suite-ws053") == "builtin",
+              f"{_r.status_code} {_r.text[:120]}")
+
+        # R-I1 restart-shaped: the speaker node is offline/unknown, its
+        # existing builtin entry must not block saving OTHER rooms
+        registry.mark_disconnected("pc-053ws")
+        _saved_rec053 = registry._known_rooms.pop("suite-ws053", None)
+        try:
+            _r = client.put("/api/dashboard/mapping",
+                            json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": _shared053}})
+            check("053 R-I1 unchanged builtin entry of an offline node doesn't block saving other rooms",
+                  _r.status_code == 200, f"{_r.status_code} {_r.text[:120]}")
+            _m = client.get("/api/dashboard/mapping").json()
+            check("053 R-I1 GET mapping keeps an offline builtin room listed (row doesn't fall to 'pick a zone')",
+                  (_m.get("speakers") or {}).get("suite-ws053", {}).get("online") is False,
+                  str(_m.get("speakers")))
+            _r = client.put("/api/dashboard/mapping",
+                            json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": "builtin"}})
+            check("053 R-I1 a NEW builtin entry for a non-speaker room is still refused", _r.status_code == 400)
+        finally:
+            if _saved_rec053 is not None:
+                registry._known_rooms["suite-ws053"] = _saved_rec053
+            registry.mark_connected("pc-053ws")
+            registry.note_offer("pc-053ws", "suite-ws053")
+
         # a rename carries the speaker volume with the zone mapping
+        _sent053.clear()
         _nc053.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
                                       "data": {"name": "suite-ws053b"}}), "pc-053ws")
         _c = _cfg053()
@@ -3312,6 +3357,8 @@ def main():
               and "suite-ws053" not in (_c.get("node_speaker") or {}).get("volumes", {})
               and _c["room_zones"].get("suite-ws053b") == "builtin",
               str(_c.get("node_speaker")))
+        check("053 R-I3 a rename re-syncs the node under its new name",
+              any(r == "suite-ws053b" and pl.get("cmd") == "set_speaker" for r, pl in _sent053), str(_sent053))
     finally:
         _nc053.send_to_room = _real_send053
         registry.mark_disconnected("pc-053ws")

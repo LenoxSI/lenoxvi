@@ -37,6 +37,8 @@ check("053 resolve: unmapped mic-only node -> None (backend default zone)",
 check("053 resolve: None/unknown room -> None",
       ns.resolve_zone(None, rz, has_speaker=True) is None
       and ns.resolve_zone("unknown", rz, has_speaker=True) is None)
+check("053 R-I2 resolve: a stale builtin mapping on a node without a (proven) speaker -> default zone, never silence",
+      ns.resolve_zone("bench", rz, has_speaker=False) is None)
 check("053 resolve: tolerates a missing room_zones section",
       ns.resolve_zone("new", None, has_speaker=True) == "builtin")
 
@@ -56,12 +58,16 @@ ns._room_zones = lambda: STATE["room_zones"]
 ns._volumes = lambda: STATE["volumes"]
 SPK = {"bench", "den", "fresh"}
 ns._has_speaker = lambda room: room in SPK
+CAPABLE = SPK | {"probing"}
+ns._capable = lambda room: room in CAPABLE
 
 check("053 payload: builtin -> enabled + volume",
       ns.payload("bench") == {"cmd": "set_speaker", "enabled": True, "volume": 30}, str(ns.payload("bench")))
 check("053 payload: mapped to a shared zone -> disabled (never both outputs)",
       ns.payload("den") == {"cmd": "set_speaker", "enabled": False, "volume": 40}, str(ns.payload("den")))
 check("053 payload: unmapped speaker room -> enabled (default)", ns.payload("fresh")["enabled"] is True)
+check("053 R-I4 payload: capable but not yet PROVEN (no speaker_ok ack) -> disabled probe",
+      ns.payload("probing") == {"cmd": "set_speaker", "enabled": False, "volume": 40}, str(ns.payload("probing")))
 
 SENT = []
 _real_send = node_command.send_to_room
@@ -70,8 +76,10 @@ try:
     check("053 sync: speaker room sends set_speaker", ns.sync("bench") is True and SENT[-1] == ("bench", ns.payload("bench")))
     n = len(SENT)
     check("053 sync: mic-only room sends nothing", ns.sync("kitchen") is False and len(SENT) == n)
+    check("053 R-I4 sync: a capable-but-unproven room is probed (enabled false)",
+          ns.sync("probing") is True and SENT[-1] == ("probing", {"cmd": "set_speaker", "enabled": False, "volume": 40}))
     SENT.clear()
-    ns.sync_all(["bench", "kitchen", "den"])
+    ns.sync_all(["bench", "kitchen", "den", "bench"])
     check("053 sync_all: only speaker rooms, each once", sorted(r for r, _ in SENT) == ["bench", "den"], str(SENT))
 finally:
     node_command.send_to_room = _real_send
@@ -111,19 +119,40 @@ registry._room_by_pc["pc-053r"] = "ws053"
 registry.note_line("pc-053r", "waveshare")
 registry._room_by_pc["pc-053x"] = "xvf053"
 registry.note_line("pc-053x", "array")
-check("053 registry.has_speaker: waveshare line", registry.has_speaker("ws053") is True)
+check("053 R-I4 registry: a waveshare line alone is CAPABLE, not yet a speaker",
+      registry.speaker_capable("ws053") is True and registry.has_speaker("ws053") is False)
+registry.note_speaker_ok("pc-053r", True)
+check("053 registry.has_speaker: waveshare line + speaker_ok ack", registry.has_speaker("ws053") is True)
 check("053 registry.has_speaker: array line / unknown room", registry.has_speaker("xvf053") is False and registry.has_speaker("nope053") is False)
 row = {r["room"]: r for r in registry.known_rooms()}
 check("053 known_rooms carries speaker flag", row["ws053"].get("speaker") is True and row["xvf053"].get("speaker") is False)
-check("053 speaker_ok unknown until the node answers", row["ws053"].get("speaker_ok") is None)
-registry.note_speaker_ok("pc-053r", False)
-check("053 note_speaker_ok recorded", {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is False)
 check("053 speaker_rooms lists speaker rooms only", "ws053" in registry.speaker_rooms() and "xvf053" not in registry.speaker_rooms())
+registry.note_speaker_ok("pc-053r", False)
+check("053 note_speaker_ok recorded (a failed speaker is no speaker)",
+      {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is False and registry.has_speaker("ws053") is False)
+check("053 capable_rooms still lists it (so it gets probed again)", "ws053" in registry.capable_rooms())
 
 # ── node_command wiring ──────────────────────────────────────────────
-node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_speaker", "ok": True,
-                                    "data": {"enabled": True, "volume": 40, "speaker_ok": True}}), "pc-053r")
-check("053 set_speaker reply updates speaker_ok", {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is True)
+RESYNC = []
+_real_sync = ns.sync
+ns.sync = lambda room: RESYNC.append(room) or True
+
+
+def _ack(ok, pc="pc-053r"):
+    node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_speaker", "ok": True,
+                                        "data": {"enabled": False, "volume": 40, "speaker_ok": ok}}), pc)
+
+try:
+    _ack(True)
+    check("053 set_speaker reply updates speaker_ok", {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is True)
+    check("053 R-I4 first proof (ack speaker_ok true) re-syncs so the real state follows the probe", RESYNC == ["ws053"], str(RESYNC))
+    _ack(True)
+    check("053 R-I4 a repeat ack does not re-sync (no ping-pong)", RESYNC == ["ws053"], str(RESYNC))
+    node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_speaker", "ok": False,
+                                        "note": "unknown cmd"}), "pc-053x")
+    check("053 R-I4 older firmware answering 'unknown cmd' never becomes a speaker", registry.has_speaker("xvf053") is False)
+finally:
+    ns.sync = _real_sync
 
 CALLED = []
 _real_sync_pc = ns.sync_pc
@@ -144,6 +173,8 @@ async def _push(line, pc):
 try:
     asyncio.run(_push("waveshare", "pc-053r"))
     check("053 fw_push from a speaker line schedules sync_pc", CALLED == ["pc-053r"], str(CALLED))
+    check("053 R-I4 a new session forgets last boot's proof (re-probed; a downgrade can't stay 'speaker')",
+          registry.has_speaker("ws053") is False and {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is None)
     CALLED.clear()
     asyncio.run(_push("array", "pc-053x"))
     check("053 fw_push from a mic-only line does not", CALLED == [], str(CALLED))
@@ -188,10 +219,76 @@ gate, pushed = _run_reply("builtin")
 check("053 builtin reply arms the echo gate for duration + 1.5 s",
       len(gate.blocks) == 1 and abs(gate.blocks[0] - 2.5) < 0.01, str(gate.blocks))
 check("053 output stage passes every frame downstream (the audio IS the node's reply)", len(pushed) == 3, str(len(pushed)))
+def _run_slow_reply(zone, gen_s):
+    gate = _Gate()
+    proc = nso.NodeSpeakerOutput(echo_gate=gate, zone_selector=lambda: zone)
+
+    async def _push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+        pass
+    proc.push_frame = _push_frame
+
+    async def go():
+        await proc.process_frame(TTSStartedFrame(), FrameDirection.DOWNSTREAM)
+        await proc.process_frame(TTSAudioRawFrame(audio=b"\x00\x00" * 24000, sample_rate=24000, num_channels=1),
+                                 FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(gen_s)  # streaming TTS: generation ends while the node is already playing
+        await proc.process_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+    asyncio.run(go())
+    return gate
+
+g = _run_slow_reply("builtin", 0.4)
+check("053 R-M4 echo gate anchored at the FIRST audio frame (playback start), not generation end",
+      len(g.blocks) == 1 and abs(g.blocks[0] - 2.1) < 0.08, str(g.blocks))
 gate, pushed = _run_reply("Dining Room")
 check("053 shared-zone reply: stage leaves the gate to the Sonos/WiiM backend", gate.blocks == [] and len(pushed) == 3)
 gate, _ = _run_reply(None)
 check("053 no zone (backend default): stage stays out of it", gate.blocks == [])
+
+# ── R-I5 speaker-only install (Sonos disabled): LEDs + wake gate follow the reply ──
+import sonos_output as _so
+
+
+class _Led:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, m):
+        self.sent.append(m)
+
+
+class _WakeGate:
+    def __init__(self):
+        self.speech = []
+
+    def note_speech(self, d):
+        self.speech.append(d)
+
+
+def _sonos_disabled_reply(zone):
+    led, wg = _Led(), _WakeGate()
+    so = _so.SonosOutput(echo_gate=_Gate(), zone_selector=lambda: zone, wake_gate=wg, led=led)
+    so._enabled = False
+    ends = []
+    so._schedule_end_of_speech = lambda s: ends.append(s)
+    so._cancel_end_of_speech = lambda: None
+
+    async def _pf(frame, direction=FrameDirection.DOWNSTREAM):
+        pass
+    so.push_frame = _pf
+
+    async def go():
+        for f in (TTSStartedFrame(), TTSAudioRawFrame(audio=b"\x00\x00" * 24000, sample_rate=24000, num_channels=1),
+                  TTSStoppedFrame()):
+            await so.process_frame(f, FrameDirection.DOWNSTREAM)
+    asyncio.run(go())
+    return led, wg, ends
+
+led, wg, ends = _sonos_disabled_reply("builtin")
+check("053 R-I5 Sonos disabled + builtin reply: LED end at duration + 0.5 (not instantly)",
+      ends == [1.5] and "bot-started-speaking" in led.sent, f"ends={ends} led={led.sent}")
+check("053 R-I5 Sonos disabled + builtin reply: wake gate gets the real speech window", wg.speech == [1.0], str(wg.speech))
+led, wg, ends = _sonos_disabled_reply(None)
+check("053 R-I5 Sonos disabled, no builtin: unchanged (LED ends at once, no speech window)", ends == [0.0] and wg.speech == [])
 
 # ── bot wiring (source pins) ─────────────────────────────────────────
 import inspect

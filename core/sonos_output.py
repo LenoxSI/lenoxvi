@@ -618,6 +618,11 @@ class SonosOutput(FrameProcessor):
         duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
         if epoch is None:
             epoch = self._speech_epoch  # direct call (tests): act as current
+        if self._reply_is_builtin():
+            # The node's own speaker plays it; its echo gate is owned by
+            # NodeSpeakerOutput (anchored at playback start).
+            logger.debug("sonos_output: reply zone is the node's built-in speaker, skipping")
+            return
         # Block echo handling for exactly as long as this clip will sound:
         # the mic will hear it off the zone speakers (no AEC by design).
         if self._echo_gate is not None:
@@ -640,9 +645,6 @@ class SonosOutput(FrameProcessor):
             except Exception as e:  # routing hint must never break the reply
                 logger.debug(f"sonos_output: zone_selector failed: {e}")
         zone = self._zones.get(zone_name)
-        if zone_name == BUILTIN:  # the node's own speaker plays it
-            logger.debug("sonos_output: reply zone is the node's built-in speaker, skipping")
-            return
         if not zone:
             logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
             return
@@ -765,6 +767,15 @@ class SonosOutput(FrameProcessor):
                 except Exception:
                     pass
 
+    def _reply_is_builtin(self) -> bool:
+        """This reply plays on the node's own speaker (zone `builtin`)."""
+        if not self._zone_selector:
+            return False
+        try:
+            return self._zone_selector() == BUILTIN
+        except Exception:  # noqa: BLE001 — a routing hint must never break the reply
+            return False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -820,6 +831,19 @@ class SonosOutput(FrameProcessor):
                 # site re-anchors all speech timers.
                 # Fire-and-forget: never block the pipeline on Sonos I/O
                 self.create_task(self._speak_to_sonos(pcm, epoch=gen))
+            elif len(self._pcm) > 0 and self._reply_is_builtin():
+                # Sonos disabled, but the node's own speaker sounds this
+                # reply (a speaker-only install): time the LEDs and the
+                # wake gate to the speech, exactly as for a Sonos clip.
+                duration = len(self._pcm) / (2 * self._sample_rate * max(self._channels, 1))
+                self._pcm.clear()
+                if self._led:
+                    self._schedule_end_of_speech(duration + 0.5)
+                if self._wake_gate is not None:
+                    try:
+                        self._wake_gate.note_speech(duration)
+                    except Exception as e:  # noqa: BLE001 — gate hint must never break the reply
+                        logger.debug(f"sonos_output: note_speech failed: {e}")
             elif self._led:
                 # No clip to time (Sonos disabled): end immediately.
                 self._schedule_end_of_speech(0.0)

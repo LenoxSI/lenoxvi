@@ -148,27 +148,43 @@ def note_line(pc_id: str, line: str) -> None:
         return
     rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
     rec["line"] = line
+    rec["speaker_ok"] = None  # new session: last boot's speaker proof is void
 
 
-def has_speaker(room) -> bool:
-    """The node in `room` has a built-in speaker (its board line is one
-    of node_speaker.SPEAKER_LINES). Unknown room / unknown line -> False."""
+def speaker_capable(room) -> bool:
+    """The node in `room` is a board line with a built-in speaker
+    (node_speaker.SPEAKER_LINES). Unknown room / unknown line -> False."""
     from node_speaker import SPEAKER_LINES
     rec = _known_rooms.get(room) if room else None
     return bool(rec) and rec.get("line") in SPEAKER_LINES
+
+
+def has_speaker(room) -> bool:
+    """A PROVEN speaker: capable AND its set_speaker reply said
+    speaker_ok=true this session (older firmware never acks; a speaker that
+    failed to start acks false)."""
+    return speaker_capable(room) and _known_rooms[room].get("speaker_ok") is True
+
+
+def capable_rooms() -> list:
+    return sorted(r for r in _known_rooms if r != PROVISIONAL and speaker_capable(r))
 
 
 def speaker_rooms() -> list:
     return sorted(r for r in _known_rooms if r != PROVISIONAL and has_speaker(r))
 
 
-def note_speaker_ok(pc_id: str, ok) -> None:
-    """The node's set_speaker reply says whether its speaker came up
-    this boot (None until it answers)."""
+def note_speaker_ok(pc_id: str, ok) -> bool:
+    """The node's set_speaker reply says whether its speaker came up this
+    boot (None until it answers). Returns True when this is the FIRST proof
+    (-> the caller re-syncs, so the real state follows the probe)."""
     room = _room_by_pc.get(pc_id)
     if not room or room == PROVISIONAL or not isinstance(ok, bool):
-        return
-    _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})["speaker_ok"] = ok
+        return False
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    became = ok is True and rec.get("speaker_ok") is not True
+    rec["speaker_ok"] = ok
+    return became
 
 
 def note_muted(pc_id: str, muted: bool) -> None:
@@ -205,6 +221,7 @@ def _drain_held(pc_id, label) -> None:
         rec["fw"] = held_fw
     if held_line:
         rec["line"] = held_line
+        rec["speaker_ok"] = None  # new session: re-proven by its set_speaker ack
     if held_muted is not None:
         rec["muted"] = held_muted
 
@@ -422,7 +439,7 @@ def known_rooms():
                 "muted": rec.get("muted"),
                 # built-in speaker (board line) + whether it came up
                 # this boot (set_speaker reply; None = not answered yet).
-                "speaker": has_speaker(room),
+                "speaker": speaker_capable(room),
                 "speaker_ok": rec.get("speaker_ok"),
             }
         )

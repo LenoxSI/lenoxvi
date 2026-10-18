@@ -591,8 +591,11 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   // as a private zone. Unmapped = that speaker, by default.
   const speakers = mapping?.speakers || {}
   const zoneLabel = z => (z === BUILTIN ? 'Built-in speaker' : z)
+  // An unmapped speaker room defaults to its own speaker only once the
+  // server resolves it there (the node proved its speaker this session).
+  const defaultZone = room => (speakers[room]?.zone === BUILTIN ? BUILTIN : undefined)
   const saveMapping = async room => {
-    const zone = mapDraft?.[room] ?? (speakers[room] ? BUILTIN : undefined)
+    const zone = mapDraft?.[room] ?? defaultZone(room)
     if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
     // PUT /mapping takes the FULL room_zones dict WRAPPED in a
     // room_zones key (MappingPayload contract, routes.py) — a bare
@@ -629,12 +632,12 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
               {roomRows.map(room => {
                 const hasSpeaker = !!speakers[room]
                 const unmapped = !mapping?.room_zones?.[room]
-                const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? (hasSpeaker ? BUILTIN : '')
+                const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? defaultZone(room) ?? ''
                 return (
                 <tr key={room} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">
                     {esc(room)}
-                    {unmapped && !hasSpeaker && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
+                    {unmapped && !defaultZone(room) && <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">unmapped</span>}
                   </td>
                   <td className="px-4 py-2">
                     {/* Empty placeholder: without it an unmapped row
@@ -645,7 +648,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                       className={`${INPUT_CLS} w-[200px]`}>
                       {(zone === '' || (!zoneNames.includes(zone) && !(hasSpeaker && zone === BUILTIN))) &&
                         <option value="" disabled>{zoneNames.length ? 'pick a zone…' : 'add a zone below first'}</option>}
-                      {hasSpeaker && <option value={BUILTIN}>{unmapped ? 'Built-in speaker (default)' : 'Built-in speaker'}</option>}
+                      {hasSpeaker && <option value={BUILTIN}>{unmapped && defaultZone(room) ? 'Built-in speaker (default)' : 'Built-in speaker'}</option>}
                       {hasSpeaker && zoneNames.length > 0 && <option disabled value="__sep">──────────</option>}
                       {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>

@@ -11,6 +11,8 @@ for every reply, generation-anchored, whichever zone plays it.
 """
 from __future__ import annotations
 
+import time
+
 from node_speaker import BUILTIN
 from pipecat.frames.frames import (
     Frame,
@@ -30,6 +32,7 @@ class NodeSpeakerOutput(FrameProcessor):
         self._zone_selector = zone_selector
         self._bytes_per_s = 0.0
         self._bytes = 0
+        self._t_first = None  # first audio frame: the node starts playing ~here
 
     def _zone(self):
         if not self._zone_selector:
@@ -42,12 +45,20 @@ class NodeSpeakerOutput(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TTSStartedFrame):
-            self._bytes, self._bytes_per_s = 0, 0.0
+            self._bytes, self._bytes_per_s, self._t_first = 0, 0.0, None
         elif isinstance(frame, TTSAudioRawFrame):
+            if self._t_first is None:
+                self._t_first = time.monotonic()
             self._bytes += len(frame.audio)
             self._bytes_per_s = 2.0 * frame.sample_rate * max(frame.num_channels, 1)
         elif isinstance(frame, TTSStoppedFrame):
             if self._bytes and self._bytes_per_s and self._echo_gate is not None and self._zone() == BUILTIN:
-                self._echo_gate.block(self._bytes / self._bytes_per_s + TAIL_S)
+                # The transport paces the audio out in real time from the
+                # first frame, so the reply stops sounding at first-frame +
+                # duration — NOT generation end + duration (streaming TTS
+                # would keep the gate shut for the generation time on top).
+                duration = self._bytes / self._bytes_per_s
+                elapsed = time.monotonic() - self._t_first if self._t_first is not None else 0.0
+                self._echo_gate.block(max(0.0, duration - elapsed) + TAIL_S)
             self._bytes = 0
         await self.push_frame(frame, direction)

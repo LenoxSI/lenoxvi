@@ -255,13 +255,17 @@ async def get_mapping(names: bool = False):
     # poll). Sonos zones only. Still threaded when asked (this
     # is the voice pipeline's event loop).
     # speaker nodes — their private built-in zone (never in "zones").
+    # Listed when the board can have one, or config already maps it there
+    # (an offline node after a restart keeps its row).
     online = {r["room"]: r for r in registry.known_rooms()}
+    spk_rooms = sorted(set(registry.capable_rooms())
+                       | {r for r, z in out["room_zones"].items() if z == node_speaker.BUILTIN})
     out["speakers"] = {
         room: {"volume": node_speaker.volume_for(room, cfg("node_speaker", "volumes")),
                "zone": node_speaker.zone_for(room),
                "online": bool(online.get(room, {}).get("online")),
                "speaker_ok": online.get(room, {}).get("speaker_ok")}
-        for room in registry.speaker_rooms()
+        for room in spk_rooms
     }
     if names:
         out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
@@ -280,15 +284,20 @@ async def put_mapping(payload: MappingPayload):
         )
     zones = _all_zones()
     # Validate BEFORE writing: every mapped zone must exist (either backend).
-    # `builtin` is a node's own speaker — only for a node that has one.
-    no_spk = sorted(r for r, z in payload.room_zones.items()
-                    if z == node_speaker.BUILTIN and not registry.has_speaker(r))
+    rz = {r.strip(): z for r, z in payload.room_zones.items()}
+    # `builtin` is a node's own speaker — only for a node that has PROVEN
+    # one. An entry config already holds is left alone: after a restart the
+    # node may be offline, and the UI always PUTs the full dict.
+    current = dict(config_store.read_section("room_zones") or {})
+    no_spk = sorted(r for r, z in rz.items()
+                    if z == node_speaker.BUILTIN and not registry.has_speaker(r)
+                    and current.get(r) != node_speaker.BUILTIN)
     if no_spk:
         raise HTTPException(
             status_code=400,
             detail=f"room(s) {no_spk} have no built-in speaker",
         )
-    bad = {r: z for r, z in payload.room_zones.items()
+    bad = {r: z for r, z in rz.items()
            if z not in zones and z != node_speaker.BUILTIN}
     if bad:
         raise HTTPException(
@@ -307,7 +316,7 @@ async def put_mapping(payload: MappingPayload):
         raise HTTPException(status_code=409, detail=str(e))
     # exactly one output sounds a reply — tell every speaker node
     # whether it's now the one (a full-dict PUT can map OR unmap it).
-    node_speaker.sync_all(registry.speaker_rooms())
+    node_speaker.sync_all(registry.capable_rooms())
     return {"ok": True, "room_zones": clean, "changed": diff["before"] != diff["after"]}
 
 
@@ -326,8 +335,11 @@ class NodeSpeakerRoomPayload(BaseModel):
 
 
 def _speaker_room_or_404(room: str) -> str:
+    """A board that has a speaker, or a room config maps to one (its node
+    may be offline after a restart)."""
     room = room.strip()
-    if not registry.has_speaker(room):
+    mapped = (config_store.read_section("room_zones") or {}).get(room)
+    if not (registry.speaker_capable(room) or mapped == node_speaker.BUILTIN):
         raise HTTPException(status_code=404, detail=f"'{room}' has no built-in speaker")
     return room
 
@@ -536,6 +548,9 @@ async def delete_zone(name: str):
         config_store.write_sections(sections)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    # A speaker room mapped to the deleted zone is back on its own speaker
+    # (the default) — tell its node, or it stays silent.
+    node_speaker.sync_all(registry.capable_rooms())
     return {"ok": True, "dropped_room_mappings": dangling, "backend": backend}
 
 

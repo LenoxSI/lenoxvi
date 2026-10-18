@@ -6,6 +6,11 @@ Rules:
   mapping route, not just hidden in the UI.
 - An UNMAPPED speaker node replies on its own speaker. That default is
   resolved at runtime here — never written into config.
+- A node only counts as a speaker once it has PROVEN it: its set_speaker
+  reply said speaker_ok=true this session. A capable board line alone
+  (older firmware without set_speaker, or a speaker that didn't come up)
+  never resolves to `builtin`, so replies fall back to the shared zones
+  instead of going silent. Each session starts with a disabled probe.
 - Exactly one output ever sounds a reply. Reply audio streams to EVERY
   node over its WebRTC track (it drives the node-side turn lock), so the
   node is told explicitly whether to play it: `set_speaker {enabled,
@@ -31,6 +36,8 @@ def resolve_zone(room, room_zones, has_speaker: bool):
     if not room or room == "unknown":
         return None
     mapped = (room_zones or {}).get(room)
+    if mapped == BUILTIN and not has_speaker:
+        return None  # stale/unproven builtin: the default zone, never silence
     if mapped:
         return mapped
     return BUILTIN if has_speaker else None
@@ -59,8 +66,15 @@ def _volumes():
 
 
 def _has_speaker(room) -> bool:
+    """Proven speaker (acked speaker_ok=true this session)."""
     from dashboard import registry
     return registry.has_speaker(room)
+
+
+def _capable(room) -> bool:
+    """Board line has a speaker — worth telling (probing) even unproven."""
+    from dashboard import registry
+    return registry.speaker_capable(room)
 
 
 def zone_for(room):
@@ -75,9 +89,10 @@ def payload(room) -> dict:
 
 def sync(room) -> bool:
     """Tell `room`'s node whether to play replies (and at what volume).
-    No-op (False) for nodes without a speaker. Best-effort: an offline
-    node gets synced again after its next fw_push."""
-    if not _has_speaker(room):
+    No-op (False) for boards without a speaker; an unproven one gets a
+    disabled probe. Best-effort: an offline node gets synced again after
+    its next fw_push."""
+    if not _capable(room):
         return False
     from dashboard import node_command
     return bool(node_command.send_to_room(room, payload(room)))
