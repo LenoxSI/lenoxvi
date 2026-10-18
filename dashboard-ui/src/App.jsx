@@ -1446,22 +1446,22 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
                 <KeyInput id="tts-key" key={`tts-${provider}-${ttsKeyEpoch}`}
                   hint={provider === 'elevenlabs' ? tts?.elevenlabs_key_hint : tts?.deepgram_key_hint}
                   placeholder={provider === 'elevenlabs' ? 'paste ElevenLabs key…' : 'paste Deepgram key…'} />
+                <button className={BTN_DEFAULT} onClick={async () => {
+                  const key = readKey('tts-key')
+                  if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'TTS'); return }
+                  const route = provider === 'elevenlabs'
+                    ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
+                  try {
+                    await api(route, { method: 'PUT', json: { api_key: key } })
+                    setMsg('Key saved — applies on next bot restart.', 'ok', 'TTS')
+                    setTtsKeyEpoch(n => n + 1)
+                    reloadAll()
+                  } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
+                }}>Save key</button>
               </div>
             </Field>
           )}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            {provider !== 'pocket' ? <button className={BTN_DEFAULT} onClick={async () => {
-              const key = readKey('tts-key')
-              if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'TTS'); return }
-              const route = provider === 'elevenlabs'
-                ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
-              try {
-                await api(route, { method: 'PUT', json: { api_key: key } })
-                setMsg('Key saved — applies on next bot restart.', 'ok', 'TTS')
-                setTtsKeyEpoch(n => n + 1)
-                reloadAll()
-              } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
-            }}>Save key</button> : <span />}
+          <div className="flex items-center justify-end gap-4 flex-wrap">
             <button className={BTN_PRIMARY} onClick={saveTTS}>Save TTS</button>
           </div>
         </div>
@@ -1665,25 +1665,25 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <KeyInput id="int-key" key={`int-${intKind}-${agentSel}-${keyEpoch}`} hint={keyHint}
               placeholder={intKind === 'hermes' && agentSel && agentSel !== 'default'
                 ? `paste the ${agentSel} profile's API key…` : 'paste key…'} />
+              <button className={BTN_DEFAULT} onClick={async () => {
+                const key = readKey('int-key')
+                if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'Intelligence'); return }
+                try {
+                  // Send the kind (and Hermes profile) on screen — the server
+                  // writes THAT key, never the one config.yaml happens to hold.
+                  const named = intKind === 'hermes' && agentSel && agentSel !== 'default'
+                  const json = { kind: intKind, api_key: key, ...(named ? { agent: agentSel } : {}) }
+                  await api('/api/dashboard/intelligence/key', { method: 'PUT', json })
+                  setKeyEpoch(n => n + 1)  // fresh box: shows the new key's hint, drops the typed value
+                  const who = intKind === 'openclaw' ? 'OpenClaw' : `Hermes · ${agentSel || 'default'}`
+                  setMsg(`Key saved for ${who} — applies on next bot restart.`, 'ok', 'Intelligence')
+                  discover(intKind, document.getElementById('int-url')?.value.trim())
+                  reloadAll()
+                } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
+              }}>Save key</button>
           </div>
         </Field>
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <button className={BTN_DEFAULT} onClick={async () => {
-            const key = readKey('int-key')
-            if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'Intelligence'); return }
-            try {
-              // Send the kind (and Hermes profile) on screen — the server
-              // writes THAT key, never the one config.yaml happens to hold.
-              const named = intKind === 'hermes' && agentSel && agentSel !== 'default'
-              const json = { kind: intKind, api_key: key, ...(named ? { agent: agentSel } : {}) }
-              await api('/api/dashboard/intelligence/key', { method: 'PUT', json })
-              setKeyEpoch(n => n + 1)  // fresh box: shows the new key's hint, drops the typed value
-              const who = intKind === 'openclaw' ? 'OpenClaw' : `Hermes · ${agentSel || 'default'}`
-              setMsg(`Key saved for ${who} — applies on next bot restart.`, 'ok', 'Intelligence')
-              discover(intKind, document.getElementById('int-url')?.value.trim())
-              reloadAll()
-            } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
-          }}>Save key</button>
+        <div className="flex items-center justify-end gap-4 flex-wrap">
           <div className="flex gap-2 flex-wrap">
             <button id="btn-int-test" className={BTN_DEFAULT}
               onClick={async ev => {
