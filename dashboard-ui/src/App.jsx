@@ -1544,8 +1544,8 @@ function WakeNameCard({ setMsg }) {
     <Section title="Wake name"
       note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        {/* 2x2 on wide screens: name row, then the spelling row with the chips
-            beside it (their label sits just above them, at the name row's foot).
+        {/* Wide screens: the name and the spelling box share the top row; the
+            spelling chips sit below the box, in its column.
             Phones stack: name, spelling box, label, chips. */}
         <div className="grid md:grid-cols-[auto_1fr] gap-x-8 gap-y-2">
           <div className="md:col-start-1 md:row-start-1">
@@ -1556,24 +1556,27 @@ function WakeNameCard({ setMsg }) {
                 onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Set wake word</button>
             </Field>
           </div>
-          <div className="flex items-center gap-2 flex-wrap md:col-start-1 md:row-start-2">
-            <input id="wake-alias" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="add a spelling"
-              value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
-            <button className={`${BTN_DEFAULT} w-[136px]`} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
+          <div className="md:col-start-2 md:row-start-1">
+            <Field label="Add a spelling">
+              <input id="wake-alias" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="how it's misheard"
+                value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
+              <button className={`${BTN_DEFAULT} w-[136px]`} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
+            </Field>
           </div>
-          <span className="text-[12px] font-medium text-[var(--muted)] mt-2 md:mt-0 md:self-end md:col-start-2 md:row-start-1">Also heard as</span>
-          {/* min height = the input row's, so chips center on the Add button */}
-          <div className="flex items-center gap-2 flex-wrap min-h-[37px] md:col-start-2 md:row-start-2">
-            {aliases.map(a => (
-              <span key={a} data-alias={a}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
-                {esc(a)}
-                <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
-                  onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
-              </span>
-            ))}
-            {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
+          <div className="grid gap-1 mt-2 md:mt-0 md:col-start-2 md:row-start-2">
+            <span className="text-[12px] font-medium text-[var(--muted)]">Also heard as</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {aliases.map(a => (
+                <span key={a} data-alias={a}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
+                  {esc(a)}
+                  <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
+                    onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
+                </span>
+              ))}
+              {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
+            </div>
           </div>
         </div>
 
