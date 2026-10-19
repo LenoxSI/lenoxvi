@@ -9,6 +9,17 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- **Cloud speech-to-text (Deepgram Nova-3).** The STT card gets a
+  Provider choice: *Local — Whisper* (private, the default) or *Deepgram
+  Nova-3 (cloud)* for top transcription quality on modest hardware. On
+  Deepgram, your Whisper model becomes the **fallback**: if Deepgram
+  rejects the key or can't be reached, the session switches to local
+  Whisper on its own (under a second for a bad key, about 8 s for a dead
+  network) and switches back when Deepgram answers again. The card shows
+  which one is listening, with an amber "On Whisper fallback" chip and
+  the reason. The Deepgram key is shared with Deepgram TTS (enter it on
+  either card). Language *Auto-detect* uses Nova-3's multilingual mode.
+  The wake word always stays local.
 - Dashboard: **STT card** (Voice, under TTS). Pick one of four benchmarked
   faster-whisper models — Turbo (default), Medium, Small, Base — and a
   language (Auto-detect + 16 common ones). Device and compute type are

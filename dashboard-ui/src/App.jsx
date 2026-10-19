@@ -1548,6 +1548,7 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
    server writes device/compute with the model and downloads a missing
    model before switching config (restart only offered once it's on disk). */
 const CHIP_CLS = 'inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium'
+const WARN_CHIP_CLS = 'inline-block rounded-full bg-[var(--warning)] text-[var(--warning-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
 
 const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`
 
@@ -1565,6 +1566,8 @@ function SttCard({ status, setMsg, setRebooting }) {
   const [data, setData] = useState(null)
   const [model, setModel] = useState(null)
   const [language, setLanguage] = useState(null)
+  const [provider, setProvider] = useState(null)
+  const [dgKey, setDgKey] = useState('')
   const [busy, setBusy] = useState(false)
   // setMsg is a new function on every parent render (the 5 s poll): keep it
   // in a ref so the effects below don't re-run on every poll.
@@ -1577,6 +1580,7 @@ function SttCard({ status, setMsg, setRebooting }) {
     setData(d)
     setModel(m => m ?? d.current.model)
     setLanguage(l => l ?? d.current.language)
+    setProvider(p => p ?? d.current.provider)
     return d
   }
   const load = () => api('/api/dashboard/stt').then(apply)
@@ -1594,6 +1598,7 @@ function SttCard({ status, setMsg, setRebooting }) {
         setData(d)
         setModel(m => m ?? d.current.model)
         setLanguage(l => l ?? d.current.language)
+        setProvider(p => p ?? d.current.provider)
       })
       .catch(e => { if (alive) msgRef.current('STT load failed: ' + e.message, 'err', 'STT') })
     return () => { alive = false }
@@ -1644,11 +1649,23 @@ function SttCard({ status, setMsg, setRebooting }) {
     finally { setDeleting(null) }
   }
 
+  const saveDgKey = async () => {
+    const key = dgKey.trim()
+    if (!key) return
+    try {
+      await api('/api/dashboard/tts/key/deepgram', { method: 'PUT', json: { api_key: key } })
+      setDgKey('')
+      await load()
+      setMsg('Deepgram key saved (shared with TTS) — applies on bot restart.', 'ok', 'STT')
+    } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'STT') }
+  }
+
   const save = async () => {
     if (!data) return
     const body = {}
     if (model !== data.current.model && model !== pendingModel) body.model = model
     if (language !== data.current.language) body.language = language
+    if (provider && provider !== data.current.provider) body.provider = provider
     if (!Object.keys(body).length) { setMsg('Nothing changed.', 'ok', 'STT'); return }
     setBusy(true)
     try {
@@ -1657,8 +1674,9 @@ function SttCard({ status, setMsg, setRebooting }) {
       if (r.download === 'started') {
         setMsg(`Downloading ${model} — restart offered when it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
-        setMsg('Saved to config.yaml — the model loads on bot restart.', 'ok', 'STT')
-        offerRestart(setMsg, setRebooting)
+        setMsg(r.key_needed ? 'Saved — add your Deepgram key below, then restart.'
+          : 'Saved to config.yaml — applies on bot restart.', 'ok', 'STT')
+        if (!r.key_needed) offerRestart(setMsg, setRebooting)
       } else {
         setMsg('Saved — applies to the next thing you say.', 'ok', 'STT')
       }
@@ -1668,6 +1686,9 @@ function SttCard({ status, setMsg, setRebooting }) {
 
   const st = status?.stt || data?.status
   const state = sttStateChip(st, data?.download)
+  const onCloud = st?.provider === 'deepgram' && st?.active === 'deepgram'
+  const onFallback = st?.provider === 'deepgram' && st?.active === 'whisper'
+  const cloudPick = provider === 'deepgram'
   const ms = st?.latency_ms_median
   const models = data?.models || []
   const custom = data?.current?.custom_model
@@ -1676,11 +1697,22 @@ function SttCard({ status, setMsg, setRebooting }) {
     <Section id="stt" title="STT" note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex flex-wrap items-center gap-2" id="stt-chips">
-          <span className={`${CHIP_CLS} ${state.cls}`} title={state.title}>{state.text}</span>
-          {st?.model && <span className={CHIP_CLS}>{st.model}</span>}
-          {st?.device && <span className={CHIP_CLS}>
-            {st.device === 'cuda' ? `GPU · ${data?.gpu || 'CUDA'}` : 'CPU'}</span>}
-          {st?.compute && <span className={CHIP_CLS}>{st.compute}</span>}
+          {onFallback
+            ? <span className={WARN_CHIP_CLS} title={st.fallback_reason}>● On Whisper fallback</span>
+            : <span className={`${CHIP_CLS} ${state.cls}`} title={state.title}>{state.text}</span>}
+          {onCloud ? (
+            <>
+              <span className={CHIP_CLS}>Deepgram {st.cloud_model}</span>
+              <span className={CHIP_CLS}>cloud</span>
+            </>
+          ) : (
+            <>
+              {st?.model && <span className={CHIP_CLS}>{st.model}</span>}
+              {st?.device && <span className={CHIP_CLS}>
+                {st.device === 'cuda' ? `GPU · ${data?.gpu || 'CUDA'}` : 'CPU'}</span>}
+              {st?.compute && <span className={CHIP_CLS}>{st.compute}</span>}
+            </>
+          )}
           <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
             {ms != null ? `${(ms / 1000).toFixed(2)} s / command` : '— s / command'}</span>
         </div>
@@ -1700,7 +1732,17 @@ function SttCard({ status, setMsg, setRebooting }) {
           </div>
         )}
         <div className="flex flex-wrap items-end gap-4">
-          <Field label="Model">
+          <Field label="Provider">
+            <select id="stt-provider" className={`${INPUT_CLS} w-auto`} value={provider || 'whisper'}
+              onChange={e => setProvider(e.target.value)} disabled={!data}>
+              {(data?.providers || [{ name: 'whisper', label: 'Local — Whisper', available: true }]).map(p => (
+                <option key={p.name} value={p.name} disabled={!p.available} title={p.reason || ''}>
+                  {p.label}{p.available ? '' : ' — not installed'}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={cloudPick ? 'Fallback model' : 'Model'}>
             <select id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
               onChange={e => setModel(e.target.value)} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
@@ -1721,6 +1763,25 @@ function SttCard({ status, setMsg, setRebooting }) {
             </select>
           </Field>
         </div>
+        {cloudPick && (
+          <div className="grid gap-2">
+            <div id="stt-dg-key-line" className="flex flex-wrap items-center gap-2 text-[14px]">
+              {data?.deepgram_key_set
+                ? <span>Deepgram key ✓ — shared with TTS</span>
+                : (
+                  <>
+                    <input id="stt-dg-key" type="password" autoComplete="off" value={dgKey}
+                      onChange={e => setDgKey(e.target.value)} placeholder="Deepgram API key (shared with TTS)"
+                      className={`${INPUT_CLS} w-[260px] font-mono`} />
+                    <button className={BTN_DEFAULT} onClick={saveDgKey} disabled={!dgKey.trim()}>Save key</button>
+                  </>
+                )}
+            </div>
+            <span className="text-[12px] text-[var(--muted)]">
+              On Deepgram, a language change applies after a restart. If Deepgram can't be reached, the fallback model listens.
+            </span>
+          </div>
+        )}
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
