@@ -252,6 +252,139 @@ const readKey = (id) => {
   return el && el.dataset.dirty === '1' ? el.value.trim() : ''
 }
 
+// A picked provider/agent with no key: point at the Keys card (keys are
+// entered there only).
+function MissingKey({ label }) {
+  return (
+    <a href="#keys" className="text-[13px] text-[var(--danger)] hover:underline">
+      No {label} key → System · Keys
+    </a>
+  )
+}
+
+// The save route for a row: the existing kind-aware routes (one write path).
+function keyRoute(row) {
+  if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
+  if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
+  const named = row.kind === 'hermes' && row.agent && row.agent !== 'default'
+  return ['/api/dashboard/intelligence/key', { kind: row.kind, ...(named ? { agent: row.agent } : {}) }]
+}
+
+function keyState(row) {
+  if (!row.set) return row.in_use ? { text: 'Missing', cls: WARN_CHIP_CLS } : { text: 'Not set', cls: CHIP_CLS }
+  if (row.pending_restart) return { text: `Saved · ${row.hint || ''} — restart to apply`, cls: WARN_CHIP_CLS }
+  return { text: `● Set · ${row.hint || ''}`, cls: CHIP_CLS }
+}
+
+function KeysCard({ setMsg, setRebooting }) {
+  const [keys, setKeys] = useState(null)
+  const [open, setOpen] = useState(null)        // var being replaced
+  const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
+  const [tests, setTests] = useState({})        // var -> {status, detail}
+  const [agents, setAgents] = useState(null)    // Hermes agents with no key yet
+  const [adding, setAdding] = useState(false)
+  const [addAgent, setAddAgent] = useState('')
+  const msgRef = useRef(setMsg)
+  useEffect(() => { msgRef.current = setMsg })
+  const load = () => api('/api/dashboard/keys').then(d => { setKeys(d.keys || []); return d })
+  useEffect(() => {
+    api('/api/dashboard/keys').then(d => setKeys(d.keys || []))
+      .catch(e => msgRef.current('Keys load failed: ' + e.message, 'err', 'Keys'))
+  }, [])
+
+  const save = async (row, inputId) => {
+    const key = readKey(inputId)
+    if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return }
+    const [route, extra] = keyRoute(row)
+    try {
+      await api(route, { method: 'PUT', json: { ...extra, api_key: key } })
+      setOpen(null); setAdding(false); setEpoch(n => n + 1)
+      setTests(t => ({ ...t, [row.var]: undefined }))
+      await load()
+      setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
+      offerRestart(setMsg, setRebooting)
+    } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys') }
+  }
+
+  const test = async row => {
+    setTests(t => ({ ...t, [row.var]: { status: 'testing' } }))
+    try {
+      const r = await api('/api/dashboard/keys/test', { method: 'POST', json: { var: row.var } })
+      setTests(t => ({ ...t, [row.var]: r }))
+    } catch (e) { setTests(t => ({ ...t, [row.var]: { status: 'unreachable', detail: e.message } })) }
+  }
+
+  const startAdd = async () => {
+    setAdding(true); setAgents(null)
+    try {
+      const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
+      const list = (d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id)
+      setAgents(list); setAddAgent(list[0] || '')
+    } catch (e) { setAgents([]); setMsg('Agent list failed: ' + e.message, 'err', 'Keys') }
+  }
+
+  return (
+    <Section id="system" title="Keys" note="">
+      <div id="keys" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3">
+        {!keys ? <span className="text-[13px] text-[var(--muted)]">Loading…</span> : keys.map(row => {
+          const st = keyState(row)
+          const t = tests[row.var]
+          return (
+            <div key={row.var} data-var={row.var} className="flex flex-wrap items-center gap-3">
+              <div className="min-w-[180px]">
+                <div className="text-[14px] font-medium">{row.label}</div>
+                <div className="text-[12px] font-mono text-[var(--muted)]">{row.var}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u}</span>)}
+                {row.in_use && <span className={`${CHIP_CLS} text-[var(--success)]`}>in use</span>}
+                <span className={st.cls} data-role="state">{st.text}</span>
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
+                  {t?.status === 'testing' ? 'Testing…' : 'Test'}</button>
+                <button className={BTN_DEFAULT} onClick={() => setOpen(open === row.var ? null : row.var)}>
+                  {row.set ? 'Replace' : 'Set'}</button>
+              </div>
+              {open === row.var && (
+                <div className="basis-full flex items-center gap-2 flex-wrap">
+                  <KeyInput id={`keyin-${row.var}`} key={`${row.var}-${epoch}`} hint=""
+                    placeholder={`paste the new ${row.label} key…`} />
+                  <button className={BTN_PRIMARY} onClick={() => save(row, `keyin-${row.var}`)}>Save</button>
+                </div>
+              )}
+              {t && t.status !== 'testing' && (
+                <div data-role="test" className={`basis-full text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                  {t.status === 'ok' ? '✓ ' : '✗ '}{t.detail || t.status}
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <div className="flex items-center gap-2 flex-wrap">
+          {!adding ? (
+            <button className={BTN_DEFAULT} onClick={startAdd}>Add agent key</button>
+          ) : agents === null ? (
+            <span className="text-[13px] text-[var(--muted)]">Finding Hermes agents…</span>
+          ) : agents.length === 0 ? (
+            <span className="text-[13px] text-[var(--muted)]">Every Hermes agent already has a key.</span>
+          ) : (
+            <>
+              <select id="key-add-agent" className={`${INPUT_CLS} w-auto`} value={addAgent}
+                onChange={e => setAddAgent(e.target.value)}>
+                {agents.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the agent's API key…" />
+              <button className={BTN_PRIMARY} onClick={() => save(
+                { var: '', label: `Hermes · ${addAgent}`, kind: 'hermes', agent: addAgent }, 'keyin-add')}>Save</button>
+            </>
+          )}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 /* ── rail ──────────────────────────────────────────────────── */
 const SECTIONS = [
   { id: 'overview', label: 'Overview' },
@@ -1338,7 +1471,6 @@ const savedFor = (t, p) =>
 
 function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
-  const [ttsKeyEpoch, setTtsKeyEpoch] = useState(0)  // remounts the key box after a save
   const [model, setModel] = useState(null)
   // Bug-class fix: the 5s poll refetches tts state and
   // resyncing from server would clobber the user's in-progress provider
@@ -1507,26 +1639,9 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
               )}
             </Field>
           )}
-          {provider !== 'pocket' && (
-            <Field label="API key">
-              <div className="flex items-center gap-2 flex-wrap flex-1">
-                <KeyInput id="tts-key" key={`tts-${provider}-${ttsKeyEpoch}`}
-                  hint={provider === 'elevenlabs' ? tts?.elevenlabs_key_hint : tts?.deepgram_key_hint}
-                  placeholder={provider === 'elevenlabs' ? 'paste ElevenLabs key…' : 'paste Deepgram key…'} />
-                <button className={BTN_DEFAULT} onClick={async () => {
-                  const key = readKey('tts-key')
-                  if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'TTS'); return }
-                  const route = provider === 'elevenlabs'
-                    ? '/api/dashboard/tts/key/elevenlabs' : '/api/dashboard/tts/key/deepgram'
-                  try {
-                    await api(route, { method: 'PUT', json: { api_key: key } })
-                    setMsg('Key saved — applies on next bot restart.', 'ok', 'TTS')
-                    setTtsKeyEpoch(n => n + 1)
-                    reloadAll()
-                  } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'TTS') }
-                }}>Save key</button>
-              </div>
-            </Field>
+          {provider !== 'pocket' && tts &&
+            !(provider === 'elevenlabs' ? tts.elevenlabs_key_hint : tts.deepgram_key_hint) && (
+            <MissingKey label={provider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram'} />
           )}
           <div className="flex items-center justify-end gap-4 flex-wrap">
             <button className={BTN_PRIMARY} onClick={saveTTS}>Save</button>
@@ -1567,7 +1682,6 @@ function SttCard({ status, setMsg, setRebooting }) {
   const [model, setModel] = useState(null)
   const [language, setLanguage] = useState(null)
   const [provider, setProvider] = useState(null)
-  const [dgKey, setDgKey] = useState('')
   const [busy, setBusy] = useState(false)
   // setMsg is a new function on every parent render (the 5 s poll): keep it
   // in a ref so the effects below don't re-run on every poll.
@@ -1647,18 +1761,6 @@ function SttCard({ status, setMsg, setRebooting }) {
       setMsg(`Deleted ${m.name} — freed ${fmtBytes(r.freed_bytes || 0)}.`, 'ok', 'STT')
     } catch (e) { setMsg('Delete failed: ' + e.message, 'err', 'STT') }
     finally { setDeleting(null) }
-  }
-
-  const saveDgKey = async () => {
-    const key = dgKey.trim()
-    if (!key) return
-    try {
-      await api('/api/dashboard/tts/key/deepgram', { method: 'PUT', json: { api_key: key } })
-      setDgKey('')
-      const d = await load()
-      setMsg('Deepgram key saved (shared with TTS) — applies on bot restart.', 'ok', 'STT')
-      if (d?.current?.provider === 'deepgram') offerRestart(setMsg, setRebooting)
-    } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'STT') }
   }
 
   const save = async () => {
@@ -1764,14 +1866,7 @@ function SttCard({ status, setMsg, setRebooting }) {
             </select>
           </Field>
         </div>
-        {cloudPick && data && !data.deepgram_key_set && (
-          <div id="stt-dg-key-line" className="flex flex-wrap items-center gap-2 text-[14px]">
-            <input id="stt-dg-key" type="password" autoComplete="off" value={dgKey}
-              onChange={e => setDgKey(e.target.value)} placeholder="Deepgram API key (shared with TTS)"
-              className={`${INPUT_CLS} w-[260px] font-mono`} />
-            <button className={BTN_DEFAULT} onClick={saveDgKey} disabled={!dgKey.trim()}>Save key</button>
-          </div>
-        )}
+        {cloudPick && data && !data.deepgram_key_set && <MissingKey label="Deepgram" />}
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
@@ -1906,7 +2001,6 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   const agentDrafts = useRef({})  // {hermes: 'default', openclaw: '<agent>'}
   const [found, setFound] = useState({})  // kind -> {agents, note, selected, loading}
   const lastDiscoverUrl = useRef({})
-  const [keyEpoch, setKeyEpoch] = useState(0)  // remounts the key box after a save
   const discover = async (kind, url) => {
     lastDiscoverUrl.current[kind] = url || ''
     setFound(f => ({ ...f, [kind]: { ...(f[kind] || {}), loading: true } }))
@@ -1947,11 +2041,11 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   // Nothing picked for this kind yet: the saved one, else the first listed.
   const agentSel = intAgent || found[intKind]?.selected || agentList[0]?.id || ''
   const agentEntry = agentList.find(a => a.id === agentSel)
-  const keyHint = agentEntry ? agentEntry.key_hint : intelligence?.key_hints?.[intKind]
   const agentNote = found[intKind]?.note
   return (
     <>
-    <Section id="system" title="Intelligence"
+    <KeysCard setMsg={setMsg} setRebooting={setRebooting} />
+    <Section id="intelligence" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Provider / agent / API URL">
@@ -1990,29 +2084,10 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
         </Field>
         {agentNote ? <div className="text-[12px] text-[var(--muted)] -mt-2">{agentNote}</div> : null}
-        <Field label="API key">
-          <div className="flex items-center gap-2 flex-wrap flex-1">
-            <KeyInput id="int-key" key={`int-${intKind}-${agentSel}-${keyEpoch}`} hint={keyHint}
-              placeholder={intKind === 'hermes' && agentSel && agentSel !== 'default'
-                ? `paste the ${agentSel} profile's API key…` : 'paste key…'} />
-              <button className={BTN_DEFAULT} onClick={async () => {
-                const key = readKey('int-key')
-                if (!key) { setMsg('Nothing to save — paste a new key first.', 'muted', 'Intelligence'); return }
-                try {
-                  // Send the kind (and Hermes profile) on screen — the server
-                  // writes THAT key, never the one config.yaml happens to hold.
-                  const named = intKind === 'hermes' && agentSel && agentSel !== 'default'
-                  const json = { kind: intKind, api_key: key, ...(named ? { agent: agentSel } : {}) }
-                  await api('/api/dashboard/intelligence/key', { method: 'PUT', json })
-                  setKeyEpoch(n => n + 1)  // fresh box: shows the new key's hint, drops the typed value
-                  const who = intKind === 'openclaw' ? 'OpenClaw' : `Hermes · ${agentSel || 'default'}`
-                  setMsg(`Key saved for ${who} — applies on next bot restart.`, 'ok', 'Intelligence')
-                  discover(intKind, document.getElementById('int-url')?.value.trim())
-                  reloadAll()
-                } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Intelligence') }
-              }}>Save key</button>
-          </div>
-        </Field>
+        {intelligence && !(agentEntry ? agentEntry.key_set : intelligence.keys_set?.[intKind]) && (
+          <MissingKey label={intKind === 'openclaw' ? 'OpenClaw'
+            : `Hermes${agentSel && agentSel !== 'default' ? ` · ${agentSel}` : ''}`} />
+        )}
         {/* Footer: secondary action bottom-left, green commit bottom-right */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
             <button id="btn-int-test" className={BTN_DEFAULT}

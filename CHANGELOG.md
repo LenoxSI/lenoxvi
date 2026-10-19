@@ -17,6 +17,15 @@ The two version streams are independent.
   Local Whisper behaves exactly as before.
 
 ### Added
+- **Keys card (System).** Every API key in one place: ElevenLabs,
+  Deepgram, Hermes, OpenClaw and each Hermes agent key. Each row shows
+  what uses the key, whether it's set (first 4 characters only),
+  missing, or saved and waiting for a restart, with Replace and Test
+  (checks the saved key with its provider before you restart). Add agent
+  key lists the Hermes agents that don't have one yet. Replacing a key
+  keeps a private backup of the old `.env` (newest 3). Keys are never
+  shown, never deleted. The TTS, STT and Intelligence cards no longer
+  take keys; they link to the Keys card when one is missing.
 - **Cloud speech-to-text (Deepgram Nova-3).** The STT card gets a
   Provider choice: *Local — Whisper* (private, the default) or *Deepgram
   Nova-3 (cloud)* for top transcription quality on modest hardware. On
