@@ -576,18 +576,18 @@ def main():
           r.status_code == 422, f"status={r.status_code}")
     # Pocket lane + fallback (routes). pocket_available is monkeypatched
     # so the pins are deterministic whether or not torch is on this host.
-    import tts_pocket as _tp050
-    _orig_avail050 = _tp050.pocket_available
-    _tp050.pocket_available = lambda: True
+    import tts_pocket as _tppk
+    _orig_availpk = _tppk.pocket_available
+    _tppk.pocket_available = lambda: True
     try:
         t = client.get("/api/dashboard/tts").json()
         check("pocket: GET /tts catalog.pocket = 21 presets, alba first",
               (t.get("catalog", {}).get("pocket") or [None])[0] == "alba"
               and len(t["catalog"]["pocket"]) == 21, f"{t.get('catalog', {}).get('pocket')}")
-        _pv050 = ((__import__("yaml").safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
+        _pvpk = ((__import__("yaml").safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
                    .get("tts") or {}).get("pocket_voice") or "alba")
         check("pocket: GET /tts reports pocket_installed + pocket_voice + fallback",
-              t.get("pocket_installed") is True and t.get("pocket_voice") == _pv050
+              t.get("pocket_installed") is True and t.get("pocket_voice") == _pvpk
               and "fallback" in t,
               str({k: t.get(k) for k in ("pocket_installed", "pocket_voice", "fallback")}))
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "vera"})
@@ -655,7 +655,7 @@ def main():
         client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                "deepgram_voice": "aura-2-thalia-en",
                                                "fallback": "pocket"})
-        _tp050.pocket_available = lambda: False
+        _tppk.pocket_available = lambda: False
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-zeus-en",
                                                    "fallback": "pocket"})
@@ -676,7 +676,7 @@ def main():
                                                    "fallback": "pocket"})
         check("pocket: PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
     finally:
-        _tp050.pocket_available = _orig_avail050
+        _tppk.pocket_available = _orig_availpk
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
     client.put("/api/dashboard/tts", json={
@@ -713,7 +713,7 @@ def main():
     finally:
         subprocess.run = real_run
 
-    # 9b1m. Mute error honesty (2026-10-09, the lying-error incident):
+    # Mute error honesty (2026-10-09, the lying-error incident):
     # a node answering {ok: false, data: "unknown cmd"} to set_mute must
     # 501 with the per-line TRUTH (array = physical button, flex needs
     # 1.1.0+) — never the old lie "(firmware 1.1.0+ required)" that
@@ -722,7 +722,7 @@ def main():
     from dashboard import registry as _reg_mut
     _real_request = _routes_mut.node_command.request
     # seed an online room so _room_online passes (the suite's
-    # connect/tee pattern — see the 9b5 fw_push pins)
+    # connect/tee pattern — see the fw_push pins)
     _reg_mut.note_offer("suite-mute-pc", "suite-mute-probe")
     _reg_mut.mark_connected("suite-mute-pc")
 
@@ -857,7 +857,7 @@ def main():
           not [p for p, _ in PIPECAT_HANDLER_HITS if p.startswith("/api/dashboard")],
           f"hits={[p for p, _ in PIPECAT_HANDLER_HITS][:5]}")
 
-    # 9b2. Key-route hardening: the character-class
+    # Key-route hardening: the character-class
     # pattern must reject newline injection (the old code-exec lane) and
     # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch
     # .env so the suite never touches a real key file.
@@ -887,7 +887,7 @@ def main():
     finally:
         os.environ.pop("LVI_ENV_FILE", None)
 
-    # 9b3. Clip server singleton: SonosOutput and
+    # Clip server singleton: SonosOutput and
     # WiiMOutput must share ONE server. Two mixed-backend pipelines +
     # the dashboard test-clip lane must all resolve to the same object
     # with exactly ONE bind on the port. (Suite runs on port 8766 via
@@ -920,7 +920,7 @@ def main():
     check("clip server url_for works (quotes filenames)",
           _url.endswith("/probe.mp3") and _url.startswith("http://"), f"url={_url}")
 
-    # 9b4. Reply-time backend dispatch regression (the
+    # Reply-time backend dispatch regression (the
     # 2026-10-04 bedroom outage): bot.py must wire BOTH output
     # backends into the pipeline UNCONDITIONALLY. The old build-time
     # ternary picked one backend before the offer tee correlated the
@@ -964,7 +964,7 @@ def main():
           f"wired={_wired} (dispatch must be reply-time, not build-time)")
     check("bot.py: no build-time ternary picks the backend (the bedroom-outage shape)",
           not _conditional, f"conditional={_conditional}")
-    # 9b11 rider (the echo-stub incident): the intelligence construction ternary
+    # Intelligence rider (the echo-stub incident): the intelligence construction ternary
     # must route BOTH live kinds (hermes, openclaw) to IntelligenceAgent — a
     # kind the ternary doesn't know falls to the echo stub silently while
     # every agent-level suite check stays green. The dispatch is the
@@ -1025,7 +1025,7 @@ def main():
     finally:
         _lg.remove(_sink)
 
-    # 9b5. fw_push (firmware 1.1.2 connect-push): a node announcing its
+    # fw_push (firmware 1.1.2 connect-push): a node announcing its
     # RUNNING version on data-channel open lands in the room record and
     # surfaces in known_rooms. Direct path: the room is ALREADY
     # correlated (post-tee) when the push lands. Race path: push before
@@ -1054,7 +1054,7 @@ def main():
               for r in _reg.known_rooms()),
           f"rooms={_reg.known_rooms()}")
 
-    # 9b5c. The OTHER race order (fw=None bug, 2026-10-09): fw_push lands
+    # The OTHER race order (fw=None bug, 2026-10-09): fw_push lands
     # while pc_id has NO binding at all (no connect, no tee yet) — the
     # version is held in _fw_by_pc; note_offer's NON-provisional branch
     # must drain it too. Old code stranded the hold forever here.
@@ -1136,15 +1136,15 @@ def main():
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
                     "ok": True, "data": {"fw": "1.2.29", "line": "waveshare"}}), "test-pc-line")
-    import firmware_image as _fwi052t, firmware_server as _fws052t
+    import firmware_image as _fwiwst, firmware_server as _fwswst
     check("waveshare: the three track tables agree (firmware_image.TRACKS == registry.NODE_LINES == firmware_server.FIRMWARE_TRACKS)",
-          tuple(_fwi052t.TRACKS) == tuple(_reg.NODE_LINES) and set(_fws052t.FIRMWARE_TRACKS) == set(_fwi052t.TRACKS)
-          and set(_fwi052t.TRACK_LABEL) == set(_fwi052t.TRACKS),
-          f"{_fwi052t.TRACKS} {_reg.NODE_LINES} {list(_fws052t.FIRMWARE_TRACKS)} {list(_fwi052t.TRACK_LABEL)}")
-    _gi052 = (Path(__file__).resolve().parent.parent / ".gitignore").read_text().splitlines()
+          tuple(_fwiwst.TRACKS) == tuple(_reg.NODE_LINES) and set(_fwswst.FIRMWARE_TRACKS) == set(_fwiwst.TRACKS)
+          and set(_fwiwst.TRACK_LABEL) == set(_fwiwst.TRACKS),
+          f"{_fwiwst.TRACKS} {_reg.NODE_LINES} {list(_fwswst.FIRMWARE_TRACKS)} {list(_fwiwst.TRACK_LABEL)}")
+    _giws = (Path(__file__).resolve().parent.parent / ".gitignore").read_text().splitlines()
     check("waveshare: every firmware track dir is gitignored (built images never committed)",
-          all(f"firmware/{t}/" in _gi052 for t in _fwi052t.TRACKS),
-          str([t for t in _fwi052t.TRACKS if f"firmware/{t}/" not in _gi052]))
+          all(f"firmware/{t}/" in _giws for t in _fwiwst.TRACKS),
+          str([t for t in _fwiwst.TRACKS if f"firmware/{t}/" not in _giws]))
     check("waveshare line: fw_push line='waveshare' is recorded (third line)",
           _room_rec("line-direct-room").get("line") == "waveshare", str(_room_rec("line-direct-room")))
     node_command.on_message(
@@ -1168,7 +1168,7 @@ def main():
           any(r.get("room") == "line-unbound-room" and r.get("line") == "array"
               for r in _st_line.get("rooms", [])), str(_st_line.get("rooms"))[:200])
 
-    # 9b5b. Track-aware firmware upload: the image + manifest
+    # Track-aware firmware upload: the image + manifest
     # must land in the DECLARED track's directory, and an unknown track
     # 400s. The old route staged everything into firmware/node/ — a
     # Flex .bin there would be OTA'd by an array node (cross-flash).
@@ -1206,7 +1206,7 @@ def main():
                                          "application/octet-stream")},
                          data={"track": "flex"})
         _j = _r.json()
-        check("9b5b flex-track upload lands in firmware/flex/",
+        check("firmware track: flex-track upload lands in firmware/flex/",
               _r.status_code == 200 and _j.get("track") == "flex"
               and _j.get("version") == "1.9.9"
               and (Path("firmware/flex/version.json")).is_file()
@@ -1217,7 +1217,7 @@ def main():
                           files={"file": ("x.bin", _fake_image5b("1.9.8"),
                                           "application/octet-stream")},
                           data={"track": "warp"})
-        check("9b5b unknown track 400s (never a silent wrong dir)",
+        check("firmware track: unknown track 400s (never a silent wrong dir)",
               _rb.status_code == 400, str(_rb.status_code))
         # (c) NO default track — a track-less upload 422s and
         # touches neither track's directory (reverses the earlier
@@ -1229,9 +1229,9 @@ def main():
         _rc = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")})
-        check("9b5b upload without track 422s (no silent array default; not pipecat's Stream-consumed 500)",
+        check("firmware track: upload without track 422s (no silent array default; not pipecat's Stream-consumed 500)",
               _rc.status_code == 422 and "track" in _rc.text, f"{_rc.status_code} {_rc.text[:120]}")
-        check("9b5b track-less upload left both manifests untouched",
+        check("firmware track: track-less upload left both manifests untouched",
               all((Path(f"firmware/{t}/version.json").read_text()
                    if Path(f"firmware/{t}/version.json").exists() else None) == _snap5c[t]
                   for t in ("array", "flex")), str(_snap5c)[:120])
@@ -1240,7 +1240,7 @@ def main():
                           files={"file": ("arr.bin", _fake_image5b("1.9.7"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("9b5b explicit array track upload lands in firmware/array/",
+        check("firmware track: explicit array track upload lands in firmware/array/",
               _rd.status_code == 200 and _rd.json().get("track") == "array"
               and json.loads(Path("firmware/array/version.json").read_text())["version"] == "1.9.7",
               _rd.text[:120])
@@ -1248,63 +1248,63 @@ def main():
         # Board identity — the image's own OTA-track marker must match
         # the declared track; every refusal leaves BOTH tracks' served
         # image + manifest byte-identical.
-        def _snap045():
+        def _snaptk():
             out = {}
             for t in ("array", "flex", "waveshare"):
                 for f in ("version.json", f"{t}_esp32.bin"):
                     q = Path(f"firmware/{t}/{f}")
                     out[f"{t}/{f}"] = q.read_bytes() if q.exists() else None
             return out
-        _before045 = _snap045()
+        _beforetk = _snaptk()
         _re = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "flex"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("9b5b Flex image declared for the ARRAY track -> 400, names the board",
+        check("firmware track: Flex image declared for the ARRAY track -> 400, names the board",
               _re.status_code == 400 and "reSpeaker Flex firmware" in _re.text
               and "track 'flex'" in _re.text, f"{_re.status_code} {_re.text[:160]}")
         _rf = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", "array"),
                                           "application/octet-stream")},
                           data={"track": "flex"})
-        check("9b5b array image declared for the FLEX track -> 400, names the board",
+        check("firmware track: array image declared for the FLEX track -> 400, names the board",
               _rf.status_code == 400 and "array (XVF3800" in _rf.text
               and "track 'array'" in _rf.text, f"{_rf.status_code} {_rf.text[:160]}")
         _rg = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", None),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("9b5b image with NO track marker -> 400 (never guessed onto a track)",
+        check("firmware track: image with NO track marker -> 400 (never guessed onto a track)",
               _rg.status_code == 400 and "can't tell which board" in _rg.text,
               f"{_rg.status_code} {_rg.text[:160]}")
         _rh = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("node_esp32.bin", _fake_image5b("1.9.6", both=True),
                                           "application/octet-stream")},
                           data={"track": "flex"})
-        check("9b5b image with BOTH markers -> 400 (can't be trusted either way)",
+        check("firmware track: image with BOTH markers -> 400 (can't be trusted either way)",
               _rh.status_code == 400 and "can't tell which board" in _rh.text,
               f"{_rh.status_code} {_rh.text[:160]}")
-        _after045 = _snap045()
-        check("9b5b every refusal left both tracks' served image + manifest byte-identical",
-              _after045 == _before045,
-              str([k for k in _before045 if _before045[k] != _after045.get(k)]))
-        _leftover045 = [str(q) for t in ("array", "flex")
+        _aftertk = _snaptk()
+        check("firmware track: every refusal left both tracks' served image + manifest byte-identical",
+              _aftertk == _beforetk,
+              str([k for k in _beforetk if _beforetk[k] != _aftertk.get(k)]))
+        _leftovertk = [str(q) for t in ("array", "flex")
                         for q in Path(f"firmware/{t}").glob("*.uploading")]
-        check("9b5b every refusal cleaned up its .uploading temp", not _leftover045,
-              str(_leftover045))
+        check("firmware track: every refusal cleaned up its .uploading temp", not _leftovertk,
+              str(_leftovertk))
 
         # deploy_firmware.sh's backstop uses the same helper via the CLI
-        import subprocess as _sp045
+        import subprocess as _sptk
         _abv = str(REPO_CORE.parent / "scripts" / "app_bin_version.py")
         _cli = {}
         for _lbl, _img in (("flex", _fake_image5b("1.9.5", "flex")), ("array", _fake_image5b("1.9.5", "array")),
                            ("none", _fake_image5b("1.9.5", None)), ("both", _fake_image5b("1.9.5", both=True))):
-            _fp = Path(SCRATCH) / f"cli045-{_lbl}.bin"
+            _fp = Path(SCRATCH) / f"clitk-{_lbl}.bin"
             _fp.write_bytes(_img)
-            _cli[_lbl] = _sp045.run([sys.executable, _abv, "--track", str(_fp)],
+            _cli[_lbl] = _sptk.run([sys.executable, _abv, "--track", str(_fp)],
                                     capture_output=True, text=True).stdout.strip()
             _fp.unlink()
-        check("9b5b app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
+        check("firmware track: app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
               _cli == {"flex": "flex", "array": "array", "none": "", "both": ""}, str(_cli))
 
         # 2026-10-16: firmware names — one vocabulary, per-line files.
@@ -1312,7 +1312,7 @@ def main():
                           files={"file": ("x.bin", _fake_image5b("1.9.4", "array"),
                                           "application/octet-stream")},
                           data={"track": "node"})
-        check("9b5b retired track name 'node' -> 400 naming array | flex",
+        check("firmware track: retired track name 'node' -> 400 naming array | flex",
               _rn.status_code == 400 and "array | flex" in _rn.text, f"{_rn.status_code} {_rn.text[:120]}")
         # In-field images (<=1.2.8, project node_esp32) are still judged by
         # their URL marker: array legacy URL -> array, flex URL -> flex.
@@ -1320,16 +1320,16 @@ def main():
                           files={"file": ("old.bin", _fake_image5b("1.9.3", "legacy"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        check("9b5b legacy array image (node_esp32 + track-less URL) still uploads to array",
+        check("firmware track: legacy array image (node_esp32 + track-less URL) still uploads to array",
               _rl.status_code == 200 and _rl.json().get("track") == "array", f"{_rl.status_code} {_rl.text[:120]}")
         _rlf = client.post("/api/dashboard/firmware/upload",
                            files={"file": ("oldf.bin", _fake_image5b("1.9.3", "flex", project=b"node_esp32"),
                                            "application/octet-stream")},
                            data={"track": "flex"})
-        check("9b5b legacy flex image (node_esp32 + flex URL) still uploads to flex",
+        check("firmware track: legacy flex image (node_esp32 + flex URL) still uploads to flex",
               _rlf.status_code == 200 and _rlf.json().get("track") == "flex", f"{_rlf.status_code} {_rlf.text[:120]}")
         # A named image must agree with its own URL marker.
-        _before046 = _snap045()
+        _beforenm = _snaptk()
         _rm = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("liar.bin", _fake_image5b("1.9.2", "array", project=b"flex_esp32"),
                                           "application/octet-stream")},
@@ -1342,9 +1342,9 @@ def main():
                            files={"file": ("alien.bin", _fake_image5b("1.9.2", "array", project=b"some_other_app"),
                                            "application/octet-stream")},
                            data={"track": "array"})
-        check("9b5b project name vs URL disagreement / unknown project -> 400, nothing written",
+        check("firmware track: project name vs URL disagreement / unknown project -> 400, nothing written",
               all(r.status_code == 400 and "can't tell which board" in r.text for r in (_rm, _rm2, _rm3))
-              and _snap045() == _before046,
+              and _snaptk() == _beforenm,
               f"{_rm.status_code} {_rm2.status_code} {_rm3.status_code}")
         # Served file is named for its track; a pre-rename .bin is swept.
         Path("firmware/array/node_esp32.bin").write_bytes(b"stale")
@@ -1352,17 +1352,17 @@ def main():
                           files={"file": ("whatever-name.bin", _fake_image5b("1.9.9", "array"),
                                           "application/octet-stream")},
                           data={"track": "array"})
-        _man046 = json.loads(Path("firmware/array/version.json").read_text())
-        check("9b5b upload serves firmware/array/array_esp32.bin, manifest names it, stale node_esp32.bin removed",
+        _mannm = json.loads(Path("firmware/array/version.json").read_text())
+        check("firmware track: upload serves firmware/array/array_esp32.bin, manifest names it, stale node_esp32.bin removed",
               _rs.status_code == 200 and _rs.json().get("filename") == "array_esp32.bin"
-              and _man046 == {"version": "1.9.9", "filename": "array_esp32.bin"}
+              and _mannm == {"version": "1.9.9", "filename": "array_esp32.bin"}
               and sorted(q.name for q in Path("firmware/array").glob("*.bin")) == ["array_esp32.bin"],
-              f"{_rs.text[:120]} {_man046} {[q.name for q in Path('firmware/array').glob('*.bin')]}")
+              f"{_rs.text[:120]} {_mannm} {[q.name for q in Path('firmware/array').glob('*.bin')]}")
         _rsf = client.post("/api/dashboard/firmware/upload",
                            files={"file": ("f.bin", _fake_image5b("1.9.9", "flex"),
                                            "application/octet-stream")},
                            data={"track": "flex"})
-        check("9b5b flex upload serves firmware/flex/flex_esp32.bin",
+        check("firmware track: flex upload serves firmware/flex/flex_esp32.bin",
               _rsf.status_code == 200 and _rsf.json().get("filename") == "flex_esp32.bin"
               and sorted(q.name for q in Path("firmware/flex").glob("*.bin")) == ["flex_esp32.bin"],
               _rsf.text[:120])
@@ -1379,7 +1379,7 @@ def main():
               == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
               and sorted(q.name for q in Path("firmware/waveshare").glob("*.bin")) == ["waveshare_esp32.bin"],
               f"{_rw.status_code} {_rw.text[:120]}")
-        _before052 = _snap045()
+        _beforews = _snaptk()
         _x = [client.post("/api/dashboard/firmware/upload",
                           files={"file": (f"x{i}.bin", _fake_image5b("1.9.1", img), "application/octet-stream")},
                           data={"track": trk})
@@ -1387,7 +1387,7 @@ def main():
                                               ("array", "waveshare"), ("flex", "waveshare"),
                                               ("legacy", "waveshare")))]
         check("waveshare: cross-line uploads refused both ways (waveshare<->array/flex, legacy array) — 400, nothing written",
-              all(r.status_code == 400 for r in _x) and _snap045() == _before052,
+              all(r.status_code == 400 for r in _x) and _snaptk() == _beforews,
               f"{[r.status_code for r in _x]} {_x[0].text[:100]}")
         _rlie = client.post("/api/dashboard/firmware/upload",
                             files={"file": ("lie.bin", _fake_image5b("1.9.1", "waveshare", project=b"flex_esp32"),
@@ -1397,11 +1397,11 @@ def main():
               _rlie.status_code == 400 and "can't tell which board" in _rlie.text, f"{_rlie.status_code} {_rlie.text[:100]}")
 
         # Waveshare: identity is decided by the image itself (not just "unknown track" 400s).
-        import firmware_image as _fwi052
+        import firmware_image as _fwiws
         check("waveshare image_track: a waveshare image identifies as 'waveshare'; a waveshare URL with an array name is None",
-              _fwi052.image_track(_fake_image5b("1.9.1", "waveshare")) == "waveshare"
-              and _fwi052.image_track(_fake_image5b("1.9.1", "waveshare", project=b"array_esp32")) is None
-              and _fwi052.image_track(_fake_image5b("1.9.1", "array")) == "array",
+              _fwiws.image_track(_fake_image5b("1.9.1", "waveshare")) == "waveshare"
+              and _fwiws.image_track(_fake_image5b("1.9.1", "waveshare", project=b"array_esp32")) is None
+              and _fwiws.image_track(_fake_image5b("1.9.1", "array")) == "array",
               "")
         _xw = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("xw.bin", _fake_image5b("1.9.1", "waveshare"), "application/octet-stream")},
@@ -1418,51 +1418,51 @@ def main():
         # The OTA server (core/firmware_server.py) — first suite
         # coverage of the node-facing routes. Tracks point at this scratch.
         import firmware_server as _fws
-        from fastapi import FastAPI as _FA046
-        _saved_tracks046 = dict(_fws.FIRMWARE_TRACKS)
+        from fastapi import FastAPI as _FAnm
+        _saved_tracksnm = dict(_fws.FIRMWARE_TRACKS)
         _fws.FIRMWARE_TRACKS.update({"array": Path("firmware/array").resolve(),
                                      "flex": Path("firmware/flex").resolve(),
                                      "waveshare": Path("firmware/waveshare").resolve()})
         try:
-            _app046 = _FA046()
-            _fws.register_firmware_routes(_app046)
-            _c046 = TestClient(_app046)
-            _legacy = _c046.get("/firmware/version")
-            _arr = _c046.get("/firmware/array/version")
-            _flx = _c046.get("/firmware/flex/version")
-            check("9b5b OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
+            _appnm = _FAnm()
+            _fws.register_firmware_routes(_appnm)
+            _cnm = TestClient(_appnm)
+            _legacy = _cnm.get("/firmware/version")
+            _arr = _cnm.get("/firmware/array/version")
+            _flx = _cnm.get("/firmware/flex/version")
+            check("firmware track OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
                   _legacy.status_code == 200 and _legacy.json() == _arr.json()
                   == {"version": "1.9.9", "filename": "array_esp32.bin"},
                   f"{_legacy.status_code} {_legacy.text[:80]} | {_arr.text[:80]}")
-            check("9b5b OTA: /firmware/flex/version serves the flex manifest",
+            check("firmware track OTA: /firmware/flex/version serves the flex manifest",
                   _flx.status_code == 200 and _flx.json() == {"version": "1.9.9", "filename": "flex_esp32.bin"},
                   _flx.text[:80])
-            _lb = _c046.get("/firmware/array_esp32.bin")
-            _tb = _c046.get("/firmware/array/array_esp32.bin")
-            check("9b5b OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
+            _lb = _cnm.get("/firmware/array_esp32.bin")
+            _tb = _cnm.get("/firmware/array/array_esp32.bin")
+            check("firmware track OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
                   _lb.status_code == 200 and _lb.content == _tb.content
                   == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
-            _wsv = _c046.get("/firmware/waveshare/version")
-            _wsb = _c046.get("/firmware/waveshare/waveshare_esp32.bin")
+            _wsv = _cnm.get("/firmware/waveshare/version")
+            _wsb = _cnm.get("/firmware/waveshare/waveshare_esp32.bin")
             check("waveshare OTA: /firmware/waveshare/version + bin serve the waveshare track",
                   _wsv.status_code == 200 and _wsv.json() == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
                   and _wsb.status_code == 200
                   and _wsb.content == Path("firmware/waveshare/waveshare_esp32.bin").read_bytes(),
                   f"{_wsv.status_code} {_wsv.text[:80]} {_wsb.status_code}")
             check("waveshare OTA: the real FIRMWARE_TRACKS table names waveshare",
-                  "waveshare" in _saved_tracks046
-                  and _saved_tracks046["waveshare"].name == "waveshare", str(list(_saved_tracks046)))
-            check("9b5b OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
-                  _c046.get("/firmware/node/version").status_code == 404, "")
-            check("9b5b OTA: path traversal out of a track dir 404s",
-                  _c046.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
+                  "waveshare" in _saved_tracksnm
+                  and _saved_tracksnm["waveshare"].name == "waveshare", str(list(_saved_tracksnm)))
+            check("firmware track OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
+                  _cnm.get("/firmware/node/version").status_code == 404, "")
+            check("firmware track OTA: path traversal out of a track dir 404s",
+                  _cnm.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
         finally:
             _fws.FIRMWARE_TRACKS.clear()
-            _fws.FIRMWARE_TRACKS.update(_saved_tracks046)
+            _fws.FIRMWARE_TRACKS.update(_saved_tracksnm)
     finally:
         os.chdir(_saved_updir5b)
 
-    # 9b6. OWW model panel (Voice tab): upload validates, select merges,
+    # OWW model panel (Voice tab): upload validates, select merges,
     # delete blocks the active model.
     tmpcfg = os.environ.get("LVI_CONFIG")
     models_dir = os.path.join(os.path.dirname(tmpcfg) if tmpcfg else ".", "unit_test_models")
@@ -1516,55 +1516,55 @@ def main():
                   f"upload={_r_sp.status_code} delete={_r_spdel.status_code}")
         # Wake-word stock models: listed with their licence, selectable by key,
         # never deletable. Restores wake.model afterwards.
-        _wake051 = dict(config_store.read_section("wake") or {})
+        _wakewn = dict(config_store.read_section("wake") or {})
         try:
-            _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
-            _stock051 = [m for m in _rows051 if m.get("source") == "stock"]
+            _rowswn = client.get("/api/dashboard/oww/models").json()["models"]
+            _stockwn = [m for m in _rowswn if m.get("source") == "stock"]
             check("wake name: OWW list carries the 3 stock models with their licence",
-                  sorted(m["name"] for m in _stock051) == ["alexa", "hey_jarvis", "hey_mycroft"]
-                  and all("NC" in (m.get("license") or "") for m in _stock051)
-                  and all(m.get("size", 0) > 0 for m in _stock051), str(_stock051)[:240])
+                  sorted(m["name"] for m in _stockwn) == ["alexa", "hey_jarvis", "hey_mycroft"]
+                  and all("NC" in (m.get("license") or "") for m in _stockwn)
+                  and all(m.get("size", 0) > 0 for m in _stockwn), str(_stockwn)[:240])
             r = client.put("/api/dashboard/oww/select", json={"model": "hey_mycroft", "source": "stock"})
-            _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
+            _rowswn = client.get("/api/dashboard/oww/models").json()["models"]
             check("wake name: selecting a stock model writes the key and marks it active",
                   r.status_code == 200
                   and (config_store.read_section("wake") or {}).get("model") == "hey_mycroft"
-                  and any(m["name"] == "hey_mycroft" and m["selected"] for m in _rows051),
+                  and any(m["name"] == "hey_mycroft" and m["selected"] for m in _rowswn),
                   f"{r.status_code} {r.text[:120]}")
             r = client.put("/api/dashboard/oww/select", json={"model": "not_a_stock", "source": "stock"})
             check("wake name: unknown stock key rejected (422)", r.status_code == 422, f"{r.status_code}")
             r = client.put("/api/dashboard/oww/select", json={"model": "hey_jarvis"})
             check("wake name: a stock key without source=stock is still rejected (422)",
                   r.status_code == 422, f"{r.status_code}")
-            import openwakeword as _oww051
-            _pkg051 = _oww051.models["hey_jarvis"]["model_path"]
+            import openwakeword as _owwwn
+            _pkgwn = _owwwn.models["hey_jarvis"]["model_path"]
             r = client.delete("/api/dashboard/oww/models/hey_jarvis?source=stock")
             check("wake name: a stock model can't be deleted (409), package file untouched",
-                  r.status_code == 409 and os.path.isfile(_pkg051), f"{r.status_code}")
+                  r.status_code == 409 and os.path.isfile(_pkgwn), f"{r.status_code}")
             # R-M10: a broken stock entry must not hide the custom rows
-            import wake_name as _wn051r
-            _orig_res051 = _wn051r.resolve_model
+            import wake_name as _wnwnr
+            _orig_reswn = _wnwnr.resolve_model
 
-            def _boom051(value=None):
-                if value in _wn051r.STOCK_MODELS:
+            def _boomwn(value=None):
+                if value in _wnwnr.STOCK_MODELS:
                     raise KeyError(value)
-                return _orig_res051(value)
-            _wn051r.resolve_model = _boom051
-            _probe051 = Path(models_dir) / "zz_custom_probe.onnx"
-            _probe051.write_bytes(b"x" * 2048)   # listing doesn't validate contents
+                return _orig_reswn(value)
+            _wnwnr.resolve_model = _boomwn
+            _probewn = Path(models_dir) / "zz_custom_probe.onnx"
+            _probewn.write_bytes(b"x" * 2048)   # listing doesn't validate contents
             try:
                 r = client.get("/api/dashboard/oww/models")
-                _ok051 = r.status_code == 200
-                _rows_b051 = r.json().get("models", []) if _ok051 else []
+                _okwn = r.status_code == 200
+                _rows_bwn = r.json().get("models", []) if _okwn else []
             finally:
-                _wn051r.resolve_model = _orig_res051
-                _probe051.unlink(missing_ok=True)
+                _wnwnr.resolve_model = _orig_reswn
+                _probewn.unlink(missing_ok=True)
             check("wake name: OWW list survives a broken stock entry (custom rows still listed)",
-                  _ok051 and any(m["source"] != "stock" for m in _rows_b051)
-                  and not any(m["source"] == "stock" for m in _rows_b051),
-                  f"{r.status_code} {str(_rows_b051)[:160]}")
+                  _okwn and any(m["source"] != "stock" for m in _rows_bwn)
+                  and not any(m["source"] == "stock" for m in _rows_bwn),
+                  f"{r.status_code} {str(_rows_bwn)[:160]}")
         finally:
-            config_store.write_section("wake", _wake051)
+            config_store.write_section("wake", _wakewn)
     finally:
         os.environ.pop("LVI_MODELS_DIR", None)
         shutil.rmtree(models_dir, ignore_errors=True)
@@ -1616,7 +1616,7 @@ def main():
     check("tuning write preserves wake.enabled (merge, not replace)",
           wake_after.get("enabled") is True, f"wake={wake_after}")
 
-    # 9b7. Load-anchored speech timers (2026-10-05): the v4
+    # Load-anchored speech timers (2026-10-05): the v4
     # dialogue lane's gen->load gap made generation-anchored timers fire
     # early — end-of-speech LED flipped the ring to 'listening' mid-reply,
     # echo gate reopened the mic, note_speech capped the LOCKED release.
@@ -1856,7 +1856,7 @@ def main():
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
 
-    # 9b8. Epoch turns + wake-word barge-in: turns
+    # Epoch turns + wake-word barge-in: turns
     # run as background tasks (frame loop never blocks on the intelligence), a
     # new question supersedes (old reply discarded, no history write,
     # ack spoken), and the wake word twice-confirmed during LOCKED fires
@@ -1864,7 +1864,7 @@ def main():
     if True:  # scope block
         import os as _os
         _os.environ["LVI_HERMES_KEY"] = "suite-test-key-not-real"
-        _os.environ["LVI_SESSIONS"] = str(SCRATCH / "sessions-9b8.json")
+        _os.environ["LVI_SESSIONS"] = str(SCRATCH / "sessions-t8.json")
         from pipecat.frames.frames import (  # noqa: E402
             TranscriptionFrame as _TF,
             VADUserStartedSpeakingFrame as _VADStart,
@@ -1948,7 +1948,7 @@ def main():
         _SPOKEN8 = []
 
         async def _agent_probe():
-            agent = _Agent(echo_gate=_EchoGate8(), room="suite-9b8",
+            agent = _Agent(echo_gate=_EchoGate8(), room="suite-t8",
                            session_mode="fresh")
             _calls = {"n": 0}
 
@@ -1993,17 +1993,17 @@ def main():
 
         try:
             _agent, _block_time = _asyncio.run(_agent_probe())
-            check("9b8 turn: frame loop never blocks on the intelligence (was 2.5s)",
+            check("turns turn: frame loop never blocks on the intelligence (was 2.5s)",
                   _block_time < 0.5, f"blocked={_block_time:.2f}s")
-            check("9b8 turn: superseded reply never spoken (stale question dropped)",
+            check("turns turn: superseded reply never spoken (stale question dropped)",
                   not any("weather" in s for s in _SPOKEN8),
                   f"spoken={_SPOKEN8}")
-            check("9b8 turn: supersede ack spoken",
+            check("turns turn: supersede ack spoken",
                   any("switching" in s for s in _SPOKEN8), f"spoken={_SPOKEN8}")
-            check("9b8 turn: new turn's reply spoken",
+            check("turns turn: new turn's reply spoken",
                   any("time is it" in s for s in _SPOKEN8), f"spoken={_SPOKEN8}")
             _hist = [h.get("content", "") for h in _agent._history]
-            check("9b8 turn: no history write for the dead turn",
+            check("turns turn: no history write for the dead turn",
                   not any("weather" in h for h in _hist) and
                   any("time is it" in h for h in _hist), f"hist={_hist}")
 
@@ -2027,9 +2027,9 @@ def main():
                 return wf, fired, one
 
             _wf8, _fired8, _one8 = _asyncio.run(_wake_probe())
-            check("9b8 wake: one over-threshold frame does NOT fire (2-frame confirm)",
+            check("turns wake: one over-threshold frame does NOT fire (2-frame confirm)",
                   _one8 == 0, f"fired_after_one={_one8}")
-            check("9b8 wake: two consecutive frames fire the interrupt, gate reopens",
+            check("turns wake: two consecutive frames fire the interrupt, gate reopens",
                   len(_fired8) == 1 and _wf8._state is _TurnState.AWAKE,
                   f"fired={len(_fired8)} state={_wf8._state}")
             # knob OFF = today's behavior: even two frames never fire.
@@ -2051,7 +2051,7 @@ def main():
                 return wf, fired
 
             _wf8b, _fired8b = _asyncio.run(_wake_probe_off())
-            check("9b8 wake: barge_in default OFF never interrupts (bit-for-bit old)",
+            check("turns wake: barge_in default OFF never interrupts (bit-for-bit old)",
                   not _fired8b and _wf8b._state is _TurnState.LOCKED,
                   f"fired={len(_fired8b)} state={_wf8b._state}")
 
@@ -2079,11 +2079,11 @@ def main():
                 return wf, ran
 
             _wf8c, _ran8c = _asyncio.run(_wake_probe_async())
-            check("9b8 wake: ASYNC on_interrupt coroutine actually runs",
+            check("turns wake: ASYNC on_interrupt coroutine actually runs",
                   len(_ran8c) == 1 and _wf8c._interrupt_task is not None
                   and _wf8c._interrupt_task.done(),
                   f"ran={len(_ran8c)} task={getattr(_wf8c, '_interrupt_task', 'missing')}")
-            # ── backend clip stop (fake player layers, 9b7 pattern) ──
+            # ── backend clip stop (fake player layers, speech-timer pattern) ──
             _CANCELS8 = []
 
             class _FakeSw8:
@@ -2095,7 +2095,7 @@ def main():
 
                 async def play_clip(self, url, volume=None):
                     await asyncio.sleep(0.05)
-                    return {"clipId": "clip-9b8"}
+                    return {"clipId": "clip-t8"}
 
                 async def cancel_clip(self, cid):
                     _CANCELS8.append(cid)
@@ -2129,13 +2129,13 @@ def main():
 
                 _so8 = _asyncio.run(_stop_probe())
                 _id8 = _so8._reply_clip_id
-                check("9b8 stop: reply clip id held before interrupt", _id8 is not None,
+                check("turns stop: reply clip id held before interrupt", _id8 is not None,
                       f"id={_id8}")
                 if _id8 is not None:
                     _asyncio.run(_so8.stop_current_clip())
-                    check("9b8 stop: sonos barge-in cancels the held clipId",
-                          "clip-9b8" in _CANCELS8, f"cancels={_CANCELS8}")
-                    check("9b8 stop: interrupt is idempotent (second call, no clip)",
+                    check("turns stop: sonos barge-in cancels the held clipId",
+                          "clip-t8" in _CANCELS8, f"cancels={_CANCELS8}")
+                    check("turns stop: interrupt is idempotent (second call, no clip)",
                           _so8._reply_clip_id is None, "clip id not cleared")
                 _WIIM_CMDS8 = []
                 _real_wiim8 = _wo_mod.wiim_api if "_wo_mod" in dir() else None
@@ -2160,7 +2160,7 @@ def main():
                         return wo
 
                     _wo8b = _asyncio.run(_wiim_stop_probe())
-                    check("9b8 stop: wiim barge-in sends setPlayerCmd:stop",
+                    check("turns stop: wiim barge-in sends setPlayerCmd:stop",
                           any("setPlayerCmd:stop" in c for c in _WIIM_CMDS8),
                           f"cmds={_WIIM_CMDS8}")
                 finally:
@@ -2171,13 +2171,13 @@ def main():
                 else:
                     sys.modules["sonos_websocket"] = _saved_ws8
 
-            # 9b9. Frame passthrough (the "you wont wake" outage): the
+            # Frame passthrough (the "you wont wake" outage): the
             # epoch-turn _run_turn extraction lost process_frame's final push_frame —
             # the agent ate EVERY frame, StartFrame never reached the sink,
             # PipelineWorker killed the session at +20s, and the node rode a
             # reconnect loop. Every processor MUST pass frames downstream.
             async def _passthrough_probe():
-                _agent2 = _Agent(echo_gate=_EchoGate8(), room="suite-9b9",
+                _agent2 = _Agent(echo_gate=_EchoGate8(), room="suite-t9",
                                  session_mode="fresh")
                 _seen2 = []
 
@@ -2192,11 +2192,11 @@ def main():
 
             from pipecat.frames.frames import BotStoppedSpeakingFrame  # noqa: E402
             _frames2, _seen2 = _asyncio.run(_passthrough_probe())
-            check("9b9 agent: every frame passes through (StartFrame must reach the sink)",
+            check("passthrough agent: every frame passes through (StartFrame must reach the sink)",
                   all(any(x is f for x in _seen2) for f in _frames2),
                   f"forwarded={sum(1 for f in _frames2 if any(x is f for x in _seen2))}/{len(_frames2)}")
 
-            # 9b10. Echo-gate relax on confirmed wakes and barge-ins (the
+            # Echo-gate relax on confirmed wakes and barge-ins (the
             # double-wake bug): a wake during a sounding clip must
             # shorten the gate's block to a tail so the follow-up question
             # lands; stop_current_clip must do the same; a lapsed gate
@@ -2228,11 +2228,11 @@ def main():
                 return _after_wake, _after_barge, _lapsed
 
             _aw, _ab, _lap = _asyncio.run(_relax_probe())
-            check("9b10 echo: normal wake relaxes the gate (follow-up lands)",
+            check("echo gate: normal wake relaxes the gate (follow-up lands)",
                   _aw <= 0.6, f"remaining={_aw:.2f}s")
-            check("9b10 echo: barge-in interrupt relaxes the gate",
+            check("echo gate: barge-in interrupt relaxes the gate",
                   _ab <= 0.6, f"remaining={_ab:.2f}s")
-            check("9b10 echo: relax never extends a lapsed gate",
+            check("echo gate: relax never extends a lapsed gate",
                   not _lap, "gate became blocked with no clip")
             # stop_current_clip relaxes the gate (sonos backend)
             async def _stop_relax_probe():
@@ -2247,10 +2247,10 @@ def main():
                 return _g3._blocked_until - time.monotonic()
 
             _stop_rem = _asyncio.run(_stop_relax_probe())
-            check("9b10 echo: stop_current_clip relaxes the gate",
+            check("echo gate: stop_current_clip relaxes the gate",
                   _stop_rem <= 0.6, f"remaining={_stop_rem:.2f}s")
 
-            # 9b11. Intelligence lane: config round-trip
+            # Intelligence lane: config round-trip
             # preserves intelligence.fillers (merge law), lane dispatch shapes
             # per kind, key fallback order + no-KeyError, key POST never
             # echoes material, test probe ok/error paths.
@@ -2262,36 +2262,36 @@ def main():
             _r = client.put("/api/dashboard/intelligence", json={
                 "kind": "openclaw", "url": "http://127.0.0.1:18789/v1",
                 "agent": "suite-agent"})
-            check("9b11 PUT ok", _r.status_code == 200, _r.text[:120])
+            check("intelligence: PUT ok", _r.status_code == 200, _r.text[:120])
             import yaml as _yaml9
             _brain9 = _yaml9.safe_load(
                 Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
-            check("9b11 PUT writes kind/url/agent",
+            check("intelligence: PUT writes kind/url/agent",
                   _brain9.get("kind") == "openclaw"
                   and _brain9.get("url") == "http://127.0.0.1:18789/v1"
                   and _brain9.get("agent") == "suite-agent",
                   str(_brain9)[:120])
-            check("9b11 PUT merge: fillers survive",
+            check("intelligence: PUT merge: fillers survive",
                   "fillers" in _brain9, str(_brain9)[:160])
             # GET round-trips
             _g = client.get("/api/dashboard/intelligence").json()
-            check("9b11 GET returns kind/agent/key_set",
+            check("intelligence: GET returns kind/agent/key_set",
                   _g.get("kind") == "openclaw" and _g.get("agent") == "suite-agent"
                   and "key_set" in _g, str(_g)[:120])
             # (a2) per-kind URL memory: PUT files url under the kind; GET
             # returns the recall map; switching kinds keeps each URL.
             _r2 = client.put("/api/dashboard/intelligence", json={
                 "kind": "hermes", "url": "http://127.0.0.1:8642/v1"})
-            check("9b11b switch to hermes ok", _r2.status_code == 200, _r2.text[:120])
+            check("intelligence: switch to hermes ok", _r2.status_code == 200, _r2.text[:120])
             _brain9b = _yaml9.safe_load(
                 Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
-            check("9b11b urls map holds both kinds",
+            check("intelligence: urls map holds both kinds",
                   _brain9b.get("url") == "http://127.0.0.1:8642/v1"
                   and _brain9b.get("urls", {}).get("openclaw") == "http://127.0.0.1:18789/v1"
                   and _brain9b.get("urls", {}).get("hermes") == "http://127.0.0.1:8642/v1",
                   str(_brain9b.get("urls"))[:160])
             _g2 = client.get("/api/dashboard/intelligence").json()
-            check("9b11b GET returns urls map", _g2.get("urls", {}).get("openclaw")
+            check("intelligence: GET returns urls map", _g2.get("urls", {}).get("openclaw")
                   == "http://127.0.0.1:18789/v1", str(_g2.get("urls"))[:120])
             # Bare kind flip: no url in the payload — the route
             # must restore THAT kind's remembered URL, not keep the other
@@ -2299,7 +2299,7 @@ def main():
             _r3 = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
             _brain9c = _yaml9.safe_load(
                 Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
-            check("9b11b bare kind flip restores that kind's remembered URL",
+            check("intelligence: bare kind flip restores that kind's remembered URL",
                   _brain9c.get("url") == "http://127.0.0.1:18789/v1",
                   f"url={_brain9c.get('url')}")
             # restore kind for later checks: the lane probes below build
@@ -2309,13 +2309,13 @@ def main():
 
             # (b) invalid kind / agent / url -> 422
             _bad = client.put("/api/dashboard/intelligence", json={"kind": "claude"})
-            check("9b11 retired kind 422s", _bad.status_code == 422, str(_bad.status_code))
+            check("intelligence: retired kind 422s", _bad.status_code == 422, str(_bad.status_code))
             _bad2 = client.put("/api/dashboard/intelligence",
                                json={"kind": "openclaw", "agent": "bad agent!"})
-            check("9b11 invalid agent 422s", _bad2.status_code == 422, str(_bad2.status_code))
+            check("intelligence: invalid agent 422s", _bad2.status_code == 422, str(_bad2.status_code))
             _bad3 = client.put("/api/dashboard/intelligence",
                                json={"kind": "openclaw", "url": "ftp://nope"})
-            check("9b11 invalid url 422s", _bad3.status_code == 422, str(_bad3.status_code))
+            check("intelligence: invalid url 422s", _bad3.status_code == 422, str(_bad3.status_code))
 
             # (c) lane dispatch: monkeypatched urlopen captures the request
             _cap9 = []
@@ -2351,13 +2351,13 @@ def main():
                 _a9._ask_intelligence("hi")
                 _oc_body = _cap9[-1]["body"]
                 _oc_hdr = _cap9[-1]["headers"]
-                check("9b11 openclaw lane: model encodes agent, no conversation",
+                check("intelligence: openclaw lane: model encodes agent, no conversation",
                       _oc_body.get("model") == "openclaw/suite-agent"
                       and "conversation" not in _oc_body, str(_oc_body)[:140])
-                check("9b11 openclaw lane: sticky session-key header",
+                check("intelligence: openclaw lane: sticky session-key header",
                       _oc_hdr.get("x-openclaw-session-key") == "voice-suite",
                       str(_oc_hdr.get("x-openclaw-session-key")))
-                check("9b11 openclaw lane: LVI_OPENCLAW_KEY wins (naming law 2026-10-08)",
+                check("intelligence: openclaw lane: LVI_OPENCLAW_KEY wins (naming law 2026-10-08)",
                       _oc_hdr.get("authorization") == "Bearer suite-openclaw-key-not-real",
                       str(_oc_hdr.get("authorization")))
                 # strict key law (2026-10-08): NO cross-kind fallback —
@@ -2378,14 +2378,14 @@ def main():
                 except RuntimeError as _e9:
                     _strict_ok9 = "LVI_OPENCLAW_KEY" in str(_e9)
                     _strict_err9 = str(_e9)[:80]
-                check("9b11 openclaw lane: missing LVI_OPENCLAW_KEY fails loud, names its own variable",
+                check("intelligence: openclaw lane: missing LVI_OPENCLAW_KEY fails loud, names its own variable",
                       _strict_ok9, _strict_err9)
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
                 # fresh: header absent
                 _a9f = _ha9.IntelligenceAgent(lull_secs=0.05, room="suite",
                                         session_mode="fresh")
                 _a9f._ask_intelligence("hi")
-                check("9b11 openclaw lane: fresh sends no session header",
+                check("intelligence: openclaw lane: fresh sends no session header",
                       "x-openclaw-session-key" not in _cap9[-1]["headers"], "")
                 # hermes round-trip: flip kind back, conversation field returns
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
@@ -2398,7 +2398,7 @@ def main():
                 _a9b._ask_intelligence("hi")
                 _hm_body = _cap9[-1]["body"]
                 _hm_hdr = _cap9[-1]["headers"]
-                check("9b11 hermes round-trip: conversation field + Hermes header restored",
+                check("intelligence: hermes round-trip: conversation field + Hermes header restored",
                       _hm_body.get("conversation") and
                       _hm_hdr.get("x-hermes-session-key") == _hm_body.get("conversation"),
                       str(_hm_body)[:140])
@@ -2406,7 +2406,7 @@ def main():
                 # lane must auth with LVI_HERMES_KEY even when LVI_BRAIN_KEY
                 # (the OpenClaw token on the real rig) is also set. A kind
                 # flip must never cross the tokens.
-                check("9b11 hermes lane: kind-aware key (LVI_HERMES_KEY wins on hermes)",
+                check("intelligence: hermes lane: kind-aware key (LVI_HERMES_KEY wins on hermes)",
                       _hm_hdr.get("authorization") == "Bearer suite-hermes-key-not-real",
                       str(_hm_hdr.get("authorization")))
                 # no key at all: construction survives, ask raises RuntimeError
@@ -2418,15 +2418,15 @@ def main():
                                              session_mode="fresh")
                     try:
                         _a9c._ask_intelligence("hi")
-                        check("9b11 no-key: ask raises (not success)", False, "no raise")
+                        check("intelligence no-key: ask raises (not success)", False, "no raise")
                     except RuntimeError as _e9:
-                        check("9b11 no-key: RuntimeError with a clear message",
+                        check("intelligence no-key: RuntimeError with a clear message",
                               "no intelligence key" in str(_e9).lower(), str(_e9))
                     except KeyError as _e9:
-                        check("9b11 no-key: RuntimeError with a clear message",
+                        check("intelligence no-key: RuntimeError with a clear message",
                               False, f"KeyError brick: {_e9}")
                 except KeyError as _e9:
-                    check("9b11 no-key: construction survives", False,
+                    check("intelligence no-key: construction survives", False,
                           f"KeyError brick: {_e9}")
             finally:
                 _urq9.urlopen = _saved_open9
@@ -2449,28 +2449,28 @@ def main():
                                  json={"kind": "hermes",
                                        "api_key": "suite-keymaterial-12345"})
                 _kj = _kr.json()
-                check("9b11 key POST ok + never echoes material",
+                check("intelligence: key POST ok + never echoes material",
                       _kr.status_code == 200 and _kj.get("key_set") is True
                       and "suite-keymaterial-12345" not in _kr.text,
                       _kr.text[:120])
                 _kbad = client.put("/api/dashboard/intelligence/key",
                                    json={"kind": "hermes", "api_key": "bad\nkey"})
-                check("9b11 key POST newline 422s", _kbad.status_code == 422, "")
+                check("intelligence: key POST newline 422s", _kbad.status_code == 422, "")
                 # Contract pins: kind is REQUIRED (no silent
                 # guess from config), only shipped lanes, extra="forbid".
                 _knk = client.put("/api/dashboard/intelligence/key",
                                   json={"api_key": "suite-keymaterial-12345"})
-                check("9b11c key POST without kind 422s",
+                check("intelligence: key POST without kind 422s",
                       _knk.status_code == 422, _knk.text[:120])
                 _kbk = client.put("/api/dashboard/intelligence/key",
                                   json={"kind": "claude",
                                         "api_key": "suite-keymaterial-12345"})
-                check("9b11c key POST unshipped kind 422s",
+                check("intelligence: key POST unshipped kind 422s",
                       _kbk.status_code == 422, _kbk.text[:120])
                 _kex = client.put("/api/dashboard/intelligence/key",
                                   json={"kind": "hermes", "apikey": "x",
                                         "api_key": "suite-keymaterial-12345"})
-                check("9b11c key POST extra field 422s (forbid)",
+                check("intelligence: key POST extra field 422s (forbid)",
                       _kex.status_code == 422, _kex.text[:120])
                 # Pin: the variable follows the PAYLOAD's
                 # kind, NOT config.yaml's. The UI-rebuilt 401: dropdown on
@@ -2494,17 +2494,17 @@ def main():
                     _kx2 = client.put("/api/dashboard/intelligence/key",
                                       json={"kind": "hermes",
                                             "api_key": "suite-keymaterial-12345"})
-                    check("9b11b key save follows payload kind, not config",
+                    check("intelligence: key save follows payload kind, not config",
                           _wek_calls9 == ["LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"],
                           f"calls={_wek_calls9}")
-                    check("9b11b key response names the variable written",
+                    check("intelligence: key response names the variable written",
                           _kx1.json().get("var") == "LVI_OPENCLAW_KEY"
                           and _kx2.json().get("var") == "LVI_HERMES_KEY",
                           f"{_kx1.text[:80]} | {_kx2.text[:80]}")
                     _cfg_kind9 = (_yaml9.safe_load(
                         Path(os.environ["LVI_CONFIG"]).read_text())
                         .get("intelligence") or {}).get("kind")
-                    check("9b11b key save never touches config kind",
+                    check("intelligence: key save never touches config kind",
                           _cfg_kind9 == "openclaw", f"kind={_cfg_kind9}")
                     # GET reports key status for EVERY kind (chip follows
                     # the kind on screen).
@@ -2513,7 +2513,7 @@ def main():
                     _os.environ["LVI_OPENCLAW_KEY"] = "suite-oc-token-123"
                     try:
                         _gk9 = client.get("/api/dashboard/intelligence").json()
-                        check("9b11c GET keys_set per kind",
+                        check("intelligence: GET keys_set per kind",
                               _gk9.get("keys_set") == {"hermes": False, "openclaw": True}
                               and "suite-oc-token-123" not in str(_gk9),
                               str(_gk9.get("keys_set")))
@@ -2531,7 +2531,7 @@ def main():
             finally:
                 _routes9._write_env_key = _saved_wek9
 
-            # 9b16. Agent picker + masked key hints (2026-10-17): agents
+            # Agent picker + masked key hints (2026-10-17): agents
             # discovered per provider, remembered per kind; a Hermes profile
             # routes to <base>/p/<agent>/v1 with ITS OWN key; set keys show
             # their first 4 characters, never more.
@@ -2540,22 +2540,22 @@ def main():
             import http.server as _hs12
             _h12 = _it12.key_hint
             _M12 = "\u2022" * 8
-            check("9b16 key_var: hermes default -> LVI_HERMES_KEY, profile -> LVI_HERMES_KEY_<AGENT>, openclaw shares one",
+            check("agent picker key_var: hermes default -> LVI_HERMES_KEY, profile -> LVI_HERMES_KEY_<AGENT>, openclaw shares one",
                   _it12.key_var("hermes", "") == "LVI_HERMES_KEY"
                   and _it12.key_var("hermes", "default") == "LVI_HERMES_KEY"
                   and _it12.key_var("hermes", "home-helper") == "LVI_HERMES_KEY_HOME_HELPER"
                   and _it12.key_var("openclaw", "lenoxvi-test") == "LVI_OPENCLAW_KEY", "")
-            check("9b16 request_url: hermes profile -> /p/<agent>/v1; default + openclaw unchanged",
+            check("agent picker request_url: hermes profile -> /p/<agent>/v1; default + openclaw unchanged",
                   _it12.request_url("hermes", "http://h:8642/v1", "home-helper") == "http://h:8642/p/home-helper/v1"
                   and _it12.request_url("hermes", "http://h:8642/v1/", "default") == "http://h:8642/v1"
                   and _it12.request_url("hermes", "http://h:8642/p/old/v1", "home-helper") == "http://h:8642/p/home-helper/v1"
                   and _it12.request_url("openclaw", "http://o:18789", "x") == "http://o:18789", "")
-            check("9b16 legacy top-level agent never reroutes Hermes (kind hermes + agent lenoxvi-test)",
+            check("agent picker: legacy top-level agent never reroutes Hermes (kind hermes + agent lenoxvi-test)",
                   _it12.agent_for({"agent": "lenoxvi-test"}, "hermes") == ""
                   and _it12.agent_for({"agent": "lenoxvi-test"}, "openclaw") == "lenoxvi-test"
                   and _it12.agent_for({"agents": {"hermes": "default"}}, "hermes") == ""
                   and _it12.agent_for({"agents": {"hermes": "home-helper"}}, "hermes") == "home-helper", "")
-            check("9b16 key hint: first 4 + fixed-length mask; short keys show no characters; unset -> None",
+            check("agent picker: key hint: first 4 + fixed-length mask; short keys show no characters; unset -> None",
                   _h12("abcdefghijklmnop") == "abcd" + _M12
                   and _h12("abcdefghijklmnopqrstuvwxyz0123456789") == "abcd" + _M12
                   and _h12("short1234") == _M12 and _h12("") is None and _h12(None) is None, "")
@@ -2593,31 +2593,31 @@ def main():
             _saved_open12 = _urq9.urlopen
             try:
                 _oc12 = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", _env12)
-                check("9b16 openclaw discovery: openclaw/<agent> ids only, invalid names dropped, token sent",
+                check("agent picker: openclaw discovery: openclaw/<agent> ids only, invalid names dropped, token sent",
                       [a["id"] for a in _oc12["agents"]] == ["default", "suite-a"]
                       and _auth12[-1] == "Bearer ockey-abcdefghijkl", str(_oc12)[:200])
                 _oc12b = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}/v1", _env12)
-                check("9b16 openclaw discovery: URL with or without /v1",
+                check("agent picker: openclaw discovery: URL with or without /v1",
                       [a["id"] for a in _oc12b["agents"]] == ["default", "suite-a"], str(_oc12b)[:120])
                 _hm12 = _it12.discover_agents("hermes", "http://ignored/v1", _env12,
                                               status_url=f"http://127.0.0.1:{_port12}/api/status")
-                check("9b16 hermes discovery: profiles from status, default first, parked + invalid dropped",
+                check("agent picker: hermes discovery: profiles from status, default first, parked + invalid dropped",
                       [a["id"] for a in _hm12["agents"]] == ["default", "home-helper"]
                       and _hm12["source"] == "hermes-status", str(_hm12)[:200])
                 _by12 = {a["id"]: a for a in _hm12["agents"]}
-                check("9b16 hermes discovery: per-profile key status (default set, profile unset)",
+                check("agent picker: hermes discovery: per-profile key status (default set, profile unset)",
                       _by12["default"]["key_set"] and not _by12["home-helper"]["key_set"]
                       and _by12["home-helper"]["key_hint"] is None, str(_by12)[:200])
-                check("9b16 discovery never returns key material (hint = first 4 only)",
+                check("agent picker: discovery never returns key material (hint = first 4 only)",
                       "abcdefghijkl" not in json.dumps([_oc12, _hm12])
                       and _by12["default"]["key_hint"] == "hmke" + _M12, "")
                 _hd12 = _it12.discover_agents("hermes", "http://127.0.0.1:9/v1", _env12, timeout=1.0,
                                               status_url="http://127.0.0.1:9/api/status")
-                check("9b16 hermes discovery: dashboard down -> default agent + honest note",
+                check("agent picker: hermes discovery: dashboard down -> default agent + honest note",
                       [a["id"] for a in _hd12["agents"]] == ["default"] and _hd12["source"] == "fallback"
                       and "default agent only" in (_hd12.get("note") or ""), str(_hd12)[:200])
                 _nk12 = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", {})
-                check("9b16 openclaw discovery without a key says so",
+                check("agent picker: openclaw discovery without a key says so",
                       _nk12["agents"] == [] and "key" in (_nk12.get("note") or ""), str(_nk12))
 
                 # route: kind validated, URL override, hermes via the status port
@@ -2626,29 +2626,29 @@ def main():
                 _it12.HERMES_STATUS_PORT = _port12
                 _ra12 = client.post("/api/dashboard/intelligence/agents",
                                     json={"kind": "openclaw", "url": f"http://127.0.0.1:{_port12}"})
-                check("9b16 POST /intelligence/agents openclaw: agents + selected",
+                check("agent picker: POST /intelligence/agents openclaw: agents + selected",
                       _ra12.status_code == 200 and [a["id"] for a in _ra12.json()["agents"]] == ["default", "suite-a"]
                       and "selected" in _ra12.json(), _ra12.text[:200])
                 _rh12 = client.post("/api/dashboard/intelligence/agents",
                                     json={"kind": "hermes", "url": "http://127.0.0.1:1/v1"})
-                check("9b16 POST /intelligence/agents hermes: profiles via the status port, no key material",
+                check("agent picker: POST /intelligence/agents hermes: profiles via the status port, no key material",
                       _rh12.status_code == 200 and [a["id"] for a in _rh12.json()["agents"]] == ["default", "home-helper"]
                       and "abcdefghijkl" not in _rh12.text, _rh12.text[:200])
                 _rb12 = client.post("/api/dashboard/intelligence/agents", json={"kind": "claude"})
                 _rb12b = client.post("/api/dashboard/intelligence/agents", json={"kind": "hermes", "url": "file:///etc"})
-                check("9b16 POST /intelligence/agents: unknown kind + non-http URL 422",
+                check("agent picker: POST /intelligence/agents: unknown kind + non-http URL 422",
                       _rb12.status_code == 422 and _rb12b.status_code == 422, f"{_rb12.status_code} {_rb12b.status_code}")
 
                 # PUT: agent filed under its kind; legacy key only for openclaw
                 client.put("/api/dashboard/intelligence", json={"kind": "openclaw", "agent": "suite-a"})
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "home-helper"})
                 _c12 = _yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
-                check("9b16 PUT files the agent per kind (hermes never overwrites openclaw's)",
+                check("agent picker: PUT files the agent per kind (hermes never overwrites openclaw's)",
                       (_c12.get("agents") or {}).get("hermes") == "home-helper"
                       and (_c12.get("agents") or {}).get("openclaw") == "suite-a"
                       and _c12.get("agent") == "suite-a", str(_c12.get("agents")) + " agent=" + str(_c12.get("agent")))
                 _g12 = client.get("/api/dashboard/intelligence").json()
-                check("9b16 GET agents per kind + first-4 key hints, never the key",
+                check("agent picker: GET agents per kind + first-4 key hints, never the key",
                       _g12.get("agents") == {"hermes": "home-helper", "openclaw": "suite-a"}
                       and (_g12.get("key_hints") or {}).get("openclaw") == "ocke" + _M12
                       and "abcdefghijkl" not in json.dumps(_g12), str(_g12)[:240])
@@ -2667,7 +2667,7 @@ def main():
                 _urq9.urlopen = _fake_open12
                 _a12 = _ia12.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
                 _a12._ask_intelligence("hi")
-                check("9b16 hermes profile turn: /p/home-helper/v1 + LVI_HERMES_KEY_HOME_HELPER",
+                check("agent picker: hermes profile turn: /p/home-helper/v1 + LVI_HERMES_KEY_HOME_HELPER",
                       _urls12[-1][0].endswith("/p/home-helper/v1/chat/completions")
                       and _urls12[-1][1].get("authorization") == "Bearer helper-key-not-real-123",
                       f"{_urls12[-1][0]} {_urls12[-1][1].get('authorization')}")
@@ -2677,7 +2677,7 @@ def main():
                 import intelligence_agent as _ia12b
                 _a12b = _ia12b.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
                 _a12b._ask_intelligence("hi")
-                check("9b16 hermes default agent: configured URL + LVI_HERMES_KEY (unchanged behaviour)",
+                check("agent picker: hermes default agent: configured URL + LVI_HERMES_KEY (unchanged behaviour)",
                       "/p/" not in _urls12[-1][0]
                       and _urls12[-1][1].get("authorization") == "Bearer hmkey-abcdefghijkl", _urls12[-1][0])
 
@@ -2685,7 +2685,7 @@ def main():
                 _urls12.clear()
                 _routes9._intelligence_probe({"kind": "hermes", "url": "http://127.0.0.1:1/v1",
                                               "agents": {"hermes": "home-helper"}})
-                check("9b16 Test probe uses the profile URL + its key",
+                check("agent picker: Test probe uses the profile URL + its key",
                       any(u.endswith("/p/home-helper/v1/chat/completions")
                           and h.get("authorization") == "Bearer helper-key-not-real-123" for u, h in _urls12),
                       str([u for u, _ in _urls12]))
@@ -2704,18 +2704,18 @@ def main():
                         "kind": "openclaw", "agent": "suite-a", "api_key": "oc-token-abcdefghijkl"})
                     _kp12c = client.put("/api/dashboard/intelligence/key", json={
                         "kind": "hermes", "agent": "default", "api_key": "hm-token-abcdefghijkl"})
-                    check("9b16 key save: hermes profile -> its own var; openclaw ignores agent; default -> base",
+                    check("agent picker: key save: hermes profile -> its own var; openclaw ignores agent; default -> base",
                           _wek12 == ["LVI_HERMES_KEY_HOME_HELPER", "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"], str(_wek12))
-                    check("9b16 key save returns the first-4 hint, never the key",
+                    check("agent picker: key save returns the first-4 hint, never the key",
                           _kp12.json().get("key_hint") == "help" + _M12
                           and "abcdefghijkl" not in _kp12.text + _kp12b.text + _kp12c.text, _kp12.text[:160])
                     _kb12 = client.put("/api/dashboard/intelligence/key", json={
                         "kind": "hermes", "agent": "../x", "api_key": "helperkey-abcdefghijkl"})
-                    check("9b16 key save: invalid agent name 422s", _kb12.status_code == 422, str(_kb12.status_code))
+                    check("agent picker: key save: invalid agent name 422s", _kb12.status_code == 422, str(_kb12.status_code))
                 finally:
                     _routes9._write_env_key = _saved_wek9
                 _t12 = client.get("/api/dashboard/tts").json()
-                check("9b16 TTS GET carries key hints (first 4 or null), never a key",
+                check("agent picker: TTS GET carries key hints (first 4 or null), never a key",
                       "elevenlabs_key_hint" in _t12 and "deepgram_key_hint" in _t12, str(_t12)[:160])
             finally:
                 _urq9.urlopen = _saved_open12
@@ -2736,7 +2736,7 @@ def main():
                                                              "reply": "ok"}
             try:
                 _tr = client.post("/api/dashboard/intelligence/test").json()
-                check("9b11 test route ok path", _tr.get("ok") is True
+                check("intelligence: test route ok path", _tr.get("ok") is True
                       and _tr.get("latency_ms") == 42, str(_tr)[:120])
             finally:
                 _routes9._intelligence_probe = _saved_probe9
@@ -2744,14 +2744,14 @@ def main():
                                                              "error": "unreachable: URLError"}
             try:
                 _tr2 = client.post("/api/dashboard/intelligence/test").json()
-                check("9b11 test route error path", _tr2.get("ok") is False
+                check("intelligence: test route error path", _tr2.get("ok") is False
                       and "URLError" in _tr2.get("error", ""), str(_tr2)[:120])
             finally:
                 _routes9._intelligence_probe = _saved_probe9
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
-    # 9b12. Dead-TTS containment (2026-10-16): with the
+    # Dead-TTS containment (2026-10-16): with the
     # ElevenLabs websocket dead, her UNspoken weather answer still armed as
     # echo text, and the user's repeat question scored 71% bag-of-words overlap
     # (5 of 7 words, only 'springfield' content — s/the/on/today counted) —
@@ -2773,7 +2773,7 @@ def main():
 
     async def _c12_probe():
         _a = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
-                               room="suite-9b12", session_mode="fresh")
+                               room="suite-t12", session_mode="fresh")
         # the exact armed state in that failure — both fillers + the answer
         # the dead TTS never actually spoke
         _a._echo_texts = ["On it.",
@@ -2790,36 +2790,36 @@ def main():
         return _a
 
     _a12 = _aio12.run(_c12_probe())
-    check("9b12 the repeat question lands (was dropped as an echo)",
+    check("dead tts: the repeat question lands (was dropped as an echo)",
           any("Springfield" in t for t in _a12._buffer), f"buffer={_a12._buffer}")
-    check("9b12 same-topic repeat is NOT her echo (bar 0.6 -> 0.9)",
+    check("dead tts: same-topic repeat is NOT her echo (bar 0.6 -> 0.9)",
           _a12._is_own_echo("What's the weather today on Springfield?") is False,
           f"echo_texts={len(_a12._echo_texts)}")
-    check("9b12 short same-topic follow-up is NOT her echo",
+    check("dead tts: short same-topic follow-up is NOT her echo",
           _a12._is_own_echo("and what about tomorrow on Springfield") is False, "")
-    check("9b12 verbatim re-transcription of her reply IS caught",
+    check("dead tts: verbatim re-transcription of her reply IS caught",
           _a12._is_own_echo(_ANS12) is True, "")
-    check("9b12 clipped tail of her reply IS caught",
+    check("dead tts: clipped tail of her reply IS caught",
           _a12._is_own_echo("maybe grab a jacket if you're heading out") is True, "")
     _a_dead = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
-                                room="suite-9b12", session_mode="fresh",
+                                room="suite-t12", session_mode="fresh",
                                 tts_is_usable=lambda: False)
     _a_dead._register_echo(_ANS12)
     _a_dead._register_echo("On it.")
-    check("9b12 dead-TTS push arms NO echo texts",
+    check("dead tts: dead-TTS push arms NO echo texts",
           _a_dead._echo_texts == [], f"echo_texts={_a_dead._echo_texts}")
     _a_live = _ha12.IntelligenceAgent(echo_gate=_eg12.EchoGate(),
-                                room="suite-9b12", session_mode="fresh")
+                                room="suite-t12", session_mode="fresh")
     _a_live._register_echo(_ANS12)
     _a_live._register_echo("On it.")
-    check("9b12 live/unknown TTS still arms echo texts (compat)",
+    check("dead tts: live/unknown TTS still arms echo texts (compat)",
           _a_live._echo_texts == [_ANS12, "On it."], f"echo_texts={_a_live._echo_texts}")
     _bot_src12 = (REPO_CORE.parent / "bot.py").read_text()
-    check("9b12 bot.py wires tts_is_usable into the agent",
+    check("dead tts: bot.py wires tts_is_usable into the agent",
           "tts_is_usable" in _bot_src12 and "tts_usable_probe" in _bot_src12,
           "bot.py missing the dead-TTS wire")
 
-    # 9b13. TTS reconnect-on-next-utterance (2026-10-16 follow-on): pipecat
+    # TTS reconnect-on-next-utterance (2026-10-16 follow-on): pipecat
     # writes a websocket TTS service off permanently once its 3 reconnect
     # attempts exhaust — and an unusable service refuses every speak, so the
     # run_tts reconnect can never fire again; the room stays mute until a
@@ -2861,34 +2861,34 @@ def main():
         pass
 
     _s13 = _Tracked13()
-    _s13.bind_tts_room("suite-9b13")
+    _s13.bind_tts_room("suite-t13")
     _aio13.run(_s13.set_usable(False))   # pipecat's permanent death verdict
     _rc13 = _aio13.run(_s13._push_tts_frames("first speak"))
-    check("9b13 dead TTS retries the websocket on the next speak",
+    check("tts reconnect: dead TTS retries the websocket on the next speak",
           _s13.is_usable and _s13.connects == 1 and _rc13 == "spoke"
           and _s13.spokes == ["first speak"],
           f"usable={_s13.is_usable} connects={_s13.connects} rc={_rc13}")
 
     _live13 = _Tracked13()
     _rc13b = _aio13.run(_live13._push_tts_frames("live speak"))
-    check("9b13 a live TTS service never pays the revive",
+    check("tts reconnect: a live TTS service never pays the revive",
           _live13.connects == 0 and _rc13b == "spoke",
           f"connects={_live13.connects} rc={_rc13b}")
 
     _dead13 = _Tracked13()
-    _dead13.bind_tts_room("suite-9b13")
+    _dead13.bind_tts_room("suite-t13")
     _aio13.run(_dead13.set_usable(False))
     _dead13.fail_connect = True
     _rc13c = _aio13.run(_dead13._push_tts_frames("during outage"))
-    check("9b13 failed revive stays dead and never breaks the speak",
+    check("tts reconnect: failed revive stays dead and never breaks the speak",
           (not _dead13.is_usable) and _dead13.connects == 1 and _rc13c == "spoke",
           f"usable={_dead13.is_usable} connects={_dead13.connects} rc={_rc13c}")
     _aio13.run(_dead13._push_tts_frames("still down"))
-    check("9b13 cooldown throttles retries while the outage lasts",
+    check("tts reconnect: cooldown throttles retries while the outage lasts",
           _dead13.connects == 1, f"connects={_dead13.connects}")
     _dead13._revive_last_attempt = 0.0   # simulate the cooldown expiring
     _aio13.run(_dead13._push_tts_frames("after cooldown"))
-    check("9b13 a later speak gets the next retry",
+    check("tts reconnect: a later speak gets the next retry",
           _dead13.connects == 2 and not _dead13.is_usable,
           f"connects={_dead13.connects} usable={_dead13.is_usable}")
 
@@ -2898,23 +2898,23 @@ def main():
     _reg13.note_tts = lambda room, provider, usable: _notes13.append((room, provider, usable))
     try:
         _chip13 = _Tracked13()
-        _chip13.bind_tts_room("suite-9b13")
+        _chip13.bind_tts_room("suite-t13")
         _aio13.run(_chip13.set_usable(False))
         _aio13.run(_chip13._push_tts_frames("revive me"))
-        check("9b13 a revived TTS clears the dashboard tts-down chip",
-              _notes13[-1] == ("suite-9b13", "elevenlabs", True) and _chip13.is_usable,
+        check("tts reconnect: a revived TTS clears the dashboard tts-down chip",
+              _notes13[-1] == ("suite-t13", "elevenlabs", True) and _chip13.is_usable,
               f"notes={_notes13}")
     finally:
         _reg13.note_tts = _orig_note13
 
-    check("9b13 the real ElevenLabs service rides the revive mixin",
+    check("tts reconnect: the real ElevenLabs service rides the revive mixin",
           issubclass(_bot13.TrackedElevenLabsTTSService, _TTST13)
           and hasattr(_bot13.ElevenLabsTTSService, "_connect")
           and hasattr(_bot13.ElevenLabsTTSService, "_disconnect")
           and hasattr(_bot13.ElevenLabsTTSService, "_push_tts_frames"),
           "Tracked* must sit on TTSTracked over a websocket TTS service")
 
-    # 9b14. Node-command error mapping: an in-flight duplicate is a
+    # Node-command error mapping: an in-flight duplicate is a
     # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a
     # bare transport timeout (empty detail — the observed restart error shape)
     # now says half-open + self-heals instead of an empty string the UI
@@ -2924,8 +2924,8 @@ def main():
     from dashboard.node_command import (CommandInFlight as _InFlight14,
                                         NoLiveSession as _NoLive14)
 
-    registry.note_offer("pc-9b14", "suite-9b14")
-    registry.mark_connected("pc-9b14")
+    registry.note_offer("pc-t14", "suite-t14")
+    registry.mark_connected("pc-t14")
     _real_request14 = _nc14.request
 
     def _raising_request14(exc):
@@ -2935,51 +2935,51 @@ def main():
 
     try:
         _nc14.request = _raising_request14(
-            _InFlight14("'restart' already in flight for 'suite-9b14'"))
-        _r14a = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14: in-flight duplicate -> 409 Conflict (was a 504)",
+            _InFlight14("'restart' already in flight for 'suite-t14'"))
+        _r14a = client.post("/api/dashboard/nodes/suite-t14/restart")
+        check("node command: in-flight duplicate -> 409 Conflict (was a 504)",
               _r14a.status_code == 409 and "already in flight" in _r14a.text,
               f"status={_r14a.status_code} body={_r14a.text[:80]}")
         _nc14.request = _raising_request14(TimeoutError())
-        _r14b = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14: bare timeout -> 504 with half-open + self-heal wording",
+        _r14b = client.post("/api/dashboard/nodes/suite-t14/restart")
+        check("node command: bare timeout -> 504 with half-open + self-heal wording",
               _r14b.status_code == 504 and "half-open" in _r14b.text
               and "10 min" in _r14b.text,
               f"status={_r14b.status_code} body={_r14b.text[:100]}")
         _nc14.request = _raising_request14(
-            _NoLive14("no live session for room 'suite-9b14'"))
-        _r14c = client.post("/api/dashboard/nodes/suite-9b14/restart")
-        check("9b14: half-open session -> 504 naming the half-open shape",
+            _NoLive14("no live session for room 'suite-t14'"))
+        _r14c = client.post("/api/dashboard/nodes/suite-t14/restart")
+        check("node command: half-open session -> 504 naming the half-open shape",
               _r14c.status_code == 504 and "half-open" in _r14c.text,
               f"status={_r14c.status_code} body={_r14c.text[:100]}")
     finally:
         _nc14.request = _real_request14
-        registry.mark_disconnected("pc-9b14")
+        registry.mark_disconnected("pc-t14")
 
     # node_command side: a pending duplicate raises CommandInFlight (the
     # route's 409 depends on the class, not on message sniffing).
     _saved_sender14 = _nc14.registry.sender_for_room
 
     async def _inflight_probe14():
-        _nc14.registry.sender_for_room = lambda room: (object(), "pc-9b14")
+        _nc14.registry.sender_for_room = lambda room: (object(), "pc-t14")
         fut = _aio14.get_event_loop().create_future()
-        _nc14._pending[("pc-9b14", "restart")] = fut
+        _nc14._pending[("pc-t14", "restart")] = fut
         try:
-            await _nc14.request("suite-9b14", "restart")
+            await _nc14.request("suite-t14", "restart")
             return "no-raise"
         except _InFlight14:
             return "inflight"
         except TimeoutError as e:
             return f"timeout:{str(e)[:40]}"
         finally:
-            _nc14._pending.pop(("pc-9b14", "restart"), None)
+            _nc14._pending.pop(("pc-t14", "restart"), None)
             _nc14.registry.sender_for_room = _saved_sender14
 
     _res14 = _aio14.run(_inflight_probe14())
-    check("9b14: node_command raises CommandInFlight for a pending duplicate",
+    check("node command: node_command raises CommandInFlight for a pending duplicate",
           _res14 == "inflight", f"result={_res14}")
 
-    # 9b15. Wake-model select keys on name + SOURCE: with the
+    # Wake-model select keys on name + SOURCE: with the
     # same basename in root and models/, a name-only select always
     # resolved to the models/ copy — clicking the ROOT row silently
     # activated the other file. source=None keeps the legacy resolution.
@@ -2991,26 +2991,26 @@ def main():
     try:
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "root"})
-        check("9b15: source=root activates the ROOT copy (collision)",
+        check("wake model select: source=root activates the ROOT copy (collision)",
               r.status_code == 200 and r.json().get("model") == _l4_name,
               f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "models"})
-        check("9b15: source=models activates the MODELS copy (collision)",
+        check("wake model select: source=models activates the MODELS copy (collision)",
               r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
               f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
         r = client.put("/api/dashboard/oww/select", json={"model": _l4_name})
-        check("9b15: no source keeps the legacy models-first resolution",
+        check("wake model select: no source keeps the legacy models-first resolution",
               r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
               f"status={r.status_code} body={r.text[:80]}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": "suite-l4-missing.onnx", "source": "root"})
-        check("9b15: unknown name+source combo 404s naming the source",
+        check("wake model select: unknown name+source combo 404s naming the source",
               r.status_code == 404 and "root" in r.text,
               f"status={r.status_code} body={r.text[:80]}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "bogus"})
-        check("9b15: source is a Literal (bogus source 422s)",
+        check("wake model select: source is a Literal (bogus source 422s)",
               r.status_code == 422, f"status={r.status_code}")
     finally:
         _l4_root.unlink(missing_ok=True)
@@ -3021,28 +3021,28 @@ def main():
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
     # deterministically when the pipeline ends, and the local STT closes the
     # unused OpenAI client itself instead of leaving it to a GC finalizer.
-    import ast as _ast043
+    import ast as _astlk
     _bot_src = (REPO_CORE.parent / "bot.py").read_text()
-    _bot_ast = _ast043.parse(_bot_src)
-    _run_bot = next((n for n in _ast043.walk(_bot_ast)
-                     if isinstance(n, _ast043.AsyncFunctionDef) and n.name == "run_bot"), None)
+    _bot_ast = _astlk.parse(_bot_src)
+    _run_bot = next((n for n in _astlk.walk(_bot_ast)
+                     if isinstance(n, _astlk.AsyncFunctionDef) and n.name == "run_bot"), None)
     _reclaim_in_finally = False
     if _run_bot is not None:
-        for _n in _ast043.walk(_run_bot):
-            if isinstance(_n, _ast043.Try) and _n.finalbody:
-                _body_src = _ast043.unparse(_n)
+        for _n in _astlk.walk(_run_bot):
+            if isinstance(_n, _astlk.Try) and _n.finalbody:
+                _body_src = _astlk.unparse(_n)
                 if "runner.run(task)" in _body_src and any(
-                        "_reclaim_session()" in _ast043.unparse(f) for f in _n.finalbody):
+                        "_reclaim_session()" in _astlk.unparse(f) for f in _n.finalbody):
                     _reclaim_in_finally = True
     check("session leak a: run_bot reclaims the session in a finally around runner.run",
           _reclaim_in_finally)
-    _reclaim_fn = next((n for n in _ast043.walk(_bot_ast)
-                        if isinstance(n, _ast043.FunctionDef) and n.name == "_reclaim_session"), None)
+    _reclaim_fn = next((n for n in _astlk.walk(_bot_ast)
+                        if isinstance(n, _astlk.FunctionDef) and n.name == "_reclaim_session"), None)
     check("session leak b: _reclaim_session runs a full gc.collect()",
-          _reclaim_fn is not None and "gc.collect()" in _ast043.unparse(_reclaim_fn))
+          _reclaim_fn is not None and "gc.collect()" in _astlk.unparse(_reclaim_fn))
 
-    import asyncio as _aio043
-    import time as _t043
+    import asyncio as _aiolk
+    import time as _tlk
     from stt_local import LocalWhisperSTTService as _LWS
     from pipecat.services.whisper.base_stt import BaseWhisperSTTService as _BWS
 
@@ -3052,7 +3052,7 @@ def main():
             self.hang = hang
         async def close(self):
             if self.hang:
-                await _aio043.sleep(10)
+                await _aiolk.sleep(10)
             self.closed = True
 
     async def _noop_cleanup(self):
@@ -3064,14 +3064,14 @@ def main():
         _svc = _LWS.__new__(_LWS)
         _fc = _FakeClient()
         _svc._client = _fc
-        _aio043.run(_LWS.cleanup(_svc))
+        _aiolk.run(_LWS.cleanup(_svc))
         check("session leak c: local STT cleanup closes the unused OpenAI client",
               _fc.closed and _svc._client is None)
         _svc2 = _LWS.__new__(_LWS)
         _svc2._client = _FakeClient(hang=True)
-        _t0 = _t043.monotonic()
-        _aio043.run(_LWS.cleanup(_svc2))
-        _dt = _t043.monotonic() - _t0
+        _t0 = _tlk.monotonic()
+        _aiolk.run(_LWS.cleanup(_svc2))
+        _dt = _tlk.monotonic() - _t0
         check("session leak c: hung client close is bounded (teardown never stalls)",
               _dt < 3.5 and _svc2._client is None, f"{_dt:.2f}s")
     finally:
@@ -3150,67 +3150,67 @@ def main():
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
     # Heard-after-wake buffer (registry): first transcript after a wake only
-    from dashboard import registry as _reg051
-    _reg051._RECENT_HEARD.clear()
-    _reg051._WAKE_PENDING.clear()
-    _reg051.note_heard("kitchen", "no wake before this", False)
-    check("wake name: a transcript without a wake is not recorded", _reg051.recent_heard() == [])
-    _reg051.note_wake("kitchen")
-    _reg051.note_heard("kitchen", "Hey Linux.", True)
-    _reg051.note_heard("kitchen", "second transcript", False)
-    _rh051 = _reg051.recent_heard()
+    from dashboard import registry as _regwn
+    _regwn._RECENT_HEARD.clear()
+    _regwn._WAKE_PENDING.clear()
+    _regwn.note_heard("kitchen", "no wake before this", False)
+    check("wake name: a transcript without a wake is not recorded", _regwn.recent_heard() == [])
+    _regwn.note_wake("kitchen")
+    _regwn.note_heard("kitchen", "Hey Linux.", True)
+    _regwn.note_heard("kitchen", "second transcript", False)
+    _rhwn = _regwn.recent_heard()
     check("wake name: only the FIRST transcript after a wake is recorded, with room + dropped flag",
-          len(_rh051) == 1 and _rh051[0]["text"] == "Hey Linux." and _rh051[0]["dropped"] is True
-          and _rh051[0]["room"] == "kitchen", str(_rh051))
-    _reg051.note_wake("kitchen")
-    _reg051._WAKE_PENDING["kitchen"] -= 600
-    _reg051.note_heard("kitchen", "ten minutes later", False)
-    check("wake name: a transcript outside the 30 s window is not recorded", len(_reg051.recent_heard()) == 1)
-    _reg051.note_wake("den")
-    _reg051.note_heard("kitchen", "other room", False)
+          len(_rhwn) == 1 and _rhwn[0]["text"] == "Hey Linux." and _rhwn[0]["dropped"] is True
+          and _rhwn[0]["room"] == "kitchen", str(_rhwn))
+    _regwn.note_wake("kitchen")
+    _regwn._WAKE_PENDING["kitchen"] -= 600
+    _regwn.note_heard("kitchen", "ten minutes later", False)
+    check("wake name: a transcript outside the 30 s window is not recorded", len(_regwn.recent_heard()) == 1)
+    _regwn.note_wake("den")
+    _regwn.note_heard("kitchen", "other room", False)
     check("wake name: a wake in one room doesn't capture another room's transcript",
-          len(_reg051.recent_heard()) == 1)
-    for _i051 in range(15):
-        _reg051.note_wake("den")
-        _reg051.note_heard("den", f"t{_i051}", False)
+          len(_regwn.recent_heard()) == 1)
+    for _iwn in range(15):
+        _regwn.note_wake("den")
+        _regwn.note_heard("den", f"t{_iwn}", False)
     check("wake name: recent list capped at 2, newest first",
-          [r["text"] for r in _reg051.recent_heard()] == ["t14", "t13"], str(_reg051.recent_heard()))
+          [r["text"] for r in _regwn.recent_heard()] == ["t14", "t13"], str(_regwn.recent_heard()))
 
     # /wake API — name + aliases apply live (no restart)
-    import wake_name as _wn051b
-    _secs051 = config_store.read_sections(["wake", "stt"])
-    _wake_bak051 = dict(_secs051.get("wake") or {})
-    _stt_bak051 = dict(_secs051.get("stt") or {})
+    import wake_name as _wnwnb
+    _secswn = config_store.read_sections(["wake", "stt"])
+    _wake_bakwn = dict(_secswn.get("wake") or {})
+    _stt_bakwn = dict(_secswn.get("stt") or {})
     try:
         r = client.get("/api/dashboard/wake")
-        _w051 = r.json() if r.status_code == 200 else {}
+        _wwn = r.json() if r.status_code == 200 else {}
         check("wake name: GET /wake shape",
-              r.status_code == 200 and {"name", "heard_as", "recent", "model"} <= set(_w051)
-              and "name_source" not in _w051 and "bias_wake_name" not in _w051
-              and _w051["recent"] and _w051["recent"][0]["text"] == "t14", str(_w051)[:200])
+              r.status_code == 200 and {"name", "heard_as", "recent", "model"} <= set(_wwn)
+              and "name_source" not in _wwn and "bias_wake_name" not in _wwn
+              and _wwn["recent"] and _wwn["recent"][0]["text"] == "t14", str(_wwn)[:200])
         r = client.put("/api/dashboard/wake",
                        json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
         check("wake name: PUT /wake applies live: name + normalised, de-duplicated aliases",
-              r.status_code == 200 and _wn051b.name() == "Computer"
-              and _wn051b.aliases() == ["komputer", "compute her"]
-              and _wn051b.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
-        _stt_mid051 = dict(config_store.read_section("stt") or {})
-        check("wake name: PUT /wake never touches the stt section", _stt_mid051 == _stt_bak051)
-        for _bad051 in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
+              r.status_code == 200 and _wnwnb.name() == "Computer"
+              and _wnwnb.aliases() == ["komputer", "compute her"]
+              and _wnwnb.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
+        _stt_midwn = dict(config_store.read_section("stt") or {})
+        check("wake name: PUT /wake never touches the stt section", _stt_midwn == _stt_bakwn)
+        for _badwn in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
                         {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "linux"},
                         {"heard_as": ["x" * 31]}]:
-            r = client.put("/api/dashboard/wake", json=_bad051)
-            _k051 = list(_bad051)[0]
-            check(f"wake name: PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
+            r = client.put("/api/dashboard/wake", json=_badwn)
+            _kwn = list(_badwn)[0]
+            check(f"wake name: PUT /wake rejects bad {_kwn} ({str(_badwn[_kwn])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
-        check("wake name: rejected PUTs changed nothing", _wn051b.name() == "Computer")
-        for _bad051 in [["okay"], ["Stop"], ["linux", "hey"]]:
-            r = client.put("/api/dashboard/wake", json={"heard_as": _bad051})
-            check(f"wake name: PUT /wake rejects filler-word alias {_bad051} (422)",
+        check("wake name: rejected PUTs changed nothing", _wnwnb.name() == "Computer")
+        for _badwn in [["okay"], ["Stop"], ["linux", "hey"]]:
+            r = client.put("/api/dashboard/wake", json={"heard_as": _badwn})
+            check(f"wake name: PUT /wake rejects filler-word alias {_badwn} (422)",
                   r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/wake", json={"name": "Zoë", "heard_as": ["zoey"]})
         check("wake name: accented name accepted", r.status_code == 200
-              and _wn051b.name() == "Zoë", f"{r.status_code} {r.text[:120]}")
+              and _wnwnb.name() == "Zoë", f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "   "})
         check("wake name: a whitespace-only name clears (same as empty)",
               r.status_code == 200 and "name" not in (config_store.read_section("wake") or {}),
@@ -3218,227 +3218,227 @@ def main():
         r = client.put("/api/dashboard/wake", json={"name": "Computer"})
         r = client.put("/api/dashboard/wake", json={"name": ""})
         check("wake name: empty name clears it (no name — never guessed from the model)",
-              r.status_code == 200 and _wn051b.name() == "" and r.json().get("name") == ""
+              r.status_code == 200 and _wnwnb.name() == "" and r.json().get("name") == ""
               and client.get("/api/dashboard/wake").json().get("name") == ""
               and "name" not in (config_store.read_section("wake") or {}), r.text[:120])
         r = client.put("/api/dashboard/wake", json={"bias_wake_name": True})
         check("wake name: the removed spelling-hint field is rejected (422), stt untouched",
-              r.status_code == 422 and dict(config_store.read_section("stt") or {}) == _stt_bak051,
+              r.status_code == 422 and dict(config_store.read_section("stt") or {}) == _stt_bakwn,
               f"{r.status_code}")
     finally:
-        config_store.write_sections({"wake": _wake_bak051, "stt": _stt_bak051})
+        config_store.write_sections({"wake": _wake_bakwn, "stt": _stt_bakwn})
 
     # Whisper never gets a wake-name hint (spelling hint removed)
-    import stt_local as _stt051
-    import wake_name as _wn051
-    import asyncio as _aio051
-    import inspect as _insp051h
-    _cap051 = {}
+    import stt_local as _sttwn
+    import wake_name as _wnwn
+    import asyncio as _aiown
+    import inspect as _inspwnh
+    _capwn = {}
 
-    class _FW051:
+    class _FWwn:
         def transcribe(self, audio, **kw):
-            _cap051.clear()
-            _cap051.update(kw)
+            _capwn.clear()
+            _capwn.update(kw)
             return iter([]), type("I", (), {"language": "en"})()
 
-    _svc051 = _stt051.LocalWhisperSTTService.__new__(_stt051.LocalWhisperSTTService)
-    _svc051._fw_model = _FW051()
-    _svc051._language = None
+    _svcwn = _sttwn.LocalWhisperSTTService.__new__(_sttwn.LocalWhisperSTTService)
+    _svcwn._fw_model = _FWwn()
+    _svcwn._language = None
 
-    async def _noop051():
+    async def _noopwn():
         return None
-    _svc051.ensure_model = _noop051
-    _orig_wake051 = _wn051._wake
+    _svcwn.ensure_model = _noopwn
+    _orig_wakewn = _wnwn._wake
     try:
-        _wn051._wake = lambda: {"name": "Computer", "heard_as": ["komputer"]}
-        _aio051.run(_svc051._transcribe(b"RIFF"))
+        _wnwn._wake = lambda: {"name": "Computer", "heard_as": ["komputer"]}
+        _aiown.run(_svcwn._transcribe(b"RIFF"))
     finally:
-        _wn051._wake = _orig_wake051
+        _wnwn._wake = _orig_wakewn
     check("wake name: Whisper never gets a hotword hint, even with a name set",
-          "hotwords" not in _cap051 and _cap051.get("beam_size") == 1
-          and "hotwords" not in _insp051h.getsource(_stt051), str(_cap051))
+          "hotwords" not in _capwn and _capwn.get("beam_size") == 1
+          and "hotwords" not in _inspwnh.getsource(_sttwn), str(_capwn))
 
     # Wake-name sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
-    import inspect as _insp051
-    _root051 = REPO_CORE.parent
-    _swept051 = [_root051 / "bot.py", _root051 / "README.md", _root051 / "config.example.yaml"]
-    _swept051 += list(REPO_CORE.rglob("*.py")) + list((_root051 / "dashboard-ui" / "src").rglob("*.jsx"))
-    _hits051 = sorted({str(p.relative_to(_root051)) for p in _swept051
+    import inspect as _inspwn
+    _rootwn = REPO_CORE.parent
+    _sweptwn = [_rootwn / "bot.py", _rootwn / "README.md", _rootwn / "config.example.yaml"]
+    _sweptwn += list(REPO_CORE.rglob("*.py")) + list((_rootwn / "dashboard-ui" / "src").rglob("*.jsx"))
+    _hitswn = sorted({str(p.relative_to(_rootwn)) for p in _sweptwn
                        if p.is_file() and "willow" in p.read_text(errors="ignore").lower()})
     check("wake name sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
-          not _hits051, f"hits={_hits051}")
-    import intelligence_agent as _ia051
+          not _hitswn, f"hits={_hitswn}")
+    import intelligence_agent as _iawn
     check("wake name: intelligence drop-filter delegates to wake_name",
-          "wake_name" in _insp051.getsource(_ia051._is_wake_phrase_only))
-    _ia_src051 = _insp051.getsource(_ia051)
+          "wake_name" in _inspwn.getsource(_iawn._is_wake_phrase_only))
+    _ia_srcwn = _inspwn.getsource(_iawn)
     check("wake name: intelligence records the first transcript after a wake, fail-open",
-          "note_heard(self._room, text, dropped)" in _ia_src051
-          and "heard-after-wake note failed" in _ia_src051)
+          "note_heard(self._room, text, dropped)" in _ia_srcwn
+          and "heard-after-wake note failed" in _ia_srcwn)
     check("wake name: the wake is keyed by the SAME room the intelligence records under",
           "note_wake(_pipeline_room(), heard_key=_room)" in _main_src, "bot.py _on_wake")
-    _reg051.note_wake("den", heard_key="unknown")
-    _reg051.note_heard("unknown", "keyed by build-time room", False)
+    _regwn.note_wake("den", heard_key="unknown")
+    _regwn.note_heard("unknown", "keyed by build-time room", False)
     check("wake name: registry pairs wake and transcript via heard_key",
-          _reg051.recent_heard()[0]["text"] == "keyed by build-time room")
-    _ex051 = (_root051 / "config.example.yaml").read_text()
+          _regwn.recent_heard()[0]["text"] == "keyed by build-time room")
+    _exwn = (_rootwn / "config.example.yaml").read_text()
     check("wake name: config.example sets the public default name explicitly (Jarvis)",
-          "\n  name: Jarvis" in _ex051)
+          "\n  name: Jarvis" in _exwn)
 
     # ── Built-in speaker zone (routes) ───────────────────────────
-    import yaml as _y053
-    from dashboard import node_command as _nc053
+    import yaml as _ysp
+    from dashboard import node_command as _ncsp
 
-    def _cfg053():
-        return _y053.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
+    def _cfgsp():
+        return _ysp.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
 
-    _sent053 = []
-    _real_send053 = _nc053.send_to_room
-    _nc053.send_to_room = lambda room, p: _sent053.append((room, p)) or True
-    _zones053 = list(client.get("/api/dashboard/mapping").json()["zones"])
-    _shared053 = _zones053[0]
-    _base_rz053 = dict(_cfg053().get("room_zones") or {})
+    _sentsp = []
+    _real_sendsp = _ncsp.send_to_room
+    _ncsp.send_to_room = lambda room, p: _sentsp.append((room, p)) or True
+    _zonessp = list(client.get("/api/dashboard/mapping").json()["zones"])
+    _sharedsp = _zonessp[0]
+    _base_rzsp = dict(_cfgsp().get("room_zones") or {})
     try:
         for _nm in ("builtin", "Builtin"):
             _r = client.post("/api/dashboard/zones", json={"name": _nm, "backend": "wiim", "ip": "192.0.2.53"})
             check(f"speaker: zone add refuses the reserved name {_nm!r}",
                   _r.status_code == 400 and "reserved" in _r.text, f"{_r.status_code} {_r.text[:120]}")
-        registry.mark_connected("pc-053xvf")
-        registry.note_offer("pc-053xvf", "suite-xvf053")
-        registry.note_line("pc-053xvf", "array")
-        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-xvf053": "builtin"}})
+        registry.mark_connected("pc-spxvf")
+        registry.note_offer("pc-spxvf", "suite-xvfsp")
+        registry.note_line("pc-spxvf", "array")
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-xvfsp": "builtin"}})
         check("speaker mapping: builtin refused for a node without a speaker (private rule, server-side)",
               _r.status_code == 400 and "speaker" in _r.text, f"{_r.status_code} {_r.text[:120]}")
 
-        registry.mark_connected("pc-053ws")
-        registry.note_offer("pc-053ws", "suite-ws053")
-        registry.note_line("pc-053ws", "waveshare")
-        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+        registry.mark_connected("pc-spws")
+        registry.note_offer("pc-spws", "suite-wssp")
+        registry.note_line("pc-spws", "waveshare")
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin"}})
         check("speaker: builtin refused until the node has PROVEN its speaker (set_speaker ack)",
               _r.status_code == 400, f"{_r.status_code} {_r.text[:120]}")
-        registry.note_speaker_ok("pc-053ws", True)
+        registry.note_speaker_ok("pc-spws", True)
         _st = {r["room"]: r for r in client.get("/api/dashboard/status").json()["rooms"]}
-        check("speaker: /status rooms carry speaker", _st.get("suite-ws053", {}).get("speaker") is True
-              and _st.get("suite-xvf053", {}).get("speaker") is False, str(_st.get("suite-ws053")))
+        check("speaker: /status rooms carry speaker", _st.get("suite-wssp", {}).get("speaker") is True
+              and _st.get("suite-xvfsp", {}).get("speaker") is False, str(_st.get("suite-wssp")))
 
         _m = client.get("/api/dashboard/mapping").json()
         check("speaker: GET mapping lists speaker rooms with volume + resolved zone",
-              _m.get("speakers", {}).get("suite-ws053") == {"volume": 40, "zone": "builtin", "online": True,
+              _m.get("speakers", {}).get("suite-wssp") == {"volume": 40, "zone": "builtin", "online": True,
                                                             "speaker_ok": True},
               str(_m.get("speakers")))
         check("speaker: GET mapping: built-in never appears as a shared zone", "builtin" not in _m["zones"])
 
-        _sent053.clear()
-        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+        _sentsp.clear()
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin"}})
         check("speaker mapping: builtin accepted for the speaker node", _r.status_code == 200, _r.text[:120])
-        check("speaker: mapping write lands in config", _cfg053()["room_zones"].get("suite-ws053") == "builtin")
+        check("speaker: mapping write lands in config", _cfgsp()["room_zones"].get("suite-wssp") == "builtin")
         check("speaker: mapping PUT syncs the speaker node (enabled)",
-              ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 40}) in _sent053, str(_sent053))
+              ("suite-wssp", {"cmd": "set_speaker", "enabled": True, "volume": 40}) in _sentsp, str(_sentsp))
 
-        _sent053.clear()
-        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": _shared053}})
+        _sentsp.clear()
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": _sharedsp}})
         check("speaker: remap to a shared zone -> node told to stay silent (never both)",
               _r.status_code == 200
-              and ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 40}) in _sent053, str(_sent053))
+              and ("suite-wssp", {"cmd": "set_speaker", "enabled": False, "volume": 40}) in _sentsp, str(_sentsp))
 
-        _sent053.clear()
-        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": 55})
+        _sentsp.clear()
+        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-wssp", "volume": 55})
         check("speaker: volume PUT ok + written to node_speaker.volumes",
-              _r.status_code == 200 and (_cfg053().get("node_speaker") or {}).get("volumes", {}).get("suite-ws053") == 55,
+              _r.status_code == 200 and (_cfgsp().get("node_speaker") or {}).get("volumes", {}).get("suite-wssp") == 55,
               f"{_r.status_code} {_r.text[:120]}")
         check("speaker: volume PUT pushes set_speaker with the new volume",
-              _sent053 and _sent053[-1] == ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 55}),
-              str(_sent053))
+              _sentsp and _sentsp[-1] == ("suite-wssp", {"cmd": "set_speaker", "enabled": False, "volume": 55}),
+              str(_sentsp))
         for _bad in (101, -1, "loud"):
-            _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": _bad})
+            _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-wssp", "volume": _bad})
             check(f"speaker: volume PUT refuses {_bad!r}", _r.status_code == 422, str(_r.status_code))
-        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-xvf053", "volume": 50})
+        _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-xvfsp", "volume": 50})
         check("speaker: volume PUT 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
 
-        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-wssp"})
         check("speaker: test clip 409s when the node's replies go to a shared zone",
               _r.status_code == 409 and "shared zone" in _r.text, f"{_r.status_code} {_r.text[:120]}")
-        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
-        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin"}})
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-wssp"})
         check("speaker: test clip 409s when the node has no live session",
               _r.status_code == 409 and "offline" in _r.text, f"{_r.status_code} {_r.text[:120]}")
 
-        class _Out053:
+        class _Outsp:
             def __init__(self):
                 self.frames = []
 
             async def queue_frame(self, frame, direction=None):
                 self.frames.append(frame)
-        _o053 = _Out053()
-        _real_sfr053 = registry.sender_for_room
-        registry.sender_for_room = lambda room: (_o053, "pc-053ws") if room == "suite-ws053" else (None, None)
+        _osp = _Outsp()
+        _real_sfrsp = registry.sender_for_room
+        registry.sender_for_room = lambda room: (_osp, "pc-spws") if room == "suite-wssp" else (None, None)
         try:
-            _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
+            _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-wssp"})
         finally:
-            registry.sender_for_room = _real_sfr053
-        _f = _o053.frames[0] if _o053.frames else None
+            registry.sender_for_room = _real_sfrsp
+        _f = _osp.frames[0] if _osp.frames else None
         check("speaker: test clip queues the tone into THAT node's output transport only",
               _r.status_code == 200 and _f is not None and type(_f).__name__ == "OutputAudioRawFrame"
               and _f.sample_rate == 24000 and _f.num_channels == 1 and len(_f.audio) > 0,
-              f"{_r.status_code} {_r.text[:120]} frames={len(_o053.frames)}")
-        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvf053"})
+              f"{_r.status_code} {_r.text[:120]} frames={len(_osp.frames)}")
+        _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvfsp"})
         check("speaker: test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
 
         # R-I3 deleting the zone a speaker room was mapped to re-syncs it
         # (the mapping drops -> the default is its own speaker again)
-        _rz = client.post("/api/dashboard/zones", json={"name": "zdel053", "backend": "wiim", "ip": "192.0.2.54"})
-        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "zdel053"}})
-        _sent053.clear()
-        _rd = client.delete("/api/dashboard/zones/zdel053")
+        _rz = client.post("/api/dashboard/zones", json={"name": "zdelsp", "backend": "wiim", "ip": "192.0.2.54"})
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": "zdelsp"}})
+        _sentsp.clear()
+        _rd = client.delete("/api/dashboard/zones/zdelsp")
         check("speaker: zone delete re-syncs speaker rooms (now back on their own speaker)",
               _rz.status_code == 200 and _rd.status_code == 200
-              and ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 55}) in _sent053,
-              f"add={_rz.status_code} del={_rd.status_code} sent={_sent053}")
-        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
+              and ("suite-wssp", {"cmd": "set_speaker", "enabled": True, "volume": 55}) in _sentsp,
+              f"add={_rz.status_code} del={_rd.status_code} sent={_sentsp}")
+        client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin"}})
 
         # R-M6 room keys are stripped BEFORE the speaker/zone checks
-        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, " suite-ws053 ": "builtin"}})
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rzsp, " suite-wssp ": "builtin"}})
         check("speaker: a padded room key validates as the stripped room",
-              _r.status_code == 200 and _cfg053()["room_zones"].get("suite-ws053") == "builtin",
+              _r.status_code == 200 and _cfgsp()["room_zones"].get("suite-wssp") == "builtin",
               f"{_r.status_code} {_r.text[:120]}")
 
         # R-I1 restart-shaped: the speaker node is offline/unknown, its
         # existing builtin entry must not block saving OTHER rooms
-        registry.mark_disconnected("pc-053ws")
-        _saved_rec053 = registry._known_rooms.pop("suite-ws053", None)
+        registry.mark_disconnected("pc-spws")
+        _saved_recsp = registry._known_rooms.pop("suite-wssp", None)
         try:
             _r = client.put("/api/dashboard/mapping",
-                            json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": _shared053}})
+                            json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin", "suite-xvfsp": _sharedsp}})
             check("speaker: unchanged builtin entry of an offline node doesn't block saving other rooms",
                   _r.status_code == 200, f"{_r.status_code} {_r.text[:120]}")
             _m = client.get("/api/dashboard/mapping").json()
             check("speaker: GET mapping keeps an offline builtin room listed (row doesn't fall to 'pick a zone')",
-                  (_m.get("speakers") or {}).get("suite-ws053", {}).get("online") is False,
+                  (_m.get("speakers") or {}).get("suite-wssp", {}).get("online") is False,
                   str(_m.get("speakers")))
             _r = client.put("/api/dashboard/mapping",
-                            json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": "builtin"}})
+                            json={"room_zones": {**_base_rzsp, "suite-wssp": "builtin", "suite-xvfsp": "builtin"}})
             check("speaker: a NEW builtin entry for a non-speaker room is still refused", _r.status_code == 400)
         finally:
-            if _saved_rec053 is not None:
-                registry._known_rooms["suite-ws053"] = _saved_rec053
-            registry.mark_connected("pc-053ws")
-            registry.note_offer("pc-053ws", "suite-ws053")
+            if _saved_recsp is not None:
+                registry._known_rooms["suite-wssp"] = _saved_recsp
+            registry.mark_connected("pc-spws")
+            registry.note_offer("pc-spws", "suite-wssp")
 
         # a rename carries the speaker volume with the zone mapping
-        _sent053.clear()
-        _nc053.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
-                                      "data": {"name": "suite-ws053b"}}), "pc-053ws")
-        _c = _cfg053()
+        _sentsp.clear()
+        _ncsp.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
+                                      "data": {"name": "suite-wsspb"}}), "pc-spws")
+        _c = _cfgsp()
         check("speaker: rename carries the speaker volume (and the mapping) to the new name",
-              (_c.get("node_speaker") or {}).get("volumes", {}).get("suite-ws053b") == 55
-              and "suite-ws053" not in (_c.get("node_speaker") or {}).get("volumes", {})
-              and _c["room_zones"].get("suite-ws053b") == "builtin",
+              (_c.get("node_speaker") or {}).get("volumes", {}).get("suite-wsspb") == 55
+              and "suite-wssp" not in (_c.get("node_speaker") or {}).get("volumes", {})
+              and _c["room_zones"].get("suite-wsspb") == "builtin",
               str(_c.get("node_speaker")))
         check("speaker: a rename re-syncs the node under its new name",
-              any(r == "suite-ws053b" and pl.get("cmd") == "set_speaker" for r, pl in _sent053), str(_sent053))
+              any(r == "suite-wsspb" and pl.get("cmd") == "set_speaker" for r, pl in _sentsp), str(_sentsp))
     finally:
-        _nc053.send_to_room = _real_send053
-        registry.mark_disconnected("pc-053ws")
-        registry.mark_disconnected("pc-053xvf")
+        _ncsp.send_to_room = _real_sendsp
+        registry.mark_disconnected("pc-spws")
+        registry.mark_disconnected("pc-spxvf")
 
     # ── per-room agent override (Intelligence agent = house default) ──
     import intelligence_agent as _iaRA

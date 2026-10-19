@@ -383,8 +383,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # IntelligenceAgent — the kind branch lives inside _ask_intelligence (envelope
     # only). A past bug: this ternary only
     # matched == "hermes", so kind: openclaw fell to the echo stub and
-    # the operator got canned answers while the suite stayed green (9b11 tested
-    # the agent directly, never the construction site).
+    # the operator got canned answers while the suite stayed green (its tests
+    # checked the agent directly, never the construction site).
     # Dead-TTS containment wire: the tracked
     # TTS service's is_usable rides into the agent so texts pushed to a
     # DEAD service are never armed as echo texts — they made no sound,

@@ -93,11 +93,11 @@ node_command._send = lambda out, p: PC_SENT.append((out, p)) or True
 
 
 async def _bind_later():
-    registry._room_by_pc["pc-053a"] = registry.PROVISIONAL
-    task = asyncio.create_task(ns.sync_pc("pc-053a", wait_s=3.0, poll_s=0.05))
+    registry._room_by_pc["pc-spa"] = registry.PROVISIONAL
+    task = asyncio.create_task(ns.sync_pc("pc-spa", wait_s=3.0, poll_s=0.05))
     await asyncio.sleep(0.2)
     check("speaker sync_pc: nothing sent while the room is provisional", PC_SENT == [], str(PC_SENT))
-    registry._room_by_pc["pc-053a"] = "den"
+    registry._room_by_pc["pc-spa"] = "den"
     return await task
 
 try:
@@ -105,32 +105,32 @@ try:
     check("speaker sync_pc: sends once the room binds, enabled from THAT room's zone",
           ok is True and PC_SENT == [("OUT", ns.payload("den"))], str(PC_SENT))
     PC_SENT.clear()
-    registry._room_by_pc["pc-053b"] = registry.PROVISIONAL
-    ok = asyncio.run(ns.sync_pc("pc-053b", wait_s=0.2, poll_s=0.05))
+    registry._room_by_pc["pc-spb"] = registry.PROVISIONAL
+    ok = asyncio.run(ns.sync_pc("pc-spb", wait_s=0.2, poll_s=0.05))
     check("speaker sync_pc: gives up quietly if the room never binds", ok is False and PC_SENT == [])
 finally:
     registry.sender_for_pc = _real_sender_for_pc
     node_command._send = _real_send_raw
-    registry._room_by_pc.pop("pc-053a", None)
-    registry._room_by_pc.pop("pc-053b", None)
+    registry._room_by_pc.pop("pc-spa", None)
+    registry._room_by_pc.pop("pc-spb", None)
 
 # ── registry ─────────────────────────────────────────────────────────
-registry._room_by_pc["pc-053r"] = "ws053"
-registry.note_line("pc-053r", "waveshare")
-registry._room_by_pc["pc-053x"] = "xvf053"
-registry.note_line("pc-053x", "array")
+registry._room_by_pc["pc-spr"] = "wssp"
+registry.note_line("pc-spr", "waveshare")
+registry._room_by_pc["pc-spx"] = "xvfsp"
+registry.note_line("pc-spx", "array")
 check("speaker registry: a waveshare line alone is CAPABLE, not yet a speaker",
-      registry.speaker_capable("ws053") is True and registry.has_speaker("ws053") is False)
-registry.note_speaker_ok("pc-053r", True)
-check("speaker registry.has_speaker: waveshare line + speaker_ok ack", registry.has_speaker("ws053") is True)
-check("speaker registry.has_speaker: array line / unknown room", registry.has_speaker("xvf053") is False and registry.has_speaker("nope053") is False)
+      registry.speaker_capable("wssp") is True and registry.has_speaker("wssp") is False)
+registry.note_speaker_ok("pc-spr", True)
+check("speaker registry.has_speaker: waveshare line + speaker_ok ack", registry.has_speaker("wssp") is True)
+check("speaker registry.has_speaker: array line / unknown room", registry.has_speaker("xvfsp") is False and registry.has_speaker("nopesp") is False)
 row = {r["room"]: r for r in registry.known_rooms()}
-check("speaker: known_rooms carries speaker flag", row["ws053"].get("speaker") is True and row["xvf053"].get("speaker") is False)
-check("speaker: speaker_rooms lists speaker rooms only", "ws053" in registry.speaker_rooms() and "xvf053" not in registry.speaker_rooms())
-registry.note_speaker_ok("pc-053r", False)
+check("speaker: known_rooms carries speaker flag", row["wssp"].get("speaker") is True and row["xvfsp"].get("speaker") is False)
+check("speaker: speaker_rooms lists speaker rooms only", "wssp" in registry.speaker_rooms() and "xvfsp" not in registry.speaker_rooms())
+registry.note_speaker_ok("pc-spr", False)
 check("speaker: note_speaker_ok recorded (a failed speaker is no speaker)",
-      {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is False and registry.has_speaker("ws053") is False)
-check("speaker: capable_rooms still lists it (so it gets probed again)", "ws053" in registry.capable_rooms())
+      {r["room"]: r for r in registry.known_rooms()}["wssp"]["speaker_ok"] is False and registry.has_speaker("wssp") is False)
+check("speaker: capable_rooms still lists it (so it gets probed again)", "wssp" in registry.capable_rooms())
 
 # ── node_command wiring ──────────────────────────────────────────────
 RESYNC = []
@@ -138,19 +138,19 @@ _real_sync = ns.sync
 ns.sync = lambda room: RESYNC.append(room) or True
 
 
-def _ack(ok, pc="pc-053r"):
+def _ack(ok, pc="pc-spr"):
     node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_speaker", "ok": True,
                                         "data": {"enabled": False, "volume": 40, "speaker_ok": ok}}), pc)
 
 try:
     _ack(True)
-    check("speaker: set_speaker reply updates speaker_ok", {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is True)
-    check("speaker: first proof (ack speaker_ok true) re-syncs so the real state follows the probe", RESYNC == ["ws053"], str(RESYNC))
+    check("speaker: set_speaker reply updates speaker_ok", {r["room"]: r for r in registry.known_rooms()}["wssp"]["speaker_ok"] is True)
+    check("speaker: first proof (ack speaker_ok true) re-syncs so the real state follows the probe", RESYNC == ["wssp"], str(RESYNC))
     _ack(True)
-    check("speaker: a repeat ack does not re-sync (no ping-pong)", RESYNC == ["ws053"], str(RESYNC))
+    check("speaker: a repeat ack does not re-sync (no ping-pong)", RESYNC == ["wssp"], str(RESYNC))
     node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_speaker", "ok": False,
-                                        "note": "unknown cmd"}), "pc-053x")
-    check("speaker: older firmware answering 'unknown cmd' never becomes a speaker", registry.has_speaker("xvf053") is False)
+                                        "note": "unknown cmd"}), "pc-spx")
+    check("speaker: older firmware answering 'unknown cmd' never becomes a speaker", registry.has_speaker("xvfsp") is False)
 finally:
     ns.sync = _real_sync
 
@@ -171,12 +171,12 @@ async def _push(line, pc):
     await asyncio.sleep(0.05)
 
 try:
-    asyncio.run(_push("waveshare", "pc-053r"))
-    check("speaker: fw_push from a speaker line schedules sync_pc", CALLED == ["pc-053r"], str(CALLED))
+    asyncio.run(_push("waveshare", "pc-spr"))
+    check("speaker: fw_push from a speaker line schedules sync_pc", CALLED == ["pc-spr"], str(CALLED))
     check("speaker: a new session forgets last boot's proof (re-probed; a downgrade can't stay 'speaker')",
-          registry.has_speaker("ws053") is False and {r["room"]: r for r in registry.known_rooms()}["ws053"]["speaker_ok"] is None)
+          registry.has_speaker("wssp") is False and {r["room"]: r for r in registry.known_rooms()}["wssp"]["speaker_ok"] is None)
     CALLED.clear()
-    asyncio.run(_push("array", "pc-053x"))
+    asyncio.run(_push("array", "pc-spx"))
     check("speaker: fw_push from a mic-only line does not", CALLED == [], str(CALLED))
 finally:
     ns.sync_pc = _real_sync_pc
