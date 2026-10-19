@@ -1581,6 +1581,11 @@ function SttCard({ status, setMsg, setRebooting }) {
   }
   const load = () => api('/api/dashboard/stt').then(apply)
     .catch(e => { msgRef.current('STT load failed: ' + e.message, 'err', 'STT'); return null })
+  // Fetch on mount AND whenever the loaded model or its load state changes
+  // (a restart onto another model, a load finishing or failing): the model
+  // list's "in use" flags depend on what's loaded. Keyed on the stt part of
+  // the 5 s /status poll only — unchanged polls don't refetch.
+  const runKey = `${status?.stt?.model}|${status?.stt?.state}`
   useEffect(() => {
     let alive = true
     api('/api/dashboard/stt')
@@ -1592,7 +1597,7 @@ function SttCard({ status, setMsg, setRebooting }) {
       })
       .catch(e => { if (alive) msgRef.current('STT load failed: ' + e.message, 'err', 'STT') })
     return () => { alive = false }
-  }, [])
+  }, [runKey])
 
   // While a download runs — started by Save, or already in progress when the
   // page loaded — poll every 2 s; offer the restart once it's on disk. A
@@ -1684,6 +1689,28 @@ function SttCard({ status, setMsg, setRebooting }) {
             </span>
           </div>
         )}
+        <div className="flex flex-wrap items-end gap-4">
+          <Field label="Model">
+            <select id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
+              onChange={e => setModel(e.target.value)} disabled={!data}>
+              {!data && <option value="" disabled>loading…</option>}
+              {custom && <option value={data.current.model} disabled>{data.current.model} (set in config)</option>}
+              {models.map(m => (
+                <option key={m.name} value={m.name} disabled={!m.available}>
+                  {m.label} ({m.size_gb} GB){!m.available ? ' — needs a GPU' : !m.cached ? ' — downloads first' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Language">
+            <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
+              onChange={e => setLanguage(e.target.value)} disabled={!data}>
+              {!data && <option value="" disabled>loading…</option>}
+              {customLang && <option value={data.current.language} disabled>{data.current.language} (set in config)</option>}
+              {(data?.languages || []).map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+            </select>
+          </Field>
+        </div>
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
@@ -1707,26 +1734,6 @@ function SttCard({ status, setMsg, setRebooting }) {
             ))}
           </tbody>
         </table>
-        <Field label="Model">
-          <select id="stt-model" className={`${INPUT_CLS} w-[260px]`} value={model || ''}
-            onChange={e => setModel(e.target.value)} disabled={!data}>
-            {!data && <option value="" disabled>loading…</option>}
-            {custom && <option value={data.current.model} disabled>{data.current.model} (set in config)</option>}
-            {models.map(m => (
-              <option key={m.name} value={m.name} disabled={!m.available}>
-                {m.label} ({m.size_gb} GB){!m.available ? ' — needs a GPU' : !m.cached ? ' — downloads first' : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Language">
-          <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
-            onChange={e => setLanguage(e.target.value)} disabled={!data}>
-            {!data && <option value="" disabled>loading…</option>}
-            {customLang && <option value={data.current.language} disabled>{data.current.language} (set in config)</option>}
-            {(data?.languages || []).map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-          </select>
-        </Field>
         <div className="flex items-center justify-end gap-4 flex-wrap">
           <button className={BTN_PRIMARY} onClick={save}
             disabled={!data || busy || (downloading && model !== data.current.model && model !== pendingModel)}>Save</button>

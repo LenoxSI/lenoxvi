@@ -23,10 +23,11 @@ The two version streams are independent.
 - Download progress: a bar under the chips plus "43%" and "650 MB / 1.5 GB",
   from the bytes Hugging Face has written to disk (faster-whisper's own
   downloader hides progress, so the card downloads the same files itself).
-- Model table on the STT card: the four models with their size on disk and
-  a Delete button for downloaded models that aren't configured, loaded or
-  downloading (removed via the Hugging Face cache API; a deleted model
-  downloads again if picked).
+- Model table on the STT card (under the Model / Language row): the four
+  models with their size on disk and a Delete button for downloaded models
+  that aren't configured, loaded or downloading (removed via the Hugging
+  Face cache API; a deleted model downloads again if picked). The "in use"
+  flags refresh when a restart loads a different model.
 - `GET`/`PUT /api/dashboard/stt`, `DELETE /api/dashboard/stt/model/{name}`;
   `/api/dashboard/status` gains an `stt` block.
 
