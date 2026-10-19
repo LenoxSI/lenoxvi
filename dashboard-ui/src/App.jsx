@@ -996,8 +996,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
 
   return (
     <>
-      <Section id="rooms" title="Room → zone mapping"
-        note="Pick a speaker zone for each mic node, and an agent if a room should differ from the Intelligence card's. New nodes appear here as soon as they connect.">
+      <Section id="rooms" title="Room → zone mapping">
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden" style={{ overflowX: 'auto' }}>
           <table className="w-full text-[14px]">
             <thead>
@@ -1541,8 +1540,7 @@ function WakeNameCard({ setMsg }) {
   const addTyped = async () => { if (await addAlias(aliasDraft)) setAliasDraft('') }
   const hhmm = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return (
-    <Section title="Wake name"
-      note="What the house is called. A bare wake phrase in any of these spellings is dropped, not answered.">
+    <Section title="Wake name">
       <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         {/* Wide screens: the name and the spelling box share the top row; the
             spelling chips sit below the box, in its column.
