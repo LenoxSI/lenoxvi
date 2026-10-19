@@ -744,8 +744,31 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
     </div>
   )
 }
-function Rooms({ status, mapping, setMsg, reloadAll }) {
+function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
   const [mapDraft, setMapDraft] = useState(null)
+  // Per-room agent override. The Intelligence card's agent is the house
+  // default; a room only differs when picked here. agentDraft holds this
+  // system's unsaved picks ('' = back to Default).
+  const [agentDraft, setAgentDraft] = useState({})
+  const [found, setFound] = useState(null)
+  const agentKind = mapping?.agent_kind || ''
+  const defaultAgent = mapping?.default_agent || ''
+  const savedAgents = mapping?.room_agents?.[agentKind] || {}
+  const discoverAgents = useRef(null)
+  useEffect(() => {
+    discoverAgents.current = async () => {
+      if (!agentKind) return
+      try {
+        setFound(await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: agentKind } }))
+      } catch (e) { setFound({ agents: [], note: 'Agent list failed: ' + e.message }) }
+    }
+  })
+  useEffect(() => { discoverAgents.current?.() }, [agentKind])
+  useEffect(() => {
+    const h = () => discoverAgents.current?.()
+    window.addEventListener('lenoxvi:reload-all', h)
+    return () => window.removeEventListener('lenoxvi:reload-all', h)
+  }, [])
   // Bug-class fix: the 5s poll refetches mapping and
   // used to clobber unsaved select edits — dirty holds user drafts.
   const [mapDirty, setMapDirty] = useState(false)
@@ -803,10 +826,21 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     // one Save persists the whole visible map (and the full-dict
     // wipe-guard contract stays honest).
     const body = { room_zones: { ...(mapDraft || mapping?.room_zones || {}), [room]: zone } }
+    // Only this system's overrides, and only when one was edited — an
+    // untouched page leaves room_agents alone server-side.
+    const agentEdits = Object.keys(agentDraft).length > 0
+    if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...agentDraft } }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
-      setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
+      setAgentDraft({})
+      if (agentEdits) {
+        const a = body.room_agents[agentKind][room]
+        setMsg(`${room} saved — agent ${a || `Default (${defaultAgent})`} applies after a bot restart.`, 'ok', 'Room → zone mapping')
+        offerRestart(setMsg, setRebooting)
+      } else {
+        setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
+      }
       reloadAll()
     } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
   }
@@ -814,13 +848,14 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   return (
     <>
       <Section id="rooms" title="Room → zone mapping"
-        note="Pick a speaker zone for each mic node. New nodes appear here as soon as they connect.">
-        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+        note="Pick a speaker zone for each mic node, and an agent if a room should differ from the Intelligence card's. New nodes appear here as soon as they connect.">
+        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden" style={{ overflowX: 'auto' }}>
           <table className="w-full text-[14px]">
             <thead>
               <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
                 <th className="text-left px-4 py-2">Room (mic node)</th>
                 <th className="text-left px-4 py-2">Zone</th>
+                <th className="text-left px-4 py-2">Agent</th>
                 <th className="text-left px-4 py-2"></th>
               </tr>
             </thead>
@@ -829,6 +864,10 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                 const hasSpeaker = !!speakers[room]
                 const unmapped = !mapping?.room_zones?.[room]
                 const zone = mapDraft?.[room] ?? mapping?.room_zones?.[room] ?? defaultZone(room) ?? ''
+                const agent = agentDraft[room] ?? savedAgents[room] ?? ''
+                const agentList = found?.agents || []
+                const known = agentList.some(a => a.id === agent)
+                const effective = agentList.find(a => a.id === (agent || defaultAgent))
                 return (
                 <tr key={room} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">
@@ -848,6 +887,19 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                       {hasSpeaker && zoneNames.length > 0 && <option disabled value="__sep">──────────</option>}
                       {zoneNames.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="grid gap-1">
+                      <select value={agent} data-agent-room={room}
+                        onChange={e => setAgentDraft({ ...agentDraft, [room]: e.target.value })}
+                        className={`${INPUT_CLS} w-[200px]`}>
+                        <option value="">{`Default (${defaultAgent || '—'})`}</option>
+                        {agent && !known && <option value={agent}>{found ? `${agent} (not found)` : agent}</option>}
+                        {agentList.map(a => <option key={a.id} value={a.id}>{a.key_set ? a.id : `${a.id} — no key`}</option>)}
+                      </select>
+                      {effective && !effective.key_set &&
+                        <MissingKey label={`${agentKind === 'openclaw' ? 'OpenClaw' : 'Hermes'} · ${effective.id}`} />}
+                    </div>
                   </td>
                   <td className="px-4 py-2 text-right">
                     <button className={BTN_PRIMARY} onClick={() => saveMapping(room)}>Save</button>
@@ -2287,7 +2339,7 @@ export default function App() {
         </header>
 
         <Overview status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
-        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} setRebooting={setRebooting} />
         <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
         <System intelligence={intelligence} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
       </div>
