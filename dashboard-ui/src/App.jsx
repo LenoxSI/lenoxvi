@@ -1082,8 +1082,9 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                 <tr key={r.room} className="border-t border-[var(--separator)]">
                   <td className="px-4 py-2 font-mono text-[13px]">{esc(r.room)}</td>
                   <td className="px-4 py-2">
-                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium
-                      ${r.online ? 'bg-[var(--accent-soft)] text-[var(--success)]' : 'text-[var(--muted)]'}`}>
+                    {/* Brand Chip rule: soft success "online", soft danger "offline". */}
+                    <span data-role="node-state"
+                      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE[r.online ? 'success' : 'danger']}`}>
                       {r.online ? 'online' : 'offline'}
                     </span>
                     {r.online && r.tts_usable === false && (
