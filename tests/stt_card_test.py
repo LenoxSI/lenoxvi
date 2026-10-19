@@ -97,6 +97,22 @@ check("stt preload failure is recorded (state error + reason) and still raised (
       raised and st.get("state") == "error" and "CUDA driver missing" in (st.get("error") or "")
       and st.get("model") == "large-v3-turbo", str(st))
 
+class _WarmupBoom(_FakeModel):
+    def transcribe(self, *a, **k):
+        raise RuntimeError("cuBLAS failed to load")
+
+
+sl._new_model = lambda model, device, compute: _WarmupBoom()
+raised = False
+try:
+    sl.preload_shared_model("small", "cuda", "float16")
+except RuntimeError:
+    raised = True
+st = sl.status()
+check("stt warm-up failure (where cuBLAS loads) is recorded as error, not stuck on loading",
+      raised and st.get("state") == "error" and "cuBLAS" in (st.get("error") or "")
+      and sl.LocalWhisperSTTService._shared_model is None, str(st))
+
 sl._new_model = lambda model, device, compute: _FakeModel()
 sl.preload_shared_model("medium", "cuda", "float16")
 st = sl.status()
@@ -147,6 +163,15 @@ check("stt language applies LIVE: the next utterance uses the new code, same ses
 LANG["v"] = "auto"
 asyncio.run(_say(1))
 check("stt language 'auto' -> None", fake.calls[-1] is None, str(fake.calls[-3:]))
+
+def _hook_boom():
+    raise RuntimeError("config hiccup")
+
+sl._language_hook = _hook_boom
+svc_auto = sl.LocalWhisperSTTService(model="medium", device="cuda", compute_type="float16", language="auto")
+asyncio.run(svc_auto._transcribe(_wav()))
+check("stt hook failure falls back to the constructor language, with 'auto' mapped to None",
+      fake.calls[-1] is None, str(fake.calls[-2:]))
 
 sl.LocalWhisperSTTService._shared_model = None
 

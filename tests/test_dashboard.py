@@ -3414,9 +3414,19 @@ def main():
         check("stt language-only PUT: live, no restart, model (even a hand-set one) untouched",
               _r.status_code == 200 and _r.json().get("restart_needed") is False
               and _c.get("language") == "en" and _c.get("model") == "large-v3", f"{_r.text[:120]} cfg={_c}")
-        _r = client.put("/api/dashboard/stt", json={"language": "auto"})
-        check("stt language 'auto' removes the key (unset = auto-detect)",
-              _r.status_code == 200 and "language" not in _sttstt(), str(_sttstt()))
+        _os_lang = os.environ.get("LVI_STT_LANGUAGE")
+        os.environ["LVI_STT_LANGUAGE"] = "de"
+        try:
+            _r = client.put("/api/dashboard/stt", json={"language": "auto"})
+            _g = client.get("/api/dashboard/stt").json()
+            check("stt language 'auto' is written explicitly, so an env language can't override Auto-detect",
+                  _r.status_code == 200 and _sttstt().get("language") == "auto" and _g["current"]["language"] == "auto",
+                  f"cfg={_sttstt()} cur={_g['current']}")
+        finally:
+            if _os_lang is None:
+                os.environ.pop("LVI_STT_LANGUAGE", None)
+            else:
+                os.environ["LVI_STT_LANGUAGE"] = _os_lang
 
         _GPUstt["name"] = None
         _r = client.put("/api/dashboard/stt", json={"model": "large-v3-turbo"})
@@ -3443,6 +3453,8 @@ def main():
               and _sttstt().get("model") == "small", f"{_r.text[:140]} cfg={_sttstt()}")
         _r2 = client.put("/api/dashboard/stt", json={"model": "medium"})
         check("stt a second model change while downloading -> 409", _r2.status_code == 409, str(_r2.status_code))
+        _r3 = client.put("/api/dashboard/stt", json={"language": "fr"})
+        check("stt a language change mid-download is accepted", _r3.status_code == 200, str(_r3.status_code))
         check("stt GET shows the download in progress",
               (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") == "downloading")
         for _ in range(40):
@@ -3455,6 +3467,30 @@ def main():
               _d.get("state") == "ready" and _d.get("model") == "medium"
               and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("medium", "cuda", "float16"),
               f"dl={_d} cfg={_c}")
+        check("stt the download's config write keeps a language saved mid-download", _c.get("language") == "fr", str(_c))
+
+        # two simultaneous model PUTs for uncached models: exactly one download starts, the other gets 409
+        import threading as _thstt
+        _CACHEDstt.discard("large-v3-turbo")
+        _CACHEDstt.discard("small")
+        _DLstt.update(fail=False, delay=0.4)
+        _slow_cached = _rstt._stt_cached
+        def _slow(name):
+            _tstt.sleep(0.15)
+            return _slow_cached(name)
+        _rstt._stt_cached = _slow
+        _codes = []
+        _ts = [_thstt.Thread(target=lambda m=m: _codes.append(client.put("/api/dashboard/stt", json={"model": m}).status_code))
+               for m in ("large-v3-turbo", "small")]  # both differ from the current (medium)
+        [t.start() for t in _ts]
+        [t.join() for t in _ts]
+        _rstt._stt_cached = _slow_cached
+        check("stt concurrent uncached model PUTs: one starts, the other 409", sorted(_codes) == [200, 409], str(_codes))
+        for _ in range(40):
+            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
+                break
+            _tstt.sleep(0.05)
+        _CACHEDstt.update({"large-v3-turbo", "small"})
 
         _CACHEDstt.discard("medium")
         _DLstt.update(fail=True, delay=0.05)
@@ -3469,6 +3505,23 @@ def main():
               _d.get("state") == "error" and "network down" in (_d.get("error") or "") and _sttstt().get("model") == "base",
               f"dl={_d} cfg={_sttstt()}")
 
+        # partial download must not count as cached (real hook, faked hub)
+        import tempfile as _tfstt
+        import faster_whisper.utils as _fwu
+        _real_cached = _savedstt[0]
+        _real_dm = _fwu.download_model
+        _pdir = Path(_tfstt.mkdtemp())
+        _fwu.download_model = lambda name, local_files_only=False, **k: str(_pdir)
+        try:
+            _empty = _real_cached("small") if _real_cached else None
+            (_pdir / "config.json").write_text("{}")
+            (_pdir / "model.bin").write_bytes(b"x")
+            _full = _real_cached("small") if _real_cached else None
+        finally:
+            _fwu.download_model = _real_dm
+        check("stt a partial snapshot (no model.bin/config.json) is NOT cached; a complete one is",
+              _empty is False and _full is True, f"{_empty} {_full}")
+
         _s = client.get("/api/dashboard/status").json()
         check("stt /status carries the stt block", isinstance(_s.get("stt"), dict) and "state" in _s["stt"],
               str(_s.get("stt")))
@@ -3477,6 +3530,32 @@ def main():
             if _v is not None:
                 setattr(_rstt, _n, _v)
         config_store.write_section("stt", _stt_beforestt)
+
+    # config_store: writes from worker threads must not corrupt config.yaml
+    import threading as _thcs
+    import yaml as _ycs
+    _errs, _N = [], 40
+    def _w(sec):
+        for i in range(_N):
+            try:
+                config_store.write_section(sec, {"n": i})
+            except Exception as e:  # noqa: BLE001
+                _errs.append(f"{sec}: {type(e).__name__}: {e}"[:120])
+    def _rd():
+        for _ in range(_N * 2):
+            try:
+                config_store.read_section("stt")
+            except Exception as e:  # noqa: BLE001
+                _errs.append(f"read: {type(e).__name__}: {e}"[:120])
+    _ts = [_thcs.Thread(target=_w, args=("zz_a",)), _thcs.Thread(target=_w, args=("zz_b",)), _thcs.Thread(target=_rd)]
+    [t.start() for t in _ts]
+    [t.join() for t in _ts]
+    _final = _ycs.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
+    check("config_store: concurrent thread writes/reads — no errors, no lost section, valid YAML",
+          not _errs and (_final.get("zz_a") or {}).get("n") == _N - 1 and (_final.get("zz_b") or {}).get("n") == _N - 1,
+          f"errs={_errs[:3]} a={_final.get('zz_a')} b={_final.get('zz_b')}")
+    check("config_store exposes LOCK for read-modify-write callers", hasattr(config_store, "LOCK"))
+    config_store.write_sections({"zz_a": {}, "zz_b": {}})
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()

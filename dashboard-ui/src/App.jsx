@@ -1563,10 +1563,8 @@ function SttCard({ status, setMsg, setRebooting }) {
   const [model, setModel] = useState(null)
   const [language, setLanguage] = useState(null)
   const [busy, setBusy] = useState(false)
-  const pollRef = useRef(null)
   // setMsg is a new function on every parent render (the 5 s poll): keep it
-  // in a ref so the mount effect runs once — re-running it refetched /stt
-  // and killed the download watcher.
+  // in a ref so the effects below don't re-run on every poll.
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
 
@@ -1590,29 +1588,37 @@ function SttCard({ status, setMsg, setRebooting }) {
         setLanguage(l => l ?? d.current.language)
       })
       .catch(e => { if (alive) msgRef.current('STT load failed: ' + e.message, 'err', 'STT') })
-    return () => { alive = false; clearInterval(pollRef.current) }
+    return () => { alive = false }
   }, [])
 
-  const watchDownload = () => {
-    clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
-      const d = await load()
-      const st = d?.download?.state
-      if (st === 'downloading') return
-      clearInterval(pollRef.current)
-      if (st === 'ready') {
-        setMsg(`Downloaded ${d.download.model} — saved; restart to load it.`, 'ok', 'STT')
-        offerRestart(setMsg, setRebooting)
-      } else if (st === 'error') {
-        setMsg(`Download failed (${d.download.error}) — config unchanged.`, 'err', 'STT')
-      }
+  // While a download runs — started by Save, or already in progress when the
+  // page loaded — poll every 2 s; offer the restart once it's on disk. A
+  // failed poll just tries again; the cleanup stops it when the state flips.
+  const downloading = data?.download?.state === 'downloading'
+  const pendingModel = downloading ? data.download.model : null   // already on its way
+  useEffect(() => {
+    if (!downloading) return
+    let alive = true
+    const t = setInterval(() => {
+      api('/api/dashboard/stt').then(d => {
+        if (!alive) return
+        setData(d)
+        const dl = d.download || {}
+        if (dl.state === 'ready') {
+          msgRef.current(`Downloaded ${dl.model} — saved; restart to load it.`, 'ok', 'STT')
+          offerRestart(msgRef.current, setRebooting)
+        } else if (dl.state === 'error') {
+          msgRef.current(`Download failed (${dl.error}) — config unchanged.`, 'err', 'STT')
+        }
+      }).catch(() => {})
     }, 2000)
-  }
+    return () => { alive = false; clearInterval(t) }
+  }, [downloading, setRebooting])
 
   const save = async () => {
     if (!data) return
     const body = {}
-    if (model !== data.current.model) body.model = model
+    if (model !== data.current.model && model !== pendingModel) body.model = model
     if (language !== data.current.language) body.language = language
     if (!Object.keys(body).length) { setMsg('Nothing changed.', 'ok', 'STT'); return }
     setBusy(true)
@@ -1621,7 +1627,6 @@ function SttCard({ status, setMsg, setRebooting }) {
       await load()
       if (r.download === 'started') {
         setMsg(`Downloading ${model} — restart offered when it's on disk.`, 'ok', 'STT')
-        watchDownload()
       } else if (r.restart_needed) {
         setMsg('Saved to config.yaml — the model loads on bot restart.', 'ok', 'STT')
         offerRestart(setMsg, setRebooting)
@@ -1672,7 +1677,7 @@ function SttCard({ status, setMsg, setRebooting }) {
         </Field>
         <div className="flex items-center justify-end gap-4 flex-wrap">
           <button className={BTN_PRIMARY} onClick={save}
-            disabled={!data || busy || data?.download?.state === 'downloading'}>Save</button>
+            disabled={!data || busy || (downloading && model !== data.current.model && model !== pendingModel)}>Save</button>
         </div>
       </div>
     </Section>

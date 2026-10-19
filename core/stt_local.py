@@ -37,8 +37,9 @@ def _set_status(state: str, model: str, device: str, compute: str, error: str | 
 def status() -> dict:
     out = dict(_STATUS)
     out["samples"] = len(_LAT_MS)
-    if _LAT_MS:
-        out["latency_ms_median"] = round(statistics.median(_LAT_MS))
+    lat = list(_LAT_MS)  # snapshot: the executor thread appends concurrently
+    if lat:
+        out["latency_ms_median"] = round(statistics.median(lat))
     return out
 
 
@@ -111,15 +112,17 @@ def preload_shared_model(model: str, device: str, compute_type: str) -> None:
     _set_status("loading", model, device, compute_type)
     try:
         m = _new_model(model, device, compute_type)
+        # Warm-up: the first encode loads cuBLAS (+~0.5 GB) — do it now, not
+        # inside someone's first question. 1 s of silence, result discarded.
+        # Inside the try: a broken CUDA lib fails HERE, and must show as an
+        # error on the dashboard, not a "Loading…" that never ends.
+        segs, _ = m.transcribe(np.zeros(16000, dtype=np.float32), language="en")
+        list(segs)
     except Exception as e:
         # Recorded for the dashboard, then re-raised: bot.py treats a failed
         # preload as non-fatal (the lazy path tries again).
         _set_status("error", model, device, compute_type, error=f"{type(e).__name__}: {e}"[:300])
         raise
-    # Warm-up: the first encode loads cuBLAS (+~0.5 GB) — do it now, not
-    # inside someone's first question. 1 s of silence, result discarded.
-    segs, _ = m.transcribe(np.zeros(16000, dtype=np.float32), language="en")
-    list(segs)
     LocalWhisperSTTService._shared_model = m
     _set_status("ready", model, device, compute_type)
     logger.info(f"stt_local: whisper ready in {time.monotonic() - t0:.1f}s "
@@ -215,7 +218,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         try:
             language = stt_catalog.language_value(_language_hook())
         except Exception:  # noqa: BLE001 — a config hiccup must never cost a transcript
-            language = self._language
+            language = stt_catalog.language_value(self._language)
 
         def _run():
             t0 = time.monotonic()

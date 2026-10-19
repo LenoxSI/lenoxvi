@@ -15,6 +15,7 @@ out of the web path for now).
 
 import os
 import shutil
+import threading
 from pathlib import Path
 
 from loguru import logger
@@ -25,6 +26,13 @@ from config import CONFIG_PATH
 _YAML = YAML()  # round-trip mode: comments and layout survive
 _YAML.preserve_quotes = True
 
+# One lock for every read and write. The ruamel YAML() instance keeps its
+# parser/emitter state on itself (not thread-safe) and every write shares one
+# tmp file, so a write from a worker thread racing a loop-side read or write
+# could garble config.yaml — and a garbled config fails the next boot.
+# Re-entrant: read-modify-write callers hold it across both steps.
+LOCK = threading.RLock()
+
 
 def _path() -> Path:
     # Same resolution as core/config.py — one process, one config file.
@@ -32,19 +40,21 @@ def _path() -> Path:
 
 
 def read_section(section: str, default=None):
-    p = _path()
-    if not p.is_file():
-        return default
-    data = _YAML.load(p.read_text()) or {}
-    return data.get(section) or default
+    with LOCK:
+        p = _path()
+        if not p.is_file():
+            return default
+        data = _YAML.load(p.read_text()) or {}
+        return data.get(section) or default
 
 
 def read_sections(sections: list[str]) -> dict:
-    p = _path()
-    if not p.is_file():
-        return {s: None for s in sections}
-    data = _YAML.load(p.read_text()) or {}
-    return {s: data.get(s) for s in sections}
+    with LOCK:
+        p = _path()
+        if not p.is_file():
+            return {s: None for s in sections}
+        data = _YAML.load(p.read_text()) or {}
+        return {s: data.get(s) for s in sections}
 
 
 def write_section(section: str, value: dict) -> dict:
@@ -55,20 +65,21 @@ def write_section(section: str, value: dict) -> dict:
     skipped `cp config.example.yaml config.yaml`) or ValueError on a
     bad key.
     """
-    p = _path()
-    if not p.is_file():
-        raise FileNotFoundError(
-            f"{p} not found — copy config.example.yaml to config.yaml first"
-        )
-    data = _YAML.load(p.read_text()) or {}
-    before = dict(data.get(section) or {})
-    if value:
-        data[section] = value
-    else:
-        data[section] = {}
-    _atomic_write(p, data)
-    logger.info(f"config_store: rewrote '{section}' via dashboard ({len(value)} entries)")
-    return {"before": before, "after": dict(value)}
+    with LOCK:
+        p = _path()
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"{p} not found — copy config.example.yaml to config.yaml first"
+            )
+        data = _YAML.load(p.read_text()) or {}
+        before = dict(data.get(section) or {})
+        if value:
+            data[section] = value
+        else:
+            data[section] = {}
+        _atomic_write(p, data)
+        logger.info(f"config_store: rewrote '{section}' via dashboard ({len(value)} entries)")
+        return {"before": before, "after": dict(value)}
 
 
 def write_sections(sections: dict) -> dict:
@@ -80,23 +91,24 @@ def write_sections(sections: dict) -> dict:
     of history churn). Callers that need the before/after diff read the
     sections first via read_sections.
     """
-    p = _path()
-    if not p.is_file():
-        raise FileNotFoundError(
-            f"{p} not found — copy config.example.yaml to config.yaml first"
-        )
-    data = _YAML.load(p.read_text()) or {}
-    before = {k: dict(data.get(k) or {}) for k in sections}
-    for section, value in sections.items():
-        if value:
-            data[section] = value
-        else:
-            data[section] = {}
-    _atomic_write(p, data)
-    for section in sections:
-        logger.info(f"config_store: rewrote '{section}' via dashboard "
-                    f"({len(sections[section])} entries, multi-section write)")
-    return {"before": before, "after": {k: dict(v) for k, v in sections.items()}}
+    with LOCK:
+        p = _path()
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"{p} not found — copy config.example.yaml to config.yaml first"
+            )
+        data = _YAML.load(p.read_text()) or {}
+        before = {k: dict(data.get(k) or {}) for k in sections}
+        for section, value in sections.items():
+            if value:
+                data[section] = value
+            else:
+                data[section] = {}
+        _atomic_write(p, data)
+        for section in sections:
+            logger.info(f"config_store: rewrote '{section}' via dashboard "
+                        f"({len(sections[section])} entries, multi-section write)")
+        return {"before": before, "after": {k: dict(v) for k, v in sections.items()}}
 
 
 def _atomic_write(p: Path, data) -> None:

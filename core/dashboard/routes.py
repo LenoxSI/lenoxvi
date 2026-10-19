@@ -160,7 +160,7 @@ async def status():
                              stt_cfg.get("model") or "large-v3-turbo"),
         # STT card chips: load state + per-command transcription time (median
         # of the last 10), straight from the shared model's owner.
-        "stt": __import__("stt_local").status(),
+        "stt": _stt_status(),
         "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
                                 tts_cfg.get("provider") or "elevenlabs"),
         # Intelligence: rig-facts label — same cfg_env chain
@@ -1461,20 +1461,25 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
 # downloaded FIRST; config switches only after the download succeeds, so a
 # restart never downloads and config never names a missing model.
 
+import threading  # noqa: E402
+
 import stt_catalog  # noqa: E402
 
 _STT_DL: dict = {}          # {"model", "state": downloading|ready|error, "error"?}
-_STT_DL_LOCK = __import__("threading").Lock()
+_STT_DL_LOCK = threading.Lock()
 _GPU_NAME_CACHE: list = []
 
 
 def _stt_cached(name: str) -> bool:
+    """On disk AND complete. Older huggingface_hub returns a snapshot dir
+    without checking it's whole, and a restart mid-download leaves one
+    behind — so the files the model actually loads must be there."""
     try:
         from faster_whisper.utils import download_model
-        download_model(name, local_files_only=True)
-        return True
+        path = Path(download_model(name, local_files_only=True))
     except Exception:  # noqa: BLE001 — not cached (or no hub): either way, not on disk
         return False
+    return (path / "model.bin").is_file() and (path / "config.json").is_file()
 
 
 def _stt_download(name: str) -> None:
@@ -1504,6 +1509,12 @@ def _stt_gpu_name():
     return name
 
 
+def _stt_status() -> dict:
+    import stt_local
+
+    return stt_local.status()
+
+
 def _stt_current() -> dict:
     model = cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo")
     language = cfg_env("stt", "language", "LVI_STT_LANGUAGE") or "auto"
@@ -1518,17 +1529,18 @@ def _stt_current() -> dict:
 
 
 def _stt_write(model: str | None = None, language: str | None = None, has_gpu: bool = True) -> None:
-    section = dict(config_store.read_section("stt") or {})
-    if model is not None:
-        device, compute = stt_catalog.runtime_for(has_gpu)
-        section.update(model=model, device=device, compute_type=compute)
-    if language is not None:
-        value = stt_catalog.language_value(language)
-        if value is None:
-            section.pop("language", None)
-        else:
-            section["language"] = value
-    config_store.write_section("stt", section)
+    # Read-modify-write under the store's lock: the download thread and a
+    # loop-side PUT can't lose each other's change.
+    with config_store.LOCK:
+        section = dict(config_store.read_section("stt") or {})
+        if model is not None:
+            device, compute = stt_catalog.runtime_for(has_gpu)
+            section.update(model=model, device=device, compute_type=compute)
+        if language is not None:
+            # Written explicitly, "auto" included: removing the key would let
+            # an LVI_STT_LANGUAGE env value override Auto-detect.
+            section["language"] = language
+        config_store.write_section("stt", section)
 
 
 def _stt_download_then_switch(model: str, has_gpu: bool) -> None:
@@ -1562,6 +1574,7 @@ async def get_stt():
     gpu = await asyncio.to_thread(_stt_gpu_name)
     cached = await asyncio.gather(*(asyncio.to_thread(_stt_cached, m["name"]) for m in stt_catalog.MODELS))
     import stt_local
+
     with _STT_DL_LOCK:
         dl = dict(_STT_DL) or None
     return {
@@ -1593,14 +1606,20 @@ async def put_stt(payload: SttPayload):
             cur = _stt_current()
             want = (payload.model, *stt_catalog.runtime_for(has_gpu))
             if want != (cur["model"], cur["device"], cur["compute"]):
-                if await asyncio.to_thread(_stt_cached, payload.model):
+                cached = await asyncio.to_thread(_stt_cached, payload.model)
+                # Check-and-claim in ONE lock hold (the cache check above
+                # awaits, so the early 409 alone can't stop two PUTs racing).
+                with _STT_DL_LOCK:
+                    if _STT_DL.get("state") == "downloading":
+                        raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
+                    if not cached:
+                        _STT_DL.clear()
+                        _STT_DL.update(model=payload.model, state="downloading")
+                if cached:
                     _stt_write(model=payload.model, has_gpu=has_gpu)
                     restart_needed = True
                 else:
-                    with _STT_DL_LOCK:
-                        _STT_DL.clear()
-                        _STT_DL.update(model=payload.model, state="downloading")
-                    __import__("threading").Thread(
+                    threading.Thread(
                         target=_stt_download_then_switch, args=(payload.model, has_gpu),
                         name="stt-download", daemon=True).start()
                     download = "started"
