@@ -77,7 +77,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
     (empty in a fresh clone by design); served by firmware_server
 - `deploy/lenoxvi-bot.service.example` — sanitized systemd user unit
   (launch flags, `.env` loading, CUDA LD_LIBRARY_PATH for whisper's
-    CTranslate2, restart policy, SIGKILL-after-10s on hung WebRTC)
+    CTranslate2, restart policy, a ~2 s graceful stop with a 10 s hard limit)
 - `config.example.yaml` — **the tuning surface template**: every
   behavior knob in one file (wake threshold/timeout/model/barge-in,
   VAD params, STT/TTS/intelligence settings, Sonos/WiiM zones, intelligence
@@ -96,25 +96,33 @@ auth on reads. Mutating routes carry two guard rails
 cross-origin-tab and DNS-rebinding shapes) and an optional
 `LVI_DASHBOARD_TOKEN`. The page prompts for it once.
 
-Panels, Settings tab (each panel saves to `config.yaml` through
-comment-preserving read-merge-write, applies on next bot restart):
+Panels (each saves to `config.yaml` through comment-preserving
+read-merge-write; most apply on the next bot restart, which the page offers):
 
 - **Rig facts** — version, TTS, STT, OWW model, Intelligence line
 - **Bot control** — restart the bot (with restart countdown popup)
 - **TTS** — provider (ElevenLabs / Deepgram / Deepgram Flux), model
-  (flash v2.5 / v4 turbo), voice, API keys (never rendered back)
+  (flash v2.5 / v4 turbo), voice
+- **STT** — provider (Local — Whisper, or Deepgram Nova-3 in the cloud
+  with local Whisper as its automatic fallback), Whisper model (download
+  with progress, delete unused), language, live status and latency
 - **Intelligence** — provider picker (Hermes / OpenClaw), an agent
   dropdown filled from the provider (OpenClaw: its `/v1/models`; Hermes:
   the profiles on a multiplexing gateway, read from the Hermes
   dashboard's status page — falls back to the default agent), API URL
-  (provider-agnostic: a stranger's Hermes lives at their URL), API key
-  (a saved key shows its first 4 characters), Test connection (health +
-  one minimal completion, latency)
+  (provider-agnostic: a stranger's Hermes lives at their URL), Test
+  connection (health + one minimal completion, latency)
+- **Keys** — every API key in one place (ElevenLabs, Deepgram, Hermes,
+  OpenClaw, each Hermes agent): what uses it, set / missing / waiting for
+  a restart (first 4 characters only), Replace, Remove (with a backup),
+  Test, and one Add picker; other panels link here when a key is missing
 - **Voice Tuning** — filler/pause tunables
 - **Wake Word Model (OWW)** — stock + trained wake-word models: upload,
   select, delete (stock models are selectable, never deletable)
 - **Zones / Nodes / Room→zone mapping** — rooms, mic nodes, speaker zones
-  (a node with a built-in speaker can use it as its own private zone)
+  (a node with a built-in speaker can use it as its own private zone), and
+  a per-room agent (a room can talk to a different agent than the
+  Intelligence panel's default)
 - **Firmware** — node image push, FW version column
 
 The suite (`tests/test_dashboard.py`) exercises every panel through

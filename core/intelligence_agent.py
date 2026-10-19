@@ -27,7 +27,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-# Supersede-ack rate limit (2026-10-07, the a kid session): consecutive
+# Supersede-ack rate limit (2026-10-07, a two-person session): consecutive
 # supersedes in a two-person conversation said "Hold on — switching."
 # three times in ten seconds. One ack per wake window: after speaking it,
 # further supersedes inside this gap stay silent (the turn still
@@ -275,10 +275,10 @@ class IntelligenceAgent(FrameProcessor):
         self._turn_task: asyncio.Task | None = None
         self._turn_epoch: int = 0
         self._turn_started: float = 0.0
-        # Supersede-ack rate limit (2026-10-07, the a kid session): the ack
+        # Supersede-ack rate limit (2026-10-07, a two-person session): the ack
         # ("Hold on — switching.") is useful for one deliberate interrupt,
         # but in a two-person conversation consecutive utterances supersede
-        # repeatedly and she says it three times in ten seconds — sounds
+        # repeatedly and the assistant says it three times in ten seconds — sounds
         # broken. Once per wake window is plenty: the state flip from the
         # old turn dying still tells the user something changed. Reset on
         # a fresh turn start after a quiet gap (no live turn at supersede
