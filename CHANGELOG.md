@@ -8,6 +8,20 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- Dashboard: **STT card** (Voice, under TTS). Pick one of four benchmarked
+  faster-whisper models — Turbo (default), Medium, Small, Base — and a
+  language (Auto-detect + 16 common ones). Device and compute type are
+  written with the model (GPU → `cuda`/`float16`, no GPU → `cpu`/`int8`);
+  Turbo and Medium need a GPU. A model that isn't downloaded yet is fetched
+  first and config switches only once it's on disk, so a restart never
+  downloads. Language changes apply to the next utterance, no restart.
+  Hand-set values outside the lists show as "(set in config)" and are kept.
+- Status chips across the top of the card: load state, model, GPU/CPU,
+  compute type, and per-command speech-to-text time (median of the last 10
+  since restart) — a live A/B meter when trying models.
+- `GET`/`PUT /api/dashboard/stt`; `/api/dashboard/status` gains an `stt` block.
+
 ### Changed
 - Dashboard: the Nodes table no longer shows a `speaker` chip (the built-in
   speaker lives in Zones and the mapping dropdown); the waveshare line chip's

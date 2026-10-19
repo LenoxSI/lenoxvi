@@ -1336,7 +1336,7 @@ const savedFor = (t, p) =>
   p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice
   : p === 'pocket' ? t?.pocket_voice : t?.deepgram_flux_voice
 
-function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
+function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
   const [provider, setProvider] = useState(null)
   const [ttsKeyEpoch, setTtsKeyEpoch] = useState(0)  // remounts the key box after a save
   const [model, setModel] = useState(null)
@@ -1534,10 +1534,148 @@ function Voice({ tts, tuning, setMsg, setRebooting, reloadAll }) {
         </div>
       </Section>
 
+      <SttCard status={status} setMsg={setMsg} setRebooting={setRebooting} />
       <Tuning tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} />
       <WakeNameCard setMsg={setMsg} />
       <OwwPanel setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
     </>
+  )
+}
+
+/* ── STT card ───────────────────────────────────────────────────
+   Chips = what's RUNNING (load state + per-command time, from the 5s
+   /status poll). Selects = what's SAVED. Four benchmarked models; the
+   server writes device/compute with the model and downloads a missing
+   model before switching config (restart only offered once it's on disk). */
+const CHIP_CLS = 'inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium'
+
+function sttStateChip(st, dl) {
+  if (dl?.state === 'downloading') return { text: `Downloading ${dl.model}…`, cls: 'text-[var(--muted)]' }
+  if (!st) return { text: '…', cls: 'text-[var(--muted)]' }
+  if (st.state === 'ready') return { text: '● Running', cls: 'text-[var(--success)]' }
+  if (st.state === 'error') return { text: '● Failed to load', cls: 'text-[var(--danger)]', title: st.error }
+  if (st.state === 'loading') return { text: 'Loading…', cls: 'text-[var(--muted)]' }
+  return { text: 'Not loaded yet', cls: 'text-[var(--muted)]' }
+}
+
+function SttCard({ status, setMsg, setRebooting }) {
+  const [data, setData] = useState(null)
+  const [model, setModel] = useState(null)
+  const [language, setLanguage] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const pollRef = useRef(null)
+  // setMsg is a new function on every parent render (the 5 s poll): keep it
+  // in a ref so the mount effect runs once — re-running it refetched /stt
+  // and killed the download watcher.
+  const msgRef = useRef(setMsg)
+  useEffect(() => { msgRef.current = setMsg })
+
+  // Draft law: the server seeds the selects once; after that they're
+  // local until saved (a refetch must not clobber a pick in progress).
+  const apply = d => {
+    setData(d)
+    setModel(m => m ?? d.current.model)
+    setLanguage(l => l ?? d.current.language)
+    return d
+  }
+  const load = () => api('/api/dashboard/stt').then(apply)
+    .catch(e => { msgRef.current('STT load failed: ' + e.message, 'err', 'STT'); return null })
+  useEffect(() => {
+    let alive = true
+    api('/api/dashboard/stt')
+      .then(d => {
+        if (!alive) return
+        setData(d)
+        setModel(m => m ?? d.current.model)
+        setLanguage(l => l ?? d.current.language)
+      })
+      .catch(e => { if (alive) msgRef.current('STT load failed: ' + e.message, 'err', 'STT') })
+    return () => { alive = false; clearInterval(pollRef.current) }
+  }, [])
+
+  const watchDownload = () => {
+    clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      const d = await load()
+      const st = d?.download?.state
+      if (st === 'downloading') return
+      clearInterval(pollRef.current)
+      if (st === 'ready') {
+        setMsg(`Downloaded ${d.download.model} — saved; restart to load it.`, 'ok', 'STT')
+        offerRestart(setMsg, setRebooting)
+      } else if (st === 'error') {
+        setMsg(`Download failed (${d.download.error}) — config unchanged.`, 'err', 'STT')
+      }
+    }, 2000)
+  }
+
+  const save = async () => {
+    if (!data) return
+    const body = {}
+    if (model !== data.current.model) body.model = model
+    if (language !== data.current.language) body.language = language
+    if (!Object.keys(body).length) { setMsg('Nothing changed.', 'ok', 'STT'); return }
+    setBusy(true)
+    try {
+      const r = await api('/api/dashboard/stt', { method: 'PUT', json: body })
+      await load()
+      if (r.download === 'started') {
+        setMsg(`Downloading ${model} — restart offered when it's on disk.`, 'ok', 'STT')
+        watchDownload()
+      } else if (r.restart_needed) {
+        setMsg('Saved to config.yaml — the model loads on bot restart.', 'ok', 'STT')
+        offerRestart(setMsg, setRebooting)
+      } else {
+        setMsg('Saved — applies to the next thing you say.', 'ok', 'STT')
+      }
+    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'STT') }
+    finally { setBusy(false) }
+  }
+
+  const st = status?.stt || data?.status
+  const state = sttStateChip(st, data?.download)
+  const ms = st?.latency_ms_median
+  const models = data?.models || []
+  const custom = data?.current?.custom_model
+  const customLang = data?.current?.custom_language
+  return (
+    <Section id="stt" title="STT" note="">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="flex flex-wrap items-center gap-2" id="stt-chips">
+          <span className={`${CHIP_CLS} ${state.cls}`} title={state.title}>{state.text}</span>
+          {st?.model && <span className={CHIP_CLS}>{st.model}</span>}
+          {st?.device && <span className={CHIP_CLS}>
+            {st.device === 'cuda' ? `GPU · ${data?.gpu || 'CUDA'}` : 'CPU'}</span>}
+          {st?.compute && <span className={CHIP_CLS}>{st.compute}</span>}
+          <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
+            {ms != null ? `${(ms / 1000).toFixed(2)} s / command` : '— s / command'}</span>
+        </div>
+        <Field label="Model">
+          <select id="stt-model" className={`${INPUT_CLS} w-[260px]`} value={model || ''}
+            onChange={e => setModel(e.target.value)} disabled={!data}>
+            {!data && <option value="" disabled>loading…</option>}
+            {custom && <option value={data.current.model} disabled>{data.current.model} (set in config)</option>}
+            {models.map(m => (
+              <option key={m.name} value={m.name} disabled={!m.available}>
+                {m.label} ({m.size_gb} GB){!m.available ? ' — needs a GPU' : !m.cached ? ' — downloads first' : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Language">
+          <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
+            onChange={e => setLanguage(e.target.value)} disabled={!data}>
+            {!data && <option value="" disabled>loading…</option>}
+            {customLang && <option value={data.current.language} disabled>{data.current.language} (set in config)</option>}
+            {(data?.languages || []).map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
+        </Field>
+        <div className="flex items-center justify-end gap-4 flex-wrap">
+          <button className={BTN_PRIMARY} onClick={save}
+            disabled={!data || busy || data?.download?.state === 'downloading'}>Save</button>
+        </div>
+      </div>
+    </Section>
   )
 }
 
@@ -1871,7 +2009,7 @@ export default function App() {
 
         <Overview status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
         <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
-        <Voice tts={tts} tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
+        <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
         <System intelligence={intelligence} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
       </div>
     </div>
