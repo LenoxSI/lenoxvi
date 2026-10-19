@@ -1600,26 +1600,34 @@ function SttCard({ status, setMsg, setRebooting }) {
   }, [runKey])
 
   // While a download runs — started by Save, or already in progress when the
-  // page loaded — poll every 2 s; offer the restart once it's on disk. A
-  // failed poll just tries again; the cleanup stops it when the state flips.
+  // page loaded — poll every 0.5 s. When it lands, the bar fills to 100%
+  // "Downloaded ✓" and holds a beat before the restart prompt, so even a
+  // 4-second download visibly finishes. A failed poll just tries again; the
+  // cleanup stops polling when the state flips.
   const downloading = data?.download?.state === 'downloading'
   const pendingModel = downloading ? data.download.model : null   // already on its way
+  const [finished, setFinished] = useState(null)   // { model, bytes } during the 100% beat
   useEffect(() => {
     if (!downloading) return
     let alive = true
     const t = setInterval(() => {
       api('/api/dashboard/stt').then(d => {
         if (!alive) return
-        setData(d)
         const dl = d.download || {}
         if (dl.state === 'ready') {
-          msgRef.current(`Downloaded ${dl.model} — saved; restart to load it.`, 'ok', 'STT')
-          offerRestart(msgRef.current, setRebooting)
+          const m = (d.models || []).find(x => x.name === dl.model)
+          setFinished({ model: dl.model, bytes: m?.disk_bytes || 0 })
+          setTimeout(() => {
+            setFinished(null)
+            msgRef.current(`Downloaded ${dl.model} — saved; restart to load it.`, 'ok', 'STT')
+            offerRestart(msgRef.current, setRebooting)
+          }, 1000)
         } else if (dl.state === 'error') {
           msgRef.current(`Download failed (${dl.error}) — config unchanged.`, 'err', 'STT')
         }
+        setData(d)
       }).catch(() => {})
-    }, 2000)
+    }, 500)
     return () => { alive = false; clearInterval(t) }
   }, [downloading, setRebooting])
 
@@ -1676,16 +1684,18 @@ function SttCard({ status, setMsg, setRebooting }) {
           <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
             {ms != null ? `${(ms / 1000).toFixed(2)} s / command` : '— s / command'}</span>
         </div>
-        {downloading && (
+        {(downloading || finished) && (
           <div className="grid gap-2">
             <div id="stt-progress" className="w-full rounded-full bg-[var(--default)] overflow-hidden" style={{ height: 6 }}>
               <div className="rounded-full bg-[var(--accent)]"
-                style={{ height: 6, width: `${Math.max(2, data.download.percent || 0)}%` }} />
+                style={{ height: 6, width: finished ? '100%' : `${Math.max(2, data.download.percent || 0)}%` }} />
             </div>
             <span className="text-[12px] text-[var(--muted)]">
-              {data.download.total_bytes
-                ? `${fmtBytes(data.download.done_bytes || 0)} / ${fmtBytes(data.download.total_bytes)}`
-                : 'Starting download…'}
+              {finished
+                ? `Downloaded ✓${finished.bytes ? ` · ${fmtBytes(finished.bytes)}` : ''}`
+                : data.download.total_bytes
+                  ? `${fmtBytes(data.download.done_bytes || 0)} / ${fmtBytes(data.download.total_bytes)}`
+                  : 'Starting download…'}
             </span>
           </div>
         )}

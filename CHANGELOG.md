@@ -23,6 +23,9 @@ The two version streams are independent.
 - Download progress: a bar under the chips plus "43%" and "650 MB / 1.5 GB",
   from the bytes Hugging Face has written to disk (faster-whisper's own
   downloader hides progress, so the card downloads the same files itself).
+  The card checks every 0.5 s while downloading, and a finished download
+  fills the bar to 100% "Downloaded ✓" for a moment before the restart
+  prompt, so even a few-second download visibly completes.
 - Model table on the STT card (under the Model / Language row): the four
   models with their size on disk and a Delete button for downloaded models
   that aren't configured, loaded or downloading (removed via the Hugging
