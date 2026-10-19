@@ -256,7 +256,7 @@ const readKey = (id) => {
 // entered there only).
 function MissingKey({ label }) {
   return (
-    <a href="#keys" className="text-[13px] text-[var(--danger)] hover:underline">
+    <a href="#system" className="text-[13px] text-[var(--danger)] hover:underline">
       No {label} key → System · Keys
     </a>
   )
@@ -282,14 +282,19 @@ function KeysCard({ setMsg, setRebooting }) {
   const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
   const [tests, setTests] = useState({})        // var -> {status, detail}
   const [agents, setAgents] = useState(null)    // Hermes agents with no key yet
+  const [agentNote, setAgentNote] = useState('')
   const [adding, setAdding] = useState(false)
   const [addAgent, setAddAgent] = useState('')
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
   const load = () => api('/api/dashboard/keys').then(d => { setKeys(d.keys || []); return d })
   useEffect(() => {
-    api('/api/dashboard/keys').then(d => setKeys(d.keys || []))
+    const get = () => api('/api/dashboard/keys').then(d => setKeys(d.keys || []))
       .catch(e => msgRef.current('Keys load failed: ' + e.message, 'err', 'Keys'))
+    get()
+    // After a restart or any card's save: pending/in-use follow the truth.
+    window.addEventListener('lenoxvi:reload-all', get)
+    return () => window.removeEventListener('lenoxvi:reload-all', get)
   }, [])
 
   const save = async (row, inputId) => {
@@ -301,6 +306,7 @@ function KeysCard({ setMsg, setRebooting }) {
       setOpen(null); setAdding(false); setEpoch(n => n + 1)
       setTests(t => ({ ...t, [row.var]: undefined }))
       await load()
+      window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
       setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
       offerRestart(setMsg, setRebooting)
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys') }
@@ -315,11 +321,11 @@ function KeysCard({ setMsg, setRebooting }) {
   }
 
   const startAdd = async () => {
-    setAdding(true); setAgents(null)
+    setAdding(true); setAgents(null); setAgentNote('')
     try {
       const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
       const list = (d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id)
-      setAgents(list); setAddAgent(list[0] || '')
+      setAgents(list); setAddAgent(list[0] || ''); setAgentNote(d.note || '')
     } catch (e) { setAgents([]); setMsg('Agent list failed: ' + e.message, 'err', 'Keys') }
   }
 
@@ -367,7 +373,10 @@ function KeysCard({ setMsg, setRebooting }) {
           ) : agents === null ? (
             <span className="text-[13px] text-[var(--muted)]">Finding Hermes agents…</span>
           ) : agents.length === 0 ? (
-            <span className="text-[13px] text-[var(--muted)]">Every Hermes agent already has a key.</span>
+            <>
+              <span className="text-[13px] text-[var(--muted)]">{agentNote || 'Every Hermes agent already has a key.'}</span>
+              <button className={BTN_DEFAULT} onClick={() => setAdding(false)}>Cancel</button>
+            </>
           ) : (
             <>
               <select id="key-add-agent" className={`${INPUT_CLS} w-auto`} value={addAgent}
@@ -377,6 +386,7 @@ function KeysCard({ setMsg, setRebooting }) {
               <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the agent's API key…" />
               <button className={BTN_PRIMARY} onClick={() => save(
                 { var: '', label: `Hermes · ${addAgent}`, kind: 'hermes', agent: addAgent }, 'keyin-add')}>Save</button>
+              <button className={BTN_DEFAULT} onClick={() => setAdding(false)}>Cancel</button>
             </>
           )}
         </div>
@@ -1699,6 +1709,13 @@ function SttCard({ status, setMsg, setRebooting }) {
   }
   const load = () => api('/api/dashboard/stt').then(apply)
     .catch(e => { msgRef.current('STT load failed: ' + e.message, 'err', 'STT'); return null })
+  // A key saved on the Keys card (or a restart): refresh the data only —
+  // the selects keep any unsaved pick (draft law).
+  useEffect(() => {
+    const h = () => api('/api/dashboard/stt').then(d => setData(d)).catch(() => {})
+    window.addEventListener('lenoxvi:reload-all', h)
+    return () => window.removeEventListener('lenoxvi:reload-all', h)
+  }, [])
   // Fetch on mount AND whenever the loaded model or its load state changes
   // (a restart onto another model, a load finishing or failing): the model
   // list's "in use" flags depend on what's loaded. Keyed on the stt part of
@@ -2013,6 +2030,15 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
       setFound(f => ({ ...f, [kind]: { agents: [], note: 'Agent list failed: ' + e.message, loading: false } }))
     }
   }
+  // A key saved on the Keys card: re-run discovery so the agent list's
+  // key status (and the "No key" link) follow it.
+  const rediscover = useRef(null)
+  useEffect(() => { rediscover.current = () => discover(intKind, document.getElementById('int-url')?.value.trim()) })
+  useEffect(() => {
+    const h = () => rediscover.current?.()
+    window.addEventListener('lenoxvi:reload-all', h)
+    return () => window.removeEventListener('lenoxvi:reload-all', h)
+  }, [])
   useEffect(() => {
     if (intelligence && !intSynced) {
       const kind = intelligence.kind || 'hermes'

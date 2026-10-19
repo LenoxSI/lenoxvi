@@ -1091,16 +1091,33 @@ def _env_path():
                            _Path(__file__).resolve().parent.parent.parent / ".env"))
 
 
+def _file_env() -> dict:
+    """What .env holds NOW, parsed exactly the way the bot loads it
+    (python-dotenv: quotes, `export`, inline comments). Read-only."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover — dotenv ships with the bot
+        dotenv_values = None
+    path = _env_path()
+    if not path.is_file():
+        return {}
+    if dotenv_values is not None:
+        return {k: v for k, v in dotenv_values(path).items() if v is not None}
+    view = {}
+    for ln in path.read_text().splitlines():
+        k, sep, v = ln.partition("=")
+        if sep and k and not k.lstrip().startswith("#"):
+            view[k.strip()] = v.strip()
+    return view
+
+
 def _saved_env() -> dict:
     """Process env overlaid with what .env holds NOW, so key status and
     hints show a key the moment it is saved (the voice agent itself still
     reads the process env, at the next restart). Read-only."""
     view = dict(os.environ)
     try:
-        for ln in _env_path().read_text().splitlines():
-            k, sep, v = ln.partition("=")
-            if sep and k and not k.lstrip().startswith("#"):
-                view[k.strip()] = v.strip()
+        view.update(_file_env())
     except OSError:
         pass
     return view
@@ -1114,14 +1131,20 @@ def _backup_env(env_path) -> None:
     keep the newest few — a bad paste stays recoverable. A key line is
     never deleted (the 2026-10-08 lesson), and neither is its last copy."""
     import os as _os
+    import re as _re
     from datetime import datetime as _dt
+    from datetime import timezone as _tz
 
-    stamp = _dt.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
+    # UTC + 'Z': names sort in time order all year (no DST repeat hour).
+    stamp = _dt.now(_tz.utc).strftime("%Y%m%d-%H%M%S-%fZ")
     bak = env_path.with_name(f"{env_path.name}.bak-{stamp}")
     fd = _os.open(bak, _os.O_WRONLY | _os.O_CREAT | _os.O_EXCL, 0o600)
     with _os.fdopen(fd, "w") as f:
         f.write(env_path.read_text())
-    for old in sorted(env_path.parent.glob(f"{env_path.name}.bak-*"))[:-_ENV_BACKUPS_KEPT]:
+    # Prune only OUR backups; a hand-made .env.bak-whatever is never touched.
+    ours = _re.compile(_re.escape(env_path.name) + r"\.bak-\d{8}-\d{6}-\d{6}Z")
+    mine = sorted(p for p in env_path.parent.glob(f"{env_path.name}.bak-*") if ours.fullmatch(p.name))
+    for old in mine[:-_ENV_BACKUPS_KEPT]:
         old.unlink(missing_ok=True)
 
 
@@ -1183,11 +1206,24 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
 async def get_keys():
     import keys_catalog
 
-    cfg = {sec: dict(config_store.read_section(sec) or {}) for sec in ("tts", "stt", "intelligence")}
-    return {"keys": keys_catalog.rows(_saved_env(), dict(os.environ), cfg)}
+    return {"keys": keys_catalog.rows(_saved_env(), dict(os.environ), _keys_cfg(), file_env=_file_env())}
+
+
+def _keys_cfg() -> dict:
+    """The config the bot will run with — config.yaml, then the same env
+    fallbacks and normalisation bot.py applies."""
+    def pick(sec, key, env, default):
+        v = (config_store.read_section(sec) or {}).get(key)
+        return str(v if v not in (None, "") else os.getenv(env, default)).strip().lower()
+    icfg = dict(config_store.read_section("intelligence") or {})
+    icfg["kind"] = pick("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes")
+    return {"tts": {"provider": pick("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")},
+            "stt": {"provider": pick("stt", "provider", "LVI_STT_PROVIDER", "whisper")},
+            "intelligence": icfg}
 
 
 class KeyTestPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     var: str = Field(min_length=1, max_length=64, pattern=r"^[A-Z0-9_]+$")
 
 
@@ -1208,15 +1244,35 @@ def _keys_http(method: str, url: str, headers: dict) -> tuple:
 
 def _key_test(row: dict, key: str) -> dict:
     """Synchronous (worker thread). → {ok, status, detail}; never the key."""
+    try:
+        return _key_test_inner(row, key)
+    except Exception as e:  # noqa: BLE001 — the contract is a result, never a 500
+        return {"ok": False, "status": "unreachable", "detail": type(e).__name__}
+
+
+def _key_test_inner(row: dict, key: str) -> dict:
     def scrub(text):
         return str(text).replace(key, "***")[:160] if key else str(text)[:160]
 
     if row["kind"] in ("hermes", "openclaw"):
+        kind = row["kind"]
         icfg = dict(config_store.read_section("intelligence") or {})
-        url = (icfg.get("urls") or {}).get(row["kind"]) or \
-            (icfg.get("url") if (icfg.get("kind") or "hermes") == row["kind"] else None) or ""
-        agent = "" if row.get("agent") in (None, "default") else row["agent"]
-        r = _intelligence_probe({"kind": row["kind"], "url": url, "agent": agent})
+        url = (icfg.get("urls") or {}).get(kind) or \
+            (icfg.get("url") if (icfg.get("kind") or "hermes") == kind else None) or ""
+        if kind == "openclaw":
+            agent = intelligence_target.agent_for(icfg, "openclaw")
+            if not agent:
+                return {"ok": False, "status": "unreachable",
+                        "detail": "pick an OpenClaw agent on the Intelligence card first"}
+        else:
+            agent = row.get("agent") or "default"
+        # Build the config the way the probe READS it (agents.<kind>), then
+        # refuse unless the variable it will send is exactly this row's.
+        probe_cfg = {"kind": kind, "url": url, "agents": {kind: agent}, "agent": agent,
+                     "model": icfg.get("model")}
+        if intelligence_target.key_var(kind, intelligence_target.agent_for(probe_cfg, kind)) != row["var"]:
+            return {"ok": False, "status": "unreachable", "detail": "refused: that test would use a different key"}
+        r = _intelligence_probe(probe_cfg)
         if r.get("ok"):
             return {"ok": True, "status": "ok", "detail": f"{r.get('model') or row['label']} answered"}
         err = scrub(r.get("error") or "failed")
@@ -1246,8 +1302,8 @@ async def post_key_test(payload: KeyTestPayload):
     provider, server-side. POST + GUARD: it makes outbound requests."""
     import keys_catalog
 
-    row = keys_catalog.target_for(payload.var)
-    if row is None:
+    row = keys_catalog.target_for(payload.var, keys_catalog.known_agents(_keys_cfg()))
+    if row is None or (row["kind"] == "hermes" and row["var"] != "LVI_HERMES_KEY" and payload.var not in _file_env()):
         raise HTTPException(status_code=422, detail=f"{payload.var} is not an API key this appliance uses")
     key = _saved_env().get(payload.var) or ""
     if not key:
@@ -2051,8 +2107,9 @@ def _oww_validate(data: bytes) -> None:
     """Load-and-one-test-inference against the SAME library and shape the
     pipeline feeds (loaded-gun rule: a model that can't run
     never lands on disk, so a restart can never wake-brick the bot)."""
-    import onnxruntime as ort
     import io
+
+    import onnxruntime as ort
 
     try:
         sess = ort.InferenceSession(data, providers=["CPUExecutionProvider"])

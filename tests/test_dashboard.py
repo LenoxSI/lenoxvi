@@ -3799,7 +3799,7 @@ def main():
     # ── Keys card: every API key in one place (presence + hint only) ──
     from dashboard import routes as _rk
     _K_VARS = ("LVI_ENV_FILE", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "LVI_HERMES_KEY",
-               "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER")
+               "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER", "LVI_HERMES_KEY_STRAY")
     _k_before_env = {k: os.environ.get(k) for k in _K_VARS}
     _k_before_cfg = {sec: dict(config_store.read_section(sec) or {}) for sec in ("tts", "stt", "intelligence")}
     _k_saved_fns = (_rk._keys_http if hasattr(_rk, "_keys_http") else None, _rk._intelligence_probe)
@@ -3807,13 +3807,15 @@ def main():
     # Running process: deepgram OLD, elevenlabs set, hermes set. Saved .env:
     # deepgram NEW (restart pending), hermes same, ha-butler agent key (new).
     _kenv.write_text("DEEPGRAM_API_KEY=dg-new-SECRET-2222\nLVI_HERMES_KEY=hk-same-SECRET-3333\n"
-                     "LVI_HERMES_KEY_HA_BUTLER=hb-agent-SECRET-4444\n")
+                     "LVI_HERMES_KEY_HA_BUTLER=hb-agent-SECRET-4444\n"
+                     'ELEVENLABS_API_KEY="el-live-SECRET-5555"  # quoted, as dotenv allows\n')
     os.environ.update({"LVI_ENV_FILE": str(_kenv), "DEEPGRAM_API_KEY": "dg-old-SECRET-1111",
                        "ELEVENLABS_API_KEY": "el-live-SECRET-5555", "LVI_HERMES_KEY": "hk-same-SECRET-3333"})
     os.environ.pop("LVI_OPENCLAW_KEY", None)
     os.environ.pop("LVI_HERMES_KEY_HA_BUTLER", None)
+    os.environ["LVI_HERMES_KEY_STRAY"] = "stray-SECRET-6666"   # process-only: must never become a row
     _SECRETS = ("dg-new-SECRET-2222", "dg-old-SECRET-1111", "hk-same-SECRET-3333", "hb-agent-SECRET-4444",
-                "el-live-SECRET-5555")
+                "el-live-SECRET-5555", "stray-SECRET-6666", "oc-file-SECRET-7777")
     try:
         config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "elevenlabs"})
         config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "deepgram"})
@@ -3830,6 +3832,11 @@ def main():
         check("keys GET: Deepgram — set, hint of the SAVED key, restart pending (saved != running), used by TTS+STT",
               _dg.get("set") is True and _dg.get("hint") == _rk.intelligence_target.key_hint("dg-new-SECRET-2222")
               and _dg.get("pending_restart") is True and _dg.get("used_by") == ["TTS", "STT"], str(_dg))
+        check("keys GET: a quoted .env value parses like the bot's dotenv (hint right, not 'pending' forever)",
+              _kk.get("ELEVENLABS_API_KEY", {}).get("hint") == _rk.intelligence_target.key_hint("el-live-SECRET-5555"),
+              str(_kk.get("ELEVENLABS_API_KEY")))
+        check("keys GET: a process-only LVI_HERMES_KEY_* is NOT a row (rows come from .env)",
+              "LVI_HERMES_KEY_STRAY" not in _kk, str(list(_kk)))
         check("keys GET: ElevenLabs set, nothing pending; OpenClaw not set",
               _kk.get("ELEVENLABS_API_KEY", {}).get("set") is True
               and _kk.get("ELEVENLABS_API_KEY", {}).get("pending_restart") is False
@@ -3887,19 +3894,83 @@ def main():
         check("keys test: a key that isn't set -> missing (no outbound call)", _r.json().get("status") == "missing", _r.text[:200])
         _r = _kt("PATH")
         check("keys test: unknown variable -> 422", _r.status_code == 422, str(_r.status_code))
-        _pcalls = []
+        # Hermes / OpenClaw: mock ONE LEVEL LOWER (urlopen) — assert the real
+        # outbound URL and Bearer token, not the dict handed to the probe.
+        import urllib.request as _urq
+        _real_urlopen = _urq.urlopen
+        _reqs = []
 
-        def _fake_probe(cfg):
-            _pcalls.append(dict(cfg))
-            return {"ok": True, "model": "hermes-agent", "latency_ms": 12}
-        _rk._intelligence_probe = _fake_probe
-        _r = _kt("LVI_HERMES_KEY_HA_BUTLER")
-        check("keys test: an agent key probes Hermes as that agent",
-              _r.json().get("status") == "ok" and _pcalls and _pcalls[-1].get("kind") == "hermes"
-              and _pcalls[-1].get("agent") == "ha-butler", f"{_r.text[:160]} {_pcalls}")
-        _rk._intelligence_probe = lambda cfg: {"ok": False, "error": "HTTP 401 Unauthorized"}
-        _r = _kt("LVI_HERMES_KEY")
-        check("keys test: Hermes 401 -> rejected", _r.json().get("status") == "rejected", _r.text[:200])
+        class _Resp:
+            def __init__(self, body):
+                self._b = body
+
+            def read(self, *a):
+                return self._b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_urlopen(req, timeout=None):
+            _reqs.append((req.full_url, req.get_header("Authorization"), req.data))
+            return _Resp(b'{"choices":[{"message":{"content":"ok"}}]}')
+        _urq.urlopen = _fake_urlopen
+        try:
+            config_store.write_section("intelligence", {"kind": "hermes", "url": "http://hermes.test:8642/v1",
+                                                        "model": "hermes-agent"})
+            _reqs.clear()
+            _r = _kt("LVI_HERMES_KEY_HA_BUTLER")
+            _chat = [x for x in _reqs if x[0].endswith("/chat/completions")]
+            check("keys test: an agent key probes /p/<agent>/v1 with THAT agent's key (not the default key)",
+                  _r.json().get("status") == "ok" and _chat and "/p/ha-butler/v1/chat/completions" in _chat[-1][0]
+                  and _chat[-1][1] == "Bearer hb-agent-SECRET-4444" and not any(x in _r.text for x in _SECRETS),
+                  f"{_r.text[:160]} {[(u, (h or '')[:12]) for u, h, _ in _reqs]}")
+            _reqs.clear()
+            _r = _kt("LVI_HERMES_KEY")
+            _chat = [x for x in _reqs if x[0].endswith("/chat/completions")]
+            check("keys test: the default Hermes key probes the base URL with LVI_HERMES_KEY",
+                  _r.json().get("status") == "ok" and _chat and "/p/" not in _chat[-1][0]
+                  and _chat[-1][1] == "Bearer hk-same-SECRET-3333", f"{_r.text[:160]} {[(u, (h or '')[:12]) for u, h, _ in _reqs]}")
+            _kenv.write_text(_kenv.read_text() + "LVI_OPENCLAW_KEY=oc-file-SECRET-7777\n")
+            config_store.write_section("intelligence", {"kind": "openclaw", "urls": {"openclaw": "http://oc.test:18789/v1"}})
+            _reqs.clear()
+            _r = _kt("LVI_OPENCLAW_KEY")
+            check("keys test: OpenClaw with no agent picked -> a clear message, no outbound call",
+                  _r.json().get("status") == "unreachable" and "agent" in (_r.json().get("detail") or "") and not _reqs,
+                  _r.text[:160])
+            config_store.write_section("intelligence", {"kind": "openclaw", "urls": {"openclaw": "http://oc.test:18789/v1"},
+                                                        "agents": {"openclaw": "main"}})
+            _reqs.clear()
+            _r = _kt("LVI_OPENCLAW_KEY")
+            _chat = [x for x in _reqs if x[0].endswith("/chat/completions")]
+            check("keys test: OpenClaw probes model openclaw/<agent> with LVI_OPENCLAW_KEY",
+                  _r.json().get("status") == "ok" and _chat and b'"openclaw/main"' in (_chat[-1][2] or b"")
+                  and _chat[-1][1] == "Bearer oc-file-SECRET-7777", f"{_r.text[:160]} {[(u, (h or '')[:12]) for u, h, _ in _reqs]}")
+
+            import urllib.error as _uerr
+
+            def _deny(req, timeout=None):
+                if req.full_url.endswith("/chat/completions"):
+                    raise _uerr.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+                return _Resp(b"")
+            _urq.urlopen = _deny
+            _r = _kt("LVI_OPENCLAW_KEY")
+            check("keys test: the gateway's 401 -> rejected", _r.json().get("status") == "rejected", _r.text[:160])
+
+            def _boom(req, timeout=None):
+                raise ValueError("Invalid header value")
+            _urq.urlopen = _boom
+            _r = _kt("LVI_OPENCLAW_KEY")
+            check("keys test: any exception is a result (unreachable), never a 500", _r.status_code == 200
+                  and _r.json().get("ok") is False, f"{_r.status_code} {_r.text[:120]}")
+        finally:
+            _urq.urlopen = _real_urlopen
+        _r = _kt("LVI_HERMES_KEY_STRAY")
+        check("keys test: a process-only agent variable is refused (422)", _r.status_code == 422, str(_r.status_code))
+        _r = client.post("/api/dashboard/keys/test", json={"var": "DEEPGRAM_API_KEY", "x": 1})
+        check("keys test: unknown payload fields -> 422 (extra=forbid)", _r.status_code == 422, str(_r.status_code))
 
         # Backup on replace (real writer, scratch .env).
         _benv = SCRATCH / "bak-test" / ".env"
@@ -3909,6 +3980,11 @@ def main():
 
         def _baks():
             return sorted(_benv.parent.glob(".env.bak-*"))
+        _hand = _benv.parent / ".env.bak-2026-10-08"
+        _hand.write_text("A_KEY=handmade\n")
+
+        def _baks():
+            return sorted(x for x in _benv.parent.glob(".env.bak-*") if x != _hand)
         _asyncio.run(_rk._write_env_key("B_KEY", "first"))
         check("backup: a first set makes no backup", _baks() == [], str(_baks()))
         _asyncio.run(_rk._write_env_key("A_KEY", "two"))
@@ -3923,6 +3999,8 @@ def main():
         _b = _baks()
         check("backup: only the newest 3 are kept", len(_b) == 3 and "A_KEY=five" in _b[-1].read_text(),
               f"{len(_b)} {[x.read_text() for x in _b]}")
+        check("backup: a hand-made .env.bak-* is never pruned; ours are UTC-stamped (…Z)",
+              _hand.exists() and all(x.name.endswith("Z") for x in _b), f"{_hand.exists()} {[x.name for x in _b]}")
     finally:
         if _k_saved_fns[0] is not None:
             _rk._keys_http = _k_saved_fns[0]
