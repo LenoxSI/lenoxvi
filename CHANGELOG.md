@@ -554,7 +554,7 @@ hardening.
 ## [0.4.0] — 2026-10-04
 
 The config-editable dashboard release. The dashboard stops being
-read-only-plus-sliders and becomes the primary way to operate lenoxvi:
+read-only-plus-sliders and becomes the primary way to operate LenoxVI:
 TTS provider/voice/model, Flux's speed + expressivity, and the six
 pipecat ear-tuning knobs all live in the GUI now, with a restart button
 and a save→apply flow that never forces a tab hop.
@@ -711,7 +711,7 @@ conversation features shipped and verified the same day.
   `POST /nodes/{room}/session-mode`; status carries `session_modes`.
   Spec: **sticky = stash + server-side continuity**. Verified: a
   "what's the last thing I asked you" test across a node restart AND a bot
-  restart answered correctly from restored history (`d747b36`)
+  restart answered correctly from restored history (`6aec78e`)
 - **Tiered fillers** — one spoken line per latency tier so a slow brain turn
   no longer goes silent after the first ack: tier 1 acks at 3s (the classic
   pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then the
@@ -720,18 +720,18 @@ conversation features shipped and verified the same day.
   configs unchanged). All lines <2s spoken; tier 2/3 lines meet the ≥3-word
   echo-containment contract. Verified: all three tiers fire in sequence on
   a long turn, and rotation never repeats a line within a session
-  (`536cdc7`)
+  (`de385c1`)
 - **Wake-window forensics** — an AWAKE window that closes without VAD now
   logs delivered-frame count, peak amplitude, echo-gate state, and
   whether VAD ever fired, so the next silent failure names its own cause
   (frames=0 = stalled track; low peak = below-threshold speech;
-  echo_blocked = a Sonos clip swallowed it) (`56c4f5b`)
+  echo_blocked = a Sonos clip swallowed it) (`a55b2ec`)
 
 ### Fixed
 - **pc_id capture was a silent no-op** (regression) — `SmallWebRTCTransport`
   is a facade holding `._client`, not `._webrtc_connection`; the runner args
   carry the connection directly. Wakes had been recording `room: null` in
-  the status API (`56c4f5b`)
+  the status API (`a55b2ec`)
 - **Wi-Fi `set_wifi` lying verify** (firmware 1.1.1) — NVS writes never
   reached the live WiFi driver (config only pushed at boot), so a wrong
   password re-associated on the OLD creds and acked "connected" in 1.2s —

@@ -212,4 +212,4 @@ Changes apply on the next bot restart. Preset voices and their licences:
 (`tts.pocket_voice: /path/to/voice.wav` in config.yaml) needs the gated
 `kyutai/pocket-tts` weights and your own Hugging Face login.
 
-[Pocket TTS]: https://github.com/kyutai-labs/pocket-tts⟫
+[Pocket TTS]: https://github.com/kyutai-labs/pocket-tts
