@@ -271,6 +271,7 @@ function keyRoute(row) {
 }
 
 function keyState(row) {
+  if (!row.set && row.pending_restart) return { text: 'Removed — restart to apply', cls: WARN_CHIP_CLS }
   if (!row.set) return row.in_use ? { text: 'Missing', cls: WARN_CHIP_CLS } : { text: 'Not set', cls: CHIP_CLS }
   if (row.pending_restart) return { text: `Saved · ${row.hint || ''} — restart to apply`, cls: WARN_CHIP_CLS }
   return { text: `● Set · ${row.hint || ''}`, cls: CHIP_CLS }
@@ -310,6 +311,22 @@ function KeysCard({ setMsg, setRebooting }) {
       setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
       offerRestart(setMsg, setRebooting)
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys') }
+  }
+
+  const remove = async row => {
+    const what = row.in_use
+      ? `It is IN USE: ${row.used_by.join(' + ')} will stop working after the next restart.`
+      : 'Nothing uses it right now.'
+    if (!window.confirm(`Remove the ${row.label} key (${row.var})?\n\n${what}\n\n` +
+      'A private backup of .env is kept on the appliance (newest 3). For a leaked key, also revoke it with the provider.')) return
+    try {
+      await api(`/api/dashboard/keys/${encodeURIComponent(row.var)}`, { method: 'DELETE' })
+      setOpen(null); setTests(t => ({ ...t, [row.var]: undefined }))
+      await load()
+      window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
+      setMsg(`${row.label} key removed — applies on bot restart.`, 'ok', 'Keys')
+      offerRestart(setMsg, setRebooting)
+    } catch (e) { setMsg('Remove failed: ' + e.message, 'err', 'Keys') }
   }
 
   const test = async row => {
@@ -371,6 +388,7 @@ function KeysCard({ setMsg, setRebooting }) {
                               {t?.status === 'testing' ? 'Testing…' : 'Test'}</button>
                             <button className={BTN_DEFAULT} onClick={() => setOpen(open === row.var ? null : row.var)}>
                               {row.set ? 'Replace' : 'Set'}</button>
+                            {row.set && <button className={BTN_DANGER} onClick={() => remove(row)}>Remove</button>}
                           </div>
                         </td>
                       </tr>

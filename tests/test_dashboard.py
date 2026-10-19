@@ -3959,6 +3959,17 @@ def main():
             _r = _kt("LVI_OPENCLAW_KEY")
             check("keys test: the gateway's 401 -> rejected", _r.json().get("status") == "rejected", _r.text[:160])
 
+            def _nf(req, timeout=None):
+                if req.full_url.endswith("/chat/completions"):
+                    raise _uerr.HTTPError(req.full_url, 404, "Not Found", {}, None)
+                return _Resp(b"")
+            config_store.write_section("intelligence", {"kind": "openclaw", "urls": {"openclaw": "http://oc.test:18789"},
+                                                        "agents": {"openclaw": "main"}})
+            _urq.urlopen = _nf
+            _r = _kt("LVI_OPENCLAW_KEY")
+            check("keys test: a 404 from a URL without /v1 says so (the saved URL may need /v1)",
+                  "/v1" in (_r.json().get("detail") or "") and _r.json().get("ok") is False, _r.text[:200])
+
             def _boom(req, timeout=None):
                 raise ValueError("Invalid header value")
             _urq.urlopen = _boom
@@ -3971,6 +3982,33 @@ def main():
         check("keys test: a process-only agent variable is refused (422)", _r.status_code == 422, str(_r.status_code))
         _r = client.post("/api/dashboard/keys/test", json={"var": "DEEPGRAM_API_KEY", "x": 1})
         check("keys test: unknown payload fields -> 422 (extra=forbid)", _r.status_code == 422, str(_r.status_code))
+
+        # Remove: for security; backup first; only that line; never echoed.
+        _r = client.delete("/api/dashboard/keys/PATH")
+        check("keys remove: a variable the card doesn't know -> 422", _r.status_code == 422, str(_r.status_code))
+        _r = client.delete("/api/dashboard/keys/LVI_HERMES_KEY_STRAY")
+        check("keys remove: a key that isn't in .env -> 404 (process-only values can't be 'removed')",
+              _r.status_code == 404, str(_r.status_code))
+        _bak_before = set(SCRATCH.glob("keys.env.bak-*"))
+        _r = client.delete("/api/dashboard/keys/LVI_HERMES_KEY_HA_BUTLER")
+        _txt = _kenv.read_text()
+        _new_baks = sorted(set(SCRATCH.glob("keys.env.bak-*")) - _bak_before)
+        check("keys remove: drops ONLY that line, writes a 0600 backup that holds it, response has no value",
+              _r.status_code == 200 and "LVI_HERMES_KEY_HA_BUTLER=" not in _txt and "DEEPGRAM_API_KEY=dg-new-SECRET-2222" in _txt
+              and "LVI_OPENCLAW_KEY=" in _txt and len(_new_baks) == 1 and "hb-agent-SECRET-4444" in _new_baks[0].read_text()
+              and (_new_baks[0].stat().st_mode & 0o777) == 0o600 and (_kenv.stat().st_mode & 0o777) == 0o600
+              and not any(x in _r.text for x in _SECRETS), f"{_r.status_code} {_r.text[:120]} baks={len(_new_baks)}")
+        _r = client.delete("/api/dashboard/keys/DEEPGRAM_API_KEY")
+        _kk4 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
+        check("keys remove: a removed agent key's row is gone; a removed static key reads not set + restart pending",
+              _r.status_code == 200 and "LVI_HERMES_KEY_HA_BUTLER" not in _kk4
+              and _kk4["DEEPGRAM_API_KEY"]["set"] is False and _kk4["DEEPGRAM_API_KEY"]["pending_restart"] is True
+              and _kk4["DEEPGRAM_API_KEY"]["hint"] is None, str(_kk4.get("DEEPGRAM_API_KEY")))
+        _r = _kt("DEEPGRAM_API_KEY")
+        check("keys test: after removal (running bot still holds the old value) -> missing, never tests the stale value",
+              _r.json().get("status") == "missing", _r.text[:160])
+        _r = client.delete("/api/dashboard/keys/DEEPGRAM_API_KEY")
+        check("keys remove: removing again -> 404", _r.status_code == 404, str(_r.status_code))
 
         # Backup on replace (real writer, scratch .env).
         _benv = SCRATCH / "bak-test" / ".env"

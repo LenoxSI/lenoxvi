@@ -1277,6 +1277,8 @@ def _key_test_inner(row: dict, key: str) -> dict:
             return {"ok": True, "status": "ok", "detail": f"{r.get('model') or row['label']} answered"}
         err = scrub(r.get("error") or "failed")
         status = "rejected" if ("401" in err or "403" in err) else "unreachable"
+        if "HTTP 404" in err and not url.rstrip("/").endswith("/v1"):
+            err += " — the saved URL may need /v1 at the end (Intelligence card)"
         return {"ok": False, "status": status, "detail": err}
     if row["kind"] == "deepgram":
         req = ("GET", "https://api.deepgram.com/v1/projects", {"Authorization": f"Token {key}"})
@@ -1305,12 +1307,57 @@ async def post_key_test(payload: KeyTestPayload):
     row = keys_catalog.target_for(payload.var, keys_catalog.known_agents(_keys_cfg()))
     if row is None or (row["kind"] == "hermes" and row["var"] != "LVI_HERMES_KEY" and payload.var not in _file_env()):
         raise HTTPException(status_code=422, detail=f"{payload.var} is not an API key this appliance uses")
-    key = _saved_env().get(payload.var) or ""
+    key = _key_saved_value(payload.var)
     if not key:
         return {"ok": False, "status": "missing", "detail": f"{payload.var} is not set"}
     result = await asyncio.to_thread(_key_test, row, key)
     logger.info(f"dashboard: key test {payload.var} -> {result['status']}")
     return result
+
+
+def _key_saved_value(var: str) -> str:
+    """The key the NEXT restart loads: .env is the store (systemd loads it
+    as EnvironmentFile), so a removed line means removed even while the
+    running process still holds the old value."""
+    if _env_path().is_file():
+        return _file_env().get(var) or ""
+    return os.environ.get(var) or ""
+
+
+async def _remove_env_key(var: str) -> bool:
+    """Drop `var=` from .env (backup first, atomic, 0600). False if absent."""
+    env_path = _env_path()
+    if not env_path.is_file():
+        return False
+    lines = env_path.read_text().splitlines()
+    keep = [ln for ln in lines
+            if not (ln.startswith(var + "=") or ln.lstrip().startswith(f"export {var}="))]
+    if len(keep) == len(lines):
+        return False
+    _backup_env(env_path)
+    tmp = env_path.with_suffix(".env.tmp")
+    tmp.write_text("\n".join(keep) + ("\n" if keep else ""))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, env_path)
+    return True
+
+
+@router.delete("/keys/{var}", dependencies=GUARD)
+async def delete_key(var: str):
+    """Remove an API key from .env — for security (a leaked or unused key).
+    A private backup of .env is written first; the running bot keeps the
+    old value until the next restart."""
+    import keys_catalog
+
+    if not re.fullmatch(r"[A-Z0-9_]{1,64}", var or ""):
+        raise HTTPException(status_code=422, detail="not a key variable")
+    row = keys_catalog.target_for(var, keys_catalog.known_agents(_keys_cfg()))
+    if row is None:
+        raise HTTPException(status_code=422, detail=f"{var} is not an API key this appliance uses")
+    if not await _remove_env_key(var):
+        raise HTTPException(status_code=404, detail=f"{var} is not in .env")
+    logger.info(f"dashboard: {var} removed from .env (backup kept; value never logged)")
+    return {"ok": True, "var": var, "removed": True}
 
 
 # ── Intelligence (Settings — provider picker) ──

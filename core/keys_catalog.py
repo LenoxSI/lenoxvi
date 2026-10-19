@@ -79,14 +79,17 @@ def rows(saved_env: dict, live_env: dict, cfg: dict, file_env=None) -> list[dict
             templates.append(t)
     out = []
     for row in templates:
-        saved = saved_env.get(row["var"]) or ""
+        # .env is the store: with the file given, a removed line is
+        # "not set" even while the running process still holds the value.
+        saved = (file_env if file_env is not None else saved_env).get(row["var"]) or ""
         live = live_env.get(row["var"]) or ""
         out.append({
             **row,
             "set": bool(saved),
             "hint": intelligence_target.key_hint(saved),
-            # Saved in .env but not what the running bot loaded.
-            "pending_restart": bool(saved) and saved != live,
+            # .env differs from what the running bot loaded (saved, replaced
+            # or removed since the last restart).
+            "pending_restart": saved != live,
             "in_use": _in_use(row, cfg),
         })
     return out
