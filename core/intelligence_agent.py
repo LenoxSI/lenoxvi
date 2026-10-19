@@ -190,7 +190,7 @@ class IntelligenceAgent(FrameProcessor):
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None,
                  room: str = None, session_mode: str = "fresh",
-                 tts_is_usable=None, **kwargs):
+                 tts_is_usable=None, room_resolver=None, **kwargs):
         super().__init__(**kwargs)
         from config import cfg, cfg_env
 
@@ -208,6 +208,12 @@ class IntelligenceAgent(FrameProcessor):
         _icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
                  "agents": cfg("intelligence", "agents") or {}}
         self._agent = _it.agent_for(_icfg, self._kind) if self._kind in _it.BASE_KEY_VARS else ""
+        # Per-room override (room_agents.<kind>.<room>) is resolved at the
+        # first turn (_ensure_route): the room can still be unknown here.
+        self._base_url = self._url
+        self._default_agent = self._agent
+        self._room_resolver = room_resolver
+        self._routed_room = None
         if self._kind in _it.BASE_KEY_VARS:
             self._url = _it.request_url(self._kind, self._url, self._agent)
         # Missing key is NOT a construction brick (the provider-
@@ -357,6 +363,41 @@ class IntelligenceAgent(FrameProcessor):
         self._echo_texts.append(text)
         self._echo_texts = self._echo_texts[-4:]
 
+    def _ensure_route(self) -> None:
+        """Route this session to its room's agent: room_agents.<kind>.<room>
+        overrides the house default (the Intelligence card's agent). Runs at
+        every turn but only acts once the room is known — the pipeline's
+        room can still be unknown when the session is built, and resolving
+        early would send a racing session to the default agent."""
+        import intelligence_target as _it
+
+        if self._kind not in _it.BASE_KEY_VARS:
+            return
+        room = self._room
+        if not room and self._room_resolver is not None:
+            try:
+                room = self._room_resolver()
+            except Exception:  # noqa: BLE001 — no room yet = default for now
+                room = None
+        if not room or room == "unknown" or room == self._routed_room:
+            return
+        from config import cfg
+
+        overrides = cfg("room_agents", self._kind) or {}
+        agent = str(overrides.get(room) or "").strip() if isinstance(overrides, dict) else ""
+        how = "override"
+        if not agent or not _it.AGENT_RE.match(agent):
+            agent, how = self._default_agent, "default"
+        self._routed_room = room
+        if agent != self._agent:
+            self._agent = agent
+            self._url = _it.request_url(self._kind, self._base_url, agent)
+            self._key_var = _it.key_var(self._kind, agent)
+            self._key = os.getenv(self._key_var) if self._key_var else None
+            if not self._key:
+                logger.warning(f"intelligence_agent: no key set ({self._key_var}) for room '{room}' agent '{agent}'")
+        logger.info(f"intelligence_agent: room '{room}' -> agent '{agent or 'default'}' ({how})")
+
     def _ask_intelligence(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
@@ -367,6 +408,7 @@ class IntelligenceAgent(FrameProcessor):
         X-Hermes-Session-Key). The messages array, output caps, client-side
         history and fillers are shared — the lanes differ only in envelope.
         """
+        self._ensure_route()
         if not self._key:
             raise RuntimeError(
                 f"no intelligence key set ({self._key_var}) — set it in .env "

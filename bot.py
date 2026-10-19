@@ -393,7 +393,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # is_usable means "some service can still speak".
     tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
                         if isinstance(tts_primary, TTSTracked) else None)
-    intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, session_mode=_session_mode,
+    intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, room_resolver=_pipeline_room,
+                                session_mode=_session_mode,
                                 tts_is_usable=tts_usable_probe)
              if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
              else StubIntelligence(echo_gate=gate))

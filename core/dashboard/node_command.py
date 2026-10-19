@@ -206,6 +206,18 @@ def on_message(message, pc_id: str) -> None:
                     f"node_command: rename carried mapping '{old}' -> '{new}' "
                     f"(zone '{mapping[new]}')"
                 )
+            # per-room agent overrides (every intelligence system) follow too.
+            ragents = dict(config_store.read_section("room_agents") or {})
+            moved = False
+            for kind, rooms in list(ragents.items()):
+                if isinstance(rooms, dict) and old in rooms:
+                    rooms = dict(rooms)
+                    rooms[new] = rooms.pop(old)
+                    ragents[kind] = rooms
+                    moved = True
+            if moved:
+                writes["room_agents"] = ragents
+                logger.info(f"node_command: rename carried agent override(s) '{old}' -> '{new}'")
             if old in vols:
                 vols[new] = vols.pop(old)
                 writes["node_speaker"] = {**spk, "volumes": vols}

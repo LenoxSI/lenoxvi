@@ -91,6 +91,10 @@ class MappingPayload(BaseModel):
     # wipes shipped to config.yaml before this guard existed).
     model_config = ConfigDict(extra="forbid")
     room_zones: dict[str, str] = Field(default_factory=dict)
+    # Per-room agent overrides, per intelligence system. Omitted = leave
+    # them alone (an older page); a system sent = that system's map
+    # replaced; "" = back to the house default.
+    room_agents: dict[Literal["hermes", "openclaw"], dict[str, str]] | None = None
 
 
 class SessionModePayload(BaseModel):
@@ -240,6 +244,8 @@ async def get_mapping(names: bool = False):
     zones = _all_zones()
     out = {
         "room_zones": dict(config_store.read_section("room_zones") or {}),
+        "room_agents": dict(config_store.read_section("room_agents") or {}),
+        **_agent_default(),
         "zones": zones,
         "default_zone": cfg("sonos", "default_zone"),
         # Per-zone clip volumes (slider lane): config copy + live layer,
@@ -273,6 +279,15 @@ async def get_mapping(names: bool = False):
     if names:
         out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
     return out
+
+
+def _agent_default() -> dict:
+    """The intelligence system the bot runs and its house-default agent —
+    what a room without an override uses."""
+    icfg = dict(config_store.read_section("intelligence") or {})
+    kind = str(icfg.get("kind") or os.getenv("LVI_INTELLIGENCE_KIND") or "hermes").strip().lower()
+    agent = intelligence_target.agent_for(icfg, kind) or ("default" if kind == "hermes" else "")
+    return {"agent_kind": kind, "default_agent": agent}
 
 
 @router.put("/mapping", dependencies=GUARD)
@@ -313,14 +328,32 @@ async def put_mapping(payload: MappingPayload):
         if not room:
             raise HTTPException(status_code=400, detail="empty room name")
         clean[room] = zone
+    sections = {"room_zones": clean}
+    if payload.room_agents is not None:
+        known = set(clean) | {k["room"] for k in registry.known_rooms()}
+        agents = dict(config_store.read_section("room_agents") or {})
+        for kind, rooms in payload.room_agents.items():
+            picked = {}
+            for room, agent in rooms.items():
+                room, agent = room.strip(), (agent or "").strip()
+                if room not in known:
+                    raise HTTPException(status_code=400, detail=f"room '{room}' is not mapped or connected")
+                if agent and not intelligence_target.AGENT_RE.match(agent):
+                    raise HTTPException(status_code=400, detail=f"invalid agent name for room '{room}'")
+                if agent:
+                    picked[room] = agent
+            agents[kind] = picked
+        sections["room_agents"] = agents
     try:
-        diff = config_store.write_section("room_zones", clean)
+        before = config_store.read_section("room_zones")
+        config_store.write_sections(sections)  # one atomic pass
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     # exactly one output sounds a reply — tell every speaker node
     # whether it's now the one (a full-dict PUT can map OR unmap it).
     node_speaker.sync_all(registry.capable_rooms())
-    return {"ok": True, "room_zones": clean, "changed": diff["before"] != diff["after"]}
+    return {"ok": True, "room_zones": clean, "room_agents": sections.get("room_agents"),
+            "changed": (before or {}) != clean}
 
 
 # ── node speaker (a node's built-in speaker zone) ────────────────
@@ -1219,7 +1252,8 @@ def _keys_cfg() -> dict:
     icfg["kind"] = pick("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes")
     return {"tts": {"provider": pick("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")},
             "stt": {"provider": pick("stt", "provider", "LVI_STT_PROVIDER", "whisper")},
-            "intelligence": icfg}
+            "intelligence": icfg,
+            "room_agents": dict(config_store.read_section("room_agents") or {})}
 
 
 class KeyTestPayload(BaseModel):

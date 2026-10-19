@@ -65,7 +65,12 @@ def _in_use(row: dict, cfg: dict) -> bool:
     kind = str(icfg.get("kind") or "hermes").strip().lower()
     if row["kind"] != kind:
         return False
-    return intelligence_target.key_var(kind, intelligence_target.agent_for(icfg, kind)) == row["var"]
+    if intelligence_target.key_var(kind, intelligence_target.agent_for(icfg, kind)) == row["var"]:
+        return True
+    # A room's agent override (room_agents.<kind>.<room>) uses its key too.
+    overrides = (cfg.get("room_agents") or {}).get(kind) or {}
+    return any(intelligence_target.key_var(kind, str(a)) == row["var"]
+               for a in (overrides.values() if isinstance(overrides, dict) else []) if a)
 
 
 def rows(saved_env: dict, live_env: dict, cfg: dict, file_env=None) -> list[dict]:

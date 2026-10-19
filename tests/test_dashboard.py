@@ -3437,6 +3437,123 @@ def main():
         registry.mark_disconnected("pc-053ws")
         registry.mark_disconnected("pc-053xvf")
 
+    # ── per-room agent override (Intelligence agent = house default) ──
+    import intelligence_agent as _iaRA
+    from dashboard import node_command as _ncRA
+
+    _57_cfg = {sec: config_store.read_section(sec) for sec in ("intelligence", "room_agents", "room_zones")}
+    _57_vars = ("LVI_HERMES_KEY", "LVI_HERMES_KEY_HA_BUTLER", "LVI_HERMES_KEY_KIDS_AGENT", "LVI_OPENCLAW_KEY")
+    _57_env = {k: os.environ.get(k) for k in _57_vars}
+    try:
+        os.environ.update({"LVI_HERMES_KEY": "k-default", "LVI_HERMES_KEY_HA_BUTLER": "k-butler",
+                           "LVI_HERMES_KEY_KIDS_AGENT": "k-kids", "LVI_OPENCLAW_KEY": "k-oc"})
+        _57_icfg = {"kind": "hermes", "url": "http://h.test:8642/v1", "agents": {"hermes": "ha-butler"},
+                    "urls": {"hermes": "http://h.test:8642/v1", "openclaw": "http://oc.test:18789/v1"}}
+        config_store.write_section("intelligence", _57_icfg)
+        config_store.write_section("room_agents", {"hermes": {"suite-kids57": "kids-agent"},
+                                                   "openclaw": {"suite-kids57": "kidbot"}})
+
+        def _mk57(room, resolver=None):
+            a = _iaRA.IntelligenceAgent(room=room, session_mode="fresh", room_resolver=resolver)
+            a._ensure_route()
+            return a
+        _a = _mk57("suite-kids57")
+        check("room agents: bot: a room override routes to /p/<agent>/v1 with that agent's key",
+              "/p/kids-agent/v1" in _a._url and _a._key_var == "LVI_HERMES_KEY_KIDS_AGENT" and _a._key == "k-kids"
+              and _a._agent == "kids-agent", f"{_a._url} {_a._key_var} {_a._agent}")
+        _a = _mk57("suite-kitchen57")
+        check("room agents: bot: no override -> the house default agent (Intelligence card)",
+              "/p/ha-butler/v1" in _a._url and _a._key == "k-butler" and _a._agent == "ha-butler", f"{_a._url} {_a._agent}")
+        _box57 = {"room": None}
+        _a = _iaRA.IntelligenceAgent(room=None, session_mode="fresh", room_resolver=lambda: _box57["room"])
+        _a._ensure_route()
+        _before57 = _a._agent
+        _box57["room"] = "suite-kids57"
+        _a._ensure_route()
+        check("room agents: bot: room unknown when the session is built, known at the first turn -> override used",
+              _before57 == "ha-butler" and _a._agent == "kids-agent" and _a._key == "k-kids", f"{_before57} -> {_a._agent}")
+        import inspect as _insp57
+        check("room agents: bot: every turn resolves the route before sending",
+              "self._ensure_route()" in _insp57.getsource(_iaRA.IntelligenceAgent._ask_intelligence))
+        config_store.write_section("intelligence", {**_57_icfg, "kind": "openclaw", "url": "http://oc.test:18789/v1",
+                                                    "agents": {"hermes": "ha-butler", "openclaw": "main"}})
+        _a = _mk57("suite-kids57")
+        _b = _mk57("suite-kitchen57")
+        check("room agents: bot: OpenClaw uses its OWN overrides (kidbot) and default (main); hermes overrides ignored",
+              _a._agent == "kidbot" and _a._key == "k-oc" and _b._agent == "main", f"{_a._agent} {_b._agent}")
+        config_store.write_section("intelligence", _57_icfg)
+        config_store.write_section("room_agents", {"openclaw": {"suite-kids57": "kidbot"}})
+        _a = _mk57("suite-kids57")
+        check("room agents: bot: an override for the other system is ignored -> default", _a._agent == "ha-butler", _a._agent)
+
+        # routes
+        config_store.write_section("room_agents", {"hermes": {"suite-kids57": "kids-agent"},
+                                                   "openclaw": {"suite-kids57": "kidbot"}})
+        _m = client.get("/api/dashboard/mapping").json()
+        check("room agents: GET mapping: room_agents (both systems) + the current system and its default agent",
+              _m.get("room_agents") == {"hermes": {"suite-kids57": "kids-agent"}, "openclaw": {"suite-kids57": "kidbot"}}
+              and _m.get("agent_kind") == "hermes" and _m.get("default_agent") == "ha-butler",
+              str({k: _m.get(k) for k in ("room_agents", "agent_kind", "default_agent")}))
+        _rz = dict(_m.get("room_zones") or {})
+        _zone57 = next(iter(_rz.values()), None)
+        if _zone57:
+            _rz["suite-kids57"] = _zone57
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz,
+                                                             "room_agents": {"hermes": {"suite-kids57": "kids-x"}}})
+            _ra = config_store.read_section("room_agents") or {}
+            check("room agents: PUT: replaces only the sent system's overrides; the other system's stay",
+                  _r.status_code == 200 and _ra.get("hermes") == {"suite-kids57": "kids-x"}
+                  and _ra.get("openclaw") == {"suite-kids57": "kidbot"}, f"{_r.status_code} {_r.text[:120]} {_ra}")
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz})
+            check("room agents: PUT without room_agents (an older page) leaves overrides untouched",
+                  _r.status_code == 200 and (config_store.read_section("room_agents") or {}).get("hermes") == {"suite-kids57": "kids-x"},
+                  _r.text[:120])
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz,
+                                                             "room_agents": {"hermes": {"suite-kids57": ""}}})
+            check("room agents: PUT: an empty agent clears the override (back to Default)",
+                  _r.status_code == 200 and "suite-kids57" not in ((config_store.read_section("room_agents") or {}).get("hermes") or {}),
+                  str(config_store.read_section("room_agents")))
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz, "room_agents": {"grok": {"suite-kids57": "x"}}})
+            check("room agents: PUT: an unknown system -> 422", _r.status_code == 422, str(_r.status_code))
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz,
+                                                             "room_agents": {"hermes": {"suite-kids57": "bad agent!"}}})
+            check("room agents: PUT: an invalid agent name -> 422/400", _r.status_code in (400, 422), str(_r.status_code))
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz,
+                                                             "room_agents": {"hermes": {"suite-nowhere57": "kids-agent"}}})
+            check("room agents: PUT: an override for a room that isn't mapped or connected -> 400", _r.status_code == 400,
+                  f"{_r.status_code} {_r.text[:100]}")
+        else:
+            check("room agents: PUT: suite needs at least one mapped room in the copied config", False)
+
+        # rename carries the override
+        config_store.write_section("room_agents", {"hermes": {"suite-ren57": "kids-agent"}})
+        registry.mark_connected("pc-ra")
+        registry.note_offer("pc-ra", "suite-ren57")
+        _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
+                                      "data": {"name": "suite-ren57b"}}), "pc-ra")
+        _ra = config_store.read_section("room_agents") or {}
+        check("room agents: a room rename carries its agent override to the new name",
+              (_ra.get("hermes") or {}).get("suite-ren57b") == "kids-agent" and "suite-ren57" not in (_ra.get("hermes") or {}),
+              str(_ra))
+        registry.mark_disconnected("pc-ra")
+
+        # Keys card: an agent used by a room is in use
+        import keys_catalog as _kc57
+        config_store.write_section("room_agents", {"hermes": {"suite-kids57": "kids-agent"}})
+        _rows = {r["var"]: r for r in _kc57.rows({"LVI_HERMES_KEY_KIDS_AGENT": "k"}, {}, {
+            "tts": {}, "stt": {}, "intelligence": {"kind": "hermes", "agents": {"hermes": "ha-butler"}},
+            "room_agents": config_store.read_section("room_agents")}, file_env={"LVI_HERMES_KEY_KIDS_AGENT": "k"})}
+        check("room agents: keys: an agent picked for a room counts as in use",
+              _rows.get("LVI_HERMES_KEY_KIDS_AGENT", {}).get("in_use") is True, str(_rows.get("LVI_HERMES_KEY_KIDS_AGENT")))
+    finally:
+        for _k, _v in _57_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _sec, _val in _57_cfg.items():
+            config_store.write_section(_sec, _val or {})
+
     # ── stt STT card (routes) ─────────────────────────────────────────
     import time as _tstt
 
