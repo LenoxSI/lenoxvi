@@ -1,4 +1,4 @@
-// lenoxvi dashboard — app. Wireframe-C structure:
+// LenoxVI dashboard — app. Wireframe-C structure:
 // single scrolling page, sticky header + section rail, no tabs.
 // Brand: dark theme default, one lime element leads, sentence case,
 // no emoji. Live data via the same /api/dashboard/* routes the old

@@ -1,4 +1,4 @@
-"""Static intelligence stub for lenoxvi (bench/dev echo intelligence).
+"""Static intelligence stub for LenoxVI (bench/dev echo intelligence).
 
 Deterministic echo intelligence for bench and dev runs without the Hermes API
 (production uses IntelligenceAgent via config.yaml intelligence.kind: hermes; the stub
@@ -47,7 +47,7 @@ class StubIntelligence(FrameProcessor):
             return ("Hey! Stub intelligence here: audio round trip works — local GPU "
                     "STT heard you and ElevenLabs is speaking this reply.")
         if "your name" in t or "who are you" in t:
-            return ("I'm the lenoxvi stub intelligence — the bench stand-in while the "
+            return ("I'm the LenoxVI stub intelligence — the bench stand-in while the "
                     "Hermes intelligence is unset in config.")
         if any(w in t for w in ("bye", "goodbye", "good night")):
             return "Later! Set intelligence.kind: hermes in config.yaml for the real intelligence."

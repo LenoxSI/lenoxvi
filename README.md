@@ -1,4 +1,4 @@
-# lenoxvi
+# LenoxVI
 
 **house-voice appliance.** A pipecat bot that turns mic nodes into a
 house-wide voice assistant with any intelligence you want:
@@ -133,7 +133,7 @@ header), key precedence + no-KeyError, key POST hygiene (never echoes
 material), test-probe ok/error paths.
 
 Developing the dashboard: the prebuilt `dashboard-ui/dist/` is committed,
-so running lenoxvi needs no node toolchain. To work on the UI, run the Vite
+so running LenoxVI needs no node toolchain. To work on the UI, run the Vite
 dev server and point its `/api` proxy at a running bot (default
 `https://localhost:7860`):
 
@@ -167,7 +167,7 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
 
 The default wake word is **"Hey Jarvis"** (`wake.model: hey_jarvis`). It is
 one of openWakeWord's pre-trained models, which install with the
-`openwakeword` package — lenoxvi does not ship or host any model file. The
+`openwakeword` package — LenoxVI does not ship or host any model file. The
 stock choices are `hey_jarvis`, `hey_mycroft` and `alexa`, selectable in the
 dashboard's Wake Word Model panel.
 
@@ -189,7 +189,7 @@ dropped instead of answered.
 
 ## Local TTS (optional): Pocket TTS
 
-lenoxvi can speak with [Pocket TTS], a small CPU-only model from Kyutai: no
+LenoxVI can speak with [Pocket TTS], a small CPU-only model from Kyutai: no
 API key, and nothing leaves your network. It runs about 3x faster than real
 time on a 4-core CPU, so it leaves the GPU to speech recognition.
 

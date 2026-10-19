@@ -1,4 +1,4 @@
-"""wake_word — openWakeWord gate + turn lock for lenoxvi (Phase 4).
+"""wake_word — openWakeWord gate + turn lock for LenoxVI (Phase 4).
 
 Sits FIRST in the pipeline (before VAD/STT) and gates AUDIO, not
 transcriptions: in IDLE/LOCKED the audio never reaches STT, so the GPU

@@ -1,4 +1,4 @@
-"""config — single source of truth for lenoxvi tunables (2026-09-19).
+"""config — single source of truth for LenoxVI tunables (2026-09-19).
 
 config.yaml is where humans tune the bot. Precedence for every knob:
 
@@ -68,7 +68,7 @@ def cfg(section: str, key: str = None, default=None):
 def cfg_env(section: str, key: str, env_var: str, default=None):
     """yaml section.key, falling back to the env var, then the default.
 
-    This is the one helper to use for knobs that already have a LVI_* env
+    This is the one helper to use for knobs that already have an LVI_* env
     var — keeps .env working unchanged while letting config.yaml win.
     """
     yaml_val = cfg(section, key)

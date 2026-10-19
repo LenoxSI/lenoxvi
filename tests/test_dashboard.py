@@ -1,4 +1,4 @@
-"""Offline test rig for the lenoxvi dashboard package.
+"""Offline test rig for the LenoxVI dashboard package.
 
 Runs against the host's REAL venv (pipecat, fastapi, soco, ruamel) in a
 scratch dir — NOT the live repo checkout (host is a pure deploy target).
@@ -197,7 +197,7 @@ def main():
     after_text = cfg_test.read_text()
     check("config write changed the file", after_text != before_text)
     check("comment preservation (header survives)",
-          "# lenoxvi config" in after_text or "THE tuning surface" in after_text,
+          "# LenoxVI config" in after_text or "THE tuning surface" in after_text,
           )
     m = client.get("/api/dashboard/mapping").json()
     check("mapping read-back after write", m["room_zones"] == {"bedroom": "Dining Room"},
@@ -256,8 +256,7 @@ def main():
         importlib.reload(_cfg_mod)
         _cp = str(_cfg_mod.CONFIG_PATH)
         check("config path is repo-anchored (cwd-proof)",
-              "lenoxvi" in _cp and os.path.isabs(_cp)
-              and _cp.endswith("config.yaml"), f"CONFIG_PATH={_cp}")
+              _cp == str(REPO_CORE.parent / "config.yaml"), f"CONFIG_PATH={_cp}")
         check("config loads away from repo root",
               bool(_cfg_mod.cfg("tts")), f"tts={_cfg_mod.cfg('tts')}")
     finally:

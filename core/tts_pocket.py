@@ -1,7 +1,7 @@
 """Pocket TTS (Kyutai, CPU-native): the local TTS lane + fallback engine.
 
 pipecat 1.11 ships PocketTTSService, but it loads the model in __init__
-and lenoxvi builds a TTS per SESSION, so every wake would reload weights.
+and LenoxVI builds a TTS per SESSION, so every wake would reload weights.
 This module keeps ONE model per process (loaded at startup by preload())
 and hands it to every session's service. A process-wide lock serializes
 generation, so two rooms queue instead of thrashing the CPU.

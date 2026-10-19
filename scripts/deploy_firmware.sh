@@ -8,7 +8,7 @@
 #      nodes read them from NVS, set via the dashboard WiFi flow)
 #   2. Bump firmware/<track>/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
-#   3. Copy bin + version.json to the lenoxvi repo on the appliance host
+#   3. Copy bin + version.json to the LenoxVI repo on the appliance host
 #   4. Restart the bot (serves /firmware/* via core/firmware_server.py) —
 #      only drops the node's live session; files are picked up per request
 #   5. Poke the node (future: an HTTP poke endpoint); today the node picks
@@ -219,7 +219,7 @@ echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
 # picked up a stale artifact. Shipping it re-flashes the same firmware
 # every boot or mislabels a deploy. Either way: STOP.
 if [ -z "$BIN_VER" ]; then
-  echo "FATAL: no embedded version found in $BIN — not an lenoxvi app image?"; exit 1
+  echo "FATAL: no embedded version found in $BIN — not a LenoxVI app image?"; exit 1
 fi
 if [ "$BIN_VER" != "$NEW" ]; then
   echo "FATAL: binary says $BIN_VER, manifest says $NEW."

@@ -17,7 +17,7 @@ import os
 import re
 
 # Pre-trained wake models registered in openwakeword 0.4.0's own `models`
-# table (bundled in its wheel; CC BY-NC-SA 4.0, non-commercial). lenoxvi never
+# table (bundled in its wheel; CC BY-NC-SA 4.0, non-commercial). LenoxVI never
 # ships or hosts a model file. ("timer"/"weather" there are not wake words.)
 STOCK_MODELS: tuple[str, ...] = ("hey_jarvis", "hey_mycroft", "alexa")
 STOCK_LICENSE = "CC BY-NC-SA 4.0 (non-commercial)"

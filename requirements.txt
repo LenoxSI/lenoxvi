@@ -1,4 +1,4 @@
-# lenoxvi — runtime dependencies (top-level, version-pinned to what's
+# LenoxVI — runtime dependencies (top-level, version-pinned to what's
 # as of 2026-09-20; pipecat 1.11.0).
 # Host Python: 3.14. numpy==2.5.3 needs >=3.12; on older interpreters pip
 # fails the install — by design, not by accident: this file pins the

@@ -1,4 +1,4 @@
-"""lenoxvi house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
+"""LenoxVI house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
 
 Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord) ->
 Silero VAD -> local faster-whisper STT -> intelligence (IntelligenceAgent via config.yaml

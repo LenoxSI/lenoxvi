@@ -1,5 +1,5 @@
 #!/bin/bash
-# lenoxvi bot restart (run on the appliance host).
+# LenoxVI bot restart (run on the appliance host).
 # Now a thin wrapper over the systemd user unit lenoxvi-bot.service
 # (2026-09-20): the unit owns startup, crash-restart, boot survival, and
 # journald logging. This keeps the same UX (bash scripts/restart.sh).

@@ -1,4 +1,4 @@
-"""sonos_output — lenoxvi's Sonos audioClip output path.
+"""sonos_output — LenoxVI's Sonos audioClip output path.
 
 Sits after the TTS service in the pipeline, captures the spoken reply into an
 MP3 clip, serves it over LAN HTTP, and tells the zone's Sonos Port/Amp to play

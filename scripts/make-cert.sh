@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-shot self-signed cert for the lenoxvi web client (HTTPS = secure context
+# One-shot self-signed cert for the LenoxVI web client (HTTPS = secure context
 # = browsers allow microphone access on the LAN IP; plain HTTP is hard-blocked).
 # Regenerate after expiry (825 days). Not a secret; safe to keep on the box.
 #

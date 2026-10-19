@@ -1,12 +1,20 @@
 # Changelog
 
-All notable changes to lenoxvi are documented here.
+All notable changes to LenoxVI are documented here.
 
 Server-level versioning only — firmware carries its own `project(VERSION)` in
 its CMakeLists, bumped together with the server manifest on every OTA deploy.
 The two version streams are independent.
 
 ## [Unreleased]
+
+### Changed
+- **Renamed to LenoxVI.** Name, docs, dashboard logo and page title follow
+  the LenoxVI brand kit (colours unchanged). Environment variables use the
+  `LVI_` prefix (e.g. `LVI_HERMES_KEY`), the systemd user unit is
+  `lenoxvi-bot` (`deploy/lenoxvi-bot.service.example`), and the dev
+  server reads `LENOXVI_DEV_BOT_URL`. The firmware repo is
+  `lenoxvi-firmware`.
 
 ### Fixed
 - **Restarts no longer hang.** Stopping the bot waited for every node's
@@ -425,7 +433,7 @@ tunable character.
 
 ## [0.6.0] — 2026-10-07 — HeroUI dashboard + second node type (Flex)
 
-The dashboard becomes a React app, and lenoxvi gets its second mic node
+The dashboard becomes a React app, and LenoxVI gets its second mic node
 type.
 
 ### Added — HeroUI dashboard (replaces legacy page.html)
@@ -687,7 +695,8 @@ config-file number.
 
 ## [0.3.3] — 2026-10-03
 
-The rename + voice-UX release: the project takes its public name. One silent-failure bug found by a live test,
+The rename + voice-UX release: the project takes its public name. One
+silent-failure bug found by a live test,
 one lying verify found by a deliberate wrong-password rollback test, and two
 conversation features shipped and verified the same day.
 
@@ -731,9 +740,9 @@ conversation features shipped and verified the same day.
   → auto-restore → rejoin. Found by a deliberate wrong-password rollback
   test
 - **Rename sweep coherence** — project renamed across 25 files: the env
-  prefix, the systemd unit example and the GitHub repo follow the new name; firmware factory default room name = "lenoxvi"
-  (fresh flashes boot as lenoxvi; deployed nodes keep their dashboard
-  names)
+  prefix, the systemd unit example and the GitHub repo follow the new name;
+  the firmware's factory default room name is the project name (fresh
+  flashes boot with it; deployed nodes keep their dashboard names)
 
 ### Known issues
 - Node command acks that fire while the node is off-network (rollback
@@ -843,7 +852,7 @@ state).
 
 ## [0.3.0] — 2026-09-29
 
-Web dashboard v1 — lenoxvi gets a GUI. Mapping, node status, zone
+Web dashboard v1 — LenoxVI gets a GUI. Mapping, node status, zone
 management, and test clips, all served by the bot process itself.
 
 ### Added

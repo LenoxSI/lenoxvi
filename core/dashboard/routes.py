@@ -2459,14 +2459,14 @@ async def upload_firmware(
         tmp.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
-            detail="not an ESP32 app image (no app-descriptor magic) — is this a lenoxvi build?",
+            detail="not an ESP32 app image (no app-descriptor magic) — is this a LenoxVI build?",
         )
     version = head[48:80].split(b"\x00")[0].decode(errors="replace").strip()
     if not re.match(r"^\d+\.\d+\.\d+$", version):
         tmp.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
-            detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a lenoxvi app image?",
+            detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a LenoxVI app image?",
         )
     # Board identity: the
     # image proves its line — compiled-in OTA URL format, plus the project

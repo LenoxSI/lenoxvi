@@ -1,4 +1,4 @@
-"""intelligence_agent — lenoxvi's intelligence step: turns speech into a reply.
+"""intelligence_agent — LenoxVI's intelligence step: turns speech into a reply.
 
 The real counterpart of intelligence_stub.py, same turn shape: buffers user
 speech, waits for the end-of-turn lull, plays fillers while it waits, filters

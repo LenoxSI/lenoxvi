@@ -1,4 +1,4 @@
-"""Local faster-whisper STT service for lenoxvi (pipecat 1.11).
+"""Local faster-whisper STT service for LenoxVI (pipecat 1.11).
 
 Subclasses pipecat's Whisper base STT (the OpenAI-API one) and overrides
 `_transcribe` to run faster-whisper locally on the GPU instead of hitting

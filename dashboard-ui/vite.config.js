@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// lenoxvi dashboard build. Prebuilt dist/ is committed — a fresh clone
+// LenoxVI dashboard build. Prebuilt dist/ is committed — a fresh clone
 // runs with zero node toolchain (public-flip rule); this build stays
 // dev-side. Base path is relative so the page works under any host
 // mount (FastAPI serves it at /dashboard).
