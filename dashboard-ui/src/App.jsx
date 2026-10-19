@@ -552,17 +552,6 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
         <Stat label="Uptime">
           <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
         </Stat>
-        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms)} /></Stat>
-        <Stat label="Last wake">
-          <StatChip stat="last-wake" muted={!status?.last_wake}>
-            {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
-          </StatChip>
-        </Stat>
-        <Stat label="Version">
-          <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
-        </Stat>
-        {/* The voice path, in order: hear (STT) → think (Intelligence) → speak (TTS). */}
-        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
         <Stat label="Intelligence">
           {(() => {
             // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
@@ -580,6 +569,16 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
             return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s} style={s}>{brand.toLowerCase()}</StatChip>
           })()}
         </Stat>
+        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms)} /></Stat>
+        <Stat label="Last wake">
+          <StatChip stat="last-wake" muted={!status?.last_wake}>
+            {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
+          </StatChip>
+        </Stat>
+        <Stat label="Version">
+          <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
+        </Stat>
+        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
         <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status)} /></Stat>
       </div>
     </Section>
