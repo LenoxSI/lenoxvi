@@ -560,7 +560,7 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
           <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
         </Stat>
         {/* The voice path, in order: hear (STT) → think (Intelligence) → speak (TTS). */}
-        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt)} /></Stat>
+        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
         <Stat label="Intelligence">
           {(() => {
             // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
@@ -607,7 +607,7 @@ const STAT_TONE = {
 function StatChip({ stat, tone = 'neutral', text, title, muted, className, style, children }) {
   return (
     <span data-stat={stat} data-tone={tone} title={title || undefined} style={style || undefined}
-      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE[tone]}${muted ? ' text-[var(--muted)]' : ''}${className ? ` ${className}` : ''}`}>
+      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium${STAT_TONE[tone] ? ` ${STAT_TONE[tone]}` : ''}${muted ? ' text-[var(--muted)]' : ''}${className ? ` ${className}` : ''}`}>
       {children ?? text}
     </span>
   )
@@ -627,8 +627,10 @@ function nodesChip(rooms) {
 const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket' }
 const ttsName = p => TTS_NAMES[p] || p
 
-// TTS: the configured voice service; only rooms that are online count —
-// an offline node's last report is stale.
+// TTS: the voice service the rooms are actually using (each online room
+// reports its live provider); the configured one only until a room has
+// reported — config edits apply on the next restart. Offline rooms don't
+// count: their last report is stale.
 function ttsChip(status) {
   if (!status) return { text: '—', muted: true }
   const live = (status.rooms || []).filter(r => r.online)
@@ -636,30 +638,39 @@ function ttsChip(status) {
   if (down.length)
     return { tone: 'danger', text: 'TTS down',
       title: `${down.join(', ')} can't speak. Reboot the node (or the bot) to rebuild its session.` }
-  const fb = live.filter(r => String(r.tts_provider || '').endsWith('(fallback)'))
+  const isFb = r => String(r.tts_provider || '').endsWith('(fallback)')
+  // Rooms report Deepgram Flux as plain "deepgram": when the room's service
+  // is the configured one's family, the configured name is the more
+  // specific (a switch between the two Deepgram voices shows early).
+  const roomP = live.find(r => r.tts_provider && !isFb(r))?.tts_provider
+  const cfgP = status.tts_provider
+  const primary = roomP && !String(cfgP || '').startsWith(roomP) ? roomP : (cfgP || roomP)
+  const fb = live.filter(isFb)
   if (fb.length) {
     const name = ttsName(String(fb[0].tts_provider).replace(/\s*\(fallback\)$/, ''))
     return { tone: 'warning', text: `${name} fallback`,
-      title: `${fb.map(r => esc(r.room)).join(', ')} on the local ${name} voice: ${ttsName(status.tts_provider)} is unreachable` }
+      title: `${fb.map(r => esc(r.room)).join(', ')} on the local ${name} voice: ${ttsName(primary)} is unreachable` }
   }
-  return { text: ttsName(status.tts_provider) || '—', muted: !status.tts_provider }
+  return { text: ttsName(primary) || '—', muted: !primary }
 }
 
 // STT: Whisper <model>, or Deepgram <model> with Whisper as its fallback.
-function sttChip(st) {
+// model falls back to the configured one (status.stt_model) before the
+// first load reports it.
+function sttChip(st, configuredModel) {
   if (!st) return { text: '—', muted: true }
+  const whisper = `Whisper ${st.model || configuredModel || ''}`.trim()
   const onWhisper = st.provider !== 'deepgram' || st.active === 'whisper'
-  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'failed to load', title: st.error || 'Whisper failed to load' }
+  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'Whisper failed', title: st.error || 'Whisper failed to load' }
   if (st.provider === 'deepgram' && st.active === 'whisper') {
     const rooms = (st.fallback_rooms || []).map(esc)
     return { tone: 'warning', text: 'Whisper fallback',
-      title: `${st.fallback_reason || 'Deepgram unreachable'}${rooms.length ? `: ${rooms.join(', ')}` : ''}` }
+      title: `${st.fallback_reason || 'Deepgram unreachable'}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
   }
-  if (st.provider === 'deepgram') {
-    const m = String(st.cloud_model || '')
-    return { text: `Deepgram ${m.charAt(0).toUpperCase()}${m.slice(1)}`.trim() }
-  }
-  return { text: `Whisper ${st.model || ''}`.trim() }
+  // same model spelling as the STT card ("Deepgram nova-3")
+  if (st.provider === 'deepgram') return { text: `Deepgram ${st.cloud_model || ''}`.trim() }
+  if (st.state === 'loading') return { text: `${whisper} (loading)`, muted: true }
+  return { text: whisper }
 }
 
 /* ── node row actions ─────────────────────────────────────── */
