@@ -235,12 +235,12 @@ function Switch({ checked, onChange, title }) {
 // Focus selects the hint; typing replaces it (hidden). The hint is never
 // sent back as a key — readKey() returns '' until the box is edited.
 // Remount it (React key) after a save to show the new hint.
-function KeyInput({ id, hint, placeholder }) {
+function KeyInput({ id, hint, placeholder, label }) {
   const [dirty, setDirty] = useState(false)
   const [val, setVal] = useState('')
   return (
     <input id={id} data-dirty={dirty ? '1' : '0'} type={dirty ? 'password' : 'text'}
-      value={dirty ? val : (hint || '')} placeholder={placeholder} autoComplete="off" spellCheck={false}
+      value={dirty ? val : (hint || '')} placeholder={placeholder} aria-label={label || placeholder} autoComplete="off" spellCheck={false}
       title={hint ? 'Saved key (first 4 characters shown). Paste a new key to replace it.' : undefined}
       onFocus={e => { if (!dirty) e.target.select() }}
       onChange={e => { setDirty(true); setVal(e.target.value) }}
@@ -287,16 +287,24 @@ function KeysCard({ setMsg, setRebooting }) {
   const [tests, setTests] = useState({})        // var -> {status, detail}
   const [agents, setAgents] = useState([])      // Hermes agents with no key yet
   const [agentNote, setAgentNote] = useState('')
-  const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'
+  const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'; '' = first offered
+  const [busy, setBusy] = useState(false)        // an Add in flight (no double submit)
+  const [loadErr, setLoadErr] = useState('')
   const msgRef = useRef(setMsg)
   const discover = useRef(null)
+  const discSeq = useRef(0)                      // only the newest discovery reply counts
   useEffect(() => {
     discover.current = async () => {
+      const seq = ++discSeq.current
       try {
         const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
+        if (seq !== discSeq.current) return
         setAgents((d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id))
         setAgentNote(d.note || '')
-      } catch (e) { setAgents([]); setAgentNote('Agent list failed: ' + e.message) }
+      } catch (e) {
+        if (seq !== discSeq.current) return
+        setAgents([]); setAgentNote('Agent list failed: ' + e.message)
+      }
     }
   })
   useEffect(() => {
@@ -308,15 +316,15 @@ function KeysCard({ setMsg, setRebooting }) {
   useEffect(() => { msgRef.current = setMsg })
   const load = () => api('/api/dashboard/keys').then(d => { setKeys(d.keys || []); return d })
   useEffect(() => {
-    const get = () => api('/api/dashboard/keys').then(d => setKeys(d.keys || []))
-      .catch(e => msgRef.current('Keys load failed: ' + e.message, 'err', 'Keys'))
+    const get = () => api('/api/dashboard/keys').then(d => { setKeys(d.keys || []); setLoadErr('') })
+      .catch(e => { setLoadErr(e.message); msgRef.current('Keys load failed: ' + e.message, 'err', 'Keys') })
     get()
     // After a restart or any card's save: pending/in-use follow the truth.
     window.addEventListener('lenoxvi:reload-all', get)
     return () => window.removeEventListener('lenoxvi:reload-all', get)
   }, [])
 
-  const save = async (row, inputId) => {
+  const save = async (row, inputId, { offer = true } = {}) => {
     const key = readKey(inputId)
     if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return null }
     const target = keyRoute(row)
@@ -329,7 +337,7 @@ function KeysCard({ setMsg, setRebooting }) {
       await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
       setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
-      offerRestart(setMsg, setRebooting)
+      if (offer) offerRestart(setMsg, setRebooting)
       return r || {}
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys'); return null }
   }
@@ -363,23 +371,38 @@ function KeysCard({ setMsg, setRebooting }) {
   // in the one Add picker.
   const shown = r => r.set || r.pending_restart || r.in_use
   const services = (keys || []).filter(r => !shown(r))
+  const offered = v => (v.startsWith('agent:') ? agents.includes(v.slice(6))
+    : services.some(r => r.var === v && keyRoute(r)))
   const firstPick = services.find(r => keyRoute(r))?.var || (agents[0] ? `agent:${agents[0]}` : '')
-  const pickValue = (addPick.startsWith('agent:') ? agents.includes(addPick.slice(6))
-    : services.some(r => r.var === addPick && keyRoute(r))) ? addPick : firstPick
+  // Never fall back silently: a pick that a refresh removed stays visible
+  // as "pick again" — the pasted key must not go to another service.
+  const pickValue = addPick || firstPick
+  const stale = !!pickValue && !offered(pickValue)
   const add = async () => {
+    if (busy) return
+    if (!pickValue || stale) {
+      setMsg('That key is no longer offered — pick again.', 'err', 'Keys'); return  // stays on 'pick again' until the user chooses
+    }
     const row = pickValue.startsWith('agent:')
       ? { var: '', label: `Hermes · ${pickValue.slice(6)}`, kind: 'hermes', agent: pickValue.slice(6) }
       : services.find(r => r.var === pickValue)
-    if (!row) return
-    const r = await save(row, 'keyin-add')
-    const v = r && (r.var || row.var)
-    if (v) test({ var: v })  // the new key, checked right away
+    setBusy(true)
+    try {
+      const r = await save(row, 'keyin-add', { offer: false })
+      const v = r && (r.var || row.var)
+      if (!v) return
+      setAddPick('')
+      await test({ var: v })  // the saved key, checked BEFORE any restart
+      offerRestart(setMsg, setRebooting)
+    } finally { setBusy(false) }
   }
+  const shownRows = (keys || []).filter(shown)
+  const openVar = shownRows.some(r => r.var === open) ? open : null  // a row that left takes its box with it
 
   return (
     <Section id="system" title="Keys" note="">
       <div id="keys" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3">
-        {!keys ? <span className="text-[13px] text-[var(--muted)]">Loading…</span> : (
+        {!keys ? <span className="text-[13px] text-[var(--muted)]">{loadErr ? `Keys load failed: ${loadErr}` : 'Loading…'}</span> : (
           <div style={{ overflowX: 'auto' }}>
             <table id="keys-table" className="w-full text-[14px]">
               <thead>
@@ -392,7 +415,7 @@ function KeysCard({ setMsg, setRebooting }) {
                 </tr>
               </thead>
               <tbody>
-                {keys.filter(shown).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })).map(row => {
+                {shownRows.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })).map(row => {
                   const st = keyState(row)
                   const t = tests[row.var]
                   const close = () => setOpen(null)
@@ -422,7 +445,7 @@ function KeysCard({ setMsg, setRebooting }) {
                           </div>
                         </td>
                       </tr>
-                      {open === row.var && (
+                      {openVar === row.var && (
                         <tr data-role="replace">
                           <td colSpan={5} className="px-4 py-2">
                             <div className="flex items-center gap-2 flex-wrap"
@@ -451,12 +474,13 @@ function KeysCard({ setMsg, setRebooting }) {
           </div>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          {!firstPick ? (
+          {!keys ? null : (services.length === 0 && agents.length === 0) ? (
             <span className="text-[13px] text-[var(--muted)]">Every key is set.{agentNote ? ` ${agentNote}` : ''}</span>
           ) : (
             <>
-              <select id="key-add" className={`${INPUT_CLS} w-auto`} value={pickValue}
+              <select id="key-add" aria-label="Key to add" className={`${INPUT_CLS} w-auto`} value={pickValue}
                 onChange={e => setAddPick(e.target.value)}>
+                {stale && <option value={pickValue} disabled>(no longer offered — pick again)</option>}
                 {services.length > 0 && (
                   <optgroup label="Services">
                     {services.map(r => (
@@ -471,9 +495,9 @@ function KeysCard({ setMsg, setRebooting }) {
                   </optgroup>
                 )}
               </select>
-              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the key…" />
-              <button className={BTN_PRIMARY} onClick={add}>Add</button>
-              {agentNote && <span className="text-[13px] text-[var(--muted)]">{agentNote}</span>}
+              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the key…" label="New key" />
+              <button className={BTN_PRIMARY} disabled={busy || !pickValue} onClick={add}>Add</button>
+              {agentNote && agents.length === 0 && <span className="text-[13px] text-[var(--muted)]">{agentNote}</span>}
             </>
           )}
         </div>
