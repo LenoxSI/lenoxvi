@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -249,6 +250,14 @@ class IntelligenceAgent(FrameProcessor):
         self._last_transcription: float = 0.0
         self._speaking = False
         self._flushed = False
+        # Turn gate: a streaming STT (Deepgram) sends finals WHILE you talk,
+        # so "lull since the last transcript" alone can close a turn
+        # mid-sentence. The turn closes only once VAD says you stopped; the
+        # lull counts from whichever came last (transcript or stop), and a
+        # finalized transcript after the stop (the STT's flush) closes it at
+        # once. Whisper only transcribes after the stop, so it's unchanged.
+        self._vad_active = False
+        self._vad_stopped_at = 0.0
         # Dedup: same utterance re-heard inside this window is treated as an
         # echo/repeat (observed live: the lull-timer can double-fire while the
         # bot is still speaking a slow reply).
@@ -449,9 +458,14 @@ class IntelligenceAgent(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        final_now = False
         if isinstance(frame, VADUserStartedSpeakingFrame):
             self._speaking = True
             self._flushed = False
+            self._vad_active = True
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._vad_active = False
+            self._vad_stopped_at = time.monotonic()
         elif isinstance(frame, TranscriptionFrame):
             if frame.text.strip():
                 if self._echo_gate and self._echo_gate.blocked():
@@ -461,13 +475,16 @@ class IntelligenceAgent(FrameProcessor):
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()
+                    final_now = bool(getattr(frame, "finalized", False))
 
         if (
             self._speaking
             and self._flushed is False
             and self._buffer
             and self._last_transcription > 0
-            and (time.monotonic() - self._last_transcription) >= self._lull_secs
+            and not self._vad_active
+            and (final_now or (time.monotonic() - max(self._last_transcription, self._vad_stopped_at))
+                 >= self._lull_secs)
         ):
             self._speaking = False
             self._flushed = True

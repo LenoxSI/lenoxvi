@@ -8,6 +8,14 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Fixed
+- **Turns no longer split on a streaming STT.** With Deepgram, words
+  finalized mid-sentence could close the turn while you were still
+  talking, and the rest of the sentence was glued onto your next one. A
+  turn now closes only after you stop speaking, and Deepgram's final
+  transcript closes it immediately (faster than the old fixed pause).
+  Local Whisper behaves exactly as before.
+
 ### Added
 - **Cloud speech-to-text (Deepgram Nova-3).** The STT card gets a
   Provider choice: *Local — Whisper* (private, the default) or *Deepgram

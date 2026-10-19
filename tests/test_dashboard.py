@@ -1881,6 +1881,70 @@ def main():
         from wake_word import TurnState as _TurnState, WakeWordFilter as _WF  # noqa: E402
         _FD = _FD8
 
+        # ── turn gate: a streaming STT's mid-speech final never closes the turn ──
+        async def _tg_probe():
+            from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStop
+            ag = _Agent(echo_gate=_EchoGate8(), room="suite-tg", session_mode="fresh")
+            ag._lull_secs = 0.3
+            turns = []
+
+            async def rec(text, epoch):
+                turns.append((time.monotonic(), text))
+            ag._run_turn = rec
+            D = _FD8.DOWNSTREAM
+
+            async def tick(n, gap=0.05):
+                for _ in range(n):
+                    await ag.process_frame(_TF("", "", 0, 0, 0), D)
+                    await asyncio.sleep(gap)
+            out = {}
+            # A — the live split, replayed: "What" final mid-speech, the rest
+            # arrives as Deepgram's finalize result after VAD stop.
+            await ag.process_frame(_VADStart(), D)
+            await ag.process_frame(_TF("What", "", 0, 0, 0), D)
+            await tick(14)
+            out["mid"] = [t for _, t in turns]
+            await ag.process_frame(_VADStop(), D)
+            t0 = time.monotonic()
+            await ag.process_frame(_TF("STT provider is", "", 0, 0, 0, finalized=True), D)
+            await asyncio.sleep(0.02)
+            out["A"] = [t for _, t in turns]
+            out["A_ms"] = (turns[0][0] - t0) * 1000 if turns else None
+            turns.clear()
+            # B — no finalize result: the lull counts from VAD stop.
+            await ag.process_frame(_VADStart(), D)
+            await ag.process_frame(_TF("hello there", "", 0, 0, 0), D)
+            await tick(8)
+            await ag.process_frame(_VADStop(), D)
+            ts = time.monotonic()
+            await tick(3)
+            out["B_early"] = [t for _, t in turns]
+            await tick(8)
+            out["B"] = [t for _, t in turns]
+            out["B_wait"] = (turns[0][0] - ts) if turns else None
+            turns.clear()
+            # C — Whisper's order (stop, then one plain transcript): unchanged.
+            await ag.process_frame(_VADStart(), D)
+            await tick(4)
+            await ag.process_frame(_VADStop(), D)
+            await asyncio.sleep(0.4)
+            await ag.process_frame(_TF("what time is it", "", 0, 0, 0), D)
+            tw = time.monotonic()
+            await tick(10)
+            out["C"] = [t for _, t in turns]
+            out["C_wait"] = (turns[0][0] - tw) if turns else None
+            return out
+
+        _tg = _asyncio.run(_tg_probe())
+        check("turn gate: a final that arrives mid-speech never closes the turn (the live 'What' split)",
+              _tg["mid"] == [], str(_tg))
+        check("turn gate: VAD stop + the finalize result -> ONE turn with the whole sentence, at once",
+              _tg["A"] == ["What STT provider is"] and _tg["A_ms"] is not None and _tg["A_ms"] < 100, str(_tg))
+        check("turn gate: no finalize result -> the lull counts from VAD stop (not early, not lost)",
+              _tg["B_early"] == [] and _tg["B"] == ["hello there"] and 0.28 <= (_tg["B_wait"] or 0) <= 0.55, str(_tg))
+        check("turn gate: Whisper order (stop, then a plain transcript) still waits the lull from the transcript",
+              _tg["C"] == ["what time is it"] and 0.28 <= (_tg["C_wait"] or 0) <= 0.55, str(_tg))
+
         _SPOKEN8 = []
 
         async def _agent_probe():
@@ -1903,8 +1967,12 @@ def main():
 
             agent.push_frame = fake_push
 
+            from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStop8
+
             async def say(txt):
+                # Whisper's real order: VAD start, VAD stop, then the transcript.
                 await agent.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await agent.process_frame(_VADStop8(), _FD8.DOWNSTREAM)
                 await agent.process_frame(_TF(txt, "", 0, 0, 0), _FD8.DOWNSTREAM)
 
             async def flush():
@@ -3735,6 +3803,8 @@ def main():
     _rdg._stt_deepgram_sdk = lambda: _DGSDK["ok"]
     _dg_env = os.environ.get("DEEPGRAM_API_KEY")
     _dg_stt_before = dict(config_store.read_section("stt") or {})
+    # Start from "no provider saved" whatever the copied live config says.
+    config_store.write_section("stt", {k: v for k, v in _dg_stt_before.items() if k != "provider"})
     try:
         os.environ["DEEPGRAM_API_KEY"] = "dg-secret-xyz123"
         _gr = client.get("/api/dashboard/stt")
