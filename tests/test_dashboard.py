@@ -3780,9 +3780,29 @@ def main():
         check("cloud stt: /status shows the RUNNING provider (whisper until a restart builds deepgram); GET shows the saved one",
               (_s.get("stt") or {}).get("provider") == "whisper" and _gc["current"]["provider"] == "deepgram",
               f"{_s.get('stt')} saved={_gc['current'].get('provider')}")
+        _lang0 = _sttstt().get("language")
+        _r = client.put("/api/dashboard/stt", json={"language": "de" if _lang0 != "de" else "fr"})
+        check("cloud stt: a language change while Deepgram is saved needs a restart (Deepgram's language is fixed per session)",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True, _r.text[:160])
+        client.put("/api/dashboard/stt", json={"language": _lang0 or "auto"})
         _r = client.put("/api/dashboard/stt", json={"provider": "whisper"})
-        check("cloud stt PUT back to whisper: restart needed", _r.status_code == 200 and _r.json().get("restart_needed") is True
+        check("cloud stt PUT back to whisper while Whisper is what's running: saved, no restart",
+              _r.status_code == 200 and _r.json().get("restart_needed") is False
               and _sttstt().get("provider") == "whisper", _r.text[:120])
+        import stt_fallback as _sfb
+        _sfb.set_provider("deepgram")
+        try:
+            client.put("/api/dashboard/stt", json={"provider": "deepgram"})
+            _r1 = client.put("/api/dashboard/stt", json={"provider": "whisper"})
+            _l = _sttstt().get("language")
+            _r2 = client.put("/api/dashboard/stt", json={"language": "it" if _l != "it" else "es"})
+        finally:
+            _sfb.set_provider("whisper")
+            client.put("/api/dashboard/stt", json={"language": _lang0 or "auto"})
+        check("cloud stt: leaving a RUNNING Deepgram for Whisper needs a restart",
+              _r1.status_code == 200 and _r1.json().get("restart_needed") is True, _r1.text[:120])
+        check("cloud stt: a language change while Deepgram is RUNNING needs a restart (even if Whisper is saved)",
+              _r2.status_code == 200 and _r2.json().get("restart_needed") is True, _r2.text[:120])
     finally:
         for _n, _v in zip(("_stt_deepgram_sdk",), _dg_saved):
             if _v is not None:

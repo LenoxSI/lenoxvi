@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 
@@ -28,6 +29,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     ManuallySwitchServiceFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.service_switcher import (
@@ -59,12 +61,30 @@ def note_unavailable(reason) -> None:
     _STATE["unavailable"] = reason
 
 
-def note_active(room, active: str, reason=None) -> None:
-    _STATE["rooms"][room or "?"] = (active, reason)
+def note_active(room, active: str, reason=None, owner=None) -> None:
+    _STATE["rooms"][room or "?"] = (active, reason, owner)
 
 
-def forget(room) -> None:
-    _STATE["rooms"].pop(room or "?", None)
+def forget(room, owner=None) -> None:
+    """Drop the room's entry — only if it's still this session's (a node
+    that reconnects gets a new session before the old one finishes closing)."""
+    entry = _STATE["rooms"].get(room or "?")
+    if entry is not None and (owner is None or entry[2] is owner):
+        _STATE["rooms"].pop(room or "?", None)
+
+
+_TOKEN_RE = re.compile(r"(?i)\b(token|bearer)\s+[^\s'\",}]+")
+
+
+def redact(text) -> str:
+    """Error text for logs/status/tooltips: never the key. By value first
+    (whatever the format), then any 'Token x' / 'Bearer x' left over."""
+    s = str(text)
+    key = os.environ.get("DEEPGRAM_API_KEY")
+    if key:
+        s = s.replace(key, "***")
+    s = _TOKEN_RE.sub(lambda m: m.group(1) + " ***", s)
+    return s.split(": headers:")[0][:160]
 
 
 def status() -> dict:
@@ -75,7 +95,7 @@ def status() -> dict:
     if _STATE["unavailable"]:
         out.update(active="whisper", fallback_reason=_STATE["unavailable"], fallback_rooms=[])
         return out
-    fallback = {room: why for room, (active, why) in _STATE["rooms"].items() if active == "whisper"}
+    fallback = {room: why for room, (active, why, _owner) in _STATE["rooms"].items() if active == "whisper"}
     if fallback:
         out.update(active="whisper", fallback_reason=next(iter(fallback.values())) or "Deepgram unreachable",
                    fallback_rooms=sorted(fallback))
@@ -94,11 +114,14 @@ def make_deepgram(language):
         from pipecat.services.deepgram.stt import DeepgramSTTService
     except Exception as e:  # noqa: BLE001 — the SDK is optional
         return None, f"deepgram-sdk is not installed ({e})"
-    svc = DeepgramSTTService(
-        api_key=key,
-        settings=DeepgramSTTService.Settings(model=stt_catalog.DEEPGRAM_MODEL,
-                                             language=stt_catalog.deepgram_language(language),
-                                             smart_format=True))
+    try:
+        svc = DeepgramSTTService(
+            api_key=key,
+            settings=DeepgramSTTService.Settings(model=stt_catalog.DEEPGRAM_MODEL,
+                                                 language=stt_catalog.deepgram_language(language),
+                                                 smart_format=True))
+    except Exception as e:  # noqa: BLE001 — Whisper, not a dead pipeline
+        return None, f"Deepgram STT could not be built ({type(e).__name__}: {redact(e)})"
     return svc, None
 
 
@@ -120,24 +143,33 @@ async def recover_stt(dg, request_switch: Callable, cooldown: float, sleep=async
         await sleep(cooldown)
         if closed and closed():
             return False
-        if reachable is not None and not await reachable():
-            continue                      # network still down: stay quiet
         try:
-            await dg._do_reconnect()
-        except Exception as e:  # noqa: BLE001 — not back yet; try next round
-            logger.debug(f"stt fallback: Deepgram reconnect failed: {e}")
-            continue
-        await dg.set_usable(True)
-        await request_switch(dg)
-        if is_active is None:
-            return True
-        waited = 0.0
-        while waited < confirm_secs:
-            if is_active():
+            if reachable is not None and not await reachable():
+                continue                  # network still down: stay quiet
+            try:
+                # pipecat: disconnect, connect, raise ConnectionError if no
+                # connection came up (bad key, dead network, rejected setting).
+                await dg._do_reconnect()
+            except Exception as e:  # noqa: BLE001 — not back yet; try next round
+                logger.debug(f"stt fallback: Deepgram reconnect failed: {redact(e)}")
+                continue
+            if getattr(dg, "_connection", True) is None:
+                continue                  # belt and braces: never switch to no socket
+            await dg.set_usable(True)
+            await request_switch(dg)
+            if is_active is None:
                 return True
-            await asyncio.sleep(0.05)
-            waited += 0.05
-        logger.warning("stt fallback: switch back was refused — will retry")
+            waited = 0.0
+            while waited < confirm_secs:
+                if is_active():
+                    return True
+                await asyncio.sleep(0.05)
+                waited += 0.05
+            logger.warning("stt fallback: switch back was refused — will retry")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — stay on Whisper, keep trying, say so
+            logger.warning(f"stt fallback: recovery round failed: {redact(e)}")
 
 
 def _cancel_recovery(switcher) -> None:
@@ -151,22 +183,22 @@ def close_stt_fallback(switcher) -> None:
     """Session over: stop recovery for good and drop the room from status."""
     switcher._lenoxvi_closed = True
     _cancel_recovery(switcher)
-    forget(switcher._lenoxvi_room)
+    forget(switcher._lenoxvi_room, owner=switcher)
 
 
 async def _on_switched(switcher, service) -> None:
     dg = switcher._lenoxvi_primary
     room = switcher._lenoxvi_room
     _cancel_recovery(switcher)
+    if getattr(switcher, "_lenoxvi_closed", False):
+        return                            # teardown noise: the session is gone
     if service is dg:
-        note_active(room, "deepgram")
+        note_active(room, "deepgram", owner=switcher)
         logger.warning("stt fallback: Deepgram is back — switching off local Whisper")
         return
     reason = getattr(switcher, "_lenoxvi_last_error", None) or "Deepgram unreachable"
-    note_active(room, "whisper", reason)
+    note_active(room, "whisper", reason, owner=switcher)
     logger.warning(f"stt fallback: Deepgram is down ({reason}) — local Whisper is listening")
-    if getattr(switcher, "_lenoxvi_closed", False):
-        return
 
     async def _request(svc):
         await switcher._lenoxvi_queue(ManuallySwitchServiceFrame(service=svc))
@@ -199,13 +231,12 @@ def wrap_stt_with_fallback(dg, whisper, *, room, queue_frame: Callable[..., Awai
     async def _push_error(*args, **kwargs):
         msg = kwargs.get("error_msg", args[0] if args else None)
         if msg:
-            # The SDK appends request headers ("…: headers: {…}"); keep the
-            # readable part for the card's tooltip.
-            switcher._lenoxvi_last_error = str(msg).split(": headers:")[0][:160]
+            # Shown in logs, /status and the card's tooltip: redacted.
+            switcher._lenoxvi_last_error = redact(msg)
         return await orig_push_error(*args, **kwargs)
     dg.push_error = _push_error
 
-    note_active(room, "deepgram")
+    note_active(room, "deepgram", owner=switcher)
 
     @switcher.strategy.event_handler("on_service_switched")
     async def _h(strategy, service):
@@ -218,6 +249,8 @@ class SttTimer(FrameProcessor):
     """End of speech (VAD stop) -> final transcript, in ms, into stt_local's
     per-command ring. Sits right after the STT stage; passes every frame."""
 
+    CAP_MS = 10_000                       # longer = not a measurement, a missed turn
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._stop_at = None
@@ -227,10 +260,13 @@ class SttTimer(FrameProcessor):
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             self._stop_at = now
             return None
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._stop_at = None          # stop produced nothing; don't time the next turn
+            return None
         if isinstance(frame, TranscriptionFrame) and self._stop_at is not None:
             ms = (now - self._stop_at) * 1000
             self._stop_at = None
-            return ms
+            return ms if ms <= self.CAP_MS else None
         return None
 
     async def process_frame(self, frame, direction):

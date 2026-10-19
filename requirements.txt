@@ -42,5 +42,6 @@ numpy==2.5.3
 # Bench scripts only (scripts/serial_watch.py and friends) — not imported
 # by the bot itself:
 pyserial==3.5
-# Cloud STT provider (Deepgram Nova-3) — optional; without it the card offers Whisper only
+# Cloud STT provider (Deepgram Nova-3); within pipecat's deepgram extra (>=6.1.1,<8).
+# If it's ever missing, the STT card offers local Whisper only.
 deepgram-sdk==7.13.0

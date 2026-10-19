@@ -1793,13 +1793,19 @@ async def put_stt(payload: SttPayload):
         with _STT_DL_LOCK:
             if _STT_DL.get("state") == "downloading":
                 raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
+    import stt_fallback
+
+    running_provider = stt_fallback._STATE["provider"]
     try:
         restart_needed, download = False, "not_needed"
-        if payload.provider is not None and payload.provider != _stt_current()["provider"]:
-            _stt_write(provider=payload.provider)
-            restart_needed = True
         if payload.language is not None:
+            before = _stt_current()
             _stt_write(language=payload.language)
+            # Whisper reads the language live; Deepgram's is fixed when the
+            # session is built, so on (or headed to) Deepgram it's a restart.
+            if payload.language != before["language"] and "deepgram" in (
+                    before["provider"], running_provider, payload.provider):
+                restart_needed = True
         if payload.model is not None:
             with _STT_DL_LOCK:
                 _stt_claim(payload.model, "a delete")
@@ -1811,6 +1817,11 @@ async def put_stt(payload: SttPayload):
                     _STT_BUSY.discard(payload.model)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    if payload.provider is not None and payload.provider != _stt_current()["provider"]:
+        # Written last, so a refused model switch (409) leaves nothing half-saved.
+        _stt_write(provider=payload.provider)
+        # A restart only if the bot isn't already running what was picked.
+        restart_needed = restart_needed or payload.provider != running_provider
     cur = _stt_current()
     key_needed = cur["provider"] == "deepgram" and not _stt_deepgram_key_set()
     return {"ok": True, "restart_needed": restart_needed, "download": download, "key_needed": key_needed,

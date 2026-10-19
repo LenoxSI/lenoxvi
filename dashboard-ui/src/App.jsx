@@ -1655,8 +1655,9 @@ function SttCard({ status, setMsg, setRebooting }) {
     try {
       await api('/api/dashboard/tts/key/deepgram', { method: 'PUT', json: { api_key: key } })
       setDgKey('')
-      await load()
+      const d = await load()
       setMsg('Deepgram key saved (shared with TTS) — applies on bot restart.', 'ok', 'STT')
+      if (d?.current?.provider === 'deepgram') offerRestart(setMsg, setRebooting)
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'STT') }
   }
 

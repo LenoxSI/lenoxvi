@@ -198,7 +198,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     )
     # stt.provider: whisper (local, default) or a cloud provider with this
     # Whisper service as its fallback (wired below, once the task exists).
-    stt_provider = cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper")
+    stt_provider = str(cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "whisper").strip().lower()
     # TTS provider dispatch: tts.provider
     # selects the engine; each provider's knobs live under its own config
     # key. ElevenLabs stays the default (a config without tts.provider —
@@ -478,8 +478,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # marks itself down on a bad key / dead network and the session moves to
     # local Whisper; stt_fallback switches back when it answers again. A
     # missing key or SDK = Whisper with a warning, never a dead pipeline.
+    import stt_catalog
     import stt_fallback
     import stt_local
+    if stt_catalog.validate_provider(stt_provider):
+        logger.warning(f"stt: unknown provider {stt_provider!r} — using local Whisper")
+        stt_provider = "whisper"
     stt_fallback.set_provider(stt_provider)
     stt_timer = None
     if stt_provider == "deepgram":
@@ -498,9 +502,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             async def _stt_queue(frame):
                 await _task_ref["task"].queue_frame(frame)
 
-            stt = stt_fallback.wrap_stt_with_fallback(_dg, stt, room=_room, queue_frame=_stt_queue,
-                                                      cooldown=_stt_cool)
-            logger.info("stt: deepgram nova-3 (local Whisper standby)")
+            try:
+                stt = stt_fallback.wrap_stt_with_fallback(_dg, stt, room=_room, queue_frame=_stt_queue,
+                                                          cooldown=_stt_cool)
+                logger.info("stt: deepgram nova-3 (local Whisper standby)")
+            except Exception as e:  # noqa: BLE001 — Whisper, not a dead pipeline
+                stt_fallback.note_unavailable(f"Deepgram STT could not be wired ({type(e).__name__})")
+                logger.warning(f"stt: deepgram wiring failed ({type(e).__name__}) — local Whisper is listening")
     else:
         stt_local.set_latency_mode("compute")
 
