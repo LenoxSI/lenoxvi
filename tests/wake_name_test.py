@@ -23,33 +23,33 @@ wn._wake = lambda: CFG["wake"]
 
 # the name comes ONLY from wake.name (dashboard text box or a hand edit)
 CFG["wake"] = {}
-check("051 name: unset -> empty (never guessed)", wn.name() == "", repr(wn.name()))
+check("wake name name: unset -> empty (never guessed)", wn.name() == "", repr(wn.name()))
 CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx"}
-check("051 name: a model filename is never used as the name", wn.name() == "", repr(wn.name()))
+check("wake name name: a model filename is never used as the name", wn.name() == "", repr(wn.name()))
 CFG["wake"] = {"model": "hey_jarvis"}
-check("051 name: a stock model doesn't name the house either", wn.name() == "", repr(wn.name()))
+check("wake name name: a stock model doesn't name the house either", wn.name() == "", repr(wn.name()))
 CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "name": "  Bill  "}
-check("051 name: wake.name used, whitespace tidied", wn.name() == "Bill", repr(wn.name()))
-check("051 no derivation helpers left", not hasattr(wn, "derive_name") and not hasattr(wn, "effective_name"))
+check("wake name name: wake.name used, whitespace tidied", wn.name() == "Bill", repr(wn.name()))
+check("wake name: no derivation helpers left", not hasattr(wn, "derive_name") and not hasattr(wn, "effective_name"))
 
 # regex — identical behaviour for this rig's shape of config
 CFG["wake"] = {"name": "Willow", "heard_as": ["Linux", "yellow", "linux"]}
-check("051 aliases normalised + de-duplicated", wn.aliases() == ["linux", "yellow"], str(wn.aliases()))
+check("wake name: aliases normalised + de-duplicated", wn.aliases() == ["linux", "yellow"], str(wn.aliases()))
 for t in ["Hey Linux.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay yellow.", "hi willow",
           "Hey, Willow."]:
-    check(f"051 drop: {t!r}", wn.is_wake_phrase_only(t))
+    check(f"wake name drop: {t!r}", wn.is_wake_phrase_only(t))
 for t in ["Hey Willow turn on the lights", "what's the weather", "hey willow, kill the kitchen lights",
           "Willow is my assistant", "install Linux on my laptop", ""]:
-    check(f"051 keep: {t!r}", not wn.is_wake_phrase_only(t))
+    check(f"wake name keep: {t!r}", not wn.is_wake_phrase_only(t))
 
 # Review Focus 1/2: metacharacters escaped; a common-word alias stays harmless
 CFG["wake"] = {"name": "Ms Smith", "heard_as": ["the", "a.b"]}
-check("051 multi-word name drops", wn.is_wake_phrase_only("hey ms  smith."))
-check("051 metachar alias is literal (a.b != axb)",
+check("wake name: multi-word name drops", wn.is_wake_phrase_only("hey ms  smith."))
+check("wake name: metachar alias is literal (a.b != axb)",
       wn.is_wake_phrase_only("a.b") and not wn.is_wake_phrase_only("axb"))
-check("051 common-word alias drops only a bare utterance",
+check("wake name: common-word alias drops only a bare utterance",
       wn.is_wake_phrase_only("hey the") and not wn.is_wake_phrase_only("turn off the lights"))
-check("051 valid_term charset",
+check("wake name: valid_term charset",
       wn.valid_term("Ms Smith") and wn.valid_term("o'neil") and not wn.valid_term("R2 D2")
       and not wn.valid_term("Mr. X") and not wn.valid_term("") and not wn.valid_term("x" * 31))
 
@@ -57,38 +57,38 @@ check("051 valid_term charset",
 CFG["wake"] = {"name": "Jarvis"}
 before = wn.is_wake_phrase_only("hey computer")
 CFG["wake"] = {"name": "Computer"}
-check("051 config change applies with no restart",
+check("wake name: config change applies with no restart",
       before is False and wn.is_wake_phrase_only("hey computer"))
 
 # model resolution
-check("051 stock key resolves to the bundled file",
+check("wake name: stock key resolves to the bundled file",
       wn.resolve_model("hey_jarvis").endswith("hey_jarvis_v0.1.onnx"), wn.resolve_model("hey_jarvis"))
-check("051 custom path passes through", wn.resolve_model("models/x.onnx") == "models/x.onnx")
+check("wake name: custom path passes through", wn.resolve_model("models/x.onnx") == "models/x.onnx")
 CFG["wake"] = {}
-check("051 absent model -> hey_jarvis bundled", wn.resolve_model().endswith("hey_jarvis_v0.1.onnx"))
+check("wake name: absent model -> hey_jarvis bundled", wn.resolve_model().endswith("hey_jarvis_v0.1.onnx"))
 
 # no speech-to-text hint any more (removed: failed its accuracy bar; aliases do the job)
-check("051 no spelling-hint helpers left",
+check("wake name: no spelling-hint helpers left",
       not any(hasattr(wn, x) for x in ("hotwords", "bias_enabled", "_stt_bias", "BIAS_DEFAULT")))
 CFG["wake"] = {"heard_as": ["linux"]}
-check("051 no name -> aliases still drop, nothing else does",
+check("wake name: no name -> aliases still drop, nothing else does",
       wn.is_wake_phrase_only("hey linux") and not wn.is_wake_phrase_only("hey")
       and not wn.is_wake_phrase_only(""))
 CFG["wake"] = {}
-check("051 no name and no aliases -> the filter never drops",
+check("wake name: no name and no aliases -> the filter never drops",
       not wn.is_wake_phrase_only("hey") and not wn.is_wake_phrase_only("Hey Jarvis."))
 # --- review fixes ---
-check("051 R-M5 accented names are valid; digits/punctuation still rejected",
+check("wake name: accented names are valid; digits/punctuation still rejected",
       wn.valid_term("José") and wn.valid_term("Zoë") and wn.valid_term("Chloé")
       and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
-check("051 R-M2 filler words are reserved (never aliases)",
+check("wake name: filler words are reserved (never aliases)",
       all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
       and not wn.reserved_term("linux") and not wn.reserved_term("yellow"))
 CFG["wake"] = {"name": "Willow", "heard_as": ["linux"]}
-check("051 R-M9 a leading comma with no prefix still drops (', Willow.')",
+check("wake name: a leading comma with no prefix still drops (', Willow.')",
       wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Linux."))
 CFG["wake"] = {"name": "Willow", "heard_as": ["okay", "linux"]}
-check("051 R-M2 a reserved word hand-edited into heard_as is ignored by the filter",
+check("wake name: a reserved word hand-edited into heard_as is ignored by the filter",
       not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey linux"))
 
 if FAILS:

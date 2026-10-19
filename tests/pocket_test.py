@@ -80,23 +80,23 @@ class Mixin:  # stand-in for bot.TTSTracked (same attribute surface)
     _tts_room = None
 
 
-check("050 catalog: 21 English presets, alba first",
+check("pocket catalog: 21 English presets, alba first",
       len(tp.POCKET_VOICES) == 21 and tp.POCKET_VOICES[0] == "alba")
-check("050 pocket_available() true with modules importable", tp.pocket_available() is True)
-check("050 resolve_voice keeps a catalog voice", tp.resolve_voice("vera") == "vera")
-check("050 resolve_voice unknown -> alba", tp.resolve_voice("not-a-voice") == "alba")
-check("050 resolve_voice empty -> alba", tp.resolve_voice(None) == "alba")
-check("050 resolve_voice passes a .wav path through",
+check("pocket: pocket_available() true with modules importable", tp.pocket_available() is True)
+check("pocket: resolve_voice keeps a catalog voice", tp.resolve_voice("vera") == "vera")
+check("pocket: resolve_voice unknown -> alba", tp.resolve_voice("not-a-voice") == "alba")
+check("pocket: resolve_voice empty -> alba", tp.resolve_voice(None) == "alba")
+check("pocket: resolve_voice passes a .wav path through",
       tp.resolve_voice("/data/voice.wav") == "/data/voice.wav")
 
 # load failure: returns None/False, never raises (Review Focus 1)
 LOADS["fail"] = True
-check("050 preload failure returns False (never raises)", tp.preload("alba") is False)
+check("pocket: preload failure returns False (never raises)", tp.preload("alba") is False)
 _n_after_fail = LOADS["n"]
-check("050 make_service returns None when the model can't load",
+check("pocket: make_service returns None when the model can't load",
       tp.make_service(mixin=Mixin, voice="alba") is None)
 # Gate 0 ruling: a WAN-dead load costs ~24 s — never retried per session
-check("050 failed load is not retried per session",
+check("pocket: failed load is not retried per session",
       LOADS["n"] == _n_after_fail, f"loads {_n_after_fail} -> {LOADS['n']}")
 LOADS["fail"] = False
 tp._reset_for_tests()
@@ -105,12 +105,12 @@ LOADS["n"] = 0
 # shared model: loaded once across two sessions
 s1 = tp.make_service(mixin=Mixin, voice="alba")
 s2 = tp.make_service(mixin=Mixin, voice="vera")
-check("050 model loaded ONCE across two sessions", LOADS["n"] == 1, f"loads={LOADS['n']}")
-check("050 both sessions share the model object",
+check("pocket: model loaded ONCE across two sessions", LOADS["n"] == 1, f"loads={LOADS['n']}")
+check("pocket: both sessions share the model object",
       s1 is not None and s2 is not None and s1._model is s2._model)
-check("050 service carries mixin + provider label",
+check("pocket: service carries mixin + provider label",
       isinstance(s1, Mixin) and s1._tts_provider == "pocket")
-check("050 voice state seeded from cache (no per-session derive)",
+check("pocket: voice state seeded from cache (no per-session derive)",
       s2 is not None and s2._voice_state == {"voice": "vera"})
 
 
@@ -138,7 +138,7 @@ async def _lock_probe():
     return active["max"]
 
 
-check("050 generation lock serializes two rooms", asyncio.run(_lock_probe()) == 1)
+check("pocket: generation lock serializes two rooms", asyncio.run(_lock_probe()) == 1)
 
 
 # a dead pocket must not try a websocket revive
@@ -147,15 +147,15 @@ async def _rev():
     return True
 
 
-check("050 pocket _try_revive is a no-op (no websocket)", asyncio.run(_rev()))
+check("pocket: pocket _try_revive is a no-op (no websocket)", asyncio.run(_rev()))
 
 # drift pin: the pipecat internals this module relies on
 from pipecat.services.pocket_tts.tts import PocketTTSService as _P  # noqa: E402
 _src = inspect.getsource(_P)
-check("050 pipecat internals: run_tts uses self._model + _get_voice_state",
+check("pocket: pipecat internals: run_tts uses self._model + _get_voice_state",
       "self._model.generate_audio_stream" in _src and "_get_voice_state" in _src)
 
-# ── 050 fallback: switcher wrap + failover + recovery ──
+# ── Pocket fallback: switcher wrap + failover + recovery ──
 import tts_fallback as tf  # noqa: E402
 from pipecat.frames.frames import ErrorFrame, ManuallySwitchServiceFrame  # noqa: E402
 from pipecat.pipeline.service_switcher import ServiceSwitcherStrategyFailover  # noqa: E402
@@ -189,7 +189,7 @@ async def _failover():
     return new is k and strat.active_service is k
 
 
-check("050 primary unusable + ErrorFrame -> Pocket active", asyncio.run(_failover()))
+check("pocket: primary unusable + ErrorFrame -> Pocket active", asyncio.run(_failover()))
 
 
 async def _recovery_one_switch():
@@ -210,8 +210,8 @@ async def _recovery_one_switch():
 
 
 ok, sw, sl, rv = asyncio.run(_recovery_one_switch())
-check("050 recovery probes every cooldown", sl == [30.0, 30.0, 30.0], f"sleeps={sl}")
-check("050 recovery queues exactly ONE switch then stops",
+check("pocket: recovery probes every cooldown", sl == [30.0, 30.0, 30.0], f"sleeps={sl}")
+check("pocket: recovery queues exactly ONE switch then stops",
       ok and len(sw) == 1 and rv == 3, f"sw={sw} rv={rv}")
 
 
@@ -231,7 +231,7 @@ async def _cancel():
     return sw._lenoxvi_recovery is None and task.cancelled()
 
 
-check("050 session end cancels the recovery task", asyncio.run(_cancel()))
+check("pocket: session end cancels the recovery task", asyncio.run(_cancel()))
 
 
 async def _switch_notes():
@@ -259,10 +259,10 @@ async def _switch_notes():
 
 
 notes, started = asyncio.run(_switch_notes())
-check("050 switch to Pocket notes 'pocket (fallback)' + starts recovery",
+check("pocket: switch to Pocket notes 'pocket (fallback)' + starts recovery",
       len(notes) >= 1 and notes[0] == ("kitchen", "pocket (fallback)", True) and started,
       f"notes={notes}")
-check("050 switch back notes the primary provider",
+check("pocket: switch back notes the primary provider",
       len(notes) >= 2 and notes[1] == ("kitchen", "elevenlabs", True), f"notes={notes}")
 
 
@@ -283,7 +283,7 @@ async def _request_frame():
 
 
 q = asyncio.run(_request_frame())
-check("050 recovery queues a ManuallySwitchServiceFrame for the primary",
+check("pocket: recovery queues a ManuallySwitchServiceFrame for the primary",
       len(q) == 1 and isinstance(q[0], ManuallySwitchServiceFrame)
       and q[0].service._tts_provider == "elevenlabs", f"queued={q}")
 
@@ -317,11 +317,11 @@ async def _wrap_real():
 
 
 shape, wired = asyncio.run(_wrap_real())
-check("050 wrap_with_fallback: real switcher, Failover, [primary, pocket], primary active", shape)
-check("050 wrap_with_fallback: switch event reaches on_switched", wired)
+check("pocket wrap_with_fallback: real switcher, Failover, [primary, pocket], primary active", shape)
+check("pocket wrap_with_fallback: switch event reaches on_switched", wired)
 
 
-# ── 050 review fixes ──────────────────────────────────────────────────
+# ── Pocket review fixes ──────────────────────────────────────────────────
 
 
 def _run(coro_fn, default):
@@ -384,9 +384,9 @@ async def _wan_dead_boot():
 
 
 _r1_active, _r1_audio, _r1_prim_usable = _run(_wan_dead_boot, (False, 0, True))
-check("050 R1 WAN-dead boot: failed first connect fails over to Pocket", _r1_active)
-check("050 R1 WAN-dead boot: the next speak comes out of Pocket", _r1_audio > 0, f"audio frames={_r1_audio}")
-check("050 R1 WAN-dead boot: primary marked unusable", _r1_prim_usable is False)
+check("pocket: R1 WAN-dead boot: failed first connect fails over to Pocket", _r1_active)
+check("pocket: R1 WAN-dead boot: the next speak comes out of Pocket", _r1_audio > 0, f"audio frames={_r1_audio}")
+check("pocket: R1 WAN-dead boot: primary marked unusable", _r1_prim_usable is False)
 
 
 async def _r1_guard():
@@ -410,7 +410,7 @@ async def _r1_guard():
     return calls
 
 
-check("050 R1 connection error escalates ONLY when primary is active + usable",
+check("pocket: R1 connection error escalates ONLY when primary is active + usable",
       _run(_r1_guard, None) == [True], "")
 
 
@@ -436,7 +436,7 @@ async def _r3():
     return req
 
 
-check("050 R3 switch-back waits until Pocket is idle", _run(_r3, None) == [3])
+check("pocket: R3 switch-back waits until Pocket is idle", _run(_r3, None) == [3])
 
 
 # R4 (minor): a refused switch keeps recovery going.
@@ -461,7 +461,7 @@ async def _r4():
     return ok, len(req)
 
 
-check("050 R4 refused switch-back retries until the primary is really active",
+check("pocket: R4 refused switch-back retries until the primary is really active",
       _run(_r4, None) == (True, 2))
 
 
@@ -483,7 +483,7 @@ async def _r5():
     return ok, p.revives, sw._lenoxvi_closed
 
 
-check("050 R5 closed session: recovery exits without probing + close flag set",
+check("pocket: R5 closed session: recovery exits without probing + close flag set",
       _run(_r5, None) == (False, 0, True))
 
 
@@ -511,9 +511,9 @@ async def _r7():
     return p.revives
 
 
-check("050 R7 unreachable primary host: zero websocket probes (no log spam)", _run(_r7, None) == 0)
+check("pocket: R7 unreachable primary host: zero websocket probes (no log spam)", _run(_r7, None) == 0)
 _pe = getattr(tf, "_primary_endpoint", lambda o: "missing")
-check("050 R7 endpoint derived from the service URL",
+check("pocket: R7 endpoint derived from the service URL",
       _pe(types.SimpleNamespace(_url="wss://api.example.test")) == ("api.example.test", 443)
       and _pe(types.SimpleNamespace(_url="ws://127.0.0.1:9")) == ("127.0.0.1", 9)
       and _pe(types.SimpleNamespace()) is None)
@@ -530,7 +530,7 @@ async def _r9_real():
     return tf.wrap_with_fallback(prim, stand, room=None, queue_frame=q, cooldown=-5)._lenoxvi_cooldown
 
 
-check("050 R9 negative revive cooldown clamped to >= 1 s", (_run(_r9_real, -1) or -1) >= 1.0)
+check("pocket: R9 negative revive cooldown clamped to >= 1 s", (_run(_r9_real, -1) or -1) >= 1.0)
 
 
 # R10 (minor): primary health notes suppressed while Pocket is active.
@@ -558,7 +558,7 @@ async def _r10():
         reg.note_tts = orig
 
 
-check("050 R10 primary health notes suppressed during fallback, restored after",
+check("pocket: R10 primary health notes suppressed during fallback, restored after",
       _run(_r10, None) == (True, False))
 
 
@@ -577,7 +577,7 @@ try:
     _r6 = tp.make_service(mixin=Mixin, voice="/missing/clone.wav")
 except Exception:
     _r6 = None
-check("050 R6 bad .wav voice: Pocket still loads, falls back to alba",
+check("pocket: R6 bad .wav voice: Pocket still loads, falls back to alba",
       _r6 is not None and _r6._voice_state == {"voice": "alba"} and tp._load_failed is False,
       f"svc={_r6} failed={tp._load_failed}")
 FakeTTSModel.load_model = _orig_load
@@ -591,7 +591,7 @@ _sink = _lg.add(lambda m: _r8_lines.append(str(m)), level="WARNING")
 for _ in range(2):
     getattr(tp, "warn_once", lambda k, m: None)("suite-key", "suite warning")
 _lg.remove(_sink)
-check("050 R8 warn_once logs a repeated warning once", sum("suite warning" in s for s in _r8_lines) == 1)
+check("pocket: R8 warn_once logs a repeated warning once", sum("suite warning" in s for s in _r8_lines) == 1)
 
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")

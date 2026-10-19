@@ -574,49 +574,49 @@ def main():
         "model": "eleven_bogus_v9"})
     check("TTS PUT rejects unknown model (422)",
           r.status_code == 422, f"status={r.status_code}")
-    # 050 Pocket lane + fallback (routes). pocket_available is monkeypatched
+    # Pocket lane + fallback (routes). pocket_available is monkeypatched
     # so the pins are deterministic whether or not torch is on this host.
     import tts_pocket as _tp050
     _orig_avail050 = _tp050.pocket_available
     _tp050.pocket_available = lambda: True
     try:
         t = client.get("/api/dashboard/tts").json()
-        check("050 GET /tts catalog.pocket = 21 presets, alba first",
+        check("pocket: GET /tts catalog.pocket = 21 presets, alba first",
               (t.get("catalog", {}).get("pocket") or [None])[0] == "alba"
               and len(t["catalog"]["pocket"]) == 21, f"{t.get('catalog', {}).get('pocket')}")
         _pv050 = ((__import__("yaml").safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
                    .get("tts") or {}).get("pocket_voice") or "alba")
-        check("050 GET /tts reports pocket_installed + pocket_voice + fallback",
+        check("pocket: GET /tts reports pocket_installed + pocket_voice + fallback",
               t.get("pocket_installed") is True and t.get("pocket_voice") == _pv050
               and "fallback" in t,
               str({k: t.get(k) for k in ("pocket_installed", "pocket_voice", "fallback")}))
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "vera"})
-        check("050 PUT pocket provider ok", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+        check("pocket: PUT pocket provider ok", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
         t = client.get("/api/dashboard/tts").json()
-        check("050 round-trip: provider pocket + voice vera",
+        check("pocket round-trip: provider pocket + voice vera",
               t.get("provider") == "pocket" and t.get("pocket_voice") == "vera", str(t)[:160])
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "nope"})
-        check("050 PUT rejects unknown pocket voice (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: PUT rejects unknown pocket voice (422)", r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "/x/clone.wav"})
-        check("050 PUT rejects a wav path from the dashboard (config-file only)",
+        check("pocket: PUT rejects a wav path from the dashboard (config-file only)",
               r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba",
                                                    "fallback": "pocket"})
-        check("050 PUT rejects pocket primary + pocket fallback (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: PUT rejects pocket primary + pocket fallback (422)", r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "pocket"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 PUT cloud primary + pocket fallback persists",
+        check("pocket: PUT cloud primary + pocket fallback persists",
               r.status_code == 200 and t.get("fallback") == "pocket", f"{r.status_code} {t.get('fallback')}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 PUT without fallback leaves it as-is (partial update)",
+        check("pocket: PUT without fallback leaves it as-is (partial update)",
               r.status_code == 200 and t.get("fallback") == "pocket", f"{t.get('fallback')}")
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 switching to pocket primary drops a saved fallback",
+        check("pocket: switching to pocket primary drops a saved fallback",
               r.status_code == 200 and t.get("fallback") is None, f"{t.get('fallback')}")
         client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                "deepgram_voice": "aura-2-thalia-en", "fallback": "pocket"})
@@ -624,31 +624,31 @@ def main():
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "off"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 PUT fallback off clears it", r.status_code == 200 and t.get("fallback") is None,
+        check("pocket: PUT fallback off clears it", r.status_code == 200 and t.get("fallback") is None,
               f"{r.status_code} {t.get('fallback')}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "flux"})
-        check("050 PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
         # Fallback voice: pickable with a cloud primary (it rides with
         # fallback: pocket), validated, and ignored when the fallback is off.
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "pocket", "pocket_voice": "vera"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 fallback voice saves with a cloud primary",
+        check("pocket: fallback voice saves with a cloud primary",
               r.status_code == 200 and t.get("pocket_voice") == "vera"
               and t.get("provider") == "deepgram" and t.get("fallback") == "pocket",
               f"{r.status_code} {t.get('provider')}/{t.get('fallback')}/{t.get('pocket_voice')}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "pocket", "pocket_voice": "nope"})
-        check("050 fallback voice must be a Pocket preset (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: fallback voice must be a Pocket preset (422)", r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "off", "pocket_voice": "charles"})
         t = client.get("/api/dashboard/tts").json()
-        check("050 fallback voice ignored when the fallback is off",
+        check("pocket: fallback voice ignored when the fallback is off",
               r.status_code == 200 and t.get("pocket_voice") == "vera", f"{t.get('pocket_voice')}")
         # R2: a saved fallback must never lock the panel when Pocket goes
         # missing later — re-sending the SAME fallback isn't a new request.
@@ -659,22 +659,22 @@ def main():
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-zeus-en",
                                                    "fallback": "pocket"})
-        check("050 R2 saved fallback + Pocket missing: other edits still save",
+        check("pocket: R2 saved fallback + Pocket missing: other edits still save",
               r.status_code == 200, f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "off"})
-        check("050 R2 saved fallback + Pocket missing: fallback can be turned off",
+        check("pocket: R2 saved fallback + Pocket missing: fallback can be turned off",
               r.status_code == 200, f"{r.status_code}")
         t = client.get("/api/dashboard/tts").json()
-        check("050 GET /tts reports pocket_installed false when missing",
+        check("pocket: GET /tts reports pocket_installed false when missing",
               t.get("pocket_installed") is False, f"{t.get('pocket_installed')}")
         r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
-        check("050 PUT pocket primary refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: PUT pocket primary refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
                                                    "deepgram_voice": "aura-2-thalia-en",
                                                    "fallback": "pocket"})
-        check("050 PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
+        check("pocket: PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
     finally:
         _tp050.pocket_available = _orig_avail050
     # restore the real provider (the suite config is a copy, but leave it
@@ -1137,15 +1137,15 @@ def main():
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
                     "ok": True, "data": {"fw": "1.2.29", "line": "waveshare"}}), "test-pc-line")
     import firmware_image as _fwi052t, firmware_server as _fws052t
-    check("052 the three track tables agree (firmware_image.TRACKS == registry.NODE_LINES == firmware_server.FIRMWARE_TRACKS)",
+    check("waveshare: the three track tables agree (firmware_image.TRACKS == registry.NODE_LINES == firmware_server.FIRMWARE_TRACKS)",
           tuple(_fwi052t.TRACKS) == tuple(_reg.NODE_LINES) and set(_fws052t.FIRMWARE_TRACKS) == set(_fwi052t.TRACKS)
           and set(_fwi052t.TRACK_LABEL) == set(_fwi052t.TRACKS),
           f"{_fwi052t.TRACKS} {_reg.NODE_LINES} {list(_fws052t.FIRMWARE_TRACKS)} {list(_fwi052t.TRACK_LABEL)}")
     _gi052 = (Path(__file__).resolve().parent.parent / ".gitignore").read_text().splitlines()
-    check("052 every firmware track dir is gitignored (built images never committed)",
+    check("waveshare: every firmware track dir is gitignored (built images never committed)",
           all(f"firmware/{t}/" in _gi052 for t in _fwi052t.TRACKS),
           str([t for t in _fwi052t.TRACKS if f"firmware/{t}/" not in _gi052]))
-    check("052 line: fw_push line='waveshare' is recorded (third line)",
+    check("waveshare line: fw_push line='waveshare' is recorded (third line)",
           _room_rec("line-direct-room").get("line") == "waveshare", str(_room_rec("line-direct-room")))
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
@@ -1367,12 +1367,12 @@ def main():
               and sorted(q.name for q in Path("firmware/flex").glob("*.bin")) == ["flex_esp32.bin"],
               _rsf.text[:120])
 
-        # 052: third line `waveshare` (Waveshare ESP32-S3-AUDIO bench board).
+        # Third line `waveshare` (Waveshare ESP32-S3-AUDIO bench board).
         _rw = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("w.bin", _fake_image5b("1.9.9", "waveshare"),
                                           "application/octet-stream")},
                           data={"track": "waveshare"})
-        check("052 waveshare upload serves firmware/waveshare/waveshare_esp32.bin",
+        check("waveshare: waveshare upload serves firmware/waveshare/waveshare_esp32.bin",
               _rw.status_code == 200 and _rw.json().get("track") == "waveshare"
               and _rw.json().get("filename") == "waveshare_esp32.bin"
               and json.loads(Path("firmware/waveshare/version.json").read_text())
@@ -1386,19 +1386,19 @@ def main():
               for i, (img, trk) in enumerate((("waveshare", "array"), ("waveshare", "flex"),
                                               ("array", "waveshare"), ("flex", "waveshare"),
                                               ("legacy", "waveshare")))]
-        check("052 cross-line uploads refused both ways (waveshare<->array/flex, legacy array) — 400, nothing written",
+        check("waveshare: cross-line uploads refused both ways (waveshare<->array/flex, legacy array) — 400, nothing written",
               all(r.status_code == 400 for r in _x) and _snap045() == _before052,
               f"{[r.status_code for r in _x]} {_x[0].text[:100]}")
         _rlie = client.post("/api/dashboard/firmware/upload",
                             files={"file": ("lie.bin", _fake_image5b("1.9.1", "waveshare", project=b"flex_esp32"),
                                             "application/octet-stream")},
                             data={"track": "waveshare"})
-        check("052 waveshare URL + another line's project name -> 400 (name and URL must agree)",
+        check("waveshare: waveshare URL + another line's project name -> 400 (name and URL must agree)",
               _rlie.status_code == 400 and "can't tell which board" in _rlie.text, f"{_rlie.status_code} {_rlie.text[:100]}")
 
-        # 052 review: identity is decided by the image itself (not just "unknown track" 400s).
+        # Waveshare: identity is decided by the image itself (not just "unknown track" 400s).
         import firmware_image as _fwi052
-        check("052 image_track: a waveshare image identifies as 'waveshare'; a waveshare URL with an array name is None",
+        check("waveshare image_track: a waveshare image identifies as 'waveshare'; a waveshare URL with an array name is None",
               _fwi052.image_track(_fake_image5b("1.9.1", "waveshare")) == "waveshare"
               and _fwi052.image_track(_fake_image5b("1.9.1", "waveshare", project=b"array_esp32")) is None
               and _fwi052.image_track(_fake_image5b("1.9.1", "array")) == "array",
@@ -1409,7 +1409,7 @@ def main():
         _xa = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("xa.bin", _fake_image5b("1.9.1", "array"), "application/octet-stream")},
                           data={"track": "waveshare"})
-        check("052 cross-line refusal names both lines (waveshare->array, array->waveshare)",
+        check("waveshare: cross-line refusal names both lines (waveshare->array, array->waveshare)",
               _xw.status_code == 400 and "Waveshare ESP32-S3-AUDIO firmware" in _xw.text and "array (XVF3800" in _xw.text
               and _xa.status_code == 400 and "array (XVF3800 mic-array board) firmware" in _xa.text
               and "Waveshare ESP32-S3-AUDIO track" in _xa.text,
@@ -1444,12 +1444,12 @@ def main():
                   == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
             _wsv = _c046.get("/firmware/waveshare/version")
             _wsb = _c046.get("/firmware/waveshare/waveshare_esp32.bin")
-            check("052 OTA: /firmware/waveshare/version + bin serve the waveshare track",
+            check("waveshare OTA: /firmware/waveshare/version + bin serve the waveshare track",
                   _wsv.status_code == 200 and _wsv.json() == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
                   and _wsb.status_code == 200
                   and _wsb.content == Path("firmware/waveshare/waveshare_esp32.bin").read_bytes(),
                   f"{_wsv.status_code} {_wsv.text[:80]} {_wsb.status_code}")
-            check("052 OTA: the real FIRMWARE_TRACKS table names waveshare",
+            check("waveshare OTA: the real FIRMWARE_TRACKS table names waveshare",
                   "waveshare" in _saved_tracks046
                   and _saved_tracks046["waveshare"].name == "waveshare", str(list(_saved_tracks046)))
             check("9b5b OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
@@ -1514,32 +1514,32 @@ def main():
             check("oww: non-active spare uploads and deletes cleanly",
                   _r_sp.status_code == 200 and _r_spdel.status_code == 200,
                   f"upload={_r_sp.status_code} delete={_r_spdel.status_code}")
-        # 051 stock models: listed with their licence, selectable by key,
+        # Wake-word stock models: listed with their licence, selectable by key,
         # never deletable. Restores wake.model afterwards.
         _wake051 = dict(config_store.read_section("wake") or {})
         try:
             _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
             _stock051 = [m for m in _rows051 if m.get("source") == "stock"]
-            check("051 OWW list carries the 3 stock models with their licence",
+            check("wake name: OWW list carries the 3 stock models with their licence",
                   sorted(m["name"] for m in _stock051) == ["alexa", "hey_jarvis", "hey_mycroft"]
                   and all("NC" in (m.get("license") or "") for m in _stock051)
                   and all(m.get("size", 0) > 0 for m in _stock051), str(_stock051)[:240])
             r = client.put("/api/dashboard/oww/select", json={"model": "hey_mycroft", "source": "stock"})
             _rows051 = client.get("/api/dashboard/oww/models").json()["models"]
-            check("051 selecting a stock model writes the key and marks it active",
+            check("wake name: selecting a stock model writes the key and marks it active",
                   r.status_code == 200
                   and (config_store.read_section("wake") or {}).get("model") == "hey_mycroft"
                   and any(m["name"] == "hey_mycroft" and m["selected"] for m in _rows051),
                   f"{r.status_code} {r.text[:120]}")
             r = client.put("/api/dashboard/oww/select", json={"model": "not_a_stock", "source": "stock"})
-            check("051 unknown stock key rejected (422)", r.status_code == 422, f"{r.status_code}")
+            check("wake name: unknown stock key rejected (422)", r.status_code == 422, f"{r.status_code}")
             r = client.put("/api/dashboard/oww/select", json={"model": "hey_jarvis"})
-            check("051 a stock key without source=stock is still rejected (422)",
+            check("wake name: a stock key without source=stock is still rejected (422)",
                   r.status_code == 422, f"{r.status_code}")
             import openwakeword as _oww051
             _pkg051 = _oww051.models["hey_jarvis"]["model_path"]
             r = client.delete("/api/dashboard/oww/models/hey_jarvis?source=stock")
-            check("051 a stock model can't be deleted (409), package file untouched",
+            check("wake name: a stock model can't be deleted (409), package file untouched",
                   r.status_code == 409 and os.path.isfile(_pkg051), f"{r.status_code}")
             # R-M10: a broken stock entry must not hide the custom rows
             import wake_name as _wn051r
@@ -1559,7 +1559,7 @@ def main():
             finally:
                 _wn051r.resolve_model = _orig_res051
                 _probe051.unlink(missing_ok=True)
-            check("051 R-M10 OWW list survives a broken stock entry (custom rows still listed)",
+            check("wake name: OWW list survives a broken stock entry (custom rows still listed)",
                   _ok051 and any(m["source"] != "stock" for m in _rows_b051)
                   and not any(m["source"] == "stock" for m in _rows_b051),
                   f"{r.status_code} {str(_rows_b051)[:160]}")
@@ -3034,11 +3034,11 @@ def main():
                 if "runner.run(task)" in _body_src and any(
                         "_reclaim_session()" in _ast043.unparse(f) for f in _n.finalbody):
                     _reclaim_in_finally = True
-    check("043a run_bot reclaims the session in a finally around runner.run",
+    check("session leak a: run_bot reclaims the session in a finally around runner.run",
           _reclaim_in_finally)
     _reclaim_fn = next((n for n in _ast043.walk(_bot_ast)
                         if isinstance(n, _ast043.FunctionDef) and n.name == "_reclaim_session"), None)
-    check("043b _reclaim_session runs a full gc.collect()",
+    check("session leak b: _reclaim_session runs a full gc.collect()",
           _reclaim_fn is not None and "gc.collect()" in _ast043.unparse(_reclaim_fn))
 
     import asyncio as _aio043
@@ -3065,14 +3065,14 @@ def main():
         _fc = _FakeClient()
         _svc._client = _fc
         _aio043.run(_LWS.cleanup(_svc))
-        check("043c local STT cleanup closes the unused OpenAI client",
+        check("session leak c: local STT cleanup closes the unused OpenAI client",
               _fc.closed and _svc._client is None)
         _svc2 = _LWS.__new__(_LWS)
         _svc2._client = _FakeClient(hang=True)
         _t0 = _t043.monotonic()
         _aio043.run(_LWS.cleanup(_svc2))
         _dt = _t043.monotonic() - _t0
-        check("043c hung client close is bounded (teardown never stalls)",
+        check("session leak c: hung client close is bounded (teardown never stalls)",
               _dt < 3.5 and _svc2._client is None, f"{_dt:.2f}s")
     finally:
         _BWS.cleanup = _saved_cleanup
@@ -3111,28 +3111,28 @@ def main():
     check("cloud stt bot.py: deepgram wraps Whisper as the fallback and closes it with the session",
           "wrap_stt_with_fallback(" in _main_src and _main_src.count("close_stt_fallback(") >= 2
           and "SttTimer(" in _main_src, f"wrap={'wrap_stt_with_fallback(' in _main_src} close={_main_src.count('close_stt_fallback(')}")
-    # 050 Pocket lane + fallback wiring. _main_src is ast.unparse (code only,
+    # Pocket lane + fallback wiring. _main_src is ast.unparse (code only,
     # comments stripped, single-quoted literals), so a comment can't fake a
     # pass. Behavior is pinned in tests/pocket_test.py.
-    check("050 bot.py: pocket lane branch exists",
+    check("pocket bot.py: pocket lane branch exists",
           "tts_provider == 'pocket'" in _main_src)
-    check("050 bot.py: pocket primary fails loud with the install hint",
+    check("pocket bot.py: pocket primary fails loud with the install hint",
           _main_src.count("INSTALL_HINT") >= 2, f"count={_main_src.count('INSTALL_HINT')}")
-    check("050 bot.py: fallback wrap keyed on tts.fallback",
+    check("pocket bot.py: fallback wrap keyed on tts.fallback",
           "wrap_with_fallback(" in _main_src and "cfg('tts', 'fallback')" in _main_src)
-    check("050 bot.py: pocket+pocket fallback ignored with a warning",
+    check("pocket bot.py: pocket+pocket fallback ignored with a warning",
           "fallback: pocket ignored" in _main_src)
     _pk_pre = _main_src.find("tts_pocket.preload(")
-    check("050 bot.py: pocket preload at startup, before main(), non-fatal",
+    check("pocket bot.py: pocket preload at startup, before main(), non-fatal",
           _pk_pre != -1 and _pk_pre < _main_src.rfind("main()")
           and "pocket preload failed" in _main_src)
-    check("050 bot.py: fallback closed at session end AND on client disconnect",
+    check("pocket bot.py: fallback closed at session end AND on client disconnect",
           _main_src.count("close_fallback(") >= 2, f"count={_main_src.count('close_fallback(')}")
-    check("050 bot.py: TTSTracked skips health notes while the fallback speaks",
+    check("pocket bot.py: TTSTracked skips health notes while the fallback speaks",
           "_tts_note_suppressed" in _main_src)
-    check("050 bot.py: repeated per-session Pocket warnings go through warn_once",
+    check("pocket bot.py: repeated per-session Pocket warnings go through warn_once",
           _main_src.count("warn_once(") >= 2, f"count={_main_src.count('warn_once(')}")
-    check("050 bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
+    check("pocket bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
           "tts_primary = tts" in _main_src)
     import stt_local as _sttR
     import ctypes as _ctR
@@ -3149,34 +3149,34 @@ def main():
         _ctR.CDLL = _orig_cdll
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
-    # 051 heard-after-wake buffer (registry): first transcript after a wake only
+    # Heard-after-wake buffer (registry): first transcript after a wake only
     from dashboard import registry as _reg051
     _reg051._RECENT_HEARD.clear()
     _reg051._WAKE_PENDING.clear()
     _reg051.note_heard("kitchen", "no wake before this", False)
-    check("051 a transcript without a wake is not recorded", _reg051.recent_heard() == [])
+    check("wake name: a transcript without a wake is not recorded", _reg051.recent_heard() == [])
     _reg051.note_wake("kitchen")
     _reg051.note_heard("kitchen", "Hey Linux.", True)
     _reg051.note_heard("kitchen", "second transcript", False)
     _rh051 = _reg051.recent_heard()
-    check("051 only the FIRST transcript after a wake is recorded, with room + dropped flag",
+    check("wake name: only the FIRST transcript after a wake is recorded, with room + dropped flag",
           len(_rh051) == 1 and _rh051[0]["text"] == "Hey Linux." and _rh051[0]["dropped"] is True
           and _rh051[0]["room"] == "kitchen", str(_rh051))
     _reg051.note_wake("kitchen")
     _reg051._WAKE_PENDING["kitchen"] -= 600
     _reg051.note_heard("kitchen", "ten minutes later", False)
-    check("051 a transcript outside the 30 s window is not recorded", len(_reg051.recent_heard()) == 1)
+    check("wake name: a transcript outside the 30 s window is not recorded", len(_reg051.recent_heard()) == 1)
     _reg051.note_wake("den")
     _reg051.note_heard("kitchen", "other room", False)
-    check("051 a wake in one room doesn't capture another room's transcript",
+    check("wake name: a wake in one room doesn't capture another room's transcript",
           len(_reg051.recent_heard()) == 1)
     for _i051 in range(15):
         _reg051.note_wake("den")
         _reg051.note_heard("den", f"t{_i051}", False)
-    check("051 recent list capped at 2, newest first",
+    check("wake name: recent list capped at 2, newest first",
           [r["text"] for r in _reg051.recent_heard()] == ["t14", "t13"], str(_reg051.recent_heard()))
 
-    # 051 /wake API — name + aliases apply live (no restart)
+    # /wake API — name + aliases apply live (no restart)
     import wake_name as _wn051b
     _secs051 = config_store.read_sections(["wake", "stt"])
     _wake_bak051 = dict(_secs051.get("wake") or {})
@@ -3184,51 +3184,51 @@ def main():
     try:
         r = client.get("/api/dashboard/wake")
         _w051 = r.json() if r.status_code == 200 else {}
-        check("051 GET /wake shape",
+        check("wake name: GET /wake shape",
               r.status_code == 200 and {"name", "heard_as", "recent", "model"} <= set(_w051)
               and "name_source" not in _w051 and "bias_wake_name" not in _w051
               and _w051["recent"] and _w051["recent"][0]["text"] == "t14", str(_w051)[:200])
         r = client.put("/api/dashboard/wake",
                        json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
-        check("051 PUT /wake applies live: name + normalised, de-duplicated aliases",
+        check("wake name: PUT /wake applies live: name + normalised, de-duplicated aliases",
               r.status_code == 200 and _wn051b.name() == "Computer"
               and _wn051b.aliases() == ["komputer", "compute her"]
               and _wn051b.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
         _stt_mid051 = dict(config_store.read_section("stt") or {})
-        check("051 PUT /wake never touches the stt section", _stt_mid051 == _stt_bak051)
+        check("wake name: PUT /wake never touches the stt section", _stt_mid051 == _stt_bak051)
         for _bad051 in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
                         {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "linux"},
                         {"heard_as": ["x" * 31]}]:
             r = client.put("/api/dashboard/wake", json=_bad051)
             _k051 = list(_bad051)[0]
-            check(f"051 PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
+            check(f"wake name: PUT /wake rejects bad {_k051} ({str(_bad051[_k051])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
-        check("051 rejected PUTs changed nothing", _wn051b.name() == "Computer")
+        check("wake name: rejected PUTs changed nothing", _wn051b.name() == "Computer")
         for _bad051 in [["okay"], ["Stop"], ["linux", "hey"]]:
             r = client.put("/api/dashboard/wake", json={"heard_as": _bad051})
-            check(f"051 R-M2 PUT /wake rejects filler-word alias {_bad051} (422)",
+            check(f"wake name: PUT /wake rejects filler-word alias {_bad051} (422)",
                   r.status_code == 422, f"{r.status_code}")
         r = client.put("/api/dashboard/wake", json={"name": "Zoë", "heard_as": ["zoey"]})
-        check("051 R-M5 accented name accepted", r.status_code == 200
+        check("wake name: accented name accepted", r.status_code == 200
               and _wn051b.name() == "Zoë", f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "   "})
-        check("051 R-M7 a whitespace-only name clears (same as empty)",
+        check("wake name: a whitespace-only name clears (same as empty)",
               r.status_code == 200 and "name" not in (config_store.read_section("wake") or {}),
               f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "Computer"})
         r = client.put("/api/dashboard/wake", json={"name": ""})
-        check("051 empty name clears it (no name — never guessed from the model)",
+        check("wake name: empty name clears it (no name — never guessed from the model)",
               r.status_code == 200 and _wn051b.name() == "" and r.json().get("name") == ""
               and client.get("/api/dashboard/wake").json().get("name") == ""
               and "name" not in (config_store.read_section("wake") or {}), r.text[:120])
         r = client.put("/api/dashboard/wake", json={"bias_wake_name": True})
-        check("051 the removed spelling-hint field is rejected (422), stt untouched",
+        check("wake name: the removed spelling-hint field is rejected (422), stt untouched",
               r.status_code == 422 and dict(config_store.read_section("stt") or {}) == _stt_bak051,
               f"{r.status_code}")
     finally:
         config_store.write_sections({"wake": _wake_bak051, "stt": _stt_bak051})
 
-    # 051 Whisper never gets a wake-name hint (spelling hint removed)
+    # Whisper never gets a wake-name hint (spelling hint removed)
     import stt_local as _stt051
     import wake_name as _wn051
     import asyncio as _aio051
@@ -3254,37 +3254,37 @@ def main():
         _aio051.run(_svc051._transcribe(b"RIFF"))
     finally:
         _wn051._wake = _orig_wake051
-    check("051 Whisper never gets a hotword hint, even with a name set",
+    check("wake name: Whisper never gets a hotword hint, even with a name set",
           "hotwords" not in _cap051 and _cap051.get("beam_size") == 1
           and "hotwords" not in _insp051h.getsource(_stt051), str(_cap051))
 
-    # 051 sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
+    # Wake-name sweep: no wake-name literal in shipped code/docs (tests may use it as a config VALUE)
     import inspect as _insp051
     _root051 = REPO_CORE.parent
     _swept051 = [_root051 / "bot.py", _root051 / "README.md", _root051 / "config.example.yaml"]
     _swept051 += list(REPO_CORE.rglob("*.py")) + list((_root051 / "dashboard-ui" / "src").rglob("*.jsx"))
     _hits051 = sorted({str(p.relative_to(_root051)) for p in _swept051
                        if p.is_file() and "willow" in p.read_text(errors="ignore").lower()})
-    check("051 sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
+    check("wake name sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
           not _hits051, f"hits={_hits051}")
     import intelligence_agent as _ia051
-    check("051 intelligence drop-filter delegates to wake_name",
+    check("wake name: intelligence drop-filter delegates to wake_name",
           "wake_name" in _insp051.getsource(_ia051._is_wake_phrase_only))
     _ia_src051 = _insp051.getsource(_ia051)
-    check("051 intelligence records the first transcript after a wake, fail-open",
+    check("wake name: intelligence records the first transcript after a wake, fail-open",
           "note_heard(self._room, text, dropped)" in _ia_src051
           and "heard-after-wake note failed" in _ia_src051)
-    check("051 R-M8 the wake is keyed by the SAME room the intelligence records under",
+    check("wake name: the wake is keyed by the SAME room the intelligence records under",
           "note_wake(_pipeline_room(), heard_key=_room)" in _main_src, "bot.py _on_wake")
     _reg051.note_wake("den", heard_key="unknown")
     _reg051.note_heard("unknown", "keyed by build-time room", False)
-    check("051 R-M8 registry pairs wake and transcript via heard_key",
+    check("wake name: registry pairs wake and transcript via heard_key",
           _reg051.recent_heard()[0]["text"] == "keyed by build-time room")
     _ex051 = (_root051 / "config.example.yaml").read_text()
-    check("051 config.example sets the public default name explicitly (Jarvis)",
+    check("wake name: config.example sets the public default name explicitly (Jarvis)",
           "\n  name: Jarvis" in _ex051)
 
-    # ── 053 built-in speaker zone (routes) ───────────────────────────
+    # ── Built-in speaker zone (routes) ───────────────────────────
     import yaml as _y053
     from dashboard import node_command as _nc053
 
@@ -3300,66 +3300,66 @@ def main():
     try:
         for _nm in ("builtin", "Builtin"):
             _r = client.post("/api/dashboard/zones", json={"name": _nm, "backend": "wiim", "ip": "192.0.2.53"})
-            check(f"053 zone add refuses the reserved name {_nm!r}",
+            check(f"speaker: zone add refuses the reserved name {_nm!r}",
                   _r.status_code == 400 and "reserved" in _r.text, f"{_r.status_code} {_r.text[:120]}")
         registry.mark_connected("pc-053xvf")
         registry.note_offer("pc-053xvf", "suite-xvf053")
         registry.note_line("pc-053xvf", "array")
         _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-xvf053": "builtin"}})
-        check("053 mapping: builtin refused for a node without a speaker (private rule, server-side)",
+        check("speaker mapping: builtin refused for a node without a speaker (private rule, server-side)",
               _r.status_code == 400 and "speaker" in _r.text, f"{_r.status_code} {_r.text[:120]}")
 
         registry.mark_connected("pc-053ws")
         registry.note_offer("pc-053ws", "suite-ws053")
         registry.note_line("pc-053ws", "waveshare")
         _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
-        check("053 R-I4 builtin refused until the node has PROVEN its speaker (set_speaker ack)",
+        check("speaker: builtin refused until the node has PROVEN its speaker (set_speaker ack)",
               _r.status_code == 400, f"{_r.status_code} {_r.text[:120]}")
         registry.note_speaker_ok("pc-053ws", True)
         _st = {r["room"]: r for r in client.get("/api/dashboard/status").json()["rooms"]}
-        check("053 /status rooms carry speaker", _st.get("suite-ws053", {}).get("speaker") is True
+        check("speaker: /status rooms carry speaker", _st.get("suite-ws053", {}).get("speaker") is True
               and _st.get("suite-xvf053", {}).get("speaker") is False, str(_st.get("suite-ws053")))
 
         _m = client.get("/api/dashboard/mapping").json()
-        check("053 GET mapping lists speaker rooms with volume + resolved zone",
+        check("speaker: GET mapping lists speaker rooms with volume + resolved zone",
               _m.get("speakers", {}).get("suite-ws053") == {"volume": 40, "zone": "builtin", "online": True,
                                                             "speaker_ok": True},
               str(_m.get("speakers")))
-        check("053 GET mapping: built-in never appears as a shared zone", "builtin" not in _m["zones"])
+        check("speaker: GET mapping: built-in never appears as a shared zone", "builtin" not in _m["zones"])
 
         _sent053.clear()
         _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
-        check("053 mapping: builtin accepted for the speaker node", _r.status_code == 200, _r.text[:120])
-        check("053 mapping write lands in config", _cfg053()["room_zones"].get("suite-ws053") == "builtin")
-        check("053 mapping PUT syncs the speaker node (enabled)",
+        check("speaker mapping: builtin accepted for the speaker node", _r.status_code == 200, _r.text[:120])
+        check("speaker: mapping write lands in config", _cfg053()["room_zones"].get("suite-ws053") == "builtin")
+        check("speaker: mapping PUT syncs the speaker node (enabled)",
               ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 40}) in _sent053, str(_sent053))
 
         _sent053.clear()
         _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": _shared053}})
-        check("053 remap to a shared zone -> node told to stay silent (never both)",
+        check("speaker: remap to a shared zone -> node told to stay silent (never both)",
               _r.status_code == 200
               and ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 40}) in _sent053, str(_sent053))
 
         _sent053.clear()
         _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": 55})
-        check("053 volume PUT ok + written to node_speaker.volumes",
+        check("speaker: volume PUT ok + written to node_speaker.volumes",
               _r.status_code == 200 and (_cfg053().get("node_speaker") or {}).get("volumes", {}).get("suite-ws053") == 55,
               f"{_r.status_code} {_r.text[:120]}")
-        check("053 volume PUT pushes set_speaker with the new volume",
+        check("speaker: volume PUT pushes set_speaker with the new volume",
               _sent053 and _sent053[-1] == ("suite-ws053", {"cmd": "set_speaker", "enabled": False, "volume": 55}),
               str(_sent053))
         for _bad in (101, -1, "loud"):
             _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-ws053", "volume": _bad})
-            check(f"053 volume PUT refuses {_bad!r}", _r.status_code == 422, str(_r.status_code))
+            check(f"speaker: volume PUT refuses {_bad!r}", _r.status_code == 422, str(_r.status_code))
         _r = client.put("/api/dashboard/node-speaker/volume", json={"room": "suite-xvf053", "volume": 50})
-        check("053 volume PUT 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
+        check("speaker: volume PUT 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
 
         _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
-        check("053 test clip 409s when the node's replies go to a shared zone",
+        check("speaker: test clip 409s when the node's replies go to a shared zone",
               _r.status_code == 409 and "shared zone" in _r.text, f"{_r.status_code} {_r.text[:120]}")
         client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "builtin"}})
         _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-ws053"})
-        check("053 test clip 409s when the node has no live session",
+        check("speaker: test clip 409s when the node has no live session",
               _r.status_code == 409 and "offline" in _r.text, f"{_r.status_code} {_r.text[:120]}")
 
         class _Out053:
@@ -3376,12 +3376,12 @@ def main():
         finally:
             registry.sender_for_room = _real_sfr053
         _f = _o053.frames[0] if _o053.frames else None
-        check("053 test clip queues the tone into THAT node's output transport only",
+        check("speaker: test clip queues the tone into THAT node's output transport only",
               _r.status_code == 200 and _f is not None and type(_f).__name__ == "OutputAudioRawFrame"
               and _f.sample_rate == 24000 and _f.num_channels == 1 and len(_f.audio) > 0,
               f"{_r.status_code} {_r.text[:120]} frames={len(_o053.frames)}")
         _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvf053"})
-        check("053 test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
+        check("speaker: test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
 
         # R-I3 deleting the zone a speaker room was mapped to re-syncs it
         # (the mapping drops -> the default is its own speaker again)
@@ -3389,7 +3389,7 @@ def main():
         client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, "suite-ws053": "zdel053"}})
         _sent053.clear()
         _rd = client.delete("/api/dashboard/zones/zdel053")
-        check("053 R-I3 zone delete re-syncs speaker rooms (now back on their own speaker)",
+        check("speaker: zone delete re-syncs speaker rooms (now back on their own speaker)",
               _rz.status_code == 200 and _rd.status_code == 200
               and ("suite-ws053", {"cmd": "set_speaker", "enabled": True, "volume": 55}) in _sent053,
               f"add={_rz.status_code} del={_rd.status_code} sent={_sent053}")
@@ -3397,7 +3397,7 @@ def main():
 
         # R-M6 room keys are stripped BEFORE the speaker/zone checks
         _r = client.put("/api/dashboard/mapping", json={"room_zones": {**_base_rz053, " suite-ws053 ": "builtin"}})
-        check("053 R-M6 a padded room key validates as the stripped room",
+        check("speaker: a padded room key validates as the stripped room",
               _r.status_code == 200 and _cfg053()["room_zones"].get("suite-ws053") == "builtin",
               f"{_r.status_code} {_r.text[:120]}")
 
@@ -3408,15 +3408,15 @@ def main():
         try:
             _r = client.put("/api/dashboard/mapping",
                             json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": _shared053}})
-            check("053 R-I1 unchanged builtin entry of an offline node doesn't block saving other rooms",
+            check("speaker: unchanged builtin entry of an offline node doesn't block saving other rooms",
                   _r.status_code == 200, f"{_r.status_code} {_r.text[:120]}")
             _m = client.get("/api/dashboard/mapping").json()
-            check("053 R-I1 GET mapping keeps an offline builtin room listed (row doesn't fall to 'pick a zone')",
+            check("speaker: GET mapping keeps an offline builtin room listed (row doesn't fall to 'pick a zone')",
                   (_m.get("speakers") or {}).get("suite-ws053", {}).get("online") is False,
                   str(_m.get("speakers")))
             _r = client.put("/api/dashboard/mapping",
                             json={"room_zones": {**_base_rz053, "suite-ws053": "builtin", "suite-xvf053": "builtin"}})
-            check("053 R-I1 a NEW builtin entry for a non-speaker room is still refused", _r.status_code == 400)
+            check("speaker: a NEW builtin entry for a non-speaker room is still refused", _r.status_code == 400)
         finally:
             if _saved_rec053 is not None:
                 registry._known_rooms["suite-ws053"] = _saved_rec053
@@ -3428,12 +3428,12 @@ def main():
         _nc053.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
                                       "data": {"name": "suite-ws053b"}}), "pc-053ws")
         _c = _cfg053()
-        check("053 rename carries the speaker volume (and the mapping) to the new name",
+        check("speaker: rename carries the speaker volume (and the mapping) to the new name",
               (_c.get("node_speaker") or {}).get("volumes", {}).get("suite-ws053b") == 55
               and "suite-ws053" not in (_c.get("node_speaker") or {}).get("volumes", {})
               and _c["room_zones"].get("suite-ws053b") == "builtin",
               str(_c.get("node_speaker")))
-        check("053 R-I3 a rename re-syncs the node under its new name",
+        check("speaker: a rename re-syncs the node under its new name",
               any(r == "suite-ws053b" and pl.get("cmd") == "set_speaker" for r, pl in _sent053), str(_sent053))
     finally:
         _nc053.send_to_room = _real_send053
