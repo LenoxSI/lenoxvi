@@ -1,4 +1,4 @@
-"""050 — Pocket TTS lane module pins (host venv; fake torch/pocket_tts).
+"""Pocket TTS lane module pins (host venv; fake torch/pocket_tts).
 
 Never loads real weights: fake `torch` and `pocket_tts` modules are put in
 sys.modules BEFORE anything imports pipecat's pocket service.

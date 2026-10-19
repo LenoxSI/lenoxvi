@@ -1,4 +1,4 @@
-"""051 — wake_name module pins (host venv).
+"""wake_name module pins (host venv).
 
 Patches wake_name._wake instead of touching config files.
 Run: cd tests && ~/venvs/lenoxvi/bin/python wake_name_test.py <path-to-core>
