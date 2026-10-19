@@ -1437,7 +1437,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
           </select>
           <input type="file" accept=".bin" className="text-[13px]"
             onChange={e => setFwFile(e.target.files?.[0] || null)} />
-          <button className={BTN_PRIMARY} disabled={pushing || !fwFile || !fwTrack} onClick={push}
+          <button className={BTN_PRIMARY} style={{ marginLeft: 'auto' }} disabled={pushing || !fwFile || !fwTrack} onClick={push}
             title={!fwTrack ? 'Pick the track first.' : !fwFile ? 'Pick a .bin first.' : ''}>
             {pushing ? 'Uploading…' : 'Push firmware'}
           </button>
