@@ -3375,7 +3375,7 @@ def main():
 
     _CACHEDstt = {"large-v3-turbo", "small", "base"}
     _GPUstt = {"name": "RTX TEST 12GB"}
-    _DLstt = {"delay": 0.3, "fail": False, "calls": []}
+    _DLstt = {"delay": 0.8, "fail": False, "calls": []}
 
     def _fake_dlstt(name, on_progress=None):
         _DLstt["calls"].append(name)
@@ -3393,6 +3393,10 @@ def main():
     _rstt._stt_cached = lambda name: name in _CACHEDstt
     _rstt._stt_download = _fake_dlstt
     _rstt._stt_gpu_name = lambda: _GPUstt["name"]
+    # the suite never scans the real model cache: sizes follow the fake cache
+    _saved_sizes = getattr(_rstt, "_stt_disk_sizes", None)
+    _rstt._stt_disk_sizes = lambda: {n: (1 if n in _CACHEDstt else 0)
+                                     for n in ("large-v3-turbo", "medium", "small", "base")}
     _stt_beforestt = dict(config_store.read_section("stt") or {})
     try:
         _g = client.get("/api/dashboard/stt").json()
@@ -3463,8 +3467,11 @@ def main():
         check("stt a language change mid-download is accepted", _r3.status_code == 200, str(_r3.status_code))
         check("stt GET shows the download in progress",
               (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") == "downloading")
-        _tstt.sleep(_DLstt["delay"] * 0.75)
-        _dp = client.get("/api/dashboard/stt").json().get("download") or {}
+        for _ in range(30):   # wait for the mid-download report (fake reports at delay/2)
+            _dp = client.get("/api/dashboard/stt").json().get("download") or {}
+            if _dp.get("done_bytes"):
+                break
+            _tstt.sleep(0.03)
         check("stt download progress: bytes + percent while downloading",
               _dp.get("done_bytes") == 650_000_000 and _dp.get("total_bytes") == 1_500_000_000
               and _dp.get("percent") == 43, str(_dp))
@@ -3518,23 +3525,48 @@ def main():
 
         # ── delete ──
         _DELstt = []
-        _saved_del = tuple(getattr(_rstt, _n, None) for _n in ("_stt_delete", "_stt_disk_bytes"))
-        _rstt._stt_delete = lambda name: (_DELstt.append(name), _CACHEDstt.discard(name), 464_000_000)[2]
-        _rstt._stt_disk_bytes = lambda name: {"large-v3-turbo": 1_600_000_000, "medium": 1_500_000_000,
-                                               "small": 464_000_000, "base": 142_000_000}.get(name, 0) \
-            if name in _CACHEDstt else 0
+        _SIZEstt = {"large-v3-turbo": 1_600_000_000, "medium": 1_500_000_000, "small": 464_000_000, "base": 142_000_000}
+        _PARTIALstt = set()          # on disk but incomplete (crashed download)
+        _SCANSstt = [0]
+        _DELMODEstt = {"slow": 0.0, "noop": False}
+        _saved_del = tuple(getattr(_rstt, _n, None) for _n in ("_stt_delete", "_stt_disk_sizes"))
+
+        def _fake_delete(name):
+            _DELstt.append(name)
+            _tstt.sleep(_DELMODEstt["slow"])
+            if _DELMODEstt["noop"]:
+                return _SIZEstt[name]
+            _CACHEDstt.discard(name)
+            _PARTIALstt.discard(name)
+            return _SIZEstt[name]
+
+        def _fake_sizes():
+            _SCANSstt[0] += 1
+            return {n: (_SIZEstt[n] if n in _CACHEDstt else 12_000_000 if n in _PARTIALstt else 0) for n in _SIZEstt}
+
+        _rstt._stt_delete = _fake_delete
+        _rstt._stt_disk_sizes = _fake_sizes
         _saved_status = _rstt._stt_status
         _rstt._stt_status = lambda: {"state": "ready", "model": "large-v3-turbo", "device": "cuda",
                                      "compute": "float16", "samples": 0}
+
+        def _set_model_by_hand(value):
+            # a hand edit of config.yaml — NOT through config_store (the process config cache stays stale)
+            _raw = _ystt.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
+            _raw.setdefault("stt", {})["model"] = value
+            Path(os.environ["LVI_CONFIG"]).write_text(_ystt.safe_dump(_raw, sort_keys=False))
+
         try:
             _CACHEDstt.update({"large-v3-turbo", "medium", "small", "base"})
             client.put("/api/dashboard/stt", json={"model": "medium"})   # configured = medium, running = turbo
+            _SCANSstt[0] = 0
             _g = client.get("/api/dashboard/stt").json()
             _m = {m["name"]: m for m in _g["models"]}
             check("stt GET: size on disk per downloaded model",
                   _m["small"].get("disk_bytes") == 464_000_000 and _m["base"].get("disk_bytes") == 142_000_000,
                   str({k: v.get("disk_bytes") for k, v in _m.items()}))
-            check("stt GET: deletable = downloaded and not configured/running",
+            check("stt GET scans the model cache ONCE per request", _SCANSstt[0] == 1, str(_SCANSstt[0]))
+            check("stt GET: deletable = on disk and not configured/running",
                   [n for n, m in _m.items() if m.get("deletable")] == ["small", "base"],
                   str({k: v.get("deletable") for k, v in _m.items()}))
             for _n, _why in (("medium", "the configured model"), ("large-v3-turbo", "the running model")):
@@ -3543,6 +3575,28 @@ def main():
                       f"{_r.status_code} {_r.text[:100]}")
             _r = client.delete("/api/dashboard/stt/model/large-v3")
             check("stt DELETE refuses a model outside the four (422)", _r.status_code == 422, str(_r.status_code))
+
+            # in use is judged by REPO, not name: aliases, repo ids and local paths all protect the files
+            _rstt._stt_status = lambda: {"state": "ready", "model": "none-loaded", "samples": 0}  # only config protects
+            for _val, _target, _why in (
+                    ("turbo", "large-v3-turbo", "faster-whisper's 'turbo' alias"),
+                    ("Systran/faster-whisper-small", "small", "a raw repo id"),
+                    ("/x/hub/models--Systran--faster-whisper-base/snapshots/abc", "base", "a local snapshot path")):
+                config_store.write_section("stt", {**(config_store.read_section("stt") or {}), "model": _val})
+                _g = client.get("/api/dashboard/stt").json()
+                _dm = {m["name"]: m.get("deletable") for m in _g["models"]}
+                _r = client.delete(f"/api/dashboard/stt/model/{_target}")
+                check(f"stt in-use by repo: {_why} protects {_target} (not deletable, DELETE 409)",
+                      _dm.get(_target) is False and _r.status_code == 409 and not _DELstt,
+                      f"deletable={_dm.get(_target)} {_r.status_code}")
+            _set_model_by_hand("small")
+            _r = client.delete("/api/dashboard/stt/model/small")
+            check("stt a hand edit of config.yaml (no restart) still protects that model",
+                  _r.status_code == 409 and not _DELstt, f"{_r.status_code} {_r.text[:100]}")
+            config_store.write_section("stt", {**(config_store.read_section("stt") or {}), "model": "medium"})
+            _rstt._stt_status = lambda: {"state": "ready", "model": "large-v3-turbo", "device": "cuda",
+                                         "compute": "float16", "samples": 0}
+
             _r = client.delete("/api/dashboard/stt/model/small")
             check("stt DELETE removes an unused downloaded model, reports freed bytes",
                   _r.status_code == 200 and _r.json().get("freed_bytes") == 464_000_000 and _DELstt == ["small"],
@@ -3552,8 +3606,48 @@ def main():
             check("stt after delete: shown as not downloaded (downloads first again)",
                   _m["small"]["cached"] is False and not _m["small"].get("deletable"), str(_m["small"]))
             _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt DELETE of a model that isn't downloaded -> 404", _r.status_code == 404, str(_r.status_code))
+            check("stt DELETE of a model that isn't on disk -> 404", _r.status_code == 404, str(_r.status_code))
+
+            # leftovers of a crashed download: on disk, not complete -> still deletable
+            _PARTIALstt.add("small")
+            _g = client.get("/api/dashboard/stt").json()
+            _ms = next(m for m in _g["models"] if m["name"] == "small")
+            _r = client.delete("/api/dashboard/stt/model/small")
+            check("stt partial leftovers: shown (cached false, on disk) and deletable",
+                  _ms["cached"] is False and _ms.get("disk_bytes") == 12_000_000 and _ms.get("deletable") is True
+                  and _r.status_code == 200, f"{_ms} {_r.status_code}")
+
+            # a delete that leaves the files behind must not report success
+            _DELMODEstt["noop"] = True
+            _r = client.delete("/api/dashboard/stt/model/base")
+            _DELMODEstt["noop"] = False
+            check("stt DELETE that didn't remove the files -> 500, not ok", _r.status_code == 500, str(_r.status_code))
+
+            # DELETE racing a PUT of the same model: config must never name a model that isn't on disk
+            import threading as _thrace
+            _DELMODEstt["slow"] = 0.4
+            _DLstt.update(fail=False, delay=0.2)
+            _res = {}
+            _td = _thrace.Thread(target=lambda: _res.update(d=client.delete("/api/dashboard/stt/model/base").status_code))
+            _tp = _thrace.Thread(target=lambda: _res.update(p=client.put("/api/dashboard/stt", json={"model": "base"}).json()))
+            _td.start()
+            _tstt.sleep(0.1)
+            _tp.start()
+            _td.join()
+            _tp.join()
+            _DELMODEstt["slow"] = 0.0
+            for _ in range(40):
+                if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
+                    break
+                _tstt.sleep(0.05)
+            _cfg_model = _sttstt().get("model")
+            check("stt DELETE racing a PUT: config never names a model that isn't on disk",
+                  _cfg_model != "base" or "base" in _CACHEDstt, f"cfg={_cfg_model} cached={sorted(_CACHEDstt)} res={_res}")
+            _CACHEDstt.add("base")
+            client.put("/api/dashboard/stt", json={"model": "medium"})
+
             # a model mid-download can't be deleted
+            _CACHEDstt.discard("small")
             _DLstt.update(fail=False, delay=0.4)
             client.put("/api/dashboard/stt", json={"model": "small"})
             _r = client.delete("/api/dashboard/stt/model/small")
@@ -3564,7 +3658,7 @@ def main():
                 _tstt.sleep(0.05)
         finally:
             _rstt._stt_status = _saved_status
-            for _n, _v in zip(("_stt_delete", "_stt_disk_bytes"), _saved_del):
+            for _n, _v in zip(("_stt_delete", "_stt_disk_sizes"), _saved_del):
                 if _v is not None:
                     setattr(_rstt, _n, _v)
 
@@ -3622,6 +3716,8 @@ def main():
         check("stt /status carries the stt block", isinstance(_s.get("stt"), dict) and "state" in _s["stt"],
               str(_s.get("stt")))
     finally:
+        if _saved_sizes is not None:
+            _rstt._stt_disk_sizes = _saved_sizes
         for _n, _v in zip(("_stt_cached", "_stt_download", "_stt_gpu_name"), _savedstt):
             if _v is not None:
                 setattr(_rstt, _n, _v)

@@ -19,6 +19,10 @@ pipecat-ai==1.11.0
 pipecat-ai-prebuilt==1.1.0
 pipecat-ai-small-webrtc-prebuilt==2.5.0
 faster-whisper==1.2.1
+# The dashboard's STT downloads read byte progress from huggingface_hub's
+# snapshot_download progress bars (the "Reconstructing" bar, 1.31+).
+# Older or newer hubs still download fine; only the progress bar would go quiet.
+huggingface_hub>=1.31,<2
 openwakeword==0.4.0
 lameenc==1.8.4
 sonos-websocket==0.2.0

@@ -1466,7 +1466,7 @@ import threading
 import stt_catalog
 
 _STT_DL: dict = {}          # {"model", "state": downloading|ready|error, "error"?}
-_STT_DL_LOCK = threading.Lock()
+_STT_DL_LOCK = threading.RLock()  # re-entrant: claim checks call _stt_in_use_repos
 _GPU_NAME_CACHE: list = []
 
 
@@ -1494,10 +1494,15 @@ def _stt_download(name: str, on_progress=None) -> None:
 
     class _Progress(tqdm):
         def __init__(self, *args, **kwargs):
-            kwargs["file"] = open(os.devnull, "w")  # noqa: SIM115 — closed in close()
+            fp = open(os.devnull, "w")  # noqa: SIM115 — closed in close()
+            kwargs["file"] = fp
             kwargs["disable"] = False
             self._report = str(kwargs.get("desc", "")).startswith("Reconstructing")
-            super().__init__(*args, **kwargs)
+            try:
+                super().__init__(*args, **kwargs)
+            except Exception:
+                fp.close()
+                raise
 
         def update(self, n=1):
             out = super().update(n)
@@ -1521,12 +1526,38 @@ def _stt_hub_repo(name: str):
     return next((r for r in scan_cache_dir().repos if r.repo_id == repo_id and r.repo_type == "model"), None)
 
 
-def _stt_disk_bytes(name: str) -> int:
+def _stt_disk_sizes() -> dict:
+    """Bytes on disk per catalog model (complete or not), from ONE cache scan."""
     try:
-        repo = _stt_hub_repo(name)
+        from huggingface_hub import scan_cache_dir
+
+        by_repo = {r.repo_id: int(r.size_on_disk) for r in scan_cache_dir().repos if r.repo_type == "model"}
     except Exception:  # noqa: BLE001 — no cache dir yet
-        return 0
-    return int(repo.size_on_disk) if repo else 0
+        by_repo = {}
+    return {m["name"]: by_repo.get(m["repo"], 0) for m in stt_catalog.MODELS}
+
+
+def _stt_repo_of(value):
+    """The Hugging Face repo a stt.model value loads from: a catalog name,
+    one of faster-whisper's own aliases ("turbo"), a raw repo id, or a local
+    path inside the hub cache. None when it isn't from the hub cache."""
+    if not value:
+        return None
+    spec = stt_catalog.spec(value)
+    if spec:
+        return spec["repo"]
+    try:
+        from faster_whisper.utils import _MODELS as fw_models
+    except Exception:  # noqa: BLE001 — alias table unavailable: fall through
+        fw_models = {}
+    if value in fw_models:
+        return fw_models[value]
+    m = re.search(r"models--([^/\\]+?)--([^/\\]+)", value)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    if "/" in value and not value.startswith(("/", ".", "~")):
+        return value
+    return None
 
 
 def _stt_delete(name: str) -> int:
@@ -1572,13 +1603,21 @@ def _stt_status() -> dict:
 
 
 def _stt_current() -> dict:
-    model = cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo")
-    language = cfg_env("stt", "language", "LVI_STT_LANGUAGE") or "auto"
+    # Fresh from config.yaml (config > env > default, the same chain the bot
+    # boots with) — the process config cache misses hand edits, and this
+    # decides what's safe to delete.
+    sec = config_store.read_section("stt") or {}
+
+    def pick(key, env, default=None):
+        return sec.get(key) or os.getenv(env) or default
+
+    model = pick("model", "LVI_STT_MODEL", "large-v3-turbo")
+    language = pick("language", "LVI_STT_LANGUAGE") or "auto"
     return {
         "model": model,
         "language": language,
-        "device": cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
-        "compute": cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
+        "device": pick("device", "LVI_STT_DEVICE", "cuda"),
+        "compute": pick("compute_type", "LVI_STT_COMPUTE", "float16"),
         "custom_model": model not in stt_catalog.MODEL_NAMES,
         "custom_language": language not in stt_catalog.LANGUAGE_CODES,
     }
@@ -1646,16 +1685,15 @@ async def get_stt():
         dl = dict(_STT_DL) or None
     if dl and dl.get("state") == "downloading" and dl.get("total_bytes"):
         dl["percent"] = min(99, round(100 * dl.get("done_bytes", 0) / dl["total_bytes"]))
-    sizes = await asyncio.gather(*(asyncio.to_thread(_stt_disk_bytes, m["name"]) if c else _zero()
-                                   for m, c in zip(stt_catalog.MODELS, cached)))
-    in_use = _stt_in_use()
+    sizes = await asyncio.to_thread(_stt_disk_sizes)
+    in_use = _stt_in_use_repos()
     return {
         "current": _stt_current(),
         "models": [{**{k: v for k, v in m.items() if k != "repo"}, "cached": c,
                     "available": not (m["gpu_only"] and gpu is None),
-                    "disk_bytes": size if c else 0,
-                    "deletable": bool(c) and m["name"] not in in_use}
-                   for m, c, size in zip(stt_catalog.MODELS, cached, sizes)],
+                    "disk_bytes": sizes.get(m["name"], 0),
+                    "deletable": sizes.get(m["name"], 0) > 0 and m["repo"] not in in_use}
+                   for m, c in zip(stt_catalog.MODELS, cached)],
         "languages": stt_catalog.LANGUAGES,
         "gpu": gpu,
         "status": _stt_status(),
@@ -1663,29 +1701,48 @@ async def get_stt():
     }
 
 
-async def _zero():
-    return 0
+# Models with a delete or a switch in flight (claimed under _STT_DL_LOCK).
+# A delete and a switch of the same model can't overlap: between "is it on
+# disk / in use?" and acting, neither may let the other slip in. A claim set
+# instead of an asyncio.Lock: no lock is ever held across an await.
+_STT_BUSY: set = set()
 
 
-def _stt_in_use() -> set:
-    """Models the bot needs: the configured one (next boot), the loaded one,
-    and one mid-download."""
-    used = {_stt_current()["model"], _stt_status().get("model")}
+def _stt_claim(name: str, why: str) -> None:
+    if name in _STT_BUSY:
+        raise HTTPException(status_code=409, detail=f"{name} is busy ({why} in progress) — try again")
+    _STT_BUSY.add(name)
+
+
+def _stt_in_use_repos() -> set:
+    """Repos the bot needs: the configured model (next boot), the loaded one,
+    and one mid-download — compared by REPO, so an alias ("turbo"), a raw
+    repo id or a local cache path protects the same files."""
+    used = [_stt_current()["model"], _stt_status().get("model")]
     with _STT_DL_LOCK:
         if _STT_DL.get("state") == "downloading":
-            used.add(_STT_DL.get("model"))
-    return {m for m in used if m}
+            used.append(_STT_DL.get("model"))
+    return {repo for repo in map(_stt_repo_of, used) if repo}
 
 
 @router.delete("/stt/model/{name}", dependencies=GUARD)
 async def delete_stt_model(name: str):
-    if stt_catalog.spec(name) is None:
+    spec = stt_catalog.spec(name)
+    if spec is None:
         raise HTTPException(status_code=422, detail=f"model must be one of {stt_catalog.MODEL_NAMES}")
-    if name in _stt_in_use():
-        raise HTTPException(status_code=409, detail=f"{name} is in use (configured, loaded or downloading)")
-    if not await asyncio.to_thread(_stt_cached, name):
-        raise HTTPException(status_code=404, detail=f"{name} isn't downloaded")
-    freed = await asyncio.to_thread(_stt_delete, name)
+    with _STT_DL_LOCK:
+        if spec["repo"] in _stt_in_use_repos():
+            raise HTTPException(status_code=409, detail=f"{name} is in use (configured, loaded or downloading)")
+        _stt_claim(name, "a change")
+    try:
+        if not (await asyncio.to_thread(_stt_disk_sizes)).get(name):
+            raise HTTPException(status_code=404, detail=f"{name} isn't on disk")
+        freed = await asyncio.to_thread(_stt_delete, name)
+        if (await asyncio.to_thread(_stt_disk_sizes)).get(name):
+            raise HTTPException(status_code=500, detail=f"{name} is still on disk — delete didn't complete")
+    finally:
+        with _STT_DL_LOCK:
+            _STT_BUSY.discard(name)
     logger.info(f"stt: deleted {name} from the model cache ({freed / 1e6:.0f} MB)")
     return {"ok": True, "freed_bytes": freed}
 
@@ -1705,29 +1762,39 @@ async def put_stt(payload: SttPayload):
             _stt_write(language=payload.language)
         restart_needed, download = False, "not_needed"
         if payload.model is not None:
-            cur = _stt_current()
-            want = (payload.model, *stt_catalog.runtime_for(has_gpu))
-            if want != (cur["model"], cur["device"], cur["compute"]):
-                cached = await asyncio.to_thread(_stt_cached, payload.model)
-                # Check-and-claim in ONE lock hold (the cache check above
-                # awaits, so the early 409 alone can't stop two PUTs racing).
+            with _STT_DL_LOCK:
+                _stt_claim(payload.model, "a delete")
+            try:
+                restart_needed, download = await _stt_switch_model(payload.model, has_gpu)
+            finally:
                 with _STT_DL_LOCK:
-                    if _STT_DL.get("state") == "downloading":
-                        raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
-                    if not cached:
-                        _STT_DL.clear()
-                        _STT_DL.update(model=payload.model, state="downloading")
-                if cached:
-                    _stt_write(model=payload.model, has_gpu=has_gpu)
-                    restart_needed = True
-                else:
-                    threading.Thread(
-                        target=_stt_download_then_switch, args=(payload.model, has_gpu),
-                        name="stt-download", daemon=True).start()
-                    download = "started"
+                    _STT_BUSY.discard(payload.model)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"ok": True, "restart_needed": restart_needed, "download": download, "current": _stt_current()}
+
+
+async def _stt_switch_model(model: str, has_gpu: bool) -> tuple:
+    """(restart_needed, download). The caller holds the model's claim, so a
+    delete can't remove it between the cache check and the config write."""
+    cur = _stt_current()
+    if (model, *stt_catalog.runtime_for(has_gpu)) == (cur["model"], cur["device"], cur["compute"]):
+        return False, "not_needed"
+    cached = await asyncio.to_thread(_stt_cached, model)
+    # Check-and-claim in ONE lock hold (the cache check above awaits, so the
+    # early 409 alone can't stop two PUTs racing).
+    with _STT_DL_LOCK:
+        if _STT_DL.get("state") == "downloading":
+            raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
+        if not cached:
+            _STT_DL.clear()
+            _STT_DL.update(model=model, state="downloading")
+    if cached:
+        _stt_write(model=model, has_gpu=has_gpu)
+        return True, "not_needed"
+    threading.Thread(target=_stt_download_then_switch, args=(model, has_gpu),
+                     name="stt-download", daemon=True).start()
+    return False, "started"
 
 
 @router.get("/voice-tuning")

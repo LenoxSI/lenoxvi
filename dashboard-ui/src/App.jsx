@@ -1618,13 +1618,17 @@ function SttCard({ status, setMsg, setRebooting }) {
     return () => { alive = false; clearInterval(t) }
   }, [downloading, setRebooting])
 
+  const [deleting, setDeleting] = useState(null)
   const del = async m => {
-    if (!window.confirm(`Delete ${m.name} (${fmtBytes(m.disk_bytes)})? It downloads again if you pick it later.`)) return
+    const size = m.disk_bytes ? ` (${fmtBytes(m.disk_bytes)})` : ''
+    if (!window.confirm(`Delete ${m.name}${size}? It downloads again if you pick it later.`)) return
+    setDeleting(m.name)
     try {
       const r = await api(`/api/dashboard/stt/model/${encodeURIComponent(m.name)}`, { method: 'DELETE' })
       await load()
       setMsg(`Deleted ${m.name} — freed ${fmtBytes(r.freed_bytes || 0)}.`, 'ok', 'STT')
     } catch (e) { setMsg('Delete failed: ' + e.message, 'err', 'STT') }
+    finally { setDeleting(null) }
   }
 
   const save = async () => {
@@ -1692,10 +1696,11 @@ function SttCard({ status, setMsg, setRebooting }) {
             {models.map(m => (
               <tr key={m.name} data-model={m.name} className="border-t border-[var(--separator)]">
                 <td className="px-4 py-2 font-mono text-[13px]">{m.name}</td>
-                <td className="px-4 py-2 font-mono text-[13px]">{m.cached ? fmtBytes(m.disk_bytes || 0) : '—'}</td>
+                <td className="px-4 py-2 font-mono text-[13px]">
+                  {m.cached ? fmtBytes(m.disk_bytes || 0) : m.disk_bytes ? `partial · ${fmtBytes(m.disk_bytes)}` : '—'}</td>
                 <td className="px-4 py-2 text-right">
                   {m.deletable
-                    ? <button className={BTN_DANGER} onClick={() => del(m)}>Delete</button>
+                    ? <button className={BTN_DANGER} disabled={deleting !== null} onClick={() => del(m)}>Delete</button>
                     : m.cached && <span className="text-[12px] text-[var(--muted)]">in use</span>}
                 </td>
               </tr>
