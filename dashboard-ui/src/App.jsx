@@ -274,10 +274,12 @@ function keyRoute(row) {
 }
 
 function keyState(row) {
-  if (!row.set && row.pending_restart) return { text: 'Removed — restart to apply', cls: WARN_CHIP_CLS }
-  if (!row.set) return row.in_use ? { text: 'Missing', cls: WARN_CHIP_CLS } : { text: 'Not set', cls: CHIP_CLS }
-  if (row.pending_restart) return { text: `Saved · ${row.hint || ''} — restart to apply`, cls: WARN_CHIP_CLS }
-  return { text: `● Set · ${row.hint || ''}`, cls: CHIP_CLS }
+  // Chip words: lowercase, one or two words (brand Chip rule); the restart
+  // note moves to the hover. Warning tone = needs a restart or a key.
+  if (!row.set && row.pending_restart) return { text: 'removed', cls: WARN_CHIP_CLS, title: 'Removed. Restart the bot to apply.' }
+  if (!row.set) return row.in_use ? { text: 'missing', cls: WARN_CHIP_CLS } : { text: 'not set', cls: CHIP_CLS }
+  if (row.pending_restart) return { text: `saved · ${row.hint || ''}`, cls: WARN_CHIP_CLS, title: 'Saved. Restart the bot to apply.' }
+  return { text: `set · ${row.hint || ''}`, cls: CHIP_CLS }
 }
 
 function KeysCard({ setMsg, setRebooting }) {
@@ -428,13 +430,13 @@ function KeysCard({ setMsg, setRebooting }) {
                         </td>
                         <td className="px-4 py-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u}</span>)}
+                            {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u.toLowerCase()}</span>)}
                           </div>
                         </td>
                         <td className="px-4 py-2">
-                          {row.in_use && <span className={`${CHIP_CLS} text-[var(--success)]`}>in use</span>}
+                          {row.in_use && <span className={OK_CHIP_CLS}>in use</span>}
                         </td>
-                        <td className="px-4 py-2"><span className={st.cls} data-role="state">{st.text}</span></td>
+                        <td className="px-4 py-2"><span className={st.cls} title={st.title} data-role="state">{st.text}</span></td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex items-center justify-end gap-2">
                             <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
@@ -1253,7 +1255,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">ESP32</span>
+                  <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">esp32</span>
                 </td>
                 <td className="px-4 py-2">
                   <VolSlider name={room} initial={sp?.volume} onCommit={saveSpeakerVolume} />
@@ -1929,18 +1931,21 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
    server writes device/compute with the model and downloads a missing
    model before switching config (restart only offered once it's on disk). */
 const CHIP_CLS = 'inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium'
-const WARN_CHIP_CLS = 'inline-block rounded-full bg-[var(--warning)] text-[var(--warning-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
+// Soft status tones (brand Chip rule), same tokens as the status bar.
+const WARN_CHIP_CLS = 'inline-block rounded-full bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
+const OK_CHIP_CLS = 'inline-block rounded-full bg-[var(--success-soft)] text-[var(--success-soft-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
+const ERR_CHIP_CLS = 'inline-block rounded-full bg-[var(--danger-soft)] text-[var(--danger-soft-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
 
 const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`
 
 function sttStateChip(st, dl) {
   if (dl?.state === 'downloading')
-    return { text: `Downloading ${dl.model}…${dl.percent != null ? ` ${dl.percent}%` : ''}`, cls: 'text-[var(--muted)]' }
-  if (!st) return { text: '…', cls: 'text-[var(--muted)]' }
-  if (st.state === 'ready') return { text: '● Running', cls: 'text-[var(--success)]' }
-  if (st.state === 'error') return { text: '● Failed to load', cls: 'text-[var(--danger)]', title: st.error }
-  if (st.state === 'loading') return { text: 'Loading…', cls: 'text-[var(--muted)]' }
-  return { text: 'Not loaded yet', cls: 'text-[var(--muted)]' }
+    return { text: `downloading${dl.percent != null ? ` ${dl.percent}%` : ''}`, cls: `${CHIP_CLS} text-[var(--muted)]`, title: `Downloading ${dl.model}` }
+  if (!st) return { text: '…', cls: `${CHIP_CLS} text-[var(--muted)]` }
+  if (st.state === 'ready') return { text: 'running', cls: OK_CHIP_CLS }
+  if (st.state === 'error') return { text: 'load failed', cls: ERR_CHIP_CLS, title: st.error }
+  if (st.state === 'loading') return { text: 'loading', cls: `${CHIP_CLS} text-[var(--muted)]` }
+  return { text: 'not loaded', cls: `${CHIP_CLS} text-[var(--muted)]` }
 }
 
 function SttCard({ status, setMsg, setRebooting }) {
@@ -2074,18 +2079,18 @@ function SttCard({ status, setMsg, setRebooting }) {
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex flex-wrap items-center gap-2" id="stt-chips">
           {onFallback
-            ? <span className={WARN_CHIP_CLS} title={st.fallback_reason}>● On Whisper fallback</span>
-            : <span className={`${CHIP_CLS} ${state.cls}`} title={state.title}>{state.text}</span>}
+            ? <span className={WARN_CHIP_CLS} title={st.fallback_reason}>whisper fallback</span>
+            : <span className={state.cls} title={state.title}>{state.text}</span>}
           {onCloud ? (
             <>
-              <span className={CHIP_CLS}>Deepgram {st.cloud_model}</span>
+              <span className={CHIP_CLS}>deepgram {st.cloud_model}</span>
               <span className={CHIP_CLS}>cloud</span>
             </>
           ) : (
             <>
               {st?.model && <span className={CHIP_CLS}>{st.model}</span>}
               {st?.device && <span className={CHIP_CLS}>
-                {st.device === 'cuda' ? `GPU · ${data?.gpu || 'CUDA'}` : 'CPU'}</span>}
+                {st.device === 'cuda' ? `gpu · ${data?.gpu || 'cuda'}` : 'cpu'}</span>}
               {st?.compute && <span className={CHIP_CLS}>{st.compute}</span>}
             </>
           )}
