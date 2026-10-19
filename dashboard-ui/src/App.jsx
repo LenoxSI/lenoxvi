@@ -1764,23 +1764,12 @@ function SttCard({ status, setMsg, setRebooting }) {
             </select>
           </Field>
         </div>
-        {cloudPick && (
-          <div className="grid gap-2">
-            <div id="stt-dg-key-line" className="flex flex-wrap items-center gap-2 text-[14px]">
-              {data?.deepgram_key_set
-                ? <span>Deepgram key ✓ — shared with TTS</span>
-                : (
-                  <>
-                    <input id="stt-dg-key" type="password" autoComplete="off" value={dgKey}
-                      onChange={e => setDgKey(e.target.value)} placeholder="Deepgram API key (shared with TTS)"
-                      className={`${INPUT_CLS} w-[260px] font-mono`} />
-                    <button className={BTN_DEFAULT} onClick={saveDgKey} disabled={!dgKey.trim()}>Save key</button>
-                  </>
-                )}
-            </div>
-            <span className="text-[12px] text-[var(--muted)]">
-              On Deepgram, a language change applies after a restart. If Deepgram can't be reached, the fallback model listens.
-            </span>
+        {cloudPick && data && !data.deepgram_key_set && (
+          <div id="stt-dg-key-line" className="flex flex-wrap items-center gap-2 text-[14px]">
+            <input id="stt-dg-key" type="password" autoComplete="off" value={dgKey}
+              onChange={e => setDgKey(e.target.value)} placeholder="Deepgram API key (shared with TTS)"
+              className={`${INPUT_CLS} w-[260px] font-mono`} />
+            <button className={BTN_DEFAULT} onClick={saveDgKey} disabled={!dgKey.trim()}>Save key</button>
           </div>
         )}
         <table id="stt-models" className="w-full text-[14px]">
