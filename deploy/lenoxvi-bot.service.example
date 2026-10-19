@@ -32,8 +32,8 @@ Environment=LD_LIBRARY_PATH=%h/venvs/lenoxvi/lib/python3.14/site-packages/nvidia
 ExecStart=%h/venvs/lenoxvi/bin/python bot.py --host <bot-host-LAN-IP> --port 7860 --esp32
 Restart=on-failure
 RestartSec=5
-# A graceful SIGTERM can hang on a live WebRTC session (uvicorn waits for
-# the connection); give it 10s then SIGKILL.
+# A stop takes ~2 s: the server gives node sessions a 2 s grace, then
+# closes every connection (core/serve_opts.py). 10 s is the hard limit.
 TimeoutStopSec=10
 
 [Install]

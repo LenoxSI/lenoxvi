@@ -3100,6 +3100,9 @@ def main():
           _pre_call is not None and len(_pre_tr) == 3 and _pre_tr == _stt_tr,
           f"preload={_pre_tr} run_bot={_stt_tr}")
     _main_src = _astR.unparse(_botR)
+    check("fast restart: uvicorn.run is wrapped (TLS + graceful-shutdown deadline) before the runner starts",
+          "wrap_uvicorn_run(uvicorn" in _main_src and _main_src.find("wrap_uvicorn_run(uvicorn") < _main_src.rfind("main()")
+          and "_tls_run" not in _main_src, "wrapper missing / after main() / old TLS-only wrapper still there")
     check("RSS preload runs before main() (startup, not first voice turn)",
           _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
           "preload call missing or after main()")

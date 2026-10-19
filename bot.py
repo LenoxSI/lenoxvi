@@ -658,24 +658,13 @@ if __name__ == "__main__":
     from dashboard import register_dashboard
     register_dashboard(_runner_app)
 
-    # Serve HTTPS when certs exist: plain-HTTP LAN origins are insecure
-    # contexts, so browsers hide getUserMedia/RTCPeerConnection and the
-    # prebuilt client dies with "WebRTC not supported or suppressed".
-    # The pipecat runner has no SSL args, so we wrap uvicorn.run to inject
-    # the certfile/keyfile. Certs: scripts/make-cert.sh (self-signed, click
-    # through the browser warning once).
+    # uvicorn.run options (core/serve_opts.py): HTTPS when certs exist, and
+    # a graceful-shutdown deadline so a stop closes every node connection
+    # (the goodbye a node reacts to) instead of hanging until SIGKILL.
     import uvicorn
+    from serve_opts import wrap_uvicorn_run
 
-    _cert = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
-    if os.path.exists(os.path.join(_cert, "cert.pem")):
-        _orig_run = uvicorn.run
-
-        def _tls_run(app, host=None, port=None, **kw):
-            kw["ssl_certfile"] = os.path.join(_cert, "cert.pem")
-            kw["ssl_keyfile"] = os.path.join(_cert, "key.pem")
-            return _orig_run(app, host=host, port=port, **kw)
-
-        uvicorn.run = _tls_run
+    wrap_uvicorn_run(uvicorn, os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"))
 
     # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
     # step"): same model/device/precision run_bot uses. Non-fatal — a failure

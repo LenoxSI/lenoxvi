@@ -9,6 +9,12 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- **Restarts no longer hang.** Stopping the bot waited for every node's
+  session to end on its own, which never happens, until the service
+  manager killed it 10 s later, so nodes never heard the bot leave and
+  only noticed when their keepalive timed out. A stop now takes ~2 s and
+  closes every node connection on the way out (nodes on firmware that
+  listens for it reconnect right away).
 - **Turns no longer split on a streaming STT.** With Deepgram, words
   finalized mid-sentence could close the turn while you were still
   talking, and the rest of the sentence was glued onto your next one. A
