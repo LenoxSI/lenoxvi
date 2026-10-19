@@ -3364,6 +3364,120 @@ def main():
         registry.mark_disconnected("pc-053ws")
         registry.mark_disconnected("pc-053xvf")
 
+    # ── stt STT card (routes) ─────────────────────────────────────────
+    import time as _tstt
+    import yaml as _ystt
+    from dashboard import routes as _rstt
+
+    def _sttstt():
+        return (_ystt.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}).get("stt") or {}
+
+    _CACHEDstt = {"large-v3-turbo", "small", "base"}
+    _GPUstt = {"name": "RTX TEST 12GB"}
+    _DLstt = {"delay": 0.3, "fail": False, "calls": []}
+
+    def _fake_dlstt(name):
+        _DLstt["calls"].append(name)
+        _tstt.sleep(_DLstt["delay"])
+        if _DLstt["fail"]:
+            raise RuntimeError("network down")
+        _CACHEDstt.add(name)
+
+    _savedstt = tuple(getattr(_rstt, _n, None) for _n in ("_stt_cached", "_stt_download", "_stt_gpu_name"))
+    _rstt._stt_cached = lambda name: name in _CACHEDstt
+    _rstt._stt_download = _fake_dlstt
+    _rstt._stt_gpu_name = lambda: _GPUstt["name"]
+    _stt_beforestt = dict(config_store.read_section("stt") or {})
+    try:
+        _g = client.get("/api/dashboard/stt").json()
+        check("stt GET /stt: the four models with cached flags",
+              [(m["name"], m["cached"]) for m in _g.get("models", [])]
+              == [("large-v3-turbo", True), ("medium", False), ("small", True), ("base", True)], str(_g.get("models")))
+        check("stt GET /stt: gpu name, 17 languages, status block",
+              _g.get("gpu") == "RTX TEST 12GB" and len(_g.get("languages", [])) == 17 and "state" in (_g.get("status") or {}),
+              str({k: _g.get(k) for k in ("gpu", "status")}))
+        check("stt GET /stt: current config, not custom", _g.get("current", {}).get("custom_model") is False,
+              str(_g.get("current")))
+
+        config_store.write_section("stt", {**_stt_beforestt, "model": "large-v3"})
+        _g = client.get("/api/dashboard/stt").json()
+        check("stt hand-set model shown as custom, preserved",
+              _g["current"]["model"] == "large-v3" and _g["current"]["custom_model"] is True, str(_g["current"]))
+
+        for _body, _why in (({"model": "large-v3"}, "outside the four"), ({"language": "xx"}, "bad language"),
+                            ({"model": "small", "beam": 5}, "extra key"), ({}, "empty body")):
+            _r = client.put("/api/dashboard/stt", json=_body)
+            check(f"stt PUT refuses {_why}", _r.status_code == 422, f"{_r.status_code} {_r.text[:100]}")
+
+        _r = client.put("/api/dashboard/stt", json={"language": "en"})
+        _c = _sttstt()
+        check("stt language-only PUT: live, no restart, model (even a hand-set one) untouched",
+              _r.status_code == 200 and _r.json().get("restart_needed") is False
+              and _c.get("language") == "en" and _c.get("model") == "large-v3", f"{_r.text[:120]} cfg={_c}")
+        _r = client.put("/api/dashboard/stt", json={"language": "auto"})
+        check("stt language 'auto' removes the key (unset = auto-detect)",
+              _r.status_code == 200 and "language" not in _sttstt(), str(_sttstt()))
+
+        _GPUstt["name"] = None
+        _r = client.put("/api/dashboard/stt", json={"model": "large-v3-turbo"})
+        check("stt GPU-only model refused without a GPU", _r.status_code == 422 and "GPU" in _r.text,
+              f"{_r.status_code} {_r.text[:100]}")
+        _r = client.put("/api/dashboard/stt", json={"model": "base"})
+        _c = _sttstt()
+        check("stt no GPU: base -> cpu/int8 written together, restart needed",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True
+              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("base", "cpu", "int8"), str(_c))
+
+        _GPUstt["name"] = "RTX TEST 12GB"
+        _r = client.put("/api/dashboard/stt", json={"model": "small"})
+        _c = _sttstt()
+        check("stt GPU: small -> cuda/float16, restart needed",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True
+              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("small", "cuda", "float16"), str(_c))
+
+        # download-first: config never names a model that isn't on disk
+        _r = client.put("/api/dashboard/stt", json={"model": "medium"})
+        _j = _r.json()
+        check("stt uncached model: download started, no restart offered yet, config untouched",
+              _r.status_code == 200 and _j.get("download") == "started" and _j.get("restart_needed") is False
+              and _sttstt().get("model") == "small", f"{_r.text[:140]} cfg={_sttstt()}")
+        _r2 = client.put("/api/dashboard/stt", json={"model": "medium"})
+        check("stt a second model change while downloading -> 409", _r2.status_code == 409, str(_r2.status_code))
+        check("stt GET shows the download in progress",
+              (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") == "downloading")
+        for _ in range(40):
+            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
+                break
+            _tstt.sleep(0.05)
+        _d = client.get("/api/dashboard/stt").json().get("download") or {}
+        _c = _sttstt()
+        check("stt download done -> config switched (model/device/compute) and state ready",
+              _d.get("state") == "ready" and _d.get("model") == "medium"
+              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("medium", "cuda", "float16"),
+              f"dl={_d} cfg={_c}")
+
+        _CACHEDstt.discard("medium")
+        _DLstt.update(fail=True, delay=0.05)
+        client.put("/api/dashboard/stt", json={"model": "base"})  # cached: back to base first
+        _r = client.put("/api/dashboard/stt", json={"model": "medium"})
+        for _ in range(40):
+            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
+                break
+            _tstt.sleep(0.05)
+        _d = client.get("/api/dashboard/stt").json().get("download") or {}
+        check("stt failed download -> error state, config unchanged",
+              _d.get("state") == "error" and "network down" in (_d.get("error") or "") and _sttstt().get("model") == "base",
+              f"dl={_d} cfg={_sttstt()}")
+
+        _s = client.get("/api/dashboard/status").json()
+        check("stt /status carries the stt block", isinstance(_s.get("stt"), dict) and "state" in _s["stt"],
+              str(_s.get("stt")))
+    finally:
+        for _n, _v in zip(("_stt_cached", "_stt_download", "_stt_gpu_name"), _savedstt):
+            if _v is not None:
+                setattr(_rstt, _n, _v)
+        config_store.write_section("stt", _stt_beforestt)
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")

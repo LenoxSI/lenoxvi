@@ -158,6 +158,9 @@ async def status():
                     wake_cfg.get("model") or wake_word.WAKE_MODEL))),
         "stt_model": cfg_env("stt", "model", "LVI_STT_MODEL",
                              stt_cfg.get("model") or "large-v3-turbo"),
+        # STT card chips: load state + per-command transcription time (median
+        # of the last 10), straight from the shared model's owner.
+        "stt": __import__("stt_local").status(),
         "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
                                 tts_cfg.get("provider") or "elevenlabs"),
         # Intelligence: rig-facts label — same cfg_env chain
@@ -1450,6 +1453,160 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
     "lull_secs": ("intelligence", "lull_secs"),
     "dedup_window": ("intelligence", "dedup_window"),
 }
+
+
+# ── speech-to-text card ──────────────────────────────────────────────
+# Four benchmarked faster-whisper models (stt_catalog), a language, and the
+# GPU/CPU runtime written with each pick. A model that isn't on disk is
+# downloaded FIRST; config switches only after the download succeeds, so a
+# restart never downloads and config never names a missing model.
+
+import stt_catalog  # noqa: E402
+
+_STT_DL: dict = {}          # {"model", "state": downloading|ready|error, "error"?}
+_STT_DL_LOCK = __import__("threading").Lock()
+_GPU_NAME_CACHE: list = []
+
+
+def _stt_cached(name: str) -> bool:
+    try:
+        from faster_whisper.utils import download_model
+        download_model(name, local_files_only=True)
+        return True
+    except Exception:  # noqa: BLE001 — not cached (or no hub): either way, not on disk
+        return False
+
+
+def _stt_download(name: str) -> None:
+    from faster_whisper.utils import download_model
+    download_model(name)
+
+
+def _stt_gpu_name():
+    """The CUDA GPU's name, or None without one. Looked up once."""
+    if _GPU_NAME_CACHE:
+        return _GPU_NAME_CACHE[0]
+    name = None
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            name = "GPU"
+            try:
+                out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                     capture_output=True, text=True, timeout=3)
+                first = out.stdout.strip().splitlines()[0].strip() if out.returncode == 0 else ""
+                name = first.replace("NVIDIA ", "") or name
+            except Exception:  # noqa: BLE001 — a name is cosmetic; "GPU" will do
+                pass
+    except Exception:  # noqa: BLE001 — no ctranslate2 CUDA support -> no GPU
+        name = None
+    _GPU_NAME_CACHE.append(name)
+    return name
+
+
+def _stt_current() -> dict:
+    model = cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo")
+    language = cfg_env("stt", "language", "LVI_STT_LANGUAGE") or "auto"
+    return {
+        "model": model,
+        "language": language,
+        "device": cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
+        "compute": cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
+        "custom_model": model not in stt_catalog.MODEL_NAMES,
+        "custom_language": language not in stt_catalog.LANGUAGE_CODES,
+    }
+
+
+def _stt_write(model: str | None = None, language: str | None = None, has_gpu: bool = True) -> None:
+    section = dict(config_store.read_section("stt") or {})
+    if model is not None:
+        device, compute = stt_catalog.runtime_for(has_gpu)
+        section.update(model=model, device=device, compute_type=compute)
+    if language is not None:
+        value = stt_catalog.language_value(language)
+        if value is None:
+            section.pop("language", None)
+        else:
+            section["language"] = value
+    config_store.write_section("stt", section)
+
+
+def _stt_download_then_switch(model: str, has_gpu: bool) -> None:
+    try:
+        _stt_download(model)
+        _stt_write(model=model, has_gpu=has_gpu)
+        with _STT_DL_LOCK:
+            _STT_DL.update(model=model, state="ready")
+            _STT_DL.pop("error", None)
+        logger.info(f"stt: downloaded {model}; config switched (restart to load it)")
+    except Exception as e:  # noqa: BLE001 — reported to the card; config untouched
+        with _STT_DL_LOCK:
+            _STT_DL.update(model=model, state="error", error=f"{type(e).__name__}: {e}"[:300])
+        logger.warning(f"stt: download of {model} failed: {e}")
+
+
+class SttPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: str | None = Field(default=None, max_length=64)
+    language: str | None = Field(default=None, max_length=16)
+
+    @model_validator(mode="after")
+    def _something(self):
+        if self.model is None and self.language is None:
+            raise ValueError("send model and/or language")
+        return self
+
+
+@router.get("/stt")
+async def get_stt():
+    gpu = await asyncio.to_thread(_stt_gpu_name)
+    cached = await asyncio.gather(*(asyncio.to_thread(_stt_cached, m["name"]) for m in stt_catalog.MODELS))
+    import stt_local
+    with _STT_DL_LOCK:
+        dl = dict(_STT_DL) or None
+    return {
+        "current": _stt_current(),
+        "models": [{**m, "cached": c, "available": not (m["gpu_only"] and gpu is None)}
+                   for m, c in zip(stt_catalog.MODELS, cached)],
+        "languages": stt_catalog.LANGUAGES,
+        "gpu": gpu,
+        "status": stt_local.status(),
+        "download": dl,
+    }
+
+
+@router.put("/stt", dependencies=GUARD)
+async def put_stt(payload: SttPayload):
+    has_gpu = (await asyncio.to_thread(_stt_gpu_name)) is not None
+    err = stt_catalog.validate(payload.model, payload.language, has_gpu)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
+    if payload.model is not None:
+        with _STT_DL_LOCK:
+            if _STT_DL.get("state") == "downloading":
+                raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
+    try:
+        if payload.language is not None:
+            _stt_write(language=payload.language)
+        restart_needed, download = False, "not_needed"
+        if payload.model is not None:
+            cur = _stt_current()
+            want = (payload.model, *stt_catalog.runtime_for(has_gpu))
+            if want != (cur["model"], cur["device"], cur["compute"]):
+                if await asyncio.to_thread(_stt_cached, payload.model):
+                    _stt_write(model=payload.model, has_gpu=has_gpu)
+                    restart_needed = True
+                else:
+                    with _STT_DL_LOCK:
+                        _STT_DL.clear()
+                        _STT_DL.update(model=payload.model, state="downloading")
+                    __import__("threading").Thread(
+                        target=_stt_download_then_switch, args=(payload.model, has_gpu),
+                        name="stt-download", daemon=True).start()
+                    download = "started"
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"ok": True, "restart_needed": restart_needed, "download": download, "current": _stt_current()}
 
 
 @router.get("/voice-tuning")

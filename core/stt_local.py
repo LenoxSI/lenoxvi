@@ -8,12 +8,60 @@ and TranscriptionFrame plumbing for free.
 
 import asyncio
 import io
+import statistics
+import time
+from collections import deque
 from typing import Optional
 
 from loguru import logger
 from openai.types.audio import Transcription
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
+
+import stt_catalog
+
+# ── what the dashboard's STT card shows (read by /status, no extra polling) ──
+# Load state of the ONE shared model, and per-command transcription time
+# (last 10, in memory, reset on restart). Load time stays in the log only.
+_STATUS: dict = {"state": "not_loaded"}
+_LAT_MS: deque = deque(maxlen=10)
+
+
+def _set_status(state: str, model: str, device: str, compute: str, error: str | None = None) -> None:
+    global _STATUS
+    _STATUS = {"state": state, "model": model, "device": device, "compute": compute}
+    if error:
+        _STATUS["error"] = error
+
+
+def status() -> dict:
+    out = dict(_STATUS)
+    out["samples"] = len(_LAT_MS)
+    if _LAT_MS:
+        out["latency_ms_median"] = round(statistics.median(_LAT_MS))
+    return out
+
+
+def _reset_status_for_tests() -> None:
+    global _STATUS
+    _STATUS = {"state": "not_loaded"}
+    _LAT_MS.clear()
+
+
+def _new_model(model: str, device: str, compute: str):
+    """The one place a WhisperModel is constructed (patchable in tests)."""
+    from faster_whisper import WhisperModel
+    return WhisperModel(model, device=device, compute_type=compute)
+
+
+def _live_language():
+    """stt.language, read per utterance so a dashboard change applies to the
+    next thing said — config > env, same chain as at construction."""
+    from config import cfg_env
+    return cfg_env("stt", "language", "LVI_STT_LANGUAGE")
+
+
+_language_hook = _live_language
 
 
 def _rss_mb() -> int:
@@ -55,20 +103,25 @@ def preload_shared_model(model: str, device: str, compute_type: str) -> None:
     ensure_model() still works."""
     if LocalWhisperSTTService._shared_model is not None:
         return
-    import time
-
     import numpy as np
-    from faster_whisper import WhisperModel
 
     t0 = time.monotonic()
     before = _rss_mb()
     logger.info(f"stt_local: preloading faster-whisper {model} on {device} ({compute_type}) at startup")
-    m = WhisperModel(model, device=device, compute_type=compute_type)
+    _set_status("loading", model, device, compute_type)
+    try:
+        m = _new_model(model, device, compute_type)
+    except Exception as e:
+        # Recorded for the dashboard, then re-raised: bot.py treats a failed
+        # preload as non-fatal (the lazy path tries again).
+        _set_status("error", model, device, compute_type, error=f"{type(e).__name__}: {e}"[:300])
+        raise
     # Warm-up: the first encode loads cuBLAS (+~0.5 GB) — do it now, not
     # inside someone's first question. 1 s of silence, result discarded.
     segs, _ = m.transcribe(np.zeros(16000, dtype=np.float32), language="en")
     list(segs)
     LocalWhisperSTTService._shared_model = m
+    _set_status("ready", model, device, compute_type)
     logger.info(f"stt_local: whisper ready in {time.monotonic() - t0:.1f}s "
                 f"(RSS {before} -> {_rss_mb()} MB before trim)")
     _trim_heap("startup preload")
@@ -118,14 +171,16 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             logger.info(
                 f"Loading faster-whisper {self._model_name} on {self._device} ({self._compute_type})"
             )
-            from faster_whisper import WhisperModel  # deferred import
-
-            LocalWhisperSTTService._shared_model = await asyncio.to_thread(
-                WhisperModel,
-                self._model_name,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
+            _set_status("loading", self._model_name, self._device, self._compute_type)
+            try:
+                LocalWhisperSTTService._shared_model = await asyncio.to_thread(
+                    _new_model, self._model_name, self._device, self._compute_type
+                )
+            except Exception as e:
+                _set_status("error", self._model_name, self._device, self._compute_type,
+                            error=f"{type(e).__name__}: {e}"[:300])
+                raise
+            _set_status("ready", self._model_name, self._device, self._compute_type)
             self._fw_model = LocalWhisperSTTService._shared_model
             _trim_heap("lazy whisper load")
 
@@ -156,19 +211,28 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         """
         await self.ensure_model()
         loop = asyncio.get_running_loop()
+        # Language is read per utterance (dashboard changes apply live).
+        try:
+            language = stt_catalog.language_value(_language_hook())
+        except Exception:  # noqa: BLE001 — a config hiccup must never cost a transcript
+            language = self._language
 
         def _run():
+            t0 = time.monotonic()
             segments, info = self._fw_model.transcribe(
                 io.BytesIO(audio),
-                language=self._language,
+                language=language,
                 beam_size=1,
                 vad_filter=False,  # pipecat's Silero VAD already gates segments
             )
+            # faster-whisper decodes lazily: the work happens while the
+            # segments are drained, so the timer stops after the join.
             text = " ".join(s.text.strip() for s in segments).strip()
+            _LAT_MS.append((time.monotonic() - t0) * 1000)
             return text, info.language
 
         text, lang = await loop.run_in_executor(None, _run)
-        if self._language:
-            lang = self._language
+        if language:
+            lang = language
         logger.debug(f"local-whisper heard: [{text}] ({lang})")
         return Transcription(text=text)
