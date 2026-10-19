@@ -1106,6 +1106,25 @@ def _saved_env() -> dict:
     return view
 
 
+_ENV_BACKUPS_KEPT = 3
+
+
+def _backup_env(env_path) -> None:
+    """Before a key is REPLACED: copy .env to .env.bak-<time> (0600) and
+    keep the newest few — a bad paste stays recoverable. A key line is
+    never deleted (the 2026-10-08 lesson), and neither is its last copy."""
+    import os as _os
+    from datetime import datetime as _dt
+
+    stamp = _dt.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
+    bak = env_path.with_name(f"{env_path.name}.bak-{stamp}")
+    fd = _os.open(bak, _os.O_WRONLY | _os.O_CREAT | _os.O_EXCL, 0o600)
+    with _os.fdopen(fd, "w") as f:
+        f.write(env_path.read_text())
+    for old in sorted(env_path.parent.glob(f"{env_path.name}.bak-*"))[:-_ENV_BACKUPS_KEPT]:
+        old.unlink(missing_ok=True)
+
+
 async def _write_env_key(var: str, value: str) -> bool:
     """Replace-or-append `var=value` in .env. Returns True if replaced.
 
@@ -1119,15 +1138,18 @@ async def _write_env_key(var: str, value: str) -> bool:
     env_path = _Path(_os.getenv("LVI_ENV_FILE",
                                 _Path(__file__).resolve().parent.parent.parent / ".env"))
     lines = env_path.read_text().splitlines() if env_path.is_file() else []
-    out, replaced = [], False
+    out, replaced, changed = [], False, False
     for ln in lines:
         if ln.startswith(var + "="):
+            changed = changed or ln != var + "=" + value
             out.append(var + "=" + value)
             replaced = True
         else:
             out.append(ln)
     if not replaced:
         out.append(var + "=" + value)
+    if changed:
+        _backup_env(env_path)
     tmp = env_path.with_suffix(".env.tmp")
     tmp.write_text("\n".join(out) + "\n")
     _os.chmod(tmp, 0o600)
@@ -1149,6 +1171,90 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
     replaced = await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
     logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True, "replaced": replaced}
+
+
+# ── Keys card: every API key in one place ──
+# Presence + masked hint only; values never leave the server. Saving goes
+# through the existing kind-aware routes above (one write path, one set of
+# laws); this section only lists and tests.
+
+
+@router.get("/keys")
+async def get_keys():
+    import keys_catalog
+
+    cfg = {sec: dict(config_store.read_section(sec) or {}) for sec in ("tts", "stt", "intelligence")}
+    return {"keys": keys_catalog.rows(_saved_env(), dict(os.environ), cfg)}
+
+
+class KeyTestPayload(BaseModel):
+    var: str = Field(min_length=1, max_length=64, pattern=r"^[A-Z0-9_]+$")
+
+
+def _keys_http(method: str, url: str, headers: dict) -> tuple:
+    """(status, body) — outbound call for a key test. Never raises on an HTTP
+    status; network failures raise OSError. Tests replace this."""
+    import urllib.error as _ue
+    import urllib.request as _rq
+
+    try:
+        with _rq.urlopen(_rq.Request(url, method=method, headers=headers), timeout=5) as resp:
+            return resp.status, resp.read(2000).decode("utf-8", "replace")
+    except _ue.HTTPError as e:
+        return e.code, e.read(2000).decode("utf-8", "replace")
+    except _ue.URLError as e:
+        raise OSError(str(e.reason)) from e
+
+
+def _key_test(row: dict, key: str) -> dict:
+    """Synchronous (worker thread). → {ok, status, detail}; never the key."""
+    def scrub(text):
+        return str(text).replace(key, "***")[:160] if key else str(text)[:160]
+
+    if row["kind"] in ("hermes", "openclaw"):
+        icfg = dict(config_store.read_section("intelligence") or {})
+        url = (icfg.get("urls") or {}).get(row["kind"]) or \
+            (icfg.get("url") if (icfg.get("kind") or "hermes") == row["kind"] else None) or ""
+        agent = "" if row.get("agent") in (None, "default") else row["agent"]
+        r = _intelligence_probe({"kind": row["kind"], "url": url, "agent": agent})
+        if r.get("ok"):
+            return {"ok": True, "status": "ok", "detail": f"{r.get('model') or row['label']} answered"}
+        err = scrub(r.get("error") or "failed")
+        status = "rejected" if ("401" in err or "403" in err) else "unreachable"
+        return {"ok": False, "status": status, "detail": err}
+    if row["kind"] == "deepgram":
+        req = ("GET", "https://api.deepgram.com/v1/projects", {"Authorization": f"Token {key}"})
+    else:
+        req = ("GET", "https://api.elevenlabs.io/v1/user", {"xi-api-key": key})
+    try:
+        code, body = _keys_http(*req)
+    except OSError as e:
+        return {"ok": False, "status": "unreachable", "detail": scrub(e)}
+    if 200 <= code < 300:
+        return {"ok": True, "status": "ok", "detail": f"{row['label']} accepted the key"}
+    if row["kind"] == "elevenlabs" and code == 401 and "missing_permissions" in body:
+        # A restricted key without user_read: authenticated, just scoped.
+        return {"ok": True, "status": "ok", "detail": "ElevenLabs accepted the key (restricted permissions)"}
+    if code in (401, 403):
+        return {"ok": False, "status": "rejected", "detail": f"{row['label']} rejected the key (HTTP {code})"}
+    return {"ok": False, "status": "unreachable", "detail": f"{row['label']} answered HTTP {code}"}
+
+
+@router.post("/keys/test", dependencies=GUARD)
+async def post_key_test(payload: KeyTestPayload):
+    """Check the SAVED key (what the next restart loads) against its
+    provider, server-side. POST + GUARD: it makes outbound requests."""
+    import keys_catalog
+
+    row = keys_catalog.target_for(payload.var)
+    if row is None:
+        raise HTTPException(status_code=422, detail=f"{payload.var} is not an API key this appliance uses")
+    key = _saved_env().get(payload.var) or ""
+    if not key:
+        return {"ok": False, "status": "missing", "detail": f"{payload.var} is not set"}
+    result = await asyncio.to_thread(_key_test, row, key)
+    logger.info(f"dashboard: key test {payload.var} -> {result['status']}")
+    return result
 
 
 # ── Intelligence (Settings — provider picker) ──

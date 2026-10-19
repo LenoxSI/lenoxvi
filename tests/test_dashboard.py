@@ -3796,6 +3796,145 @@ def main():
                 setattr(_rstt, _n, _v)
         config_store.write_section("stt", _stt_beforestt)
 
+    # ── Keys card: every API key in one place (presence + hint only) ──
+    from dashboard import routes as _rk
+    _K_VARS = ("LVI_ENV_FILE", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "LVI_HERMES_KEY",
+               "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER")
+    _k_before_env = {k: os.environ.get(k) for k in _K_VARS}
+    _k_before_cfg = {sec: dict(config_store.read_section(sec) or {}) for sec in ("tts", "stt", "intelligence")}
+    _k_saved_fns = (_rk._keys_http if hasattr(_rk, "_keys_http") else None, _rk._intelligence_probe)
+    _kenv = SCRATCH / "keys.env"
+    # Running process: deepgram OLD, elevenlabs set, hermes set. Saved .env:
+    # deepgram NEW (restart pending), hermes same, ha-butler agent key (new).
+    _kenv.write_text("DEEPGRAM_API_KEY=dg-new-SECRET-2222\nLVI_HERMES_KEY=hk-same-SECRET-3333\n"
+                     "LVI_HERMES_KEY_HA_BUTLER=hb-agent-SECRET-4444\n")
+    os.environ.update({"LVI_ENV_FILE": str(_kenv), "DEEPGRAM_API_KEY": "dg-old-SECRET-1111",
+                       "ELEVENLABS_API_KEY": "el-live-SECRET-5555", "LVI_HERMES_KEY": "hk-same-SECRET-3333"})
+    os.environ.pop("LVI_OPENCLAW_KEY", None)
+    os.environ.pop("LVI_HERMES_KEY_HA_BUTLER", None)
+    _SECRETS = ("dg-new-SECRET-2222", "dg-old-SECRET-1111", "hk-same-SECRET-3333", "hb-agent-SECRET-4444",
+                "el-live-SECRET-5555")
+    try:
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "elevenlabs"})
+        config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "deepgram"})
+        config_store.write_section("intelligence", {k: v for k, v in _k_before_cfg["intelligence"].items()
+                                                    if k not in ("agents", "agent")} | {"kind": "hermes"})
+        _kr = client.get("/api/dashboard/keys")
+        _kk = {r["var"]: r for r in (_kr.json().get("keys") or [])} if _kr.status_code == 200 else {}
+        check("keys GET: static rows in order, then agent rows found in .env",
+              [r["var"] for r in _kr.json().get("keys", [])] == ["ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_HERMES_KEY",
+                                                                 "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER"]
+              if _kr.status_code == 200 else False, _kr.text[:300])
+        check("keys GET: no key value anywhere in the response", not any(x in _kr.text for x in _SECRETS), _kr.text[:300])
+        _dg = _kk.get("DEEPGRAM_API_KEY", {})
+        check("keys GET: Deepgram — set, hint of the SAVED key, restart pending (saved != running), used by TTS+STT",
+              _dg.get("set") is True and _dg.get("hint") == _rk.intelligence_target.key_hint("dg-new-SECRET-2222")
+              and _dg.get("pending_restart") is True and _dg.get("used_by") == ["TTS", "STT"], str(_dg))
+        check("keys GET: ElevenLabs set, nothing pending; OpenClaw not set",
+              _kk.get("ELEVENLABS_API_KEY", {}).get("set") is True
+              and _kk.get("ELEVENLABS_API_KEY", {}).get("pending_restart") is False
+              and _kk.get("LVI_OPENCLAW_KEY", {}).get("set") is False, str(_kk)[:300])
+        _hb = _kk.get("LVI_HERMES_KEY_HA_BUTLER", {})
+        check("keys GET: agent row labelled 'Hermes · ha-butler', kind hermes, agent ha-butler, pending (new)",
+              _hb.get("label") == "Hermes · ha-butler" and _hb.get("kind") == "hermes" and _hb.get("agent") == "ha-butler"
+              and _hb.get("pending_restart") is True, str(_hb))
+        check("keys GET: in use follows config (TTS elevenlabs, STT deepgram, hermes default; openclaw/agent not)",
+              _kk["ELEVENLABS_API_KEY"]["in_use"] and _kk["DEEPGRAM_API_KEY"]["in_use"] and _kk["LVI_HERMES_KEY"]["in_use"]
+              and not _kk["LVI_OPENCLAW_KEY"]["in_use"] and not _hb.get("in_use"), str({k: v.get("in_use") for k, v in _kk.items()}))
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "pocket"})
+        config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "whisper"})
+        config_store.write_section("intelligence", {**config_store.read_section("intelligence"), "kind": "hermes",
+                                                    "agents": {"hermes": "ha-butler"}})
+        _kk2 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
+        check("keys GET: pocket TTS + whisper STT -> Deepgram/ElevenLabs not in use; hermes agent ha-butler -> its key in use",
+              not _kk2["DEEPGRAM_API_KEY"]["in_use"] and not _kk2["ELEVENLABS_API_KEY"]["in_use"]
+              and _kk2["LVI_HERMES_KEY_HA_BUTLER"]["in_use"] and not _kk2["LVI_HERMES_KEY"]["in_use"],
+              str({k: v.get("in_use") for k, v in _kk2.items()}))
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "deepgram-flux"})
+        _kk3 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
+        check("keys GET: deepgram-flux TTS counts as using the Deepgram key", _kk3["DEEPGRAM_API_KEY"]["in_use"])
+
+        # Test: server-side, with the SAVED key, mocked providers.
+        _hcalls = []
+        _hresp = {"v": (200, "{}")}
+
+        def _fake_http(method, url, headers):
+            _hcalls.append((method, url, dict(headers)))
+            r = _hresp["v"]
+            if isinstance(r, Exception):
+                raise r
+            return r
+        _rk._keys_http = _fake_http
+
+        def _kt(var):
+            return client.post("/api/dashboard/keys/test", json={"var": var})
+        _r = _kt("DEEPGRAM_API_KEY")
+        check("keys test: Deepgram 200 -> ok, tested with the SAVED key (not the running one), no key in the response",
+              _r.status_code == 200 and _r.json().get("status") == "ok" and _hcalls
+              and "api.deepgram.com" in _hcalls[-1][1] and "dg-new-SECRET-2222" in str(_hcalls[-1][2])
+              and not any(x in _r.text for x in _SECRETS), f"{_r.text[:200]} {_hcalls[-1:] and _hcalls[-1][1]}")
+        _hresp["v"] = (401, '{"err_code":"INVALID_AUTH"}')
+        _r = _kt("DEEPGRAM_API_KEY")
+        check("keys test: 401 -> rejected", _r.json().get("status") == "rejected" and _r.json().get("ok") is False, _r.text[:200])
+        _hresp["v"] = OSError("network is unreachable")
+        _r = _kt("DEEPGRAM_API_KEY")
+        check("keys test: network error -> unreachable", _r.json().get("status") == "unreachable", _r.text[:200])
+        _hresp["v"] = (401, '{"detail":{"status":"missing_permissions","message":"needs user_read"}}')
+        _r = _kt("ELEVENLABS_API_KEY")
+        check("keys test: ElevenLabs 401 missing_permissions = a valid restricted key -> ok",
+              _r.json().get("status") == "ok" and "api.elevenlabs.io" in _hcalls[-1][1], _r.text[:200])
+        _r = _kt("LVI_OPENCLAW_KEY")
+        check("keys test: a key that isn't set -> missing (no outbound call)", _r.json().get("status") == "missing", _r.text[:200])
+        _r = _kt("PATH")
+        check("keys test: unknown variable -> 422", _r.status_code == 422, str(_r.status_code))
+        _pcalls = []
+
+        def _fake_probe(cfg):
+            _pcalls.append(dict(cfg))
+            return {"ok": True, "model": "hermes-agent", "latency_ms": 12}
+        _rk._intelligence_probe = _fake_probe
+        _r = _kt("LVI_HERMES_KEY_HA_BUTLER")
+        check("keys test: an agent key probes Hermes as that agent",
+              _r.json().get("status") == "ok" and _pcalls and _pcalls[-1].get("kind") == "hermes"
+              and _pcalls[-1].get("agent") == "ha-butler", f"{_r.text[:160]} {_pcalls}")
+        _rk._intelligence_probe = lambda cfg: {"ok": False, "error": "HTTP 401 Unauthorized"}
+        _r = _kt("LVI_HERMES_KEY")
+        check("keys test: Hermes 401 -> rejected", _r.json().get("status") == "rejected", _r.text[:200])
+
+        # Backup on replace (real writer, scratch .env).
+        _benv = SCRATCH / "bak-test" / ".env"
+        _benv.parent.mkdir(exist_ok=True)
+        _benv.write_text("A_KEY=one\n")
+        os.environ["LVI_ENV_FILE"] = str(_benv)
+
+        def _baks():
+            return sorted(_benv.parent.glob(".env.bak-*"))
+        _asyncio.run(_rk._write_env_key("B_KEY", "first"))
+        check("backup: a first set makes no backup", _baks() == [], str(_baks()))
+        _asyncio.run(_rk._write_env_key("A_KEY", "two"))
+        _b = _baks()
+        check("backup: replacing a key backs up the old .env first (0600, holds the old value)",
+              len(_b) == 1 and "A_KEY=one" in _b[0].read_text() and (_b[0].stat().st_mode & 0o777) == 0o600
+              and "A_KEY=two" in _benv.read_text(), str(_b))
+        _asyncio.run(_rk._write_env_key("A_KEY", "two"))
+        check("backup: saving the same value again makes no backup", len(_baks()) == 1, str(_baks()))
+        for _v in ("three", "four", "five", "six"):
+            _asyncio.run(_rk._write_env_key("A_KEY", _v))
+        _b = _baks()
+        check("backup: only the newest 3 are kept", len(_b) == 3 and "A_KEY=five" in _b[-1].read_text(),
+              f"{len(_b)} {[x.read_text() for x in _b]}")
+    finally:
+        if _k_saved_fns[0] is not None:
+            _rk._keys_http = _k_saved_fns[0]
+        _rk._intelligence_probe = _k_saved_fns[1]
+        for _k, _v in _k_before_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _sec, _val in _k_before_cfg.items():
+            config_store.write_section(_sec, _val)
+
     # ── cloud STT provider (Deepgram) ─────────────────────────────────
     from dashboard import routes as _rdg
     _dg_saved = tuple(getattr(_rdg, _n, None) for _n in ("_stt_deepgram_sdk",))
