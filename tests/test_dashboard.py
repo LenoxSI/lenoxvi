@@ -3366,6 +3366,7 @@ def main():
 
     # ── stt STT card (routes) ─────────────────────────────────────────
     import time as _tstt
+
     import yaml as _ystt
     from dashboard import routes as _rstt
 
@@ -3376,9 +3377,14 @@ def main():
     _GPUstt = {"name": "RTX TEST 12GB"}
     _DLstt = {"delay": 0.3, "fail": False, "calls": []}
 
-    def _fake_dlstt(name):
+    def _fake_dlstt(name, on_progress=None):
         _DLstt["calls"].append(name)
-        _tstt.sleep(_DLstt["delay"])
+        if on_progress:
+            on_progress(0, 1_500_000_000)
+        _tstt.sleep(_DLstt["delay"] / 2)
+        if on_progress:
+            on_progress(650_000_000, 1_500_000_000)
+        _tstt.sleep(_DLstt["delay"] / 2)
         if _DLstt["fail"]:
             raise RuntimeError("network down")
         _CACHEDstt.add(name)
@@ -3457,6 +3463,11 @@ def main():
         check("stt a language change mid-download is accepted", _r3.status_code == 200, str(_r3.status_code))
         check("stt GET shows the download in progress",
               (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") == "downloading")
+        _tstt.sleep(_DLstt["delay"] * 0.75)
+        _dp = client.get("/api/dashboard/stt").json().get("download") or {}
+        check("stt download progress: bytes + percent while downloading",
+              _dp.get("done_bytes") == 650_000_000 and _dp.get("total_bytes") == 1_500_000_000
+              and _dp.get("percent") == 43, str(_dp))
         for _ in range(40):
             if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
                 break
@@ -3505,8 +3516,61 @@ def main():
               _d.get("state") == "error" and "network down" in (_d.get("error") or "") and _sttstt().get("model") == "base",
               f"dl={_d} cfg={_sttstt()}")
 
+        # ── delete ──
+        _DELstt = []
+        _saved_del = tuple(getattr(_rstt, _n, None) for _n in ("_stt_delete", "_stt_disk_bytes"))
+        _rstt._stt_delete = lambda name: (_DELstt.append(name), _CACHEDstt.discard(name), 464_000_000)[2]
+        _rstt._stt_disk_bytes = lambda name: {"large-v3-turbo": 1_600_000_000, "medium": 1_500_000_000,
+                                               "small": 464_000_000, "base": 142_000_000}.get(name, 0) \
+            if name in _CACHEDstt else 0
+        _saved_status = _rstt._stt_status
+        _rstt._stt_status = lambda: {"state": "ready", "model": "large-v3-turbo", "device": "cuda",
+                                     "compute": "float16", "samples": 0}
+        try:
+            _CACHEDstt.update({"large-v3-turbo", "medium", "small", "base"})
+            client.put("/api/dashboard/stt", json={"model": "medium"})   # configured = medium, running = turbo
+            _g = client.get("/api/dashboard/stt").json()
+            _m = {m["name"]: m for m in _g["models"]}
+            check("stt GET: size on disk per downloaded model",
+                  _m["small"].get("disk_bytes") == 464_000_000 and _m["base"].get("disk_bytes") == 142_000_000,
+                  str({k: v.get("disk_bytes") for k, v in _m.items()}))
+            check("stt GET: deletable = downloaded and not configured/running",
+                  [n for n, m in _m.items() if m.get("deletable")] == ["small", "base"],
+                  str({k: v.get("deletable") for k, v in _m.items()}))
+            for _n, _why in (("medium", "the configured model"), ("large-v3-turbo", "the running model")):
+                _r = client.delete(f"/api/dashboard/stt/model/{_n}")
+                check(f"stt DELETE refuses {_why} (409)", _r.status_code == 409 and not _DELstt,
+                      f"{_r.status_code} {_r.text[:100]}")
+            _r = client.delete("/api/dashboard/stt/model/large-v3")
+            check("stt DELETE refuses a model outside the four (422)", _r.status_code == 422, str(_r.status_code))
+            _r = client.delete("/api/dashboard/stt/model/small")
+            check("stt DELETE removes an unused downloaded model, reports freed bytes",
+                  _r.status_code == 200 and _r.json().get("freed_bytes") == 464_000_000 and _DELstt == ["small"],
+                  f"{_r.status_code} {_r.text[:120]} calls={_DELstt}")
+            _g = client.get("/api/dashboard/stt").json()
+            _m = {m["name"]: m for m in _g["models"]}
+            check("stt after delete: shown as not downloaded (downloads first again)",
+                  _m["small"]["cached"] is False and not _m["small"].get("deletable"), str(_m["small"]))
+            _r = client.delete("/api/dashboard/stt/model/small")
+            check("stt DELETE of a model that isn't downloaded -> 404", _r.status_code == 404, str(_r.status_code))
+            # a model mid-download can't be deleted
+            _DLstt.update(fail=False, delay=0.4)
+            client.put("/api/dashboard/stt", json={"model": "small"})
+            _r = client.delete("/api/dashboard/stt/model/small")
+            check("stt DELETE refuses the model being downloaded (409)", _r.status_code == 409, str(_r.status_code))
+            for _ in range(40):
+                if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
+                    break
+                _tstt.sleep(0.05)
+        finally:
+            _rstt._stt_status = _saved_status
+            for _n, _v in zip(("_stt_delete", "_stt_disk_bytes"), _saved_del):
+                if _v is not None:
+                    setattr(_rstt, _n, _v)
+
         # partial download must not count as cached (real hook, faked hub)
         import tempfile as _tfstt
+
         import faster_whisper.utils as _fwu
         _real_cached = _savedstt[0]
         _real_dm = _fwu.download_model
@@ -3522,6 +3586,38 @@ def main():
         check("stt a partial snapshot (no model.bin/config.json) is NOT cached; a complete one is",
               _empty is False and _full is True, f"{_empty} {_full}")
 
+        # real download hook vs huggingface_hub's progress contract: snapshot_download builds two
+        # bars from tqdm_class ("Downloading bytes" = network, "Reconstructing…" = written to disk)
+        import huggingface_hub as _hhstt
+        _real_dl = _savedstt[1]
+        _seen = {}
+        def _fake_snapshot(repo_id, allow_patterns=None, tqdm_class=None, **kw):
+            _seen.update(repo=repo_id, patterns=list(allow_patterns or []))
+            net = tqdm_class(desc="Downloading bytes", total=0, initial=0, unit="B", unit_scale=True)
+            rec = tqdm_class(desc="Reconstructing (incomplete total...)", total=0, initial=0, unit="B", unit_scale=True)
+            rec.total = 1000
+            rec.refresh()
+            net.update(900)            # network bytes must NOT drive the bar
+            rec.update(250)
+            rec.update(250)
+            net.close()
+            rec.close()
+            return "/nowhere"
+        _real_snap = _hhstt.snapshot_download
+        _hhstt.snapshot_download = _fake_snapshot
+        _prog = []
+        try:
+            if _real_dl:
+                _real_dl("medium", on_progress=lambda d, t: _prog.append((d, t)))
+        finally:
+            _hhstt.snapshot_download = _real_snap
+        check("stt real download: medium's repo + faster-whisper's file patterns",
+              _seen.get("repo") == "Systran/faster-whisper-medium"
+              and _seen.get("patterns") == ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"],
+              str(_seen))
+        check("stt real download: progress follows the bytes-written bar only, ends at 500/1000",
+              bool(_prog) and _prog[-1] == (500, 1000) and all(d <= 500 for d, _ in _prog), str(_prog))
+
         _s = client.get("/api/dashboard/status").json()
         check("stt /status carries the stt block", isinstance(_s.get("stt"), dict) and "state" in _s["stt"],
               str(_s.get("stt")))
@@ -3533,6 +3629,7 @@ def main():
 
     # config_store: writes from worker threads must not corrupt config.yaml
     import threading as _thcs
+
     import yaml as _ycs
     _errs, _N = [], 40
     def _w(sec):

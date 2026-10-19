@@ -9,12 +9,23 @@ Hand-set config values outside these lists are left alone (shown as
 from __future__ import annotations
 
 MODELS = [
-    {"name": "large-v3-turbo", "label": "Turbo — best all-round", "size_gb": 1.6, "gpu_only": True},
-    {"name": "medium", "label": "Medium — faster, solid in noise", "size_gb": 1.5, "gpu_only": True},
-    {"name": "small", "label": "Small — snappy in quiet rooms", "size_gb": 0.5, "gpu_only": False},
-    {"name": "base", "label": "Base — no GPU / fastest", "size_gb": 0.15, "gpu_only": False},
+    {"name": "large-v3-turbo", "label": "Turbo — best all-round", "size_gb": 1.6, "gpu_only": True,
+     "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"},
+    {"name": "medium", "label": "Medium — faster, solid in noise", "size_gb": 1.5, "gpu_only": True,
+     "repo": "Systran/faster-whisper-medium"},
+    {"name": "small", "label": "Small — snappy in quiet rooms", "size_gb": 0.5, "gpu_only": False,
+     "repo": "Systran/faster-whisper-small"},
+    {"name": "base", "label": "Base — no GPU / fastest", "size_gb": 0.15, "gpu_only": False,
+     "repo": "Systran/faster-whisper-base"},
 ]
 MODEL_NAMES = [m["name"] for m in MODELS]
+# The files faster-whisper fetches for a model (same list as its
+# download_model), so our own download leaves exactly what it would.
+FILE_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+
+
+def spec(name):
+    return next((m for m in MODELS if m["name"] == name), None)
 
 LANGUAGES = [
     {"code": "auto", "label": "Auto-detect"},

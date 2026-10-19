@@ -20,7 +20,7 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-import stt_catalog as cat  # noqa: E402
+import stt_catalog as cat
 
 # ── catalog ──────────────────────────────────────────────────────────
 names = [m["name"] for m in cat.MODELS]
@@ -29,6 +29,12 @@ check("stt catalog: exactly the four benchmarked models, Turbo first",
 gpu_only = {m["name"]: m["gpu_only"] for m in cat.MODELS}
 check("stt catalog: Turbo + Medium are GPU-only; Small + Base run on CPU",
       gpu_only == {"large-v3-turbo": True, "medium": True, "small": False, "base": False}, str(gpu_only))
+repos = {m["name"]: m.get("repo") for m in cat.MODELS}
+check("stt catalog: pinned Hugging Face repos (no reliance on faster-whisper internals)",
+      repos == {"large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo", "medium": "Systran/faster-whisper-medium",
+                "small": "Systran/faster-whisper-small", "base": "Systran/faster-whisper-base"}, str(repos))
+check("stt catalog: download file patterns match faster-whisper's",
+      cat.FILE_PATTERNS == ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"])
 check("stt catalog: every model has a label and a size",
       all(m.get("label") and isinstance(m.get("size_gb"), (int, float)) for m in cat.MODELS))
 codes = [lang["code"] for lang in cat.LANGUAGES]
@@ -48,7 +54,7 @@ check("stt language_value: auto/empty -> None, code -> code",
       and cat.language_value(None) is None and cat.language_value("en") == "en")
 
 # ── stt_local: status on preload ─────────────────────────────────────
-import stt_local as sl  # noqa: E402
+import stt_local as sl
 
 
 class _Seg:

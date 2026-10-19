@@ -1461,9 +1461,9 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
 # downloaded FIRST; config switches only after the download succeeds, so a
 # restart never downloads and config never names a missing model.
 
-import threading  # noqa: E402
+import threading
 
-import stt_catalog  # noqa: E402
+import stt_catalog
 
 _STT_DL: dict = {}          # {"model", "state": downloading|ready|error, "error"?}
 _STT_DL_LOCK = threading.Lock()
@@ -1482,9 +1482,65 @@ def _stt_cached(name: str) -> bool:
     return (path / "model.bin").is_file() and (path / "config.json").is_file()
 
 
-def _stt_download(name: str) -> None:
-    from faster_whisper.utils import download_model
-    download_model(name)
+def _stt_download(name: str, on_progress=None) -> None:
+    """Fetch a model with byte progress. faster-whisper's download_model
+    hard-disables progress, so this calls snapshot_download directly with
+    the same repo + file patterns, and a silent tqdm class: the hub builds a
+    "Downloading bytes" bar (network) and a "Reconstructing…" bar (bytes
+    written to disk) from it and aggregates every file into them. Only the
+    written-to-disk bar is reported."""
+    from huggingface_hub import snapshot_download
+    from tqdm import tqdm
+
+    class _Progress(tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs["file"] = open(os.devnull, "w")  # noqa: SIM115 — closed in close()
+            kwargs["disable"] = False
+            self._report = str(kwargs.get("desc", "")).startswith("Reconstructing")
+            super().__init__(*args, **kwargs)
+
+        def update(self, n=1):
+            out = super().update(n)
+            if self._report and on_progress:
+                on_progress(int(self.n), int(self.total or 0))
+            return out
+
+        def close(self):
+            fp = self.fp
+            super().close()
+            fp.close()
+
+    snapshot_download(stt_catalog.spec(name)["repo"], allow_patterns=stt_catalog.FILE_PATTERNS,
+                      tqdm_class=_Progress)
+
+
+def _stt_hub_repo(name: str):
+    from huggingface_hub import scan_cache_dir
+
+    repo_id = stt_catalog.spec(name)["repo"]
+    return next((r for r in scan_cache_dir().repos if r.repo_id == repo_id and r.repo_type == "model"), None)
+
+
+def _stt_disk_bytes(name: str) -> int:
+    try:
+        repo = _stt_hub_repo(name)
+    except Exception:  # noqa: BLE001 — no cache dir yet
+        return 0
+    return int(repo.size_on_disk) if repo else 0
+
+
+def _stt_delete(name: str) -> int:
+    """Remove a model from the Hugging Face cache via the hub's own API
+    (never a hand-rolled rm). Returns bytes freed."""
+    from huggingface_hub import scan_cache_dir
+
+    repo = _stt_hub_repo(name)
+    if repo is None:
+        return 0
+    strategy = scan_cache_dir().delete_revisions(*(rev.commit_hash for rev in repo.revisions))
+    freed = int(strategy.expected_freed_size)
+    strategy.execute()
+    return freed
 
 
 def _stt_gpu_name():
@@ -1497,12 +1553,12 @@ def _stt_gpu_name():
         if ctranslate2.get_cuda_device_count() > 0:
             name = "GPU"
             try:
-                out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], check=False,
                                      capture_output=True, text=True, timeout=3)
                 first = out.stdout.strip().splitlines()[0].strip() if out.returncode == 0 else ""
                 name = first.replace("NVIDIA ", "") or name
-            except Exception:  # noqa: BLE001 — a name is cosmetic; "GPU" will do
-                pass
+            except Exception as e:  # noqa: BLE001 — a name is cosmetic; "GPU" will do
+                logger.debug(f"stt: nvidia-smi name lookup failed: {e}")
     except Exception:  # noqa: BLE001 — no ctranslate2 CUDA support -> no GPU
         name = None
     _GPU_NAME_CACHE.append(name)
@@ -1543,9 +1599,22 @@ def _stt_write(model: str | None = None, language: str | None = None, has_gpu: b
         config_store.write_section("stt", section)
 
 
+def _stt_progress(model: str):
+    """Download progress sink: bytes written so far / expected total. Early
+    on the hub's total only covers files already started, so the catalog
+    size is the floor — the bar never shoots up and falls back."""
+    floor = int(stt_catalog.spec(model)["size_gb"] * 1e9)
+
+    def report(done: int, total: int) -> None:
+        with _STT_DL_LOCK:
+            if _STT_DL.get("model") == model and _STT_DL.get("state") == "downloading":
+                _STT_DL.update(done_bytes=done, total_bytes=total if total >= 0.8 * floor else floor)
+    return report
+
+
 def _stt_download_then_switch(model: str, has_gpu: bool) -> None:
     try:
-        _stt_download(model)
+        _stt_download(model, on_progress=_stt_progress(model))
         _stt_write(model=model, has_gpu=has_gpu)
         with _STT_DL_LOCK:
             _STT_DL.update(model=model, state="ready")
@@ -1573,19 +1642,52 @@ class SttPayload(BaseModel):
 async def get_stt():
     gpu = await asyncio.to_thread(_stt_gpu_name)
     cached = await asyncio.gather(*(asyncio.to_thread(_stt_cached, m["name"]) for m in stt_catalog.MODELS))
-    import stt_local
-
     with _STT_DL_LOCK:
         dl = dict(_STT_DL) or None
+    if dl and dl.get("state") == "downloading" and dl.get("total_bytes"):
+        dl["percent"] = min(99, round(100 * dl.get("done_bytes", 0) / dl["total_bytes"]))
+    sizes = await asyncio.gather(*(asyncio.to_thread(_stt_disk_bytes, m["name"]) if c else _zero()
+                                   for m, c in zip(stt_catalog.MODELS, cached)))
+    in_use = _stt_in_use()
     return {
         "current": _stt_current(),
-        "models": [{**m, "cached": c, "available": not (m["gpu_only"] and gpu is None)}
-                   for m, c in zip(stt_catalog.MODELS, cached)],
+        "models": [{**{k: v for k, v in m.items() if k != "repo"}, "cached": c,
+                    "available": not (m["gpu_only"] and gpu is None),
+                    "disk_bytes": size if c else 0,
+                    "deletable": bool(c) and m["name"] not in in_use}
+                   for m, c, size in zip(stt_catalog.MODELS, cached, sizes)],
         "languages": stt_catalog.LANGUAGES,
         "gpu": gpu,
-        "status": stt_local.status(),
+        "status": _stt_status(),
         "download": dl,
     }
+
+
+async def _zero():
+    return 0
+
+
+def _stt_in_use() -> set:
+    """Models the bot needs: the configured one (next boot), the loaded one,
+    and one mid-download."""
+    used = {_stt_current()["model"], _stt_status().get("model")}
+    with _STT_DL_LOCK:
+        if _STT_DL.get("state") == "downloading":
+            used.add(_STT_DL.get("model"))
+    return {m for m in used if m}
+
+
+@router.delete("/stt/model/{name}", dependencies=GUARD)
+async def delete_stt_model(name: str):
+    if stt_catalog.spec(name) is None:
+        raise HTTPException(status_code=422, detail=f"model must be one of {stt_catalog.MODEL_NAMES}")
+    if name in _stt_in_use():
+        raise HTTPException(status_code=409, detail=f"{name} is in use (configured, loaded or downloading)")
+    if not await asyncio.to_thread(_stt_cached, name):
+        raise HTTPException(status_code=404, detail=f"{name} isn't downloaded")
+    freed = await asyncio.to_thread(_stt_delete, name)
+    logger.info(f"stt: deleted {name} from the model cache ({freed / 1e6:.0f} MB)")
+    return {"ok": True, "freed_bytes": freed}
 
 
 @router.put("/stt", dependencies=GUARD)

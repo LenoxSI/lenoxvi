@@ -1549,8 +1549,11 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
    model before switching config (restart only offered once it's on disk). */
 const CHIP_CLS = 'inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium'
 
+const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`
+
 function sttStateChip(st, dl) {
-  if (dl?.state === 'downloading') return { text: `Downloading ${dl.model}…`, cls: 'text-[var(--muted)]' }
+  if (dl?.state === 'downloading')
+    return { text: `Downloading ${dl.model}…${dl.percent != null ? ` ${dl.percent}%` : ''}`, cls: 'text-[var(--muted)]' }
   if (!st) return { text: '…', cls: 'text-[var(--muted)]' }
   if (st.state === 'ready') return { text: '● Running', cls: 'text-[var(--success)]' }
   if (st.state === 'error') return { text: '● Failed to load', cls: 'text-[var(--danger)]', title: st.error }
@@ -1615,6 +1618,15 @@ function SttCard({ status, setMsg, setRebooting }) {
     return () => { alive = false; clearInterval(t) }
   }, [downloading, setRebooting])
 
+  const del = async m => {
+    if (!window.confirm(`Delete ${m.name} (${fmtBytes(m.disk_bytes)})? It downloads again if you pick it later.`)) return
+    try {
+      const r = await api(`/api/dashboard/stt/model/${encodeURIComponent(m.name)}`, { method: 'DELETE' })
+      await load()
+      setMsg(`Deleted ${m.name} — freed ${fmtBytes(r.freed_bytes || 0)}.`, 'ok', 'STT')
+    } catch (e) { setMsg('Delete failed: ' + e.message, 'err', 'STT') }
+  }
+
   const save = async () => {
     if (!data) return
     const body = {}
@@ -1655,6 +1667,41 @@ function SttCard({ status, setMsg, setRebooting }) {
           <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
             {ms != null ? `${(ms / 1000).toFixed(2)} s / command` : '— s / command'}</span>
         </div>
+        {downloading && (
+          <div className="grid gap-2">
+            <div id="stt-progress" className="w-full rounded-full bg-[var(--default)] overflow-hidden" style={{ height: 6 }}>
+              <div className="rounded-full bg-[var(--accent)]"
+                style={{ height: 6, width: `${Math.max(2, data.download.percent || 0)}%` }} />
+            </div>
+            <span className="text-[12px] text-[var(--muted)]">
+              {data.download.total_bytes
+                ? `${fmtBytes(data.download.done_bytes || 0)} / ${fmtBytes(data.download.total_bytes)}`
+                : 'Starting download…'}
+            </span>
+          </div>
+        )}
+        <table id="stt-models" className="w-full text-[14px]">
+          <thead>
+            <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+              <th className="text-left px-4 py-2">Model</th>
+              <th className="text-left px-4 py-2">On disk</th>
+              <th className="text-left px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map(m => (
+              <tr key={m.name} data-model={m.name} className="border-t border-[var(--separator)]">
+                <td className="px-4 py-2 font-mono text-[13px]">{m.name}</td>
+                <td className="px-4 py-2 font-mono text-[13px]">{m.cached ? fmtBytes(m.disk_bytes || 0) : '—'}</td>
+                <td className="px-4 py-2 text-right">
+                  {m.deletable
+                    ? <button className={BTN_DANGER} onClick={() => del(m)}>Delete</button>
+                    : m.cached && <span className="text-[12px] text-[var(--muted)]">in use</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <Field label="Model">
           <select id="stt-model" className={`${INPUT_CLS} w-[260px]`} value={model || ''}
             onChange={e => setModel(e.target.value)} disabled={!data}>
