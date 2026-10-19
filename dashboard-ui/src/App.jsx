@@ -1090,14 +1090,14 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                     {r.online && r.tts_usable === false && (
                       <span
                         title={`TTS (${r.tts_provider || 'provider unknown'}) is down — this node hears you but can't speak. Reboot the node (or the bot) to rebuild its session.`}
-                        className="inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium bg-[var(--danger)] text-[var(--danger-foreground)]">
+                        className={`inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium ${STAT_TONE.danger}`}>
                         tts down
                       </span>
                     )}
                     {r.online && r.tts_usable !== false && String(r.tts_provider || '').endsWith('(fallback)') && (
                       <span
                         title="The cloud TTS is down — this room is speaking with local Pocket TTS until it comes back."
-                        className="inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium bg-[var(--warning)] text-[var(--warning-foreground)]">
+                        className={`inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium ${STAT_TONE.warning}`}>
                         tts fallback
                       </span>
                     )}
