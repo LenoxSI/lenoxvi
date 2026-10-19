@@ -27,11 +27,17 @@ The two version streams are independent.
   Deepgram, Hermes, OpenClaw and each Hermes agent key. Each row shows
   what uses the key, whether it's set (first 4 characters only),
   missing, or saved and waiting for a restart, with Replace and Test
-  (checks the saved key with its provider before you restart). Add agent
-  key lists the Hermes agents that don't have one yet. Replacing a key
-  keeps a private backup of the old `.env` (newest 3). Keys are never
-  shown, never deleted. The TTS, STT and Intelligence cards no longer
-  take keys; they link to the Keys card when one is missing.
+  (checks the saved key with its provider before you restart). Rows show
+  only the keys you have (plus any key in use but missing); one Add row
+  picks a service or a Hermes agent without a key, saves, then tests it.
+  Remove deletes a key after a confirmation that says what will stop
+  working. Replacing or removing a key keeps a private backup of the old
+  `.env` (newest 3). Keys are never shown. The TTS, STT and Intelligence
+  cards no longer take keys; they link to the Keys card when one is
+  missing.
+- **Per-room agent.** Room -> zone mapping gets an Agent column: each room
+  can talk to a different agent than the Intelligence card's default,
+  per intelligence system. A room without a pick follows the default.
 - **Cloud speech-to-text (Deepgram Nova-3).** The STT card gets a
   Provider choice: *Local — Whisper* (private, the default) or *Deepgram
   Nova-3 (cloud)* for top transcription quality on modest hardware. On
