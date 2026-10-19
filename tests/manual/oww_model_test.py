@@ -1,15 +1,17 @@
-"""Headless test: does the wake-word OWW model (MODEL below) load and behave?
+"""Headless test: does a wake-word OWW model load and behave?
+Usage: python tests/manual/oww_model_test.py <path/to/model.onnx>
 
 Feed 10s of synthetic noise (no wake word) — scores must stay LOW.
 We cannot synthesize a positive without real wake-phrase audio, so the
 positive case is validated by a live test.
 """
 
+import sys
 import time
 
 import numpy as np
 
-MODEL = "Hey_Willow_1-0.onnx"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else sys.exit(__doc__)
 
 
 def main():

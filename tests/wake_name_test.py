@@ -33,13 +33,13 @@ check("wake name name: wake.name used, whitespace tidied", wn.name() == "Bill", 
 check("wake name: no derivation helpers left", not hasattr(wn, "derive_name") and not hasattr(wn, "effective_name"))
 
 # regex — identical behaviour for this rig's shape of config
-CFG["wake"] = {"name": "Willow", "heard_as": ["Linux", "yellow", "linux"]}
-check("wake name: aliases normalised + de-duplicated", wn.aliases() == ["linux", "yellow"], str(wn.aliases()))
-for t in ["Hey Linux.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay yellow.", "hi willow",
+CFG["wake"] = {"name": "Willow", "heard_as": ["Yellow", "junipur", "yellow"]}
+check("wake name: aliases normalised + de-duplicated", wn.aliases() == ["yellow", "junipur"], str(wn.aliases()))
+for t in ["Hey Yellow.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay junipur.", "hi willow",
           "Hey, Willow."]:
     check(f"wake name drop: {t!r}", wn.is_wake_phrase_only(t))
 for t in ["Hey Willow turn on the lights", "what's the weather", "hey willow, kill the kitchen lights",
-          "Willow is my assistant", "install Linux on my laptop", ""]:
+          "Willow is my assistant", "show me Yellow tonight", ""]:
     check(f"wake name keep: {t!r}", not wn.is_wake_phrase_only(t))
 
 # Review Focus 1/2: metacharacters escaped; a common-word alias stays harmless
@@ -83,13 +83,13 @@ check("wake name: accented names are valid; digits/punctuation still rejected",
       and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
 check("wake name: filler words are reserved (never aliases)",
       all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
-      and not wn.reserved_term("linux") and not wn.reserved_term("yellow"))
-CFG["wake"] = {"name": "Willow", "heard_as": ["linux"]}
+      and not wn.reserved_term("yellow") and not wn.reserved_term("junipur"))
+CFG["wake"] = {"name": "Willow", "heard_as": ["yellow"]}
 check("wake name: a leading comma with no prefix still drops (', Willow.')",
-      wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Linux."))
-CFG["wake"] = {"name": "Willow", "heard_as": ["okay", "linux"]}
+      wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Yellow."))
+CFG["wake"] = {"name": "Willow", "heard_as": ["okay", "yellow"]}
 check("wake name: a reserved word hand-edited into heard_as is ignored by the filter",
-      not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey linux"))
+      not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey yellow"))
 
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
