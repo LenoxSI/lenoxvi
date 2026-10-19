@@ -263,9 +263,12 @@ function MissingKey({ label }) {
 }
 
 // The save route for a row: the existing kind-aware routes (one write path).
+// A catalog key with no route here can't be saved from the card (null) —
+// never sent through another kind's route.
 function keyRoute(row) {
   if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
   if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
+  if (row.kind !== 'hermes' && row.kind !== 'openclaw') return null
   const named = row.kind === 'hermes' && row.agent && row.agent !== 'default'
   return ['/api/dashboard/intelligence/key', { kind: row.kind, ...(named ? { agent: row.agent } : {}) }]
 }
@@ -282,11 +285,26 @@ function KeysCard({ setMsg, setRebooting }) {
   const [open, setOpen] = useState(null)        // var being replaced
   const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
   const [tests, setTests] = useState({})        // var -> {status, detail}
-  const [agents, setAgents] = useState(null)    // Hermes agents with no key yet
+  const [agents, setAgents] = useState([])      // Hermes agents with no key yet
   const [agentNote, setAgentNote] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [addAgent, setAddAgent] = useState('')
+  const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'
   const msgRef = useRef(setMsg)
+  const discover = useRef(null)
+  useEffect(() => {
+    discover.current = async () => {
+      try {
+        const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
+        setAgents((d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id))
+        setAgentNote(d.note || '')
+      } catch (e) { setAgents([]); setAgentNote('Agent list failed: ' + e.message) }
+    }
+  })
+  useEffect(() => {
+    const h = () => discover.current?.()
+    h()
+    window.addEventListener('lenoxvi:reload-all', h)  // an added agent key leaves the list
+    return () => window.removeEventListener('lenoxvi:reload-all', h)
+  }, [])
   useEffect(() => { msgRef.current = setMsg })
   const load = () => api('/api/dashboard/keys').then(d => { setKeys(d.keys || []); return d })
   useEffect(() => {
@@ -300,17 +318,20 @@ function KeysCard({ setMsg, setRebooting }) {
 
   const save = async (row, inputId) => {
     const key = readKey(inputId)
-    if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return }
-    const [route, extra] = keyRoute(row)
+    if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return null }
+    const target = keyRoute(row)
+    if (!target) { setMsg(`${row.label} keys can't be saved from the card yet.`, 'err', 'Keys'); return null }
+    const [route, extra] = target
     try {
-      await api(route, { method: 'PUT', json: { ...extra, api_key: key } })
-      setOpen(null); setAdding(false); setEpoch(n => n + 1)
+      const r = await api(route, { method: 'PUT', json: { ...extra, api_key: key } })
+      setOpen(null); setEpoch(n => n + 1)
       setTests(t => ({ ...t, [row.var]: undefined }))
       await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
       setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
       offerRestart(setMsg, setRebooting)
-    } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys') }
+      return r || {}
+    } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys'); return null }
   }
 
   const remove = async row => {
@@ -337,13 +358,22 @@ function KeysCard({ setMsg, setRebooting }) {
     } catch (e) { setTests(t => ({ ...t, [row.var]: { status: 'unreachable', detail: e.message } })) }
   }
 
-  const startAdd = async () => {
-    setAdding(true); setAgents(null); setAgentNote('')
-    try {
-      const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
-      const list = (d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id)
-      setAgents(list); setAddAgent(list[0] || ''); setAgentNote(d.note || '')
-    } catch (e) { setAgents([]); setMsg('Agent list failed: ' + e.message, 'err', 'Keys') }
+  // Rows = keys you have, a removed one until restart, and any key in use
+  // but missing (a broken setup never hides). Everything else is offered
+  // in the one Add picker.
+  const shown = r => r.set || r.pending_restart || r.in_use
+  const services = (keys || []).filter(r => !shown(r))
+  const firstPick = services.find(r => keyRoute(r))?.var || (agents[0] ? `agent:${agents[0]}` : '')
+  const pickValue = (addPick.startsWith('agent:') ? agents.includes(addPick.slice(6))
+    : services.some(r => r.var === addPick && keyRoute(r))) ? addPick : firstPick
+  const add = async () => {
+    const row = pickValue.startsWith('agent:')
+      ? { var: '', label: `Hermes · ${pickValue.slice(6)}`, kind: 'hermes', agent: pickValue.slice(6) }
+      : services.find(r => r.var === pickValue)
+    if (!row) return
+    const r = await save(row, 'keyin-add')
+    const v = r && (r.var || row.var)
+    if (v) test({ var: v })  // the new key, checked right away
   }
 
   return (
@@ -362,7 +392,7 @@ function KeysCard({ setMsg, setRebooting }) {
                 </tr>
               </thead>
               <tbody>
-                {[...keys].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })).map(row => {
+                {keys.filter(shown).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })).map(row => {
                   const st = keyState(row)
                   const t = tests[row.var]
                   const close = () => setOpen(null)
@@ -421,25 +451,29 @@ function KeysCard({ setMsg, setRebooting }) {
           </div>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          {!adding ? (
-            <button className={BTN_DEFAULT} onClick={startAdd}>Add agent key</button>
-          ) : agents === null ? (
-            <span className="text-[13px] text-[var(--muted)]">Finding Hermes agents…</span>
-          ) : agents.length === 0 ? (
-            <>
-              <span className="text-[13px] text-[var(--muted)]">{agentNote || 'Every Hermes agent already has a key.'}</span>
-              <button className={BTN_DEFAULT} onClick={() => setAdding(false)}>Cancel</button>
-            </>
+          {!firstPick ? (
+            <span className="text-[13px] text-[var(--muted)]">Every key is set.{agentNote ? ` ${agentNote}` : ''}</span>
           ) : (
             <>
-              <select id="key-add-agent" className={`${INPUT_CLS} w-auto`} value={addAgent}
-                onChange={e => setAddAgent(e.target.value)}>
-                {agents.map(a => <option key={a} value={a}>{a}</option>)}
+              <select id="key-add" className={`${INPUT_CLS} w-auto`} value={pickValue}
+                onChange={e => setAddPick(e.target.value)}>
+                {services.length > 0 && (
+                  <optgroup label="Services">
+                    {services.map(r => (
+                      <option key={r.var} value={r.var} disabled={!keyRoute(r)}>
+                        {`${r.label} — ${r.used_by.join(' · ')}${keyRoute(r) ? '' : ' (not supported yet)'}`}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {agents.length > 0 && (
+                  <optgroup label="Hermes agents">
+                    {agents.map(a => <option key={a} value={`agent:${a}`}>{`Hermes · ${a}`}</option>)}
+                  </optgroup>
+                )}
               </select>
-              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the agent's API key…" />
-              <button className={BTN_PRIMARY} onClick={() => save(
-                { var: '', label: `Hermes · ${addAgent}`, kind: 'hermes', agent: addAgent }, 'keyin-add')}>Save</button>
-              <button className={BTN_DEFAULT} onClick={() => setAdding(false)}>Cancel</button>
+              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the key…" />
+              <button className={BTN_PRIMARY} onClick={add}>Add</button>
+              {agentNote && <span className="text-[13px] text-[var(--muted)]">{agentNote}</span>}
             </>
           )}
         </div>
