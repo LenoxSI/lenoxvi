@@ -283,11 +283,38 @@ async def get_mapping(names: bool = False):
 
 def _agent_default() -> dict:
     """The intelligence system the bot runs and its house-default agent —
-    what a room without an override uses."""
-    icfg = dict(config_store.read_section("intelligence") or {})
-    kind = str(icfg.get("kind") or os.getenv("LVI_INTELLIGENCE_KIND") or "hermes").strip().lower()
+    what a room without an override uses. Same inputs as the bot
+    (IntelligenceAgent.__init__), env fallbacks included."""
+    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").strip().lower()
+    icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
+            "agents": dict(config_store.read_section("intelligence") or {}).get("agents") or {}}
     agent = intelligence_target.agent_for(icfg, kind) or ("default" if kind == "hermes" else "")
     return {"agent_kind": kind, "default_agent": agent}
+
+
+def _merge_room_agents(sent: dict, room_zones: dict) -> dict:
+    """room_agents after a PUT: each sent system's map replaces the stored
+    one ("" drops a room = back to the default). Only a NEW or CHANGED pick
+    must name a mapped or connected room — a leftover override (its zone
+    deleted, its node retired) passes unchanged or cleared, so it can never
+    wedge every later save."""
+    known = set(room_zones) | {k["room"] for k in registry.known_rooms()}
+    known.discard(registry.PROVISIONAL)
+    agents = dict(config_store.read_section("room_agents") or {})
+    for kind, rooms in sent.items():
+        stored = dict(agents.get(kind) or {})
+        picked = {}
+        for room, agent in rooms.items():
+            room, agent = room.strip(), (agent or "").strip()
+            if not agent:
+                continue
+            if not intelligence_target.AGENT_RE.match(agent):
+                raise HTTPException(status_code=400, detail=f"invalid agent name for room '{room}'")
+            if agent != str(stored.get(room) or "") and room not in known:
+                raise HTTPException(status_code=400, detail=f"room '{room}' is not mapped or connected")
+            picked[room] = agent
+        agents[kind] = picked
+    return agents
 
 
 @router.put("/mapping", dependencies=GUARD)
@@ -329,24 +356,12 @@ async def put_mapping(payload: MappingPayload):
             raise HTTPException(status_code=400, detail="empty room name")
         clean[room] = zone
     sections = {"room_zones": clean}
-    if payload.room_agents is not None:
-        known = set(clean) | {k["room"] for k in registry.known_rooms()}
-        agents = dict(config_store.read_section("room_agents") or {})
-        for kind, rooms in payload.room_agents.items():
-            picked = {}
-            for room, agent in rooms.items():
-                room, agent = room.strip(), (agent or "").strip()
-                if room not in known:
-                    raise HTTPException(status_code=400, detail=f"room '{room}' is not mapped or connected")
-                if agent and not intelligence_target.AGENT_RE.match(agent):
-                    raise HTTPException(status_code=400, detail=f"invalid agent name for room '{room}'")
-                if agent:
-                    picked[room] = agent
-            agents[kind] = picked
-        sections["room_agents"] = agents
     try:
-        before = config_store.read_section("room_zones")
-        config_store.write_sections(sections)  # one atomic pass
+        with config_store.LOCK:  # read-merge-write of room_agents as one step
+            before = config_store.read_section("room_zones")
+            if payload.room_agents is not None:
+                sections["room_agents"] = _merge_room_agents(payload.room_agents, clean)
+            config_store.write_sections(sections)  # one atomic pass
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     # exactly one output sounds a reply — tell every speaker node

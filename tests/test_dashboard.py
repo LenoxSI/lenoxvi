@@ -3472,15 +3472,55 @@ def main():
         _a._ensure_route()
         check("room agents: bot: room unknown when the session is built, known at the first turn -> override used",
               _before57 == "ha-butler" and _a._agent == "kids-agent" and _a._key == "k-kids", f"{_before57} -> {_a._agent}")
-        import inspect as _insp57
-        check("room agents: bot: every turn resolves the route before sending",
-              "self._ensure_route()" in _insp57.getsource(_iaRA.IntelligenceAgent._ask_intelligence))
+        import urllib.request as _urqRA
+
+        _sentRA = []
+
+        class _RespRA:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, *a):
+                return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+
+        def _fake_urlopenRA(req, timeout=None):
+            _sentRA.append(req)
+            return _RespRA()
+        _real_urlopenRA = _urqRA.urlopen
+        _urqRA.urlopen = _fake_urlopenRA
+        try:
+            _boxRA = {"room": None}
+            _a = _iaRA.IntelligenceAgent(room=None, session_mode="fresh", room_resolver=lambda: _boxRA["room"])
+            _boxRA["room"] = "suite-kids57"   # known by the first turn
+            _a._ask_intelligence("hi")
+            _rq = _sentRA[-1] if _sentRA else None
+            check("room agents: bot: the REQUEST of a room that resolved late goes to its agent with its key",
+                  _rq is not None and _rq.full_url.endswith("/p/kids-agent/v1/chat/completions")
+                  and _rq.get_header("Authorization") == "Bearer k-kids",
+                  f"{getattr(_rq, 'full_url', None)} auth={'k-kids' in str(getattr(_rq, 'headers', ''))}")
+        finally:
+            _urqRA.urlopen = _real_urlopenRA
         config_store.write_section("intelligence", {**_57_icfg, "kind": "openclaw", "url": "http://oc.test:18789/v1",
                                                     "agents": {"hermes": "ha-butler", "openclaw": "main"}})
         _a = _mk57("suite-kids57")
         _b = _mk57("suite-kitchen57")
         check("room agents: bot: OpenClaw uses its OWN overrides (kidbot) and default (main); hermes overrides ignored",
               _a._agent == "kidbot" and _a._key == "k-oc" and _b._agent == "main", f"{_a._agent} {_b._agent}")
+        _urqRA.urlopen = _fake_urlopenRA
+        try:
+            _ocRA = _iaRA.IntelligenceAgent(room="suite-kids57", session_mode="fresh")
+            _ocRA._ask_intelligence("hi")
+            _rq = _sentRA[-1]
+            check("room agents: bot: the OpenClaw REQUEST names the room's agent (model openclaw/kidbot) with its key",
+                  json.loads(_rq.data).get("model") == "openclaw/kidbot" and _rq.get_header("Authorization") == "Bearer k-oc",
+                  str(json.loads(_rq.data).get("model")))
+        finally:
+            _urqRA.urlopen = _real_urlopenRA
         config_store.write_section("intelligence", _57_icfg)
         config_store.write_section("room_agents", {"openclaw": {"suite-kids57": "kidbot"}})
         _a = _mk57("suite-kids57")
@@ -3522,6 +3562,22 @@ def main():
                                                              "room_agents": {"hermes": {"suite-nowhere57": "kids-agent"}}})
             check("room agents: PUT: an override for a room that isn't mapped or connected -> 400", _r.status_code == 400,
                   f"{_r.status_code} {_r.text[:100]}")
+            config_store.write_section("room_agents", {"hermes": {"suite-gone57": "kids-agent"}})
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz, "room_agents": {
+                "hermes": {"suite-gone57": "kids-agent", "suite-kids57": "ha-butler"}}})
+            _ra = (config_store.read_section("room_agents") or {}).get("hermes") or {}
+            check("room agents: PUT: a leftover override (room no longer mapped/connected) never wedges other saves",
+                  _r.status_code == 200 and _ra.get("suite-gone57") == "kids-agent" and _ra.get("suite-kids57") == "ha-butler",
+                  f"{_r.status_code} {_r.text[:120]}")
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz, "room_agents": {
+                "hermes": {"suite-gone57": "", "suite-kids57": "ha-butler"}}})
+            check("room agents: PUT: a leftover override can be cleared",
+                  _r.status_code == 200 and "suite-gone57" not in ((config_store.read_section("room_agents") or {}).get("hermes") or {}),
+                  f"{_r.status_code} {_r.text[:120]}")
+            _r = client.put("/api/dashboard/mapping", json={"room_zones": _rz, "room_agents": {
+                "hermes": {"unknown": "kids-agent"}}})
+            check("room agents: PUT: the registry's 'unknown' placeholder is not a room", _r.status_code == 400,
+                  str(_r.status_code))
         else:
             check("room agents: PUT: suite needs at least one mapped room in the copied config", False)
 
@@ -3539,10 +3595,15 @@ def main():
 
         # Keys card: an agent used by a room is in use
         import keys_catalog as _kc57
-        config_store.write_section("room_agents", {"hermes": {"suite-kids57": "kids-agent"}})
-        _rows = {r["var"]: r for r in _kc57.rows({"LVI_HERMES_KEY_KIDS_AGENT": "k"}, {}, {
-            "tts": {}, "stt": {}, "intelligence": {"kind": "hermes", "agents": {"hermes": "ha-butler"}},
-            "room_agents": config_store.read_section("room_agents")}, file_env={"LVI_HERMES_KEY_KIDS_AGENT": "k"})}
+        from dashboard import routes as _rRA
+
+        config_store.write_section("room_agents", {"hermes": {"suite-kids57": "kids_agent"}})
+        _kcfg = _rRA._keys_cfg()   # the route's own wiring (GET /keys, Test, save)
+        _rows = {r["var"]: r for r in _kc57.rows({"LVI_HERMES_KEY_KIDS_AGENT": "k"}, {}, _kcfg,
+                                                 file_env={"LVI_HERMES_KEY_KIDS_AGENT": "k"})}
+        check("room agents: keys: a room-override agent's real name is known (save/Test probe the right profile)",
+              _kc57.target_for("LVI_HERMES_KEY_KIDS_AGENT", _kc57.known_agents(_kcfg)).get("agent") == "kids_agent",
+              str(_kc57.target_for("LVI_HERMES_KEY_KIDS_AGENT", _kc57.known_agents(_kcfg))))
         check("room agents: keys: an agent picked for a room counts as in use",
               _rows.get("LVI_HERMES_KEY_KIDS_AGENT", {}).get("in_use") is True, str(_rows.get("LVI_HERMES_KEY_KIDS_AGENT")))
     finally:

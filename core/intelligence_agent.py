@@ -373,8 +373,8 @@ class IntelligenceAgent(FrameProcessor):
 
         if self._kind not in _it.BASE_KEY_VARS:
             return
-        room = self._room
-        if not room and self._room_resolver is not None:
+        room = self._room if self._room not in (None, "", "unknown") else None
+        if room is None and self._room_resolver is not None:
             try:
                 room = self._room_resolver()
             except Exception:  # noqa: BLE001 — no room yet = default for now
@@ -388,14 +388,17 @@ class IntelligenceAgent(FrameProcessor):
         how = "override"
         if not agent or not _it.AGENT_RE.match(agent):
             agent, how = self._default_agent, "default"
-        self._routed_room = room
         if agent != self._agent:
-            self._agent = agent
-            self._url = _it.request_url(self._kind, self._base_url, agent)
-            self._key_var = _it.key_var(self._kind, agent)
-            self._key = os.getenv(self._key_var) if self._key_var else None
-            if not self._key:
-                logger.warning(f"intelligence_agent: no key set ({self._key_var}) for room '{room}' agent '{agent}'")
+            # Build the whole route first, then swap it in; _routed_room is
+            # set LAST, so an overlapping (superseded) turn's thread that
+            # sees it set also sees the complete route.
+            url = _it.request_url(self._kind, self._base_url, agent)
+            key_var = _it.key_var(self._kind, agent)
+            key = os.getenv(key_var) if key_var else None
+            self._agent, self._url, self._key_var, self._key = agent, url, key_var, key
+            if not key:
+                logger.warning(f"intelligence_agent: no key set ({key_var}) for room '{room}' agent '{agent}'")
+        self._routed_room = room
         logger.info(f"intelligence_agent: room '{room}' -> agent '{agent or 'default'}' ({how})")
 
     def _ask_intelligence(self, text: str) -> str:

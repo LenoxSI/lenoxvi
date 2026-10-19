@@ -749,9 +749,12 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
   // Per-room agent override. The Intelligence card's agent is the house
   // default; a room only differs when picked here. agentDraft holds this
   // system's unsaved picks ('' = back to Default).
-  const [agentDraft, setAgentDraft] = useState({})
   const [found, setFound] = useState(null)
   const agentKind = mapping?.agent_kind || ''
+  // Picks belong to one system: drafts made under another read as none.
+  const [draftState, setDraftState] = useState({ kind: '', picks: {} })
+  const agentDraft = draftState.kind === agentKind ? draftState.picks : {}
+  const setAgentDraft = picks => setDraftState({ kind: agentKind, picks })
   const defaultAgent = mapping?.default_agent || ''
   const savedAgents = mapping?.room_agents?.[agentKind] || {}
   const discoverAgents = useRef(null)
@@ -828,15 +831,16 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
     const body = { room_zones: { ...(mapDraft || mapping?.room_zones || {}), [room]: zone } }
     // Only this system's overrides, and only when one was edited — an
     // untouched page leaves room_agents alone server-side.
-    const agentEdits = Object.keys(agentDraft).length > 0
+    const changed = Object.entries(agentDraft).filter(([r, a]) => a !== (savedAgents[r] ?? ''))
+    const agentEdits = changed.length > 0
     if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...agentDraft } }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
       setAgentDraft({})
       if (agentEdits) {
-        const a = body.room_agents[agentKind][room]
-        setMsg(`${room} saved — agent ${a || `Default (${defaultAgent})`} applies after a bot restart.`, 'ok', 'Room → zone mapping')
+        const picks = changed.map(([r, a]) => `${r} → ${a || `Default (${defaultAgent})`}`).join(', ')
+        setMsg(`${room} → ${zoneLabel(zone)} saved. Agent ${picks} applies after a bot restart.`, 'ok', 'Room → zone mapping')
         offerRestart(setMsg, setRebooting)
       } else {
         setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
@@ -894,8 +898,10 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                         onChange={e => setAgentDraft({ ...agentDraft, [room]: e.target.value })}
                         className={`${INPUT_CLS} w-[200px]`}>
                         <option value="">{`Default (${defaultAgent || '—'})`}</option>
-                        {agent && !known && <option value={agent}>{found ? `${agent} (not found)` : agent}</option>}
-                        {agentList.map(a => <option key={a.id} value={a.id}>{a.key_set ? a.id : `${a.id} — no key`}</option>)}
+                        {agent && !known && <option value={agent}>
+                          {!found ? agent : (agentList.length ? `${agent} (not found)` : `${agent} (unverified)`)}</option>}
+                        {agentList.map(a => <option key={a.id} value={a.id}>
+                          {(a.id === 'default' && agentKind === 'hermes' ? 'default (pinned)' : a.id) + (a.key_set ? '' : ' — no key')}</option>)}
                       </select>
                       {effective && !effective.key_set &&
                         <MissingKey label={`${agentKind === 'openclaw' ? 'OpenClaw' : 'Hermes'} · ${effective.id}`} />}

@@ -47,9 +47,16 @@ def target_for(var: str, known=()):
 
 
 def known_agents(cfg: dict) -> list:
+    """Hermes agent names the config uses: the default plus every room
+    override — so a key's variable maps back to its real agent name."""
     icfg = cfg.get("intelligence") or {}
     agents = icfg.get("agents") or {}
-    return [agents.get("hermes")] if isinstance(agents, dict) and agents.get("hermes") else []
+    out = [agents.get("hermes")] if isinstance(agents, dict) and agents.get("hermes") else []
+    rooms = (cfg.get("room_agents") or {}).get("hermes") or {}
+    for a in (rooms.values() if isinstance(rooms, dict) else []):
+        if a and str(a) not in out:
+            out.append(str(a))
+    return out
 
 
 def _in_use(row: dict, cfg: dict) -> bool:
