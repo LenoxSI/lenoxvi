@@ -547,14 +547,20 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
         </button>
       }>
       <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4">
-        <Stat label="Uptime">{sec(status?.uptime_secs)}</Stat>
-        <Stat label="Nodes online">
-          {status ? `${status.rooms.filter(r => r.online).length}/${status.rooms.length}` : '—'}
+        <Stat label="Uptime">
+          <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
         </Stat>
+        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms)} /></Stat>
         <Stat label="Last wake">
-          {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
+          <StatChip stat="last-wake" muted={!status?.last_wake}>
+            {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
+          </StatChip>
         </Stat>
-        <Stat label="Version"><span className="font-mono text-[13px]">{esc(status?.version) || '…'}</span></Stat>
+        <Stat label="Version">
+          <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
+        </Stat>
+        {/* The voice path, in order: hear (STT) → think (Intelligence) → speak (TTS). */}
+        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt)} /></Stat>
         <Stat label="Intelligence">
           {(() => {
             // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
@@ -569,11 +575,10 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
               : brand === 'Hermes'
               ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
               : null
-            return <span
-              className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium${s ? '' : ' text-[var(--muted)]'}`}
-              style={s}>{brand}</span>
+            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s} style={s}>{brand}</StatChip>
           })()}
         </Stat>
+        <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status)} /></Stat>
       </div>
     </Section>
   )
@@ -581,11 +586,80 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
 
 function Stat({ label, children }) {
   return (
-    <div className="grid gap-0.5">
-      <span className="text-[12px] leading-4 font-medium text-[var(--muted)]">{label}</span>
+    <div className="grid gap-1">
+      <span data-stat-label className="text-[12px] leading-4 font-medium text-[var(--muted)]">{label}</span>
       <span className="text-[14px] leading-5 font-medium">{children}</span>
     </div>
   )
+}
+
+// Status-bar chips (brand guide, Chip): soft status colours from the theme
+// tokens — success = all good, warning = partly degraded, danger = down.
+// Neutral otherwise: colour only shows up when it means something.
+const STAT_TONE = {
+  success: 'bg-[var(--success-soft)] text-[var(--success-soft-foreground)]',
+  warning: 'bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]',
+  danger: 'bg-[var(--danger-soft)] text-[var(--danger-soft-foreground)]',
+  neutral: 'bg-[var(--default)]',
+  brand: '',  // a foreign brand's own colours, set inline
+}
+
+function StatChip({ stat, tone = 'neutral', text, title, muted, className, style, children }) {
+  return (
+    <span data-stat={stat} data-tone={tone} title={title || undefined} style={style || undefined}
+      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE[tone]}${muted ? ' text-[var(--muted)]' : ''}${className ? ` ${className}` : ''}`}>
+      {children ?? text}
+    </span>
+  )
+}
+
+// Nodes online: green = every node up, yellow = some down, red = all down.
+function nodesChip(rooms) {
+  if (!rooms) return { text: '—', muted: true }
+  if (!rooms.length) return { text: 'no nodes', muted: true }
+  const down = rooms.filter(r => !r.online).map(r => esc(r.room))
+  const text = `${rooms.length - down.length}/${rooms.length}`
+  if (!down.length) return { tone: 'success', text, title: 'All nodes online' }
+  if (down.length === rooms.length) return { tone: 'danger', text, title: 'All nodes offline' }
+  return { tone: 'warning', text, title: `${down.join(', ')} offline` }
+}
+
+const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket' }
+const ttsName = p => TTS_NAMES[p] || p
+
+// TTS: the configured voice service; only rooms that are online count —
+// an offline node's last report is stale.
+function ttsChip(status) {
+  if (!status) return { text: '—', muted: true }
+  const live = (status.rooms || []).filter(r => r.online)
+  const down = live.filter(r => r.tts_usable === false).map(r => esc(r.room))
+  if (down.length)
+    return { tone: 'danger', text: 'TTS down',
+      title: `${down.join(', ')} can't speak. Reboot the node (or the bot) to rebuild its session.` }
+  const fb = live.filter(r => String(r.tts_provider || '').endsWith('(fallback)'))
+  if (fb.length) {
+    const name = ttsName(String(fb[0].tts_provider).replace(/\s*\(fallback\)$/, ''))
+    return { tone: 'warning', text: `${name} fallback`,
+      title: `${fb.map(r => esc(r.room)).join(', ')} on the local ${name} voice: ${ttsName(status.tts_provider)} is unreachable` }
+  }
+  return { text: ttsName(status.tts_provider) || '—', muted: !status.tts_provider }
+}
+
+// STT: Whisper <model>, or Deepgram <model> with Whisper as its fallback.
+function sttChip(st) {
+  if (!st) return { text: '—', muted: true }
+  const onWhisper = st.provider !== 'deepgram' || st.active === 'whisper'
+  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'failed to load', title: st.error || 'Whisper failed to load' }
+  if (st.provider === 'deepgram' && st.active === 'whisper') {
+    const rooms = (st.fallback_rooms || []).map(esc)
+    return { tone: 'warning', text: 'Whisper fallback',
+      title: `${st.fallback_reason || 'Deepgram unreachable'}${rooms.length ? `: ${rooms.join(', ')}` : ''}` }
+  }
+  if (st.provider === 'deepgram') {
+    const m = String(st.cloud_model || '')
+    return { text: `Deepgram ${m.charAt(0).toUpperCase()}${m.slice(1)}`.trim() }
+  }
+  return { text: `Whisper ${st.model || ''}`.trim() }
 }
 
 /* ── node row actions ─────────────────────────────────────── */
