@@ -575,7 +575,7 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
               : brand === 'Hermes'
               ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
               : null
-            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s} style={s}>{brand}</StatChip>
+            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s} style={s}>{brand.toLowerCase()}</StatChip>
           })()}
         </Stat>
         <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status)} /></Stat>
@@ -596,6 +596,8 @@ function Stat({ label, children }) {
 // Status-bar chips (brand guide, Chip): soft status colours from the theme
 // tokens — success = all good, warning = partly degraded, danger = down.
 // Neutral otherwise: colour only shows up when it means something.
+// Chip words are lowercase, one or two words (brand README: status chips
+// are lowercase, even brand names — "sonos"); hover text is a sentence.
 const STAT_TONE = {
   success: 'bg-[var(--success-soft)] text-[var(--success-soft-foreground)]',
   warning: 'bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]',
@@ -636,7 +638,7 @@ function ttsChip(status) {
   const live = (status.rooms || []).filter(r => r.online)
   const down = live.filter(r => r.tts_usable === false).map(r => esc(r.room))
   if (down.length)
-    return { tone: 'danger', text: 'TTS down',
+    return { tone: 'danger', text: 'tts down',
       title: `${down.join(', ')} can't speak. Reboot the node (or the bot) to rebuild its session.` }
   const isFb = r => String(r.tts_provider || '').endsWith('(fallback)')
   // Rooms report Deepgram Flux as plain "deepgram": when the room's service
@@ -648,10 +650,10 @@ function ttsChip(status) {
   const fb = live.filter(isFb)
   if (fb.length) {
     const name = ttsName(String(fb[0].tts_provider).replace(/\s*\(fallback\)$/, ''))
-    return { tone: 'warning', text: `${name} fallback`,
+    return { tone: 'warning', text: `${name.toLowerCase()} fallback`,
       title: `${fb.map(r => esc(r.room)).join(', ')} on the local ${name} voice: ${ttsName(primary)} is unreachable` }
   }
-  return { text: ttsName(primary) || '—', muted: !primary }
+  return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }
 }
 
 // STT: Whisper <model>, or Deepgram <model> with Whisper as its fallback.
@@ -661,16 +663,15 @@ function sttChip(st, configuredModel) {
   if (!st) return { text: '—', muted: true }
   const whisper = `Whisper ${st.model || configuredModel || ''}`.trim()
   const onWhisper = st.provider !== 'deepgram' || st.active === 'whisper'
-  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'Whisper failed', title: st.error || 'Whisper failed to load' }
+  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'whisper failed', title: st.error || 'Whisper failed to load' }
   if (st.provider === 'deepgram' && st.active === 'whisper') {
     const rooms = (st.fallback_rooms || []).map(esc)
-    return { tone: 'warning', text: 'Whisper fallback',
+    return { tone: 'warning', text: 'whisper fallback',
       title: `${st.fallback_reason || 'Deepgram unreachable'}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
   }
-  // same model spelling as the STT card ("Deepgram nova-3")
-  if (st.provider === 'deepgram') return { text: `Deepgram ${st.cloud_model || ''}`.trim() }
-  if (st.state === 'loading') return { text: `${whisper} (loading)`, muted: true }
-  return { text: whisper }
+  if (st.provider === 'deepgram') return { text: `deepgram ${st.cloud_model || ''}`.trim() }
+  if (st.state === 'loading') return { text: 'loading', muted: true, title: `${whisper} is loading` }
+  return { text: whisper.toLowerCase() }
 }
 
 /* ── node row actions ─────────────────────────────────────── */
