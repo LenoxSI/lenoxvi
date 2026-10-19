@@ -1469,8 +1469,8 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
   )
 }
 // Wake name card: what the house is called, the spellings speech-to-text
-// writes for it, and what it heard right after recent wakes — click a word
-// to add it as a heard-as alias. Everything here applies live (no restart).
+// writes for it, and what it heard right after recent wakes (read-only; a
+// new spelling is typed into the box). Everything here applies live (no restart).
 // Trim edge punctuation only; anything else outside letters/'/- means the
 // word can't be an alias as-is (R2D2 must not silently become "rd").
 const aliasFrom = word => word.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
@@ -1527,7 +1527,7 @@ function WakeNameCard({ setMsg }) {
     ? <Section title="Wake name"><div className="text-[13px] text-[var(--muted)]">Couldn't load wake settings: {esc(loadErr)}</div></Section>
     : null
   const aliases = w.heard_as || []
-  // One path for a clicked word and a typed spelling; true only when saved.
+  // Validates and saves a typed spelling; true only when saved.
   const addAlias = async word => {
     const a = aliasFrom(word)
     const current = aliasRef.current ?? aliases
@@ -1585,11 +1585,7 @@ function WakeNameCard({ setMsg }) {
             <div key={`${r.time}-${i}`} data-heard="" className="flex flex-wrap items-center gap-1 text-[14px] py-1 border-t border-[var(--separator)]">
               <span className="text-[12px] text-[var(--muted)] w-[44px]">{hhmm(r.time)}</span>
               <span className="font-mono text-[12px] text-[var(--muted)] mr-2">{esc(r.room || '?')}</span>
-              {String(r.text || '').split(/\s+/).filter(Boolean).map((word, j) => (
-                <button key={j} type="button" title="Add as an alias"
-                  className="rounded-md px-1 hover:bg-[var(--default)] cursor-pointer"
-                  onClick={() => addAlias(word)}>{esc(word)}</button>
-              ))}
+              <span>{esc(r.text || '')}</span>
               {r.dropped &&
                 <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] border border-[var(--separator)]">dropped</span>}
             </div>
