@@ -5,7 +5,7 @@
 // page.html used — routes are the contract, every shape verified
 // against the live rig.
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
@@ -332,41 +332,76 @@ function KeysCard({ setMsg, setRebooting }) {
   return (
     <Section id="system" title="Keys" note="">
       <div id="keys" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3">
-        {!keys ? <span className="text-[13px] text-[var(--muted)]">Loading…</span> : keys.map(row => {
-          const st = keyState(row)
-          const t = tests[row.var]
-          return (
-            <div key={row.var} data-var={row.var} className="flex flex-wrap items-center gap-3">
-              <div className="min-w-[180px]">
-                <div className="text-[14px] font-medium">{row.label}</div>
-                <div className="text-[12px] font-mono text-[var(--muted)]">{row.var}</div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u}</span>)}
-                {row.in_use && <span className={`${CHIP_CLS} text-[var(--success)]`}>in use</span>}
-                <span className={st.cls} data-role="state">{st.text}</span>
-              </div>
-              <div className="flex items-center gap-2 ml-auto">
-                <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
-                  {t?.status === 'testing' ? 'Testing…' : 'Test'}</button>
-                <button className={BTN_DEFAULT} onClick={() => setOpen(open === row.var ? null : row.var)}>
-                  {row.set ? 'Replace' : 'Set'}</button>
-              </div>
-              {open === row.var && (
-                <div className="basis-full flex items-center gap-2 flex-wrap">
-                  <KeyInput id={`keyin-${row.var}`} key={`${row.var}-${epoch}`} hint=""
-                    placeholder={`paste the new ${row.label} key…`} />
-                  <button className={BTN_PRIMARY} onClick={() => save(row, `keyin-${row.var}`)}>Save</button>
-                </div>
-              )}
-              {t && t.status !== 'testing' && (
-                <div data-role="test" className={`basis-full text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
-                  {t.status === 'ok' ? '✓ ' : '✗ '}{t.detail || t.status}
-                </div>
-              )}
-            </div>
-          )
-        })}
+        {!keys ? <span className="text-[13px] text-[var(--muted)]">Loading…</span> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table id="keys-table" className="w-full text-[14px]">
+              <thead>
+                <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+                  <th className="text-left px-4 py-2">Key</th>
+                  <th className="text-left px-4 py-2">Used by</th>
+                  <th className="text-left px-4 py-2">In use</th>
+                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="text-left px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...keys].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })).map(row => {
+                  const st = keyState(row)
+                  const t = tests[row.var]
+                  const close = () => setOpen(null)
+                  return (
+                    <Fragment key={row.var}>
+                      <tr data-var={row.var} className="border-t border-[var(--separator)]">
+                        <td className="px-4 py-2">
+                          <div className="text-[14px] font-medium">{row.label}</div>
+                          <div className="text-[12px] font-mono text-[var(--muted)]">{row.var}</div>
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u}</span>)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2">
+                          {row.in_use && <span className={`${CHIP_CLS} text-[var(--success)]`}>in use</span>}
+                        </td>
+                        <td className="px-4 py-2"><span className={st.cls} data-role="state">{st.text}</span></td>
+                        <td className="px-4 py-2 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
+                              {t?.status === 'testing' ? 'Testing…' : 'Test'}</button>
+                            <button className={BTN_DEFAULT} onClick={() => setOpen(open === row.var ? null : row.var)}>
+                              {row.set ? 'Replace' : 'Set'}</button>
+                          </div>
+                        </td>
+                      </tr>
+                      {open === row.var && (
+                        <tr data-role="replace">
+                          <td colSpan={5} className="px-4 py-2">
+                            <div className="flex items-center gap-2 flex-wrap"
+                              onKeyDown={e => { if (e.key === 'Escape') close() }}>
+                              <KeyInput id={`keyin-${row.var}`} key={`${row.var}-${epoch}`} hint=""
+                                placeholder={`paste the new ${row.label} key…`} />
+                              <button className={BTN_PRIMARY} onClick={() => save(row, `keyin-${row.var}`)}>Save</button>
+                              <button className={BTN_DEFAULT} onClick={close}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {t && t.status !== 'testing' && (
+                        <tr>
+                          <td colSpan={5} data-role="test"
+                            className={`px-4 py-2 text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                            {t.status === 'ok' ? '✓ ' : '✗ '}{t.detail || t.status}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="flex items-center gap-2 flex-wrap">
           {!adding ? (
             <button className={BTN_DEFAULT} onClick={startAdd}>Add agent key</button>
