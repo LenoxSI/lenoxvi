@@ -49,6 +49,29 @@ LANGUAGES = [
 LANGUAGE_CODES = [lang["code"] for lang in LANGUAGES]
 
 
+# Who turns speech into text. Whisper runs on this machine (private); a
+# cloud provider streams post-wake speech out (quality on slow hardware),
+# with the configured Whisper model as its fallback.
+PROVIDERS = [
+    {"name": "whisper", "label": "Local — Whisper", "cloud": False},
+    {"name": "deepgram", "label": "Deepgram Nova-3 (cloud)", "cloud": True},
+]
+PROVIDER_NAMES = [p["name"] for p in PROVIDERS]
+DEEPGRAM_MODEL = "nova-3"
+
+
+def validate_provider(provider):
+    if provider not in PROVIDER_NAMES:
+        return f"provider must be one of {PROVIDER_NAMES}"
+    return None
+
+
+def deepgram_language(code):
+    """Nova-3 language option: Auto -> 'multi' (code-switching); every card
+    language is a Nova-3 monolingual code, so a code passes straight through."""
+    return "multi" if not code or code == "auto" else code
+
+
 def runtime_for(has_gpu: bool) -> tuple[str, str]:
     """(device, compute_type) written with a model: never a mismatched pair
     (float16 on a CPU fails to load)."""

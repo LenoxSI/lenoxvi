@@ -25,6 +25,23 @@ import stt_catalog
 # (last 10, in memory, reset on restart). Load time stays in the log only.
 _STATUS: dict = {"state": "not_loaded"}
 _LAT_MS: deque = deque(maxlen=10)
+# "compute": Whisper's own transcribe time (local provider).
+# "e2e": end of speech -> final transcript, fed by stt_fallback.SttTimer
+#        (cloud provider; Whisper's compute time is then NOT recorded, so a
+#        fallback turn isn't counted twice).
+_LAT_MODE = {"mode": "compute"}
+
+
+def set_latency_mode(mode: str) -> None:
+    _LAT_MODE["mode"] = "e2e" if mode == "e2e" else "compute"
+
+
+def latency_mode() -> str:
+    return _LAT_MODE["mode"]
+
+
+def note_latency(ms: float) -> None:
+    _LAT_MS.append(float(ms))
 
 
 def _set_status(state: str, model: str, device: str, compute: str, error: str | None = None) -> None:
@@ -231,7 +248,8 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             # faster-whisper decodes lazily: the work happens while the
             # segments are drained, so the timer stops after the join.
             text = " ".join(s.text.strip() for s in segments).strip()
-            _LAT_MS.append((time.monotonic() - t0) * 1000)
+            if _LAT_MODE["mode"] == "compute":
+                _LAT_MS.append((time.monotonic() - t0) * 1000)
             return text, info.language
 
         text, lang = await loop.run_in_executor(None, _run)

@@ -1597,9 +1597,33 @@ def _stt_gpu_name():
 
 
 def _stt_status() -> dict:
+    import stt_fallback
     import stt_local
 
-    return stt_local.status()
+    return {**stt_local.status(), **stt_fallback.status()}
+
+
+def _stt_deepgram_sdk() -> bool:
+    """pipecat's Deepgram STT is built on Deepgram's SDK (an optional extra)."""
+    import importlib.util
+
+    return importlib.util.find_spec("deepgram") is not None
+
+
+def _stt_deepgram_key_set() -> bool:
+    # Live process env OR saved .env (a key saved from the TTS card counts
+    # before the restart that loads it). Presence only — never the value.
+    return bool(os.getenv("DEEPGRAM_API_KEY") or _saved_env().get("DEEPGRAM_API_KEY"))
+
+
+def _stt_providers() -> list:
+    out = []
+    for p in stt_catalog.PROVIDERS:
+        item = dict(p, available=True)
+        if p["name"] == "deepgram" and not _stt_deepgram_sdk():
+            item.update(available=False, reason="deepgram-sdk is not installed (pip install deepgram-sdk)")
+        out.append(item)
+    return out
 
 
 def _stt_current() -> dict:
@@ -1612,8 +1636,10 @@ def _stt_current() -> dict:
         return sec.get(key) or os.getenv(env) or default
 
     model = pick("model", "LVI_STT_MODEL", "large-v3-turbo")
+    provider = pick("provider", "LVI_STT_PROVIDER", "whisper")
     language = pick("language", "LVI_STT_LANGUAGE") or "auto"
     return {
+        "provider": provider,
         "model": model,
         "language": language,
         "device": pick("device", "LVI_STT_DEVICE", "cuda"),
@@ -1623,7 +1649,8 @@ def _stt_current() -> dict:
     }
 
 
-def _stt_write(model: str | None = None, language: str | None = None, has_gpu: bool = True) -> None:
+def _stt_write(model: str | None = None, language: str | None = None, has_gpu: bool = True,
+               provider: str | None = None) -> None:
     # Read-modify-write under the store's lock: the download thread and a
     # loop-side PUT can't lose each other's change.
     with config_store.LOCK:
@@ -1631,6 +1658,8 @@ def _stt_write(model: str | None = None, language: str | None = None, has_gpu: b
         if model is not None:
             device, compute = stt_catalog.runtime_for(has_gpu)
             section.update(model=model, device=device, compute_type=compute)
+        if provider is not None:
+            section["provider"] = provider
         if language is not None:
             # Written explicitly, "auto" included: removing the key would let
             # an LVI_STT_LANGUAGE env value override Auto-detect.
@@ -1669,11 +1698,12 @@ class SttPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str | None = Field(default=None, max_length=64)
     language: str | None = Field(default=None, max_length=16)
+    provider: str | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def _something(self):
-        if self.model is None and self.language is None:
-            raise ValueError("send model and/or language")
+        if self.model is None and self.language is None and self.provider is None:
+            raise ValueError("send model, language and/or provider")
         return self
 
 
@@ -1695,6 +1725,8 @@ async def get_stt():
                     "deletable": sizes.get(m["name"], 0) > 0 and m["repo"] not in in_use}
                    for m, c in zip(stt_catalog.MODELS, cached)],
         "languages": stt_catalog.LANGUAGES,
+        "providers": _stt_providers(),
+        "deepgram_key_set": _stt_deepgram_key_set(),
         "gpu": gpu,
         "status": _stt_status(),
         "download": dl,
@@ -1751,6 +1783,10 @@ async def delete_stt_model(name: str):
 async def put_stt(payload: SttPayload):
     has_gpu = (await asyncio.to_thread(_stt_gpu_name)) is not None
     err = stt_catalog.validate(payload.model, payload.language, has_gpu)
+    if payload.provider is not None:
+        err = err or stt_catalog.validate_provider(payload.provider)
+        if not err and payload.provider == "deepgram" and not _stt_deepgram_sdk():
+            err = "deepgram-sdk is not installed on this machine (pip install deepgram-sdk)"
     if err:
         raise HTTPException(status_code=422, detail=err)
     if payload.model is not None:
@@ -1758,20 +1794,27 @@ async def put_stt(payload: SttPayload):
             if _STT_DL.get("state") == "downloading":
                 raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
     try:
+        restart_needed, download = False, "not_needed"
+        if payload.provider is not None and payload.provider != _stt_current()["provider"]:
+            _stt_write(provider=payload.provider)
+            restart_needed = True
         if payload.language is not None:
             _stt_write(language=payload.language)
-        restart_needed, download = False, "not_needed"
         if payload.model is not None:
             with _STT_DL_LOCK:
                 _stt_claim(payload.model, "a delete")
             try:
-                restart_needed, download = await _stt_switch_model(payload.model, has_gpu)
+                model_restart, download = await _stt_switch_model(payload.model, has_gpu)
+                restart_needed = restart_needed or model_restart
             finally:
                 with _STT_DL_LOCK:
                     _STT_BUSY.discard(payload.model)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return {"ok": True, "restart_needed": restart_needed, "download": download, "current": _stt_current()}
+    cur = _stt_current()
+    key_needed = cur["provider"] == "deepgram" and not _stt_deepgram_key_set()
+    return {"ok": True, "restart_needed": restart_needed, "download": download, "key_needed": key_needed,
+            "current": cur}
 
 
 async def _stt_switch_model(model: str, has_gpu: bool) -> tuple:

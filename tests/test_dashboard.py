@@ -3035,6 +3035,11 @@ def main():
     check("RSS preload runs before main() (startup, not first voice turn)",
           _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
           "preload call missing or after main()")
+    check("cloud stt bot.py: stt.provider read with whisper as the default",
+          "cfg_env('stt', 'provider', 'LVI_STT_PROVIDER', 'whisper')" in _main_src)
+    check("cloud stt bot.py: deepgram wraps Whisper as the fallback and closes it with the session",
+          "wrap_stt_with_fallback(" in _main_src and _main_src.count("close_stt_fallback(") >= 2
+          and "SttTimer(" in _main_src, f"wrap={'wrap_stt_with_fallback(' in _main_src} close={_main_src.count('close_stt_fallback(')}")
     # 050 Pocket lane + fallback wiring. _main_src is ast.unparse (code only,
     # comments stripped, single-quoted literals), so a comment can't fake a
     # pass. Behavior is pinned in tests/pocket_test.py.
@@ -3722,6 +3727,71 @@ def main():
             if _v is not None:
                 setattr(_rstt, _n, _v)
         config_store.write_section("stt", _stt_beforestt)
+
+    # ── cloud STT provider (Deepgram) ─────────────────────────────────
+    from dashboard import routes as _rdg
+    _dg_saved = tuple(getattr(_rdg, _n, None) for _n in ("_stt_deepgram_sdk",))
+    _DGSDK = {"ok": True}
+    _rdg._stt_deepgram_sdk = lambda: _DGSDK["ok"]
+    _dg_env = os.environ.get("DEEPGRAM_API_KEY")
+    _dg_stt_before = dict(config_store.read_section("stt") or {})
+    try:
+        os.environ["DEEPGRAM_API_KEY"] = "dg-secret-xyz123"
+        _gr = client.get("/api/dashboard/stt")
+        _g = _gr.json()
+        check("cloud stt GET: provider defaults to whisper; providers listed with availability",
+              _g.get("current", {}).get("provider") == "whisper"
+              and [(p["name"], p.get("available")) for p in _g.get("providers", [])] == [("whisper", True), ("deepgram", True)],
+              str({k: _g.get(k) for k in ("providers",)}) + str(_g.get("current")))
+        check("cloud stt GET: deepgram_key_set true, and the key value never appears",
+              _g.get("deepgram_key_set") is True and "dg-secret-xyz123" not in _gr.text, str(_g.get("deepgram_key_set")))
+        _r = client.put("/api/dashboard/stt", json={"provider": "grok"})
+        check("cloud stt PUT: unknown provider -> 422", _r.status_code == 422, str(_r.status_code))
+        _DGSDK["ok"] = False
+        _g = client.get("/api/dashboard/stt").json()
+        _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
+        check("cloud stt: SDK missing -> deepgram unavailable with a reason, PUT 422",
+              _r.status_code == 422 and next(p for p in _g["providers"] if p["name"] == "deepgram").get("available") is False
+              and "deepgram-sdk" in (next(p for p in _g["providers"] if p["name"] == "deepgram").get("reason") or ""),
+              f"{_r.status_code} {_g['providers']}")
+        _DGSDK["ok"] = True
+        _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
+        _c = _sttstt()
+        check("cloud stt PUT deepgram: saved, restart needed, key present -> no key_needed",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True and _r.json().get("key_needed") is False
+              and _c.get("provider") == "deepgram", f"{_r.text[:160]} cfg={_c}")
+        _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
+        check("cloud stt PUT same provider again: no restart", _r.status_code == 200 and _r.json().get("restart_needed") is False,
+              _r.text[:120])
+        os.environ.pop("DEEPGRAM_API_KEY", None)
+        _saved_env_fn = _rdg._saved_env
+        _rdg._saved_env = dict
+        try:
+            client.put("/api/dashboard/stt", json={"provider": "whisper"})
+            _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
+            _g = client.get("/api/dashboard/stt").json()
+        finally:
+            _rdg._saved_env = _saved_env_fn
+        check("cloud stt without a key: allowed, but key_needed true and GET says key not set",
+              _r.status_code == 200 and _r.json().get("key_needed") is True and _g.get("deepgram_key_set") is False,
+              f"{_r.text[:160]} set={_g.get('deepgram_key_set')}")
+        _s = client.get("/api/dashboard/status").json()
+        _gc = client.get("/api/dashboard/stt").json()
+        check("cloud stt: /status shows the RUNNING provider (whisper until a restart builds deepgram); GET shows the saved one",
+              (_s.get("stt") or {}).get("provider") == "whisper" and _gc["current"]["provider"] == "deepgram",
+              f"{_s.get('stt')} saved={_gc['current'].get('provider')}")
+        _r = client.put("/api/dashboard/stt", json={"provider": "whisper"})
+        check("cloud stt PUT back to whisper: restart needed", _r.status_code == 200 and _r.json().get("restart_needed") is True
+              and _sttstt().get("provider") == "whisper", _r.text[:120])
+    finally:
+        for _n, _v in zip(("_stt_deepgram_sdk",), _dg_saved):
+            if _v is not None:
+                setattr(_rdg, _n, _v)
+        if _dg_env is None:
+            os.environ.pop("DEEPGRAM_API_KEY", None)
+        else:
+            os.environ["DEEPGRAM_API_KEY"] = _dg_env
+        config_store.write_section("stt", _dg_stt_before)
 
     # config_store: writes from worker threads must not corrupt config.yaml
     import threading as _thcs

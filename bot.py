@@ -196,6 +196,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
     )
+    # stt.provider: whisper (local, default) or a cloud provider with this
+    # Whisper service as its fallback (wired below, once the task exists).
+    stt_provider = cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper")
     # TTS provider dispatch: tts.provider
     # selects the engine; each provider's knobs live under its own config
     # key. ElevenLabs stays the default (a config without tts.provider —
@@ -471,6 +474,36 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                                  queue_frame=_queue, cooldown=_cool)
         logger.info(f"tts fallback: pocket armed behind {tts_provider}")
 
+    # Cloud STT: ServiceSwitcher([deepgram, whisper], Failover). Deepgram
+    # marks itself down on a bad key / dead network and the session moves to
+    # local Whisper; stt_fallback switches back when it answers again. A
+    # missing key or SDK = Whisper with a warning, never a dead pipeline.
+    import stt_fallback
+    import stt_local
+    stt_fallback.set_provider(stt_provider)
+    stt_timer = None
+    if stt_provider == "deepgram":
+        stt_local.set_latency_mode("e2e")
+        stt_timer = stt_fallback.SttTimer()
+        _dg, _dg_why = stt_fallback.make_deepgram(cfg_env("stt", "language", "LVI_STT_LANGUAGE"))
+        stt_fallback.note_unavailable(_dg_why)
+        if _dg is None:
+            logger.warning(f"stt: provider deepgram unavailable ({_dg_why}) — local Whisper is listening")
+        else:
+            try:
+                _stt_cool = float(cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30) or 30)
+            except (TypeError, ValueError):
+                _stt_cool = 30.0
+
+            async def _stt_queue(frame):
+                await _task_ref["task"].queue_frame(frame)
+
+            stt = stt_fallback.wrap_stt_with_fallback(_dg, stt, room=_room, queue_frame=_stt_queue,
+                                                      cooldown=_stt_cool)
+            logger.info("stt: deepgram nova-3 (local Whisper standby)")
+    else:
+        stt_local.set_latency_mode("compute")
+
     task = PipelineWorker(
         Pipeline(
             [
@@ -480,6 +513,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 *([wake_filter] if wake_filter else []),
                 VADProcessor(vad_analyzer=vad_analyzer),
                 stt,
+                *([stt_timer] if stt_timer else []),
                 intelligence,
                 tts,
                 # Per-zone backend dispatch (2026-10-04): BOTH output
@@ -536,6 +570,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             # cancel and the finally would open a socket on a dead session.
             from tts_fallback import close_fallback
             close_fallback(tts)
+        if getattr(stt, "_lenoxvi_primary", None) is not None:
+            stt_fallback.close_stt_fallback(stt)
         await task.cancel()
 
     @transport.event_handler("on_app_message")
@@ -557,6 +593,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         if tts_pocket_standby is not None:
             from tts_fallback import close_fallback
             close_fallback(tts)
+        if getattr(stt, "_lenoxvi_primary", None) is not None:
+            stt_fallback.close_stt_fallback(stt)
         _reclaim_session()
 
 
