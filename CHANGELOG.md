@@ -11,6 +11,8 @@ The two version streams are independent.
 ### Fixed
 - Dashboard fits a phone in portrait: no sideways page scroll at 360–430 px;
   wide tables scroll inside their cards instead of hiding columns.
+- ElevenLabs speed and stability sliders wrap with their labels on narrow
+  screens.
 
 ## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 
