@@ -770,6 +770,27 @@ def main():
         _r = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
                          json={"ssid": "suite-net", "password": "suite-secret-pw"})
         check("wifi: node ok:true → 200", _r.status_code == 200, f"status={_r.status_code}")
+        # Password shape matches the firmware (1.2.35): up to 63 chars is a
+        # passphrase, exactly 64 must be hex (a raw PSK), 65+ is refused.
+        # A refusal is a 422 that never echoes the password back.
+        _psk_hex = "0123456789abcdef" * 4
+        _psk_bad = "0123456789abcdef" * 3 + "0123456789abcdeg"
+        _r64 = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                           json={"ssid": "suite-net", "password": _psk_hex})
+        check("wifi: 64-char hex PSK accepted", _r64.status_code == 200,
+              f"status={_r64.status_code} body={_r64.text[:120]}")
+        _r64b = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                            json={"ssid": "suite-net", "password": _psk_bad})
+        _r65 = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                           json={"ssid": "suite-net", "password": _psk_hex + "0"})
+        check("wifi: 64 non-hex and 65 chars 422, password never echoed",
+              _r64b.status_code == 422 and _r65.status_code == 422
+              and _psk_bad not in _r64b.text and _psk_hex not in _r65.text,
+              f"64bad={_r64b.status_code} 65={_r65.status_code} body={_r64b.text[:160]}")
+        _r63 = client.post("/api/dashboard/nodes/suite-mute-probe/wifi",
+                           json={"ssid": "suite-net", "password": "p" * 63})
+        check("wifi: 63-char passphrase still accepted", _r63.status_code == 200,
+              f"status={_r63.status_code}")
 
         # MutePayload.mute is REQUIRED — a body-less/empty POST
         # must never mute a node (old default=True did).
@@ -1070,6 +1091,34 @@ def main():
           and any(r["room"] == "fw-unknown-room" and r.get("fw") == "1.1.4"
                   for r in _reg.known_rooms()),
           f"held={_reg._fw_by_pc} rooms={_reg.known_rooms()}")
+
+    # fw_push "wifi_rollback" (firmware 1.2.35): the node rolled back to its
+    # previous network after a failed Wi-Fi change — logged as a WARNING so
+    # the journal says why the node came back on the old network. Absent or
+    # false: no warning.
+    from loguru import logger as _lg_wr
+    _wr_lines = []
+    _wr_sink = _lg_wr.add(lambda m: _wr_lines.append((m.record["level"].name, m.record["message"])),
+                          level="DEBUG")
+    try:
+        _reg.note_offer("test-pc-wifirb", "wifirb-room")
+        node_command.on_message(
+            json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                        "cmd": "fw_push", "ok": True,
+                        "data": {"fw": "1.2.35", "line": "array", "wifi_rollback": True,
+                                 "muted": False}}), "test-pc-wifirb")
+        _wr_hit = [m for lv, m in _wr_lines if lv == "WARNING" and "previous network" in m]
+        _wr_lines.clear()
+        node_command.on_message(
+            json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                        "cmd": "fw_push", "ok": True,
+                        "data": {"fw": "1.2.35", "line": "array", "muted": False}}), "test-pc-wifirb")
+        _wr_quiet = [m for lv, m in _wr_lines if lv == "WARNING" and "previous network" in m]
+    finally:
+        _lg_wr.remove(_wr_sink)
+    check("fw_push wifi_rollback: one WARNING naming the room; none without it",
+          len(_wr_hit) == 1 and "wifirb-room" in _wr_hit[0] and not _wr_quiet,
+          f"hit={_wr_hit} quiet={_wr_quiet}")
 
     # Mute state (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
     # state — fw_push carries "muted" at connect, mute_push fires when an
