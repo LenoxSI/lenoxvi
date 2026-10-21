@@ -13,6 +13,10 @@ The two version streams are independent.
   wide tables scroll inside their cards instead of hiding columns.
 - ElevenLabs speed and stability sliders wrap with their labels on narrow
   screens.
+- Wi-Fi change accepts a 64-character hex key (raw PSK); needs node firmware
+  1.2.35.
+- A node that rolls back to its previous network after a failed Wi-Fi change
+  says so in the bot log (firmware 1.2.35).
 
 ## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 

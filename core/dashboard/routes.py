@@ -752,7 +752,15 @@ def _zone_test_volume(name: str, backend: str) -> int:
 class WifiPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     ssid: str = Field(min_length=1, max_length=32)
-    password: str = Field(min_length=1, max_length=63)
+    # Up to 63 chars is a WPA passphrase; exactly 64 is a raw PSK and must be
+    # hex (firmware 1.2.35+ stores it; the node applies the same rule).
+    password: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _psk_is_hex(self):
+        if len(self.password) == 64 and not re.fullmatch(r"[0-9A-Fa-f]{64}", self.password):
+            raise ValueError("a 64-character password must be a hex PSK (0-9, a-f)")
+        return self
 
 
 class NamePayload(BaseModel):

@@ -159,6 +159,12 @@ def on_message(message, pc_id: str) -> None:
                     asyncio.get_running_loop().create_task(node_speaker.sync_pc(pc_id))
                 except RuntimeError:
                     pass
+        # Firmware 1.2.35+: this boot rolled back to the previous network
+        # after a failed Wi-Fi change (the trial never reached the bot).
+        if isinstance(info, dict) and info.get("wifi_rollback") is True:
+            room = registry.room_for_pc(pc_id) or pc_id[:24]
+            logger.warning(f"node_command: {room} rolled back to its previous network "
+                           "(the Wi-Fi change never reached the bot)")
         # Firmware 1.2.11+: fw_push also carries the node's mute state.
         if isinstance(info, dict) and isinstance(info.get("muted"), bool):
             registry.note_muted(pc_id, info["muted"])
