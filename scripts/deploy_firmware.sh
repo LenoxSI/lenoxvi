@@ -9,10 +9,12 @@
 #   2. Bump firmware/<track>/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
 #   3. Copy bin + version.json to the LenoxVI repo on the appliance host
-#   4. Restart the bot (serves /firmware/* via core/firmware_server.py) —
-#      only drops the node's live session; files are picked up per request
-#   5. Poke the node (future: an HTTP poke endpoint); today the node picks
-#      it up on its next boot/reconnect
+#      (core/firmware_server.py reads the track dir per request — the bot is
+#      NOT restarted; a restart would drop every room)
+#   4. The node picks the image up on its next boot: restart just that line's
+#      node(s) from the dashboard (Nodes -> Restart, ~15 s); an offline node
+#      updates on its own next boot. Synced bot code still needs its own
+#      bot restart (this script no longer does one).
 #
 # Usage (--track is REQUIRED — there is no default line):
 #   ./scripts/deploy_firmware.sh --track array                  # patch bump
@@ -235,20 +237,16 @@ scp -q "$BIN" "$VFILE" "$LVI_HOST:$LVI_REMOTE_DIR/"
 # track dir (e.g. a pre-rename node_esp32.bin) so it holds exactly what's served.
 ssh "$LVI_HOST" "find ~/$LVI_REMOTE_DIR -maxdepth 1 -name '*.bin' ! -name '${TRACK}_esp32.bin' -delete"
 
-# ── 4. Restart bot (drops the node's session; files read per request) ──────
-echo "==> restarting bot on $LVI_HOST"
-ssh "$LVI_HOST" 'bash ~/projects/lenoxvi/scripts/restart.sh'
-
-# ── 5. Poke the node ───────────────────────────────────────────────────────
-# The node checks at every boot; in-place updates (an HTTP poke
-# endpoint) are future work — nothing sends a data-channel message
-# today. We log what to watch for:
+# ── 4. Hand off to the node ────────────────────────────────────────────────
+# No bot restart: firmware_server serves the new files on the next request.
+# The node checks at every boot, so restarting that node is the trigger.
 cat <<EOF
 
 ==> DONE. Firmware $NEW staged on $LVI_HOST.
-    The node will pick it up on its next boot (in-place updates are
-    future work — nothing sends a data-channel message today).
-    OTA is the only flash path (USB is retired). Watch (appliance host):
+    The bot was NOT restarted. The $TRACK node(s) pick it up on their next
+    boot: restart them from the dashboard (Nodes -> Restart; offline nodes
+    update when they next boot). OTA is the
+    normal path (USB only for a blank board's first flash). Watch (host):
       journalctl --user -u lenoxvi-bot -f | grep firmware_server
     Expected: "firmware_server: serving $TRACK/${TRACK}_esp32.bin" then the node
     reboots into $NEW.

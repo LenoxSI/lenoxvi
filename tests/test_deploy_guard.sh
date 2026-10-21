@@ -87,5 +87,14 @@ else
   run REFUSE "REAL checkout ($REAL_BRANCH): waveshare track" waveshare "$FW_REAL"
 fi
 
+# Static: the script never restarts the bot. firmware_server reads the track dir
+# per request, and a restart drops every room; nodes pick up a staged image on
+# their own next boot (restart just that node from the dashboard).
+if grep -vE '^[[:space:]]*#' "$DEPLOY" | grep -qE 'restart\.sh|systemctl[^#]*restart'; then
+  echo "[FAIL] static: deploy_firmware.sh restarts the bot"; fail=1
+else
+  echo "[PASS] static: deploy_firmware.sh never restarts the bot"
+fi
+
 [ $fail -eq 0 ] && echo "ALL GUARD CASES PASSED" || echo "GUARD TEST FAILED"
 exit $fail
