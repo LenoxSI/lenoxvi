@@ -8,6 +8,10 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Fixed
+- Dashboard fits a phone in portrait: no sideways page scroll at 360–430 px;
+  wide tables scroll inside their cards instead of hiding columns.
+
 ## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 
 The project's new name, one place for every API key, a cloud speech-to-text

@@ -192,7 +192,7 @@ const H2 = ({ children }) => (
 
 function Section({ id, title, note, action, children }) {
   return (
-    <section id={id} className="grid gap-3 scroll-mt-[110px]">
+    <section id={id} className="grid grid-cols-1 gap-3 scroll-mt-[110px]">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div className="grid gap-1">
           <H2>{title}</H2>
@@ -1066,7 +1066,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
 
       <Section title="Nodes"
         note="">
-        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+        <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-[14px]">
             <thead>
               <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
@@ -1207,7 +1207,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
   return (
     <Section title="Zones"
       note="">
-      <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+      <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
         <table className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
@@ -1661,8 +1661,8 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Active model / upload" between>
-          <div className="flex items-center gap-2">
-            <select className={`${INPUT_CLS} w-[260px]`} value={sel}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
               onChange={e => setSel(e.target.value)}>
               {models.map(m => (
                 <option key={m.path} value={m.path}>
@@ -1673,7 +1673,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
             </select>
             <button className={BTN_DEFAULT} onClick={select}>Set active</button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <input type="file" accept=".onnx" className="text-[13px]"
               onChange={e => setNewModel(e.target.files?.[0] || null)} />
             <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
@@ -1681,7 +1681,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
             </button>
           </div>
         </Field>
-        <div className="rounded-2xl bg-[var(--surface)] overflow-hidden">
+        <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-[14px]">
             <thead>
               <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
@@ -2471,7 +2471,7 @@ export default function App() {
 
   return (
     <div className="bg-[var(--background)] text-[var(--foreground)] min-h-screen font-sans">
-      <div className="max-w-[1120px] mx-auto px-6 pt-5 pb-12 grid gap-10">
+      <div className="max-w-[1120px] mx-auto px-6 pt-5 pb-12 grid grid-cols-1 gap-10">
         <header className="sticky top-0 z-10 -mx-6 px-6 pt-2 pb-3 bg-[var(--background)]">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <Wordmark />
