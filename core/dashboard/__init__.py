@@ -28,6 +28,13 @@ from pathlib import Path
 
 from loguru import logger
 
+# Files at the dist root the built page links with './' paths (served at /
+# and /dashboard/). Name only what the build ships; the suite pins that.
+DIST_ROOT_FILES = frozenset({
+    "lenoxvi-horizontal-on-dark.svg",
+    "lenoxvi-horizontal-on-light.svg",
+})
+
 
 def register_dashboard(app) -> None:
     """Mount the dashboard (page + API) on the runner's FastAPI app.
@@ -88,7 +95,7 @@ def register_dashboard(app) -> None:
     if ui_assets.is_dir():
         app.mount("/assets", StaticFiles(directory=ui_assets), name="ui-assets")
 
-    # Dist-root files (favicon.svg, wordmark SVGs) — the built page
+    # Dist-root files (the wordmark SVGs) — the built page
     # references them with './' paths that resolve against the SITE
     # root from /dashboard (no trailing slash). Serve each one at both
     # root and /dashboard/ so the lockups load either way (bug 1 fix,
@@ -97,9 +104,7 @@ def register_dashboard(app) -> None:
 
     @app.get("/{root_file}", include_in_schema=False)
     async def ui_root_file(root_file: str):
-        if root_file in {"favicon.svg", "icons.svg",
-                         "lenoxvi-horizontal-on-dark.svg",
-                         "lenoxvi-horizontal-on-light.svg"}:
+        if root_file in DIST_ROOT_FILES:
             f = ui_index.parent / root_file
             if f.is_file():
                 media = "image/svg+xml" if f.suffix == ".svg" else "application/octet-stream"

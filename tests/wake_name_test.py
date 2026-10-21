@@ -70,9 +70,9 @@ check("wake name: absent model -> hey_jarvis bundled", wn.resolve_model().endswi
 # no speech-to-text hint any more (removed: failed its accuracy bar; aliases do the job)
 check("wake name: no spelling-hint helpers left",
       not any(hasattr(wn, x) for x in ("hotwords", "bias_enabled", "_stt_bias", "BIAS_DEFAULT")))
-CFG["wake"] = {"heard_as": ["linux"]}
+CFG["wake"] = {"heard_as": ["yellow"]}
 check("wake name: no name -> aliases still drop, nothing else does",
-      wn.is_wake_phrase_only("hey linux") and not wn.is_wake_phrase_only("hey")
+      wn.is_wake_phrase_only("hey yellow") and not wn.is_wake_phrase_only("hey")
       and not wn.is_wake_phrase_only(""))
 CFG["wake"] = {}
 check("wake name: no name and no aliases -> the filter never drops",

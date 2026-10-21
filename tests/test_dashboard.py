@@ -3155,11 +3155,11 @@ def main():
     _regwn.note_heard("kitchen", "no wake before this", False)
     check("wake name: a transcript without a wake is not recorded", _regwn.recent_heard() == [])
     _regwn.note_wake("kitchen")
-    _regwn.note_heard("kitchen", "Hey Linux.", True)
+    _regwn.note_heard("kitchen", "Hey Yellow.", True)
     _regwn.note_heard("kitchen", "second transcript", False)
     _rhwn = _regwn.recent_heard()
     check("wake name: only the FIRST transcript after a wake is recorded, with room + dropped flag",
-          len(_rhwn) == 1 and _rhwn[0]["text"] == "Hey Linux." and _rhwn[0]["dropped"] is True
+          len(_rhwn) == 1 and _rhwn[0]["text"] == "Hey Yellow." and _rhwn[0]["dropped"] is True
           and _rhwn[0]["room"] == "kitchen", str(_rhwn))
     _regwn.note_wake("kitchen")
     _regwn._WAKE_PENDING["kitchen"] -= 600
@@ -3196,14 +3196,14 @@ def main():
         _stt_midwn = dict(config_store.read_section("stt") or {})
         check("wake name: PUT /wake never touches the stt section", _stt_midwn == _stt_bakwn)
         for _badwn in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
-                        {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "linux"},
+                        {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "yellow"},
                         {"heard_as": ["x" * 31]}]:
             r = client.put("/api/dashboard/wake", json=_badwn)
             _kwn = list(_badwn)[0]
             check(f"wake name: PUT /wake rejects bad {_kwn} ({str(_badwn[_kwn])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
         check("wake name: rejected PUTs changed nothing", _wnwnb.name() == "Computer")
-        for _badwn in [["okay"], ["Stop"], ["linux", "hey"]]:
+        for _badwn in [["okay"], ["Stop"], ["yellow", "hey"]]:
             r = client.put("/api/dashboard/wake", json={"heard_as": _badwn})
             check(f"wake name: PUT /wake rejects filler-word alias {_badwn} (422)",
                   r.status_code == 422, f"{r.status_code}")
@@ -3266,6 +3266,12 @@ def main():
                        if p.is_file() and "willow" in p.read_text(errors="ignore").lower()})
     check("wake name sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
           not _hitswn, f"hits={_hitswn}")
+    # Dashboard dist-root allowlist names only files the build actually ships
+    import dashboard as _dashdr
+    _distdr = REPO_CORE.parent / "dashboard-ui" / "dist"
+    _alldr = getattr(_dashdr, "DIST_ROOT_FILES", None)
+    check("dashboard: dist-root allowlist exists and every name in it is in dist/",
+          bool(_alldr) and all((_distdr / f).is_file() for f in _alldr), str(_alldr))
     import intelligence_agent as _iawn
     check("wake name: intelligence drop-filter delegates to wake_name",
           "wake_name" in _inspwn.getsource(_iawn._is_wake_phrase_only))
@@ -3608,6 +3614,19 @@ def main():
               str(_kc57.target_for("LVI_HERMES_KEY_KIDS_AGENT", _kc57.known_agents(_kcfg))))
         check("room agents: keys: an agent picked for a room counts as in use",
               _rows.get("LVI_HERMES_KEY_KIDS_AGENT", {}).get("in_use") is True, str(_rows.get("LVI_HERMES_KEY_KIDS_AGENT")))
+        # Keys card: an in-use agent whose key is NOT in .env still gets a row (shown as Missing)
+        _rows_m = [r for r in _kc57.rows({}, {}, _kcfg, file_env={}) if r["var"] == "LVI_HERMES_KEY_KIDS_AGENT"]
+        check("keys: an in-use room-override agent with no key in .env gets one Missing row",
+              len(_rows_m) == 1 and _rows_m[0]["set"] is False and _rows_m[0]["in_use"] is True
+              and _rows_m[0].get("agent") == "kids_agent", str(_rows_m))
+        _rows_d = [r for r in _kc57.rows({"LVI_HERMES_KEY_KIDS_AGENT": "k"}, {}, _kcfg,
+                                         file_env={"LVI_HERMES_KEY_KIDS_AGENT": "k"}) if r["var"] == "LVI_HERMES_KEY_KIDS_AGENT"]
+        check("keys: an in-use agent whose key IS in .env keeps exactly one row", len(_rows_d) == 1, str(_rows_d))
+        check("keys: an agent nothing uses and .env lacks gets no row",
+              not [r for r in _kc57.rows({}, {}, {}, file_env={}) if r["var"].startswith("LVI_HERMES_KEY_")], "")
+        _oc_cfg = {"intelligence": {"kind": "openclaw"}, "room_agents": {"hermes": {"suite-kids57": "kids_agent"}}}
+        check("keys: with OpenClaw as the intelligence, a Hermes room override gets no Missing row",
+              not [r for r in _kc57.rows({}, {}, _oc_cfg, file_env={}) if r["var"] == "LVI_HERMES_KEY_KIDS_AGENT"], "")
     finally:
         for _k, _v in _57_env.items():
             if _v is None:

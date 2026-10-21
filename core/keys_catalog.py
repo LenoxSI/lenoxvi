@@ -89,6 +89,15 @@ def rows(saved_env: dict, live_env: dict, cfg: dict, file_env=None) -> list[dict
         t = target_for(var, known) if agent_of(var) else None
         if t is not None:
             templates.append(t)
+    # An agent the config uses (house default or a room override) whose key
+    # isn't in .env still gets a row, so the card shows it as Missing.
+    listed = {t["var"] for t in templates}
+    for name in known:
+        var = intelligence_target.key_var("hermes", str(name))
+        t = target_for(var, known) if var not in listed else None
+        if t is not None and _in_use(t, cfg):
+            templates.append(t)
+            listed.add(var)
     out = []
     for row in templates:
         # .env is the store: with the file given, a removed line is
