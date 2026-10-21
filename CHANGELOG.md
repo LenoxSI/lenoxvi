@@ -8,27 +8,17 @@ The two version streams are independent.
 
 ## [Unreleased]
 
-### Changed
-- **Renamed to LenoxVI.** Name, docs, dashboard logo and page title follow
-  the LenoxVI brand kit (colours unchanged). Environment variables use the
-  `LVI_` prefix (e.g. `LVI_HERMES_KEY`), the systemd user unit is
-  `lenoxvi-bot` (`deploy/lenoxvi-bot.service.example`), and the dev
-  server reads `LENOXVI_DEV_BOT_URL`. The firmware repo is
-  `lenoxvi-firmware`.
+## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 
-### Fixed
-- **Restarts no longer hang.** Stopping the bot waited for every node's
-  session to end on its own, which never happens, until the service
-  manager killed it 10 s later, so nodes never heard the bot leave and
-  only noticed when their keepalive timed out. A stop now takes ~2 s and
-  closes every node connection on the way out (nodes on firmware that
-  listens for it reconnect right away).
-- **Turns no longer split on a streaming STT.** With Deepgram, words
-  finalized mid-sentence could close the turn while you were still
-  talking, and the rest of the sentence was glued onto your next one. A
-  turn now closes only after you stop speaking, and Deepgram's final
-  transcript closes it immediately (faster than the old fixed pause).
-  Local Whisper behaves exactly as before.
+The project's new name, one place for every API key, a cloud speech-to-text
+option with local Whisper as its safety net, a different agent per room,
+restarts that take seconds instead of a minute, and a dashboard whose status
+reads at a glance.
+
+- Companion firmware (separate version stream): `array-v1.2.34` /
+  `flex-v1.2.34` / `waveshare-v1.2.34` — nodes reconnect as soon as the bot
+  closes their connection on a stop, so a bot restart costs ~9 s of mic time
+  instead of ~1 minute.
 
 ### Added
 - **Keys card (System).** Every API key in one place: ElevenLabs,
@@ -82,17 +72,55 @@ The two version streams are independent.
 - `GET`/`PUT /api/dashboard/stt`, `DELETE /api/dashboard/stt/model/{name}`;
   `/api/dashboard/status` gains an `stt` block.
 
-### Fixed
-- Config writes are serialised behind one lock, so a write from a worker
-  thread can't garble `config.yaml` or lose a section.
-
 ### Changed
+- **Renamed to LenoxVI.** Name, docs, dashboard logo and page title follow
+  the LenoxVI brand kit (colours unchanged). Environment variables use the
+  `LVI_` prefix (e.g. `LVI_HERMES_KEY`), the systemd user unit is
+  `lenoxvi-bot` (`deploy/lenoxvi-bot.service.example`), and the dev
+  server reads `LENOXVI_DEV_BOT_URL`. The firmware repo is
+  `lenoxvi-firmware`.
 - Dashboard: the Nodes table no longer shows a `speaker` chip (the built-in
   speaker lives in Zones and the mapping dropdown); the waveshare line chip's
   tooltip reads "Waveshare esp32-s3-audio board (built-in speaker option)".
 - Dashboard: a node's built-in speaker row in Zones shows an `ESP32` backend
   chip (was `node`) and no "Mic pauses while it speaks." note; the
   "Not in use — replies go to …" note stays.
+- **Status bar as chips.** The Overview status bar reads uptime ·
+  intelligence · nodes online · last wake · version · stt · tts, each a chip.
+  Nodes online is green when every node is up, amber when some are down, red
+  when none are. The STT and TTS chips name the engine the rooms are actually
+  using, amber on a fallback and red when it's down. The Nodes table shows
+  online/offline as chips too. Every chip follows the brand's Chip rule
+  (lowercase words, soft status tones).
+- **Wake name card.** "Heard right after a wake" is plain text (spellings are
+  added in the box), and the add-a-spelling box sits beside the wake name.
+- Room → zone mapping and Wake name drop their explanatory notes; the Push
+  firmware button sits at the far right of its row.
+- **`deploy_firmware.sh` no longer restarts the bot.** The firmware server
+  reads the track directory on every request, so a restart only dropped every
+  room. The script stages the image and tells you to restart that line's
+  node(s) from the dashboard, which is when a node picks it up.
+
+### Fixed
+- **Restarts no longer hang.** Stopping the bot waited for every node's
+  session to end on its own, which never happens, until the service
+  manager killed it 10 s later, so nodes never heard the bot leave and
+  only noticed when their keepalive timed out. A stop now takes ~2 s and
+  closes every node connection on the way out (nodes on firmware that
+  listens for it reconnect right away).
+- **Turns no longer split on a streaming STT.** With Deepgram, words
+  finalized mid-sentence could close the turn while you were still
+  talking, and the rest of the sentence was glued onto your next one. A
+  turn now closes only after you stop speaking, and Deepgram's final
+  transcript closes it immediately (faster than the old fixed pause).
+  Local Whisper behaves exactly as before.
+- Config writes are serialised behind one lock, so a write from a worker
+  thread can't garble `config.yaml` or lose a section.
+- The Keys card shows a **Missing** row for an agent in use (the house default
+  or a room's override) whose key isn't in `.env`; before, that case only
+  showed up as a "No key" link elsewhere.
+- The dashboard no longer allowlists two root files the build stopped
+  shipping.
 
 ## [0.6.5] — 2026-10-18 — Built-in speaker zone, Pocket TTS, wake name from config
 
