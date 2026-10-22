@@ -488,6 +488,32 @@ def main():
     check("TTS round-trip: elevenlabs voice_id + model persisted",
           t.get("voice_id") == "AbC123xyZw9876543210" and t.get("model") == "eleven_flash_v2_5",
           f"t={t}")
+    check("tts norm: GET carries elevenlabs_text_normalization (unset = None)",
+          "elevenlabs_text_normalization" in t, f"keys={sorted(t)}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_flash_v2_5", "elevenlabs_text_normalization": "on"})
+    t = client.get("/api/dashboard/tts").json()
+    check("tts norm: PUT 'on' persists",
+          r.status_code == 200 and t.get("elevenlabs_text_normalization") == "on",
+          f"status={r.status_code} t={t.get('elevenlabs_text_normalization')}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
+    t = client.get("/api/dashboard/tts").json()
+    check("tts norm: a PUT without the field leaves it as-is",
+          r.status_code == 200 and t.get("elevenlabs_text_normalization") == "on",
+          f"t={t.get('elevenlabs_text_normalization')}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_flash_v2_5", "elevenlabs_text_normalization": "auto"})
+    t = client.get("/api/dashboard/tts").json()
+    check("tts norm: PUT 'auto' switches back",
+          r.status_code == 200 and t.get("elevenlabs_text_normalization") == "auto",
+          f"t={t.get('elevenlabs_text_normalization')}")
+    r = client.put("/api/dashboard/tts", json={
+        "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+        "model": "eleven_flash_v2_5", "elevenlabs_text_normalization": "always"})
+    check("tts norm: unknown mode rejected (422)", r.status_code == 422, f"status={r.status_code}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "deepgram", "deepgram_voice": "aura-2-zeus-en"})
     check("TTS PUT (deepgram) ok", r.status_code == 200, f"status={r.status_code}")
@@ -3148,6 +3174,12 @@ def main():
           _pre_call is not None and len(_pre_tr) == 3 and _pre_tr == _stt_tr,
           f"preload={_pre_tr} run_bot={_stt_tr}")
     _main_src = _astR.unparse(_botR)
+    check("tts norm: the Flash lane sends tts.elevenlabs_text_normalization to ElevenLabs",
+          "apply_text_normalization=tts_text.normalization_mode(cfg('tts', 'elevenlabs_text_normalization'))"
+          in _main_src)
+    check("tts norm: both ElevenLabs lanes spell clock times (ClockTimeFilter)",
+          _main_src.count("text_filters=[tts_text.ClockTimeFilter()]") == 2,
+          f"count={_main_src.count('text_filters=[tts_text.ClockTimeFilter()]')}")
     check("fast restart: uvicorn.run is wrapped (TLS + graceful-shutdown deadline) before the runner starts",
           "wrap_uvicorn_run(uvicorn" in _main_src and _main_src.find("wrap_uvicorn_run(uvicorn") < _main_src.rfind("main()")
           and "_tls_run" not in _main_src, "wrapper missing / after main() / old TLS-only wrapper still there")
