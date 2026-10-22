@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Retrying a node command (mute, scan, info) right after it timed out no
+  longer shows the first command's late answer; the retry waits a few
+  seconds until that answer has landed.
 - Saving settings from the dashboard no longer strips the comments in
   config.yaml (section notes, inline notes, and the note above the next
   section).

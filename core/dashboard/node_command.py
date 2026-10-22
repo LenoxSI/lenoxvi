@@ -21,6 +21,7 @@ automatically — a quiet house never false-reboots a node.
 
 import asyncio
 import json
+import time
 
 from loguru import logger
 
@@ -46,6 +47,13 @@ class NoLiveSession(NodeCommandError):
 # pc_id -> asyncio.Future, keyed (pc_id, cmd) — awaited by API routes.
 _pending = {}
 _pending_lock = asyncio.Lock()
+# (pc_id, cmd) -> monotonic deadline after a TIMED-OUT request. The protocol
+# has no request id the node echoes back, so a late reply to the timed-out
+# command would resolve a retry with the wrong answer (a stale mute state).
+# A retry inside the window is refused (409); the late reply still applies
+# its side effects and lifts the window.
+_settling: dict = {}
+SETTLE_SECS = 15.0
 
 
 def _send(out, payload: dict) -> bool:
@@ -106,6 +114,10 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     async with _pending_lock:
         if key in _pending and not _pending[key].done():
             raise CommandInFlight(f"'{cmd}' already in flight for '{room}'")
+        if _settling.get(key, 0.0) > time.monotonic():
+            raise CommandInFlight(f"the last '{cmd}' to '{room}' timed out and may still "
+                                  "land - try again in a few seconds")
+        _settling.pop(key, None)
         fut = asyncio.get_event_loop().create_future()
         _pending[key] = fut
 
@@ -115,6 +127,9 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
         raise TimeoutError(f"send failed for '{cmd}' to '{room}'")
     try:
         return await asyncio.wait_for(fut, timeout)
+    except TimeoutError:
+        _settling[key] = time.monotonic() + SETTLE_SECS
+        raise
     finally:
         async with _pending_lock:
             _pending.pop(key, None)
@@ -186,6 +201,9 @@ def on_message(message, pc_id: str) -> None:
     cmd = data.get("cmd")
     key = (pc_id, cmd)
     fut = _pending.get(key)
+    # A reply to a request that already timed out: its side effects below
+    # still apply (they're the node's truth), but it answers no request.
+    late = _settling.pop(key, None) is not None
     logger.info(f"node_command: <- {pc_id[:24]}… cmd_result '{cmd}' ok={data.get('ok')} data={str(data.get('data'))[:80]}")
 
     # Room rename: the registry relabels, and the room_zones mapping key
@@ -265,5 +283,5 @@ def on_message(message, pc_id: str) -> None:
 
             node_speaker.sync(registry.room_for_pc(pc_id))
 
-    if fut and not fut.done():
+    if fut and not fut.done() and not late:
         fut.set_result(data)
