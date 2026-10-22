@@ -2994,6 +2994,11 @@ def main():
           and "_synthesize_text" in _PipecatTTS13.__dict__,
           "Tracked* must sit on TTSTracked over a websocket TTS service, and the "
           "revive hook must override a method pipecat's TTSService defines")
+    _dlg13 = getattr(_bot13, "TrackedElevenLabsDialogueTTSService", None)
+    check("tts reconnect: the v4/v3 dialogue lane rides the same revive hook",
+          _dlg13 is not None and issubclass(_dlg13, _TTST13)
+          and _dlg13._synthesize_text is _TTST13._synthesize_text,
+          "TrackedElevenLabsDialogueTTSService must resolve _synthesize_text to TTSTracked's")
 
     # Node-command error mapping: an in-flight duplicate is a
     # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a

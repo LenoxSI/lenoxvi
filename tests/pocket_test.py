@@ -336,7 +336,7 @@ def _run(coro_fn, default):
 # R1 (critical): WAN-dead boot. A REAL ElevenLabs service pointed at a refused
 # port, inside a real switcher, inside a real pipeline: the failed first
 # connect must fail over to Pocket and the next speak must come out of Pocket.
-async def _wan_dead_boot():
+async def _wan_dead_boot(dialogue=False):
     from pipecat.frames.frames import EndFrame, TTSAudioRawFrame, TTSSpeakFrame
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.runner import PipelineRunner
@@ -358,8 +358,20 @@ async def _wan_dead_boot():
                 self.audio += 1
             await self.push_frame(frame, direction)
 
-    prim = Prim(api_key="suite-key-not-real", voice_id="suite-voice",
-                url="ws://127.0.0.1:9")
+    if dialogue:
+        from pipecat.services.elevenlabs.dialogue.tts import (
+            ElevenLabsDialogueTTSService,
+        )
+
+        class PrimDlg(Mixin, ElevenLabsDialogueTTSService):
+            _tts_provider = "elevenlabs"
+
+        prim = PrimDlg(api_key="suite-key-not-real", url="ws://127.0.0.1:9",
+                       settings=ElevenLabsDialogueTTSService.Settings(
+                           model="eleven_v4_turbo", voice="suite-voice"))
+    else:
+        prim = Prim(api_key="suite-key-not-real", voice_id="suite-voice",
+                    url="ws://127.0.0.1:9")
     stand = tp.make_service(mixin=Mixin, voice="alba")
 
     async def q(f):
@@ -387,6 +399,18 @@ _r1_active, _r1_audio, _r1_prim_usable = _run(_wan_dead_boot, (False, 0, True))
 check("pocket: R1 WAN-dead boot: failed first connect fails over to Pocket", _r1_active)
 check("pocket: R1 WAN-dead boot: the next speak comes out of Pocket", _r1_audio > 0, f"audio frames={_r1_audio}")
 check("pocket: R1 WAN-dead boot: primary marked unusable", _r1_prim_usable is False)
+
+
+# The same WAN-dead boot on the v4 Turbo lane (Text-to-Dialogue websocket).
+async def _wan_dead_boot_v4():
+    return await _wan_dead_boot(dialogue=True)
+
+
+_r1d_active, _r1d_audio, _r1d_prim_usable = _run(_wan_dead_boot_v4, (False, 0, True))
+check("pocket: R1 v4 lane WAN-dead boot: fails over to Pocket", _r1d_active)
+check("pocket: R1 v4 lane WAN-dead boot: the next speak comes out of Pocket",
+      _r1d_audio > 0, f"audio frames={_r1d_audio}")
+check("pocket: R1 v4 lane WAN-dead boot: primary marked unusable", _r1d_prim_usable is False)
 
 
 async def _r1_guard():
