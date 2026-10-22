@@ -1957,6 +1957,7 @@ def main():
 
         # ── turn gate: a streaming STT's mid-speech final never closes the turn ──
         async def _tg_probe():
+            from pipecat.frames.frames import InterimTranscriptionFrame as _ITF
             from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStop
             ag = _Agent(echo_gate=_EchoGate8(), room="suite-tg", session_mode="fresh")
             ag._lull_secs = 0.3
@@ -1975,6 +1976,7 @@ def main():
             # A — the live split, replayed: "What" final mid-speech, the rest
             # arrives as Deepgram's finalize result after VAD stop.
             await ag.process_frame(_VADStart(), D)
+            await ag.process_frame(_ITF("What", "", 0), D)  # Deepgram streams interims
             await ag.process_frame(_TF("What", "", 0, 0, 0), D)
             await tick(14)
             out["mid"] = [t for _, t in turns]
@@ -2018,6 +2020,86 @@ def main():
               _tg["B_early"] == [] and _tg["B"] == ["hello there"] and 0.28 <= (_tg["B_wait"] or 0) <= 0.55, str(_tg))
         check("turn gate: Whisper order (stop, then a plain transcript) still waits the lull from the transcript",
               _tg["C"] == ["what time is it"] and 0.28 <= (_tg["C_wait"] or 0) <= 0.55, str(_tg))
+
+        # ── segmented STT (Whisper stamps EVERY stretch finalized, no interims) ──
+        async def _seg_probe():
+            from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStopS
+            ag = _Agent(echo_gate=_EchoGate8(), room="suite-seg", session_mode="fresh")
+            ag._lull_secs = 0.3
+            turns = []
+
+            async def rec(text, epoch):
+                turns.append((time.monotonic(), text))
+            ag._run_turn = rec
+            D = _FD8.DOWNSTREAM
+
+            async def tick(secs):
+                end = time.monotonic() + secs
+                while time.monotonic() < end:
+                    await ag.process_frame(_TF("", "", 0, 0, 0), D)
+                    await asyncio.sleep(0.02)
+
+            def final(text):
+                return _TF(text, "", 0, 0, 0, finalized=True)
+            out = {}
+            # D: one stretch -> closes ~lull after the STOP, not at the final.
+            await ag.process_frame(_VADStart(), D)
+            await tick(0.1)
+            await ag.process_frame(_VADStopS(), D)
+            ts = time.monotonic()
+            await tick(0.15)
+            await ag.process_frame(final("what time is it"), D)
+            await asyncio.sleep(0.01)
+            out["D_instant"] = [t for _, t in turns]
+            await tick(0.4)
+            out["D"] = [t for _, t in turns]
+            out["D_wait"] = (turns[0][0] - ts) if turns else None
+            turns.clear()
+            # E: a breath pause shorter than the lull -> ONE turn, both stretches.
+            await ag.process_frame(_VADStart(), D)
+            await tick(0.1)
+            await ag.process_frame(_VADStopS(), D)
+            await tick(0.1)
+            await ag.process_frame(final("Sam got me tickets to a show."), D)
+            await tick(0.1)  # 0.2 s after the stop: talking again
+            await ag.process_frame(_VADStart(), D)
+            await tick(0.3)
+            out["E_mid"] = [t for _, t in turns]
+            await ag.process_frame(_VADStopS(), D)
+            await tick(0.1)
+            await ag.process_frame(final("It's on my bucket list."), D)
+            await tick(0.4)
+            out["E"] = [t for _, t in turns]
+            turns.clear()
+            # F: a second stretch that yields no transcript -> closes after the grace.
+            await ag.process_frame(_VADStart(), D)
+            await tick(0.1)
+            await ag.process_frame(_VADStopS(), D)
+            await tick(0.1)
+            await ag.process_frame(final("turn on the lights"), D)
+            await tick(0.1)
+            await ag.process_frame(_VADStart(), D)
+            await tick(0.1)
+            await ag.process_frame(_VADStopS(), D)
+            tf = time.monotonic()
+            await tick(0.3 + 0.3)
+            out["F_early"] = [t for _, t in turns]
+            await tick(1.6)
+            out["F"] = [t for _, t in turns]
+            out["F_wait"] = (turns[0][0] - tf) if turns else None
+            return out
+
+        _sg = _asyncio.run(_seg_probe())
+        check("turn gate: a Whisper final does NOT close the turn at once",
+              _sg["D_instant"] == [], str(_sg))
+        check("turn gate: a Whisper final closes ~the lull after VAD stop",
+              _sg["D"] == ["what time is it"] and 0.28 <= (_sg["D_wait"] or 0) <= 0.45, str(_sg))
+        check("turn gate: a breath pause shorter than the lull keeps ONE turn (Whisper)",
+              _sg["E_mid"] == [] and
+              _sg["E"] == ["Sam got me tickets to a show. It's on my bucket list."], str(_sg))
+        check("turn gate: a Whisper stretch with no transcript closes after the grace",
+              _sg["F_early"] == [] and _sg["F"] == ["turn on the lights"]
+              and 1.7 <= (_sg["F_wait"] or 0) <= 2.1, str(_sg))
 
         _SPOKEN8 = []
 
@@ -2127,6 +2209,50 @@ def main():
                   and any("can't reach" in s for s in _dd_spoken),
                   f"calls={_dd_n} spoken={_dd_spoken}")
             _df_n, _df_spoken = _asyncio.run(_dedup_probe(fail_first=False, slow_first=True))
+            # ── no filler while the user is talking ──
+            import intelligence_agent as _ia_fill
+
+            async def _filler_probe(talk_until, ask_secs):
+                agent = _Agent(echo_gate=_EchoGate8(), room="suite-fh",
+                               session_mode="fresh")
+                spoken = []
+
+                def fake_ask(text):
+                    time.sleep(ask_secs)
+                    return "the reply"
+
+                agent._ask_intelligence = fake_ask
+
+                async def fake_push(frame, direction=None):
+                    t = getattr(frame, "text", None)
+                    if t:
+                        spoken.append((round(time.monotonic() - t0, 2), t))
+
+                agent.push_frame = fake_push
+                agent._vad_active = True
+                t0 = time.monotonic()
+
+                async def stop_talking():
+                    await asyncio.sleep(talk_until)
+                    agent._vad_active = False
+                talker = asyncio.create_task(stop_talking())
+                await agent._run_turn("what's the weather", agent._turn_epoch)
+                await talker
+                return spoken
+
+            _orig_tiers = _ia_fill._filler_tiers
+            _ia_fill._filler_tiers = lambda: [(0.2, ["Working on it."])]
+            try:
+                _fh1 = _asyncio.run(_filler_probe(talk_until=0.6, ask_secs=1.2))
+                _fh2 = _asyncio.run(_filler_probe(talk_until=2.0, ask_secs=0.8))
+            finally:
+                _ia_fill._filler_tiers = _orig_tiers
+            check("turns filler: held while the user talks, spoken once they stop",
+                  [t for _, t in _fh1] == ["Working on it.", "the reply"]
+                  and _fh1[0][0] >= 0.55, f"spoken={_fh1}")
+            check("turns filler: skipped when the reply lands while the user still talks",
+                  [t for _, t in _fh2] == ["the reply"], f"spoken={_fh2}")
+
             check("turns dedup: the same utterance twice during a live turn still asks once",
                   _df_n == 1 and sum("reply to" in s for s in _df_spoken) == 1,
                   f"calls={_df_n} spoken={_df_spoken}")
@@ -3255,6 +3381,21 @@ def main():
     import asyncio as _aiolk
     import time as _tlk
     from stt_local import LocalWhisperSTTService as _LWS
+    from stt_local import is_phantom_transcript as _phantom
+    from types import SimpleNamespace as _NSeg
+    check("whisper phantom: 'Thanks for watching!' alone is dropped",
+          _phantom("Thanks for watching!") and _phantom(" thank you for watching. "))
+    check("whisper phantom: caption credits are dropped",
+          _phantom("Subtitles by the Amara.org community"))
+    check("whisper phantom: real speech that contains a phrase is kept",
+          not _phantom("thanks for watching the kids last night")
+          and not _phantom("thank you, that's all") and not _phantom("Thank you."))
+    check("whisper phantom: Whisper's own no-speech rule drops a noise segment",
+          _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-1.4)]))
+    check("whisper phantom: a confident segment is kept even with a high no-speech score",
+          not _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-0.3)])
+          and not _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-1.4),
+                                     _NSeg(no_speech_prob=0.1, avg_logprob=-0.2)]))
     from pipecat.services.whisper.base_stt import BaseWhisperSTTService as _BWS
 
     class _FakeClient:
