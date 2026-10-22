@@ -655,6 +655,11 @@ class IntelligenceAgent(FrameProcessor):
             # fails is still superseded: no history write either way.
             logger.error(f"intelligence_agent: intelligence call failed"
                          f"{' after filler' if filler_spoken else ''}: {e}")
+            # A failed turn must not dedup its own retry: the user hears the
+            # apology and repeats the question. Dedup exists for double-fires
+            # of ONE utterance, not for a deliberate second try.
+            if self._last_user_text == text:
+                self._last_user_text = ""
             if epoch != self._turn_epoch:
                 return
             await self.push_frame(
