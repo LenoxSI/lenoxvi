@@ -117,6 +117,7 @@ class WiiMOutput(FrameProcessor):
         # setup() via shared_clip_server().
         self._clip_server = None
         self._speech_epoch = 0  # generation stamp; re-anchors only while current
+        self._barge_epoch = 0  # bumped only by a barge-in (see SonosOutput)
 
     async def setup(self, setup):
         """Pipecat lifecycle hook — the ONLY reliable place to start the
@@ -150,7 +151,11 @@ class WiiMOutput(FrameProcessor):
 
     # ── reply playback ──────────────────────────────────────────────────
 
-    async def _speak_to_wiim(self, pcm: bytes, epoch: int | None = None) -> None:
+    def _barged(self, barge: int | None) -> bool:
+        return barge is not None and barge != self._barge_epoch
+
+    async def _speak_to_wiim(self, pcm: bytes, epoch: int | None = None,
+                             barge: int | None = None) -> None:
         """Interrupt-no-restore reply: snap vol → set voice vol → play clip →
         restore music vol. Echo gate blocks for the clip duration; the LED
         end-of-speech timer is set in process_frame (same timing basis as
@@ -177,6 +182,9 @@ class WiiMOutput(FrameProcessor):
         duration = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
         vol = self._volume_for(zone_name)
 
+        if self._barged(barge):  # barge-in while the clip was being built
+            logger.info("wiim_output: barge-in before the clip loaded, dropped")
+            return
         # Echo gate: her voice will come off the WiiM speakers; block the
         # mic from hearing the reply (no AEC by design).
         if self._echo_gate is not None:
@@ -238,10 +246,24 @@ class WiiMOutput(FrameProcessor):
             wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
             return before_vol
 
+        if self._barged(barge):
+            logger.info("wiim_output: barge-in during the encode, clip dropped")
+            return
         try:
             before_vol = await asyncio.to_thread(_net)
         except Exception as e:
             logger.error(f"wiim_output: play failed on {ip}: {e}")
+            return
+        if self._barged(barge):
+            # The barge-in landed while the play command was in flight:
+            # stop it and put the music volume back, no timers left behind.
+            try:
+                await asyncio.to_thread(wiim_api, ip, "setPlayerCmd:stop")
+                if before_vol is not None:
+                    await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}")
+            except Exception as e:  # noqa: BLE001 — best-effort; the barge-in already stopped it once
+                logger.warning(f"wiim_output: late barge-in stop failed: {e}")
+            logger.info("wiim_output: barge-in during load, clip stopped")
             return
         # ── LOAD-ANCHORED TIMERS ──
         # Same disease as SonosOutput: generation-anchored timers fired
@@ -301,6 +323,7 @@ class WiiMOutput(FrameProcessor):
         """Kill the sounding reply clip (wake-word barge-in). WiiM: a
         plain setPlayerCmd:stop. Idempotent: no clip, nothing to do."""
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
+        self._barge_epoch += 1  # ...and in-flight ones drop their clip
         self._cancel_end_of_speech()
         # Echo-gate rider: the clip is dead — its duration gate must
         # not eat the interrupting question. relax() never extends a
@@ -354,7 +377,7 @@ class WiiMOutput(FrameProcessor):
                         self._wake_gate.note_speech(len(pcm) / (2 * self._sample_rate * max(self._channels, 1)))
                     except Exception:
                         pass
-                self.create_task(self._speak_to_wiim(pcm, epoch=gen))
+                self.create_task(self._speak_to_wiim(pcm, epoch=gen, barge=self._barge_epoch))
             elif self._led:
                 self._schedule_end_of_speech(0.0)
         elif isinstance(frame, CancelFrame):

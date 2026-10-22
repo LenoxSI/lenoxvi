@@ -301,6 +301,9 @@ class SonosOutput(FrameProcessor):
         self._channels = 1
         self._clip_count = 0
         self._speech_epoch = 0  # generation stamp; load-anchored timers re-anchor only while current
+        # Bumped ONLY by a barge-in (a new generation must not kill an older
+        # clip still loading). A speak task that sees it move drops its clip.
+        self._barge_epoch = 0
         if not self._enabled:
             logger.info("sonos_output disabled in config.yaml")
         elif self._zone not in self._zones:
@@ -609,7 +612,11 @@ class SonosOutput(FrameProcessor):
             return self._zone_volumes[zone]
         return self._volume
 
-    async def _speak_to_sonos(self, pcm: bytes, epoch: int | None = None) -> None:
+    def _barged(self, barge: int | None) -> bool:
+        return barge is not None and barge != self._barge_epoch
+
+    async def _speak_to_sonos(self, pcm: bytes, epoch: int | None = None,
+                              barge: int | None = None) -> None:
         # Unpadded speech duration: every speech-window timer —
         # echo gate, end-of-speech LED, wake-gate cap — uses this one
         # number; the 8s duck-tail padding below extends the CLIP (and
@@ -622,6 +629,12 @@ class SonosOutput(FrameProcessor):
             # The node's own speaker plays it; its echo gate is owned by
             # NodeSpeakerOutput (anchored at playback start).
             logger.debug("sonos_output: reply zone is the node's built-in speaker, skipping")
+            return
+        # Barge-in while this clip was still being built: drop it. Checked
+        # again after the encode and before the play call; arming the echo
+        # gate for a dead clip would swallow the interrupting question.
+        if self._barged(barge):
+            logger.info("sonos_output: barge-in before the clip loaded, dropped")
             return
         # Block echo handling for exactly as long as this clip will sound:
         # the mic will hear it off the zone speakers (no AEC by design).
@@ -666,6 +679,9 @@ class SonosOutput(FrameProcessor):
             return bytes(encoder.encode(pcm_bytes)) + bytes(encoder.flush())
 
         mp3 = await asyncio.to_thread(_encode, pcm)
+        if self._barged(barge):
+            logger.info("sonos_output: barge-in during the encode, clip dropped")
+            return
 
         self._clip_count += 1
         filename = f"reply-{int(time.time())}-{self._clip_count}.mp3"
@@ -681,9 +697,20 @@ class SonosOutput(FrameProcessor):
         sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
         try:
             await asyncio.wait_for(sw.connect(), timeout=5.0)  # bounded
+            if self._barged(barge):
+                logger.info("sonos_output: barge-in before play, clip dropped")
+                return
             resp = await asyncio.wait_for(
                 sw.play_clip(url, volume=volume), timeout=5.0
             )
+            if self._barged(barge):
+                # The barge-in landed while the clip was loading: kill it now,
+                # and leave no timers, clip id or echo block behind.
+                cid = _extract_clip_id(resp)
+                if cid:
+                    await asyncio.wait_for(sw.cancel_clip(cid), timeout=5.0)
+                logger.info(f"sonos_output: barge-in during load, cancelled clip {cid}")
+                return
             # ── LOAD-ANCHORED TIMERS ──
             # Generation-anchored timers fired early on the v4 dialogue
             # lane (measured a 3.4s gap from generation to load):
@@ -730,6 +757,7 @@ class SonosOutput(FrameProcessor):
         cid = self._reply_clip_id
         self._reply_clip_id = None
         self._speech_epoch += 1  # stale in-flight speak tasks can't re-anchor
+        self._barge_epoch += 1  # ...and in-flight ones drop their clip
         self._cancel_end_of_speech()
         self._clip_active_until = 0.0
         # Echo-gate rider: the clip is dead — its duration gate must
@@ -830,7 +858,7 @@ class SonosOutput(FrameProcessor):
                 # chain can exceed any margin set this early. The load
                 # site re-anchors all speech timers.
                 # Fire-and-forget: never block the pipeline on Sonos I/O
-                self.create_task(self._speak_to_sonos(pcm, epoch=gen))
+                self.create_task(self._speak_to_sonos(pcm, epoch=gen, barge=self._barge_epoch))
             elif len(self._pcm) > 0 and self._reply_is_builtin():
                 # Sonos disabled, but the node's own speaker sounds this
                 # reply (a speaker-only install): time the LEDs and the

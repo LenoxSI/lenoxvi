@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Interrupting with the wake word while a reply is still loading on a Sonos
+  or WiiM speaker now stops it; before, the reply played anyway and the mic
+  stayed closed, so the question you interrupted with was lost.
+- Wake-word detection can no longer stall when the intelligence hangs: its
+  calls and wake scoring each get their own threads.
 - A short breath pause no longer ends your request early with local Whisper:
   the turn now waits out the full pause window from when you stopped
   talking (streaming STT keeps its instant close).
