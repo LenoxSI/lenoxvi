@@ -22,6 +22,8 @@ pipeline-free led_state wire.
 """
 
 import asyncio
+import os
+import threading
 import time
 from pathlib import Path
 
@@ -162,6 +164,17 @@ def _prune_clips(clips_dir: Path, retention_days: int) -> int:
     return removed
 
 
+def _write_clip(path: Path, data: bytes) -> None:
+    """Write one clip file. Callers run it in a thread (file I/O stays off
+    the event loop) and await it before handing out the clip's URL.
+    Temp + rename: the clip server (on the loop) can serve a file while a
+    thread writes it, and every pipeline rewrites the same duck clip."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
 async def _clip_prune_loop(clips_dir: Path, retention_days: int):
     """Hourly clip prune (2026-09-20): the old construction-time-only prune
     never fired on a quiet month — the node holds ONE long-lived session, so
@@ -170,7 +183,7 @@ async def _clip_prune_loop(clips_dir: Path, retention_days: int):
     (which systemd keeps alive)."""
     while True:
         await asyncio.sleep(3600)
-        removed = _prune_clips(clips_dir, retention_days)
+        removed = await asyncio.to_thread(_prune_clips, clips_dir, retention_days)
         if removed:
             logger.info(f"sonos_output: hourly prune removed {removed} clip(s)")
 
@@ -442,8 +455,7 @@ class SonosOutput(FrameProcessor):
 
         mp3 = await asyncio.to_thread(_encode)
         p = Path("clips") / "duck-silence.mp3"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(mp3)
+        await asyncio.to_thread(_write_clip, p, mp3)
         server = self._clip_server or await shared_clip_server()
         self._duck_url = server.url_for(p.name)
         logger.info(f"sonos_output: duck-holder clip ready ({p})")
@@ -691,8 +703,9 @@ class SonosOutput(FrameProcessor):
         self._clip_count += 1
         filename = f"reply-{int(time.time())}-{self._clip_count}.mp3"
         clip_path = Path("clips") / filename
-        clip_path.parent.mkdir(parents=True, exist_ok=True)
-        clip_path.write_bytes(mp3)
+        # Awaited before the URL exists: the speaker never fetches a
+        # clip that isn't on disk yet.
+        await asyncio.to_thread(_write_clip, clip_path, mp3)
         server = self._clip_server or await shared_clip_server()
         url = server.url_for(filename)
         logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {volume}")

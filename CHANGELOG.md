@@ -9,6 +9,24 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- A question still being answered when a node disconnects is dropped: its
+  reply no longer arrives late, and a sticky room's saved conversation is no
+  longer overwritten by it.
+- After a bot restart, every node that reconnects at the same moment now
+  shows as online, not just the first.
+- The `intelligence.supersede_ack_gap` setting in config.yaml now takes
+  effect.
+- Ring updates and node commands can no longer be lost mid-send.
+- Saving reply clips and sticky conversations no longer briefly pauses the
+  voice pipeline.
+- The API key file is now written private from the start, and saving a key
+  that sits on an `export` line no longer adds a duplicate line.
+- The dashboard now refuses changes sent from a page on another port of the
+  same address.
+- Zone names containing `/` are refused when added (such zones could never
+  be managed afterwards); saving the Intelligence card with an empty URL no
+  longer fails; a refused speech-to-text save no longer half-applies; saving
+  a room mapping after a node was renamed no longer undoes the rename.
 - Retrying a node command (mute, scan, info) right after it timed out no
   longer shows the first command's late answer. Nodes on firmware 1.2.37+
   match every reply to its request by id, so the retry goes out at once;

@@ -95,6 +95,8 @@ intelligence:
                         # intelligence; lower = snappier but risks clipping slow talkers
   dedup_window: 10.0    # same utterance re-heard within this window = echo,
                         # dropped (the lull-timer double-fire fix)
+  supersede_ack_gap: 45 # seconds: after "Hold on — switching." is spoken,
+                        # further interruptions inside this gap switch silently
   # Tiered fillers: one line per latency tier so a slow intelligence turn doesn't
   # go silent after the first ack. `after` = seconds from turn start.
   # Keep each line <2s spoken, >=3 words (echo containment), never

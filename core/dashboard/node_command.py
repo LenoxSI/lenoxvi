@@ -62,6 +62,9 @@ SETTLE_SECS = 15.0
 _next_id = itertools.count(1)
 _pending_ids: dict = {}   # (pc_id, cmd) -> id of the request awaiting a reply
 _echoes_id: set = set()   # pc_ids whose node echoes request ids
+# In-flight sends: the loop keeps only weak references to tasks, so an
+# unreferenced one can be garbage-collected mid-send.
+_inflight: set = set()
 
 
 def _send(out, payload: dict) -> bool:
@@ -81,7 +84,9 @@ def _send(out, payload: dict) -> bool:
             logger.debug(f"node_command: send failed: {e}")
 
     try:
-        asyncio.get_running_loop().create_task(_go())
+        task = asyncio.get_running_loop().create_task(_go())
+        _inflight.add(task)
+        task.add_done_callback(_inflight.discard)
         return True
     except RuntimeError:
         return False
@@ -184,7 +189,9 @@ def on_message(message, pc_id: str) -> None:
 
             if info["line"] in node_speaker.SPEAKER_LINES:
                 try:
-                    asyncio.get_running_loop().create_task(node_speaker.sync_pc(pc_id))
+                    task = asyncio.get_running_loop().create_task(node_speaker.sync_pc(pc_id))
+                    _inflight.add(task)
+                    task.add_done_callback(_inflight.discard)
                 except RuntimeError:
                     pass
         # Firmware 1.2.35+: this boot rolled back to the previous network

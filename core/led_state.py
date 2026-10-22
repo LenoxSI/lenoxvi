@@ -37,6 +37,10 @@ Who sends what (state ownership):
 
 from loguru import logger
 
+# In-flight sends: the loop keeps only weak references to tasks, so an
+# unreferenced one can be garbage-collected mid-send.
+_inflight: set = set()
+
 
 class LedSender:
     """Fire-and-forget LED state sender bound to one pipeline's transport."""
@@ -51,7 +55,9 @@ class LedSender:
         import asyncio
 
         try:
-            asyncio.get_running_loop().create_task(self._send(msg_type))
+            task = asyncio.get_running_loop().create_task(self._send(msg_type))
+            _inflight.add(task)
+            task.add_done_callback(_inflight.discard)
         except RuntimeError:  # no running loop (sync/test context)
             logger.debug(f"led_state: no running loop for '{msg_type}'")
         except Exception as e:

@@ -973,12 +973,19 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
     // saved. The draft holds synced server values + all row edits, so
     // one Save persists the whole visible map (and the full-dict
     // wipe-guard contract stays honest).
-    const body = { room_zones: { ...(mapDraft || mapping?.room_zones || {}), [room]: zone } }
+    // Rebased on the server's CURRENT map: a room renamed (or gone) while
+    // this draft sat unsaved is dropped from the draft, not PUT back under
+    // its old name — that undid the rename's carried mapping.
+    const liveMap = mapping?.room_zones || {}
+    const liveRooms = new Set([...Object.keys(liveMap), ...(status?.rooms || []).map(r => r.room)])
+    const stillLive = draft => Object.fromEntries(Object.entries(draft || {}).filter(([r]) => liveRooms.has(r)))
+    const body = { room_zones: { ...liveMap, ...stillLive(mapDraft), [room]: zone } }
     // Only this system's overrides, and only when one was edited — an
     // untouched page leaves room_agents alone server-side.
-    const changed = Object.entries(agentDraft).filter(([r, a]) => a !== (savedAgents[r] ?? ''))
+    const liveAgentDraft = stillLive(agentDraft)
+    const changed = Object.entries(liveAgentDraft).filter(([r, a]) => a !== (savedAgents[r] ?? ''))
     const agentEdits = changed.length > 0
-    if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...agentDraft } }
+    if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...liveAgentDraft } }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
       setMapDirty(false)
@@ -2411,11 +2418,14 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <button className={BTN_PRIMARY} onClick={async () => {
               const kind = document.getElementById('int-kind').value
               const url = document.getElementById('int-url').value.trim()
-              const body = { kind, url }
+              // An empty URL is omitted, never sent as "" (the server's URL
+              // check 422s it); omitted = keep or recall the saved one.
+              const body = { kind }
+              if (url) body.url = url
               if (agentSel) body.agent = agentSel
               // Ship the full per-kind recall map so the backend files
               // the other kind's URL too (swap-on-switch memory).
-              const mem = { ...urlDrafts.current, [kind]: url }
+              const mem = Object.fromEntries(Object.entries({ ...urlDrafts.current, [kind]: url }).filter(([, u]) => u))
               if (mem.hermes || mem.openclaw) body.urls = mem
               try {
                 await api('/api/dashboard/intelligence', { method: 'PUT', json: body })

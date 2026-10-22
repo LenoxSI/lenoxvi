@@ -240,8 +240,9 @@ class WiiMOutput(FrameProcessor):
             return
         clip_path = Path("clips") / f"wiim-reply-{int(time.time())}-{id(self) % 10000}.mp3"
         try:
-            clip_path.parent.mkdir(parents=True, exist_ok=True)
-            clip_path.write_bytes(mp3)
+            from sonos_output import _write_clip
+            # off the loop, and awaited before the URL is handed out
+            await asyncio.to_thread(_write_clip, clip_path, mp3)
         except OSError as e:
             logger.error(f"wiim_output: clip write failed: {e}")
             return

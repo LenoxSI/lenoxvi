@@ -21,6 +21,7 @@ import json
 import os
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -28,17 +29,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Supersede-ack rate limit (2026-10-07, a two-person session): consecutive
-# supersedes in a two-person conversation said "Hold on — switching."
-# three times in ten seconds. One ack per wake window: after speaking it,
-# further supersedes inside this gap stay silent (the turn still
-# switches — only the announcement is muted). Re-armed on every fresh
-# turn. Config: intelligence.supersede_ack_gap / LVI_SUPERSEDE_ACK_GAP.
-ACK_GAP = float(os.getenv("LVI_SUPERSEDE_ACK_GAP", "45"))
-
 from loguru import logger
 
 from pipecat.frames.frames import (
+    CancelFrame,
     Frame,
     InterimTranscriptionFrame,
     TTSSpeakFrame,
@@ -157,6 +151,10 @@ class _SessionStash:
 
     def __init__(self, path: str | None = None):
         self._path = Path(path or os.getenv("LVI_SESSIONS", "data/sessions.json"))
+        # Saves run in worker threads (off the event loop): two rooms saving
+        # at once must not lose each other's read-modify-write or share the
+        # temp file mid-write.
+        self._lock = threading.Lock()
 
     def load(self, room: str) -> list:
         try:
@@ -167,32 +165,34 @@ class _SessionStash:
             return []
 
     def save(self, room: str, history: list) -> None:
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
+        with self._lock:
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                data = {}
+                try:
+                    data = json.loads(self._path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    pass
+                data[room] = history
+                tmp = self._path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data))
+                os.replace(tmp, self._path)
+            except OSError as e:
+                logger.warning(f"intelligence_agent: session stash write failed: {e}")
+
+    def rename(self, old: str, new: str) -> bool:
+        with self._lock:
             try:
                 data = json.loads(self._path.read_text())
             except (OSError, json.JSONDecodeError):
-                pass
-            data[room] = history
+                return False
+            if not isinstance(data, dict) or old not in data or new in data:
+                return False
+            data[new] = data.pop(old)
             tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data))
             os.replace(tmp, self._path)
-        except OSError as e:
-            logger.warning(f"intelligence_agent: session stash write failed: {e}")
-
-    def rename(self, old: str, new: str) -> bool:
-        try:
-            data = json.loads(self._path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        if not isinstance(data, dict) or old not in data or new in data:
-            return False
-        data[new] = data.pop(old)
-        tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data))
-        os.replace(tmp, self._path)
-        return True
+            return True
 
 
 _session_stash = _SessionStash()
@@ -314,8 +314,10 @@ class IntelligenceAgent(FrameProcessor):
         # broken. Once per wake window is plenty: the state flip from the
         # old turn dying still tells the user something changed. Reset on
         # a fresh turn start after a quiet gap (no live turn at supersede
-        # time = the window rolled over).
+        # time = the window rolled over). After an ack, further supersedes
+        # inside this gap stay silent.
         self._supersede_ack_ts: float = 0.0
+        self._ack_gap = float(cfg_env("intelligence", "supersede_ack_gap", "LVI_SUPERSEDE_ACK_GAP", 45.0))
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
@@ -632,7 +634,7 @@ class IntelligenceAgent(FrameProcessor):
                                                "LVI_SUPERSEDE_ACK",
                                                "Hold on — switching.") or "")
                             now_ack = time.monotonic()
-                            if ack and (now_ack - self._supersede_ack_ts) >= ACK_GAP:
+                            if ack and (now_ack - self._supersede_ack_ts) >= self._ack_gap:
                                 self._supersede_ack_ts = now_ack
                                 await self.push_frame(TTSSpeakFrame(text=ack))
                                 self._register_echo(ack)
@@ -645,11 +647,35 @@ class IntelligenceAgent(FrameProcessor):
                             # interrupt here still gets its announcement.
                             self._supersede_ack_ts = 0.0
 
+        if isinstance(frame, CancelFrame):
+            await self._end_turn()
+
         # EVERY frame passes through (a past regression):
         # this line was lost in the _run_turn extraction churn — the agent
         # ate StartFrame, PipelineWorker timed out at +20s, and the node
         # rode a reconnect loop ("you wont wake"). Non-negotiable.
         await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        # Session end, whatever ended it: a turn still waiting on the
+        # intelligence would otherwise push into the dead pipeline and write
+        # the sticky stash over the next session's history.
+        await self._end_turn()
+        await super().cleanup()
+
+    async def _end_turn(self) -> None:
+        """Cancel the in-flight turn for good. The epoch bump makes every
+        epoch check fail, so even a turn that resumes pushes nothing and
+        writes no history. The blocking call's thread runs on; its result
+        is dropped."""
+        self._turn_epoch += 1
+        task, self._turn_task = self._turn_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await asyncio.shield(task)
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — a dying turn stays quiet
+                pass
 
     async def _run_turn(self, text: str, epoch: int) -> None:
         """One turn as a background task. Every await
@@ -711,11 +737,14 @@ class IntelligenceAgent(FrameProcessor):
                 self._history.append({"role": "user", "content": text})
                 self._history.append({"role": "assistant", "content": reply})
                 self._history = self._history[-self._max_history:]
-                # Sticky rooms persist after every successful turn.
-                if self._sticky and self._room:
-                    _session_stash.save(self._room, self._history)
             logger.info(f"intelligence_agent: [{text}] -> [{reply[:120]}]")
             await self.push_frame(TTSSpeakFrame(text=reply))
+            # Sticky rooms persist after every successful turn. File I/O runs
+            # off the event loop, after the reply is on its way (no new await
+            # between the history write and the push); a copy, as the next
+            # turn may append meanwhile.
+            if not failed and self._sticky and self._room:
+                await asyncio.to_thread(_session_stash.save, self._room, list(self._history))
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
         except Exception as e:

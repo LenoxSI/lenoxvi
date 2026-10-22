@@ -253,16 +253,19 @@ def note_offer(pc_id, room):
         return
     prev = _room_by_pc.get(pc_id)
     if prev == PROVISIONAL and prev != label:
-        # promote the provisional connect: move its online state under
-        # the real room name
+        # promote the provisional connect: this pc_id is connected (only
+        # mark_connected binds it provisional, and a disconnect unbinds
+        # it), so its real room is online. The placeholder record is
+        # shared by every pc_id still provisional (all nodes re-offer at
+        # once after a restart): drop it only when the last one resolves.
         _room_by_pc[pc_id] = label
-        prov = _known_rooms.pop(PROVISIONAL, None)
-        if prov and prov.get("online"):
-            rec = _known_rooms.setdefault(
-                label, {"online": False, "first_seen": time.time()}
-            )
-            rec["online"] = True
-            rec["last_seen"] = time.time()
+        if PROVISIONAL not in _room_by_pc.values():
+            _known_rooms.pop(PROVISIONAL, None)
+        rec = _known_rooms.setdefault(
+            label, {"online": False, "first_seen": time.time()}
+        )
+        rec["online"] = True
+        rec["last_seen"] = time.time()
         # fw_push raced the tee (connect window): carry the held version
         # (and mute state) onto the now-known room record.
         _drain_held(pc_id, label)

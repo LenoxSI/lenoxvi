@@ -17,7 +17,7 @@ import subprocess
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from os import getenv as _getenv
 
 import numpy as np
@@ -534,8 +534,10 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
 @router.post("/zones", dependencies=GUARD)
 async def add_zone(payload: ZonePayload):
     name = payload.name.strip()
-    if not name or "." in name or ":" in name:
-        raise HTTPException(status_code=400, detail="bad zone name")
+    # '/' too: the zone's volume/test/delete routes carry the name as one
+    # path segment, so a zone named with a slash could never be managed.
+    if not name or any(c in name for c in ".:/"):
+        raise HTTPException(status_code=400, detail="bad zone name: '.', ':' and '/' aren't allowed")
     if node_speaker.is_reserved_zone_name(name):
         raise HTTPException(status_code=400, detail=f"'{name}' is reserved (a node's built-in speaker)")
     # Collision check across BOTH backends: one merged namespace (the
@@ -1260,21 +1262,36 @@ async def _write_env_key(var: str, value: str) -> bool:
     lines = env_path.read_text().splitlines() if env_path.is_file() else []
     out, replaced, changed = [], False, False
     for ln in lines:
+        # Both line forms, like _remove_env_key: an `export VAR=` line
+        # missed here was kept AND a duplicate appended. It keeps its prefix.
         if ln.startswith(var + "="):
-            changed = changed or ln != var + "=" + value
-            out.append(var + "=" + value)
-            replaced = True
+            new = var + "=" + value
+        elif ln.lstrip().startswith(f"export {var}="):
+            new = ln[:ln.index("export ")] + f"export {var}=" + value
         else:
             out.append(ln)
+            continue
+        changed = changed or ln != new
+        out.append(new)
+        replaced = True
     if not replaced:
         out.append(var + "=" + value)
     if changed:
         _backup_env(env_path)
-    tmp = env_path.with_suffix(".env.tmp")
-    tmp.write_text("\n".join(out) + "\n")
-    _os.chmod(tmp, 0o600)
-    _os.replace(tmp, env_path)  # atomic on the same filesystem
+    _write_private(env_path, "\n".join(out) + "\n")
     return replaced
+
+
+def _write_private(env_path, text: str) -> None:
+    """Atomic 0600 write of .env. The temp file is 0600 from creation —
+    created under the umask and chmod'ed after, it held every secret
+    world-readable for a moment."""
+    tmp = env_path.with_suffix(".env.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # a leftover temp file keeps its old mode through O_CREAT
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, env_path)  # atomic on the same filesystem
 
 
 @router.put("/tts/key/elevenlabs", dependencies=GUARD)
@@ -1433,10 +1450,7 @@ async def _remove_env_key(var: str) -> bool:
     if len(keep) == len(lines):
         return False
     _backup_env(env_path)
-    tmp = env_path.with_suffix(".env.tmp")
-    tmp.write_text("\n".join(keep) + ("\n" if keep else ""))
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, env_path)
+    _write_private(env_path, "\n".join(keep) + ("\n" if keep else ""))
     return True
 
 
@@ -1461,20 +1475,24 @@ async def delete_key(var: str):
 # ── Intelligence (Settings — provider picker) ──
 
 
+_INTELLIGENCE_URL_RE = r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$"
+
+
 class IntelligencePayload(BaseModel):
     # hermes = today's api_server contract; openclaw = OpenClaw Gateway
     # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
     # conversation field). Any other kind 422s.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     kind: str = Field(pattern="^(hermes|openclaw)$")
-    url: str | None = Field(default=None, max_length=200,
-                             pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+    url: str | None = Field(default=None, max_length=200, pattern=_INTELLIGENCE_URL_RE)
     # Per-kind URL memory (2026-10-08): the two lanes live at different
     # addresses (api_server 8642 vs OpenClaw Gateway 18789). kind and url
     # arrive together; the route files url under the kind being saved so
     # the UI can offer the right one back on switch. `url` itself stays
     # the live value the agent reads — this map is recall, not truth.
-    urls: dict[str, str] | None = Field(default=None)
+    # Values pass the same check as `url`: a recalled URL becomes `url`
+    # on the next kind flip.
+    urls: dict[str, Annotated[str, Field(max_length=200, pattern=_INTELLIGENCE_URL_RE)]] | None = Field(default=None)
     # The agent for THIS kind: an OpenClaw agent id, or a Hermes profile
     # ("default" = the main agent). Filed under intelligence.agents[kind].
     agent: str | None = Field(default=None, min_length=1, max_length=64,
@@ -2111,32 +2129,41 @@ async def put_stt(payload: SttPayload):
     import stt_fallback
 
     running_provider = stt_fallback._STATE["provider"]
+    before = _stt_current()
+    restart_needed, download = False, "not_needed"
+    # Every check that can refuse (409) runs before anything is written, and
+    # model, language and provider land in ONE write — a refused save
+    # changes nothing (the language used to be written before the model
+    # claim could 409).
     try:
-        restart_needed, download = False, "not_needed"
-        if payload.language is not None:
-            before = _stt_current()
-            _stt_write(language=payload.language)
-            # Whisper reads the language live; Deepgram's is fixed when the
-            # session is built, so on (or headed to) Deepgram it's a restart.
-            if payload.language != before["language"] and "deepgram" in (
-                    before["provider"], running_provider, payload.provider):
-                restart_needed = True
         if payload.model is not None:
             with _STT_DL_LOCK:
                 _stt_claim(payload.model, "a delete")
-            try:
-                model_restart, download = await _stt_switch_model(payload.model, has_gpu)
-                restart_needed = restart_needed or model_restart
-            finally:
+        try:
+            write_model = False
+            if payload.model is not None:
+                restart_needed, download, write_model = await _stt_switch_model(payload.model, has_gpu)
+            # Whisper reads the language live; Deepgram's is fixed when the
+            # session is built, so on (or headed to) Deepgram it's a restart.
+            if (payload.language is not None and payload.language != before["language"]
+                    and "deepgram" in (before["provider"], running_provider, payload.provider)):
+                restart_needed = True
+            provider = None
+            if payload.provider is not None and payload.provider != before["provider"]:
+                provider = payload.provider
+                # A restart only if the bot isn't already running what was picked.
+                restart_needed = restart_needed or payload.provider != running_provider
+            if write_model or payload.language is not None or provider is not None:
+                # Inside the model's claim: a delete can't remove it between
+                # the cache check and this write.
+                _stt_write(model=payload.model if write_model else None, language=payload.language,
+                           has_gpu=has_gpu, provider=provider)
+        finally:
+            if payload.model is not None:
                 with _STT_DL_LOCK:
                     _STT_BUSY.discard(payload.model)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    if payload.provider is not None and payload.provider != _stt_current()["provider"]:
-        # Written last, so a refused model switch (409) leaves nothing half-saved.
-        _stt_write(provider=payload.provider)
-        # A restart only if the bot isn't already running what was picked.
-        restart_needed = restart_needed or payload.provider != running_provider
     cur = _stt_current()
     key_needed = cur["provider"] == "deepgram" and not _stt_deepgram_key_set()
     return {"ok": True, "restart_needed": restart_needed, "download": download, "key_needed": key_needed,
@@ -2144,11 +2171,13 @@ async def put_stt(payload: SttPayload):
 
 
 async def _stt_switch_model(model: str, has_gpu: bool) -> tuple:
-    """(restart_needed, download). The caller holds the model's claim, so a
-    delete can't remove it between the cache check and the config write."""
+    """(restart_needed, download, write_model). Writes nothing: when
+    write_model is True the caller writes the model, still holding its
+    claim, so a delete can't remove it between the cache check and the
+    config write."""
     cur = _stt_current()
     if (model, *stt_catalog.runtime_for(has_gpu)) == (cur["model"], cur["device"], cur["compute"]):
-        return False, "not_needed"
+        return False, "not_needed", False
     cached = await asyncio.to_thread(_stt_cached, model)
     # Check-and-claim in ONE lock hold (the cache check above awaits, so the
     # early 409 alone can't stop two PUTs racing).
@@ -2159,11 +2188,10 @@ async def _stt_switch_model(model: str, has_gpu: bool) -> tuple:
             _STT_DL.clear()
             _STT_DL.update(model=model, state="downloading")
     if cached:
-        _stt_write(model=model, has_gpu=has_gpu)
-        return True, "not_needed"
+        return True, "not_needed", True
     threading.Thread(target=_stt_download_then_switch, args=(model, has_gpu),
                      name="stt-download", daemon=True).start()
-    return False, "started"
+    return False, "started", False
 
 
 @router.get("/voice-tuning")

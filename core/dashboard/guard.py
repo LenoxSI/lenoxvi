@@ -50,6 +50,13 @@ def _host_ok(hostname: str | None) -> bool:
         return False
 
 
+def _port(scheme: str, port: int | None) -> int | None:
+    """Explicit port, else the scheme's default (None for other schemes)."""
+    if port is not None:
+        return port
+    return {"https": 443, "http": 80}.get((scheme or "").lower())
+
+
 def mutation_guard(request: Request) -> None:
     """FastAPI dependency for every mutating (POST/PUT/DELETE) route."""
     host = request.url.hostname  # Host header, parsed, lowercased
@@ -61,11 +68,17 @@ def mutation_guard(request: Request) -> None:
 
     origin = request.headers.get("origin")
     if origin is not None:
-        origin_host = urlsplit(origin).hostname
-        # Same-origin fetches match Host (Origin includes scheme, Host
-        # doesn't — compare hostnames only). "null"/garbage origins are
-        # mismatches.
-        if origin_host is None or origin_host != host:
+        # Same-origin fetches match Host AND port: a page on another port
+        # of the same IP is another origin. A missing port is its scheme's
+        # default on each side (Origin carries its scheme; Host's is the
+        # request's). "null"/garbage origins are mismatches.
+        try:
+            o = urlsplit(origin)
+            origin_host, origin_port = o.hostname, _port(o.scheme, o.port)
+        except ValueError:  # a malformed port
+            origin_host, origin_port = None, None
+        if (origin_host is None or origin_host != host
+                or origin_port != _port(request.url.scheme, request.url.port)):
             raise HTTPException(
                 status_code=403,
                 detail="dashboard: cross-origin mutations are not allowed",
