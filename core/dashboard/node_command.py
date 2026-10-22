@@ -20,6 +20,7 @@ automatically — a quiet house never false-reboots a node.
 """
 
 import asyncio
+import itertools
 import json
 import time
 
@@ -54,6 +55,13 @@ _pending_lock = asyncio.Lock()
 # its side effects and lifts the window.
 _settling: dict = {}
 SETTLE_SECS = 15.0
+# Request ids (firmware 1.2.37+ echoes them in the reply): each request
+# carries a unique id, and a reply answers the request only if its id
+# matches. A node that has echoed an id once skips the settling window -
+# a late reply just carries a stale id. Older firmware ignores the field.
+_next_id = itertools.count(1)
+_pending_ids: dict = {}   # (pc_id, cmd) -> id of the request awaiting a reply
+_echoes_id: set = set()   # pc_ids whose node echoes request ids
 
 
 def _send(out, payload: dict) -> bool:
@@ -105,7 +113,8 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     """Send a command and await its cmd_result. Returns the reply dict
     or raises TimeoutError. One in-flight request per cmd per node
     (single-node rooms by design)."""
-    payload = {"cmd": cmd, **(args or {})}
+    rid = next(_next_id)
+    payload = {"cmd": cmd, **(args or {}), "id": rid}
     out, pc_id = registry.sender_for_room(room)
     if out is None:
         raise NoLiveSession(f"no live session for room '{room}'")
@@ -114,25 +123,29 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     async with _pending_lock:
         if key in _pending and not _pending[key].done():
             raise CommandInFlight(f"'{cmd}' already in flight for '{room}'")
-        if _settling.get(key, 0.0) > time.monotonic():
+        if pc_id not in _echoes_id and _settling.get(key, 0.0) > time.monotonic():
             raise CommandInFlight(f"the last '{cmd}' to '{room}' timed out and may still "
                                   "land - try again in a few seconds")
         _settling.pop(key, None)
         fut = asyncio.get_event_loop().create_future()
         _pending[key] = fut
+        _pending_ids[key] = rid
 
     if not _send(out, payload):
         async with _pending_lock:
             _pending.pop(key, None)
+            _pending_ids.pop(key, None)
         raise TimeoutError(f"send failed for '{cmd}' to '{room}'")
     try:
         return await asyncio.wait_for(fut, timeout)
     except TimeoutError:
-        _settling[key] = time.monotonic() + SETTLE_SECS
+        if pc_id not in _echoes_id:  # no id to tell a late reply apart
+            _settling[key] = time.monotonic() + SETTLE_SECS
         raise
     finally:
         async with _pending_lock:
             _pending.pop(key, None)
+            _pending_ids.pop(key, None)
 
 
 def on_message(message, pc_id: str) -> None:
@@ -203,8 +216,17 @@ def on_message(message, pc_id: str) -> None:
     fut = _pending.get(key)
     # A reply to a request that already timed out: its side effects below
     # still apply (they're the node's truth), but it answers no request.
-    late = _settling.pop(key, None) is not None
-    logger.info(f"node_command: <- {pc_id[:24]}… cmd_result '{cmd}' ok={data.get('ok')} data={str(data.get('data'))[:80]}")
+    rid = data.get("id")
+    if isinstance(rid, int) and not isinstance(rid, bool):
+        if len(_echoes_id) > 1000:  # one entry per session; keep it bounded
+            _echoes_id.clear()
+        _echoes_id.add(pc_id)
+        late = rid != _pending_ids.get(key)
+        _settling.pop(key, None)
+    else:  # firmware without id echo: the settling window decides
+        late = _settling.pop(key, None) is not None
+    logger.info(f"node_command: <- {pc_id[:24]}… cmd_result '{cmd}' id={data.get('id')} "
+                f"ok={data.get('ok')} data={str(data.get('data'))[:80]}")
 
     # Room rename: the registry relabels, and the room_zones mapping key
     # must follow — otherwise the rename silently orphans the node's
