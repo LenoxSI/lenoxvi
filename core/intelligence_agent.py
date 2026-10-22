@@ -25,6 +25,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Supersede-ack rate limit (2026-10-07, a two-person session): consecutive
@@ -86,6 +87,12 @@ _DEFAULT_TIERS = [
 
 _LAST_FILLER = ""
 
+
+# Intelligence calls get their own threads. A superseded or hung call can't
+# be cancelled (blocking urlopen, up to the 120 s timeout); on the shared
+# default pool (cpu+4 threads) a pile of them starved wake-word scoring in
+# every room.
+_INTEL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="lvi-intel")
 
 # Segmented STT: after VAD stop + lull, how much longer to wait for a
 # stretch's transcript before closing on what's already buffered.
@@ -633,7 +640,8 @@ class IntelligenceAgent(FrameProcessor):
         broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
         try:
-            ask = asyncio.create_task(asyncio.to_thread(self._ask_intelligence, text))
+            ask = asyncio.get_running_loop().run_in_executor(
+                _INTEL_POOL, self._ask_intelligence, text)
             failed = False
             reply = None
             # Tiered fillers (option B, 2026-10-03): wait to each tier's

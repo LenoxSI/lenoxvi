@@ -22,6 +22,7 @@ unrelated bugs (lull double-fire, flash_v2_5 not rendering v3 tags).
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
 
@@ -49,6 +50,10 @@ AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config:
 # heartbeat), but only this long into one continuous stretch: a TV that never
 # pauses must not hold the gate open forever.
 SPEECH_HOLD_MAX = 30.0
+# Wake scoring runs every 80 ms per room: its own threads, so slow work on the
+# shared default pool (stuck intelligence calls, encodes, WiiM API) can never
+# stall wake detection.
+_SCORE_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lvi-wake")
 
 
 class TurnState(Enum):
@@ -194,7 +199,8 @@ class WakeWordFilter(FrameProcessor):
             while len(self._audio_buf) >= self._frame_size:
                 chunk = bytes(self._audio_buf[: self._frame_size])
                 del self._audio_buf[: self._frame_size]
-                score = await asyncio.to_thread(self._score, chunk)
+                score = await asyncio.get_running_loop().run_in_executor(
+                    _SCORE_POOL, self._score, chunk)
                 if score >= self._threshold and self._state is TurnState.IDLE:
                     # Only IDLE acts on the wake score. Drop buffered audio
                     # (wake-phrase tail) but keep flowing audio to VAD/STT:
