@@ -1870,7 +1870,7 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
             )}
           </Field>
           {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
-            <Field label="Speed / stability (flash v2.5)">
+            <Field label="Speed / stability / normalization (flash v2.5)">
               <span className="flex items-center gap-2">
                 <span className="text-[12px] font-medium text-[var(--muted)]">speed</span>
                 <input id="tts-el-speed" type="range" min="0.7" max="1.2" step="0.05"
@@ -1885,17 +1885,15 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
                   className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
               </span>
-            </Field>
-          )}
-          {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
-            <Field label="Numbers & times">
-              <select id="tts-el-norm" className={`${INPUT_CLS} w-[200px]`} value={elNorm ?? 'auto'}
-                onChange={e => setElNorm(e.target.value)} aria-label="ElevenLabs text normalization"
-                title="On: ElevenLabs spells out numbers, times and dates before speaking (Flash skips this by default). Adds about 0.15 s.">
-                <option value="auto">Auto (ElevenLabs default)</option>
-                <option value="on">On — spell them out</option>
-                <option value="off">Off</option>
-              </select>
+              <span className="flex items-center gap-2">
+                <span className="text-[12px] font-medium text-[var(--muted)]">normalization</span>
+                <select id="tts-el-norm" className={`${INPUT_CLS} w-[110px]`} value={elNorm ?? 'auto'}
+                  onChange={e => setElNorm(e.target.value)} aria-label="ElevenLabs text normalization">
+                  <option value="auto">Auto</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </span>
             </Field>
           )}
           {provider !== 'pocket' && (

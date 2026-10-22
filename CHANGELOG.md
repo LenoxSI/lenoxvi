@@ -22,7 +22,8 @@ The two version streams are independent.
   number normalization, which is off by default on Flash.
 
 ### Added
-- TTS card: "Numbers & times" for ElevenLabs Flash (Auto / On / Off), saved
+- TTS card: a normalization picker beside the ElevenLabs Flash speed and
+  stability sliders (Auto / On / Off), saved
   as `tts.elevenlabs_text_normalization`. On spells out numbers, times and
   dates before speaking and adds about 0.15 s before the first word.
 
