@@ -587,6 +587,17 @@ async def delete_zone(name: str):
         zones = _zones()
         del zones[name]
         sections = {"sonos": {**dict(cfg("sonos") or {}), "zones": zones}}
+    # The backend's default zone must not point at the deleted zone: every
+    # unmapped room's reply would go nowhere. Hand it to a remaining zone
+    # (add-zone sets the first one as default), or clear it.
+    sec = sections[backend if backend == "wiim" else "sonos"]
+    new_default = sec.get("default_zone")
+    if new_default == name:
+        new_default = next(iter(zones), None)
+        if new_default:
+            sec["default_zone"] = new_default
+        else:
+            sec.pop("default_zone", None)
     # rooms mapped to a deleted zone become dangling — drop them in the
     # SAME write (they're a separate section, same atomic pass)
     mapping = dict(config_store.read_section("room_zones") or {})
@@ -602,7 +613,8 @@ async def delete_zone(name: str):
     # A speaker room mapped to the deleted zone is back on its own speaker
     # (the default) — tell its node, or it stays silent.
     node_speaker.sync_all(registry.capable_rooms())
-    return {"ok": True, "dropped_room_mappings": dangling, "backend": backend}
+    return {"ok": True, "dropped_room_mappings": dangling, "backend": backend,
+            "default_zone": new_default}
 
 
 # ── zone test (the proven clip path, zero API cost) ──────────────────
@@ -1719,7 +1731,8 @@ async def restart_bot():
         "systemd-run", "--user", f"--unit={unit}",
         "bash", "-c", "sleep 2 && systemctl --user restart lenoxvi-bot",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    # Off the event loop: this process also runs every room's voice pipeline.
+    proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=10)
     if proc.returncode != 0:
         logger.error(f"dashboard: restart scheduling failed: {proc.stderr.strip()}")
         raise HTTPException(status_code=500, detail="restart scheduling failed (see bot log)")
@@ -2318,12 +2331,18 @@ async def oww_upload_model(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="file too small to be a wake-word model")
     if len(data) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="model too large (50MB cap)")
-    _oww_validate(data)
+    # Model load + test inference (up to 50 MB) and the write run off the
+    # event loop: this process also runs every room's voice pipeline.
+    await asyncio.to_thread(_oww_validate, data)
     dest = _oww_dir() / name
     tmp = _oww_dir() / (name + ".uploading")
-    with open(tmp, "wb") as f:
-        f.write(data)
-    tmp.replace(dest)  # validated: swap in atomically
+
+    def _write():
+        with open(tmp, "wb") as f:
+            f.write(data)
+        tmp.replace(dest)  # validated: swap in atomically
+
+    await asyncio.to_thread(_write)
     logger.info(f"dashboard: OWW model '{name}' uploaded ({len(data)} bytes) — select it to use")
     return {"ok": True, "name": name, "size": len(data)}
 

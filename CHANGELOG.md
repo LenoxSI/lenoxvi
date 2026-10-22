@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Deleting the default speaker zone now hands "default" to a remaining zone
+  (or clears it), so unmapped rooms' replies don't go to a zone that no
+  longer exists.
+- Restarting the bot or uploading a wake-word model from the dashboard no
+  longer freezes voice in every room while it runs.
 - Renaming a node to a name another room already uses is now refused,
   instead of silently taking over that room's speaker, agent and settings.
 - A renamed room keeps its conversation mode (sticky/fresh) and, if sticky,
