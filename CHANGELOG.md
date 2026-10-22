@@ -26,6 +26,10 @@ The two version streams are independent.
 - The TTS revive (one bounded websocket retry when a dead voice service gets
   its next sentence) moved to pipecat 1.13's single synthesis path; on 1.13
   the old hook was never called, so a dead voice would have stayed silent.
+- SmallWebRTC answers keep aiortc's default bundle policy: pipecat 1.13's
+  max-bundle answers carried no ICE candidates, and the ESP32 nodes (no trickle
+  ICE) could not connect at all. A new offline handshake test answers a
+  node-shaped offer and requires candidates, a real address and short lines.
 
 ## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 

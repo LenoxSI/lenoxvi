@@ -36,6 +36,7 @@ from sonos_output import SonosOutput
 from wiim_output import WiiMOutput
 from stt_local import LocalWhisperSTTService
 from wake_word import WakeWordFilter
+import webrtc_compat
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.processors.audio.vad_processor import VADProcessor
@@ -61,6 +62,11 @@ except ImportError:  # older pipecat without the Deepgram services
     _DEEPGRAM_OK = False
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+# pipecat 1.13's MAX_BUNDLE answers carry no ICE candidates, which the ESP32
+# nodes (no trickle ICE) can't connect with — restore aiortc's default policy
+# before any peer connection exists. Pinned by tests/webrtc_answer_test.py.
+webrtc_compat.apply()
 
 
 class TTSTracked:
