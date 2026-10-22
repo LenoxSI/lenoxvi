@@ -19,17 +19,11 @@ The two version streams are independent.
   says so in the bot log (firmware 1.2.35).
 
 ### Changed
-- pipecat 1.11.0 -> 1.13.0 (pipecat-ai-prebuilt 1.1.0 -> 1.3.0): local Whisper
-  decodes off the event loop, the ElevenLabs websocket keepalive no longer
-  stops after one failure, a mid-turn TTS reconnect keeps its voice settings,
-  and Silero VAD v6.2 (speech-stop events can land slightly later).
-- The TTS revive (one bounded websocket retry when a dead voice service gets
-  its next sentence) moved to pipecat 1.13's single synthesis path; on 1.13
-  the old hook was never called, so a dead voice would have stayed silent.
-- SmallWebRTC answers keep aiortc's default bundle policy: pipecat 1.13's
-  max-bundle answers carried no ICE candidates, and the ESP32 nodes (no trickle
-  ICE) could not connect at all. A new offline handshake test answers a
-  node-shaped offer and requires candidates, a real address and short lines.
+- SmallWebRTC answers keep aiortc's default bundle policy, ready for the next
+  pipecat bump: pipecat 1.13's max-bundle answers carried no ICE candidates, so
+  the ESP32 nodes (no trickle ICE) could not connect. A new offline handshake
+  test answers a node-shaped offer and requires candidates, a real address and
+  short lines.
 
 ## [0.6.6] — 2026-10-20 — LenoxVI, a Keys card, cloud speech-to-text, per-room agents
 
