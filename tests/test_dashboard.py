@@ -3710,6 +3710,56 @@ def main():
     check("node command: node_command raises CommandInFlight for a pending duplicate",
           _res14 == "inflight", f"result={_res14}")
 
+    # A late reply to a timed-out command must never answer the retry.
+    _saved_send14 = _nc14._send
+
+    def _ack14(muted):
+        _nc14.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_mute",
+                                     "ok": True, "data": {"muted": muted}}), "pc-t14")
+
+    async def _late_probe14():
+        _nc14.registry.sender_for_room = lambda room: (object(), "pc-t14")
+        _nc14._send = lambda out, payload: True
+        out = {}
+        try:
+            try:
+                await _nc14.request("suite-t14", "set_mute", {"mute": True}, timeout=0.2)
+                out["first"] = "answered?"
+            except TimeoutError:
+                out["first"] = "timeout"
+            retry = _aio14.create_task(
+                _nc14.request("suite-t14", "set_mute", {"mute": False}, timeout=1.0))
+            await _aio14.sleep(0.05)
+            _ack14(True)              # the FIRST command's late reply
+            try:
+                r = await retry
+                out["retry"] = f"answered muted={r['data']['muted']}"
+            except _InFlight14:
+                out["retry"] = "refused"
+            except TimeoutError:
+                out["retry"] = "timeout"
+            retry2 = _aio14.create_task(
+                _nc14.request("suite-t14", "set_mute", {"mute": False}, timeout=1.0))
+            await _aio14.sleep(0.05)
+            _ack14(False)             # retry2's own reply
+            try:
+                r2 = await retry2
+                out["retry2"] = f"answered muted={r2['data']['muted']}"
+            except Exception as e:  # noqa: BLE001
+                out["retry2"] = type(e).__name__
+            return out
+        finally:
+            _nc14._send = _saved_send14
+            _nc14.registry.sender_for_room = _saved_sender14
+            getattr(_nc14, "_settling", {}).clear()
+
+    _late14 = _aio14.run(_late_probe14())
+    check("node command: a retry after a timeout never gets the late reply's answer",
+          _late14.get("first") == "timeout" and _late14.get("retry") in ("refused", "timeout")
+          and "muted=True" not in str(_late14.get("retry")), str(_late14))
+    check("node command: once the late reply lands, a retry goes through with its own answer",
+          _late14.get("retry2") == "answered muted=False", str(_late14))
+
     # Wake-model select keys on name + SOURCE: with the
     # same basename in root and models/, a name-only select always
     # resolved to the models/ copy — clicking the ROOT row silently
