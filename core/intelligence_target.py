@@ -92,9 +92,28 @@ def _entry(kind: str, agent_id: str, env) -> dict:
     return {"id": agent_id, "key_set": bool(value), "key_hint": key_hint(value)}
 
 
+def same_target(a: str, b: str) -> bool:
+    """True when two base URLs point at the same endpoint. Scheme, host and
+    port must match exactly; a trailing /v1 and trailing slashes are ignored
+    (with or without /v1 is the same gateway). Anything else — a different
+    host, port, or scheme — is a different target."""
+    def _n(u):
+        p = urllib.parse.urlsplit((u or "").rstrip("/"))
+        return (p.scheme.lower(), (p.hostname or "").lower(), p.port,
+                re.sub(r"/v1$", "", p.path or "").rstrip("/"))
+    return _n(a) == _n(b)
+
+
 def discover_agents(kind: str, url: str, env, timeout: float = 4.0,
-                    status_url: "str | None" = None) -> dict:
+                    status_url: "str | None" = None,
+                    attach_key: bool = True) -> dict:
     """List the agents a provider offers. Never raises; never returns a key.
+
+    attach_key=False probes WITHOUT credentials: the dashboard sets it when
+    the URL is not the saved config URL, so a typed-but-unsaved host never
+    receives the stored token — the saved key is only ever sent to the
+    saved URL. The OpenClaw lane then reports the server's own answer
+    (usually HTTP 401) instead of the agent list.
 
     -> {"agents": [{"id", "key_set", "key_hint"}], "source": str, "note": str|None}
     """
@@ -103,14 +122,18 @@ def discover_agents(kind: str, url: str, env, timeout: float = 4.0,
         if not url:
             return {"agents": [], "source": "none", "note": "set the OpenClaw URL first"}
         token = env.get("LVI_OPENCLAW_KEY")
-        if not token:
+        if attach_key and not token:
             return {"agents": [], "source": "none",
                     "note": "save the OpenClaw key to list its agents"}
         models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
+        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
         try:
-            data = _get_json(models_url, {"Authorization": f"Bearer {token}"}, timeout)
+            data = _get_json(models_url, headers, timeout)
         except urllib.error.HTTPError as e:
-            return {"agents": [], "source": "none", "note": f"OpenClaw answered HTTP {e.code}"}
+            note = f"OpenClaw answered HTTP {e.code}"
+            if e.code == 401 and not attach_key:
+                note += " — this URL is not saved yet; save it and the stored key will be used"
+            return {"agents": [], "source": "none", "note": note}
         except Exception as e:
             return {"agents": [], "source": "none", "note": f"OpenClaw unreachable ({type(e).__name__})"}
         ids = []

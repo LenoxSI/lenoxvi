@@ -1636,13 +1636,20 @@ async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
     """List the agents the provider offers, each with key status + hint.
     OpenClaw: its /v1/models. Hermes: the profiles on its gateway (the
     Hermes dashboard's public status route; falls back to the default
-    agent). Never returns a key. POST + GUARD: it makes outbound requests."""
+    agent). Never returns a key. POST + GUARD: it makes outbound requests.
+    The stored key is attached ONLY when the probe targets this kind's
+    SAVED URL (an omitted url means the saved URL); any other URL — typed,
+    not yet saved — is probed unauthenticated, so a mistyped or third-party
+    host can never receive the OpenClaw token."""
     icfg = dict(config_store.read_section("intelligence") or {})
-    url = payload.url or (icfg.get("urls") or {}).get(payload.kind) \
+    saved_url = (icfg.get("urls") or {}).get(payload.kind) \
         or (icfg.get("url") if (icfg.get("kind") or "hermes") == payload.kind else None) or ""
+    url = payload.url or saved_url
+    attach_key = not payload.url or intelligence_target.same_target(payload.url, saved_url)
     result = await asyncio.to_thread(
         intelligence_target.discover_agents, payload.kind, url, _saved_env(), 4.0,
-        icfg.get("hermes_status_url") if payload.kind == "hermes" else None)
+        icfg.get("hermes_status_url") if payload.kind == "hermes" else None,
+        attach_key)
     result["selected"] = intelligence_target.agent_for(icfg, payload.kind) \
         or ("default" if payload.kind == "hermes" else None)
     return result
