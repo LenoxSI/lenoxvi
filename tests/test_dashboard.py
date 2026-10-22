@@ -1789,7 +1789,7 @@ def main():
                 _fire_at = _fire.when() if _fire is not None else None
                 if _fire_at is None:
                     _stops = [ts for ts, m in _sled.sent
-                              if m in ("bot-stopped-speaking", "purple", "oww-sleeping")]
+                              if m in ("bot-stopped-speaking", "oww-sleeping")]
                     _fire_at = _stops[0] if _stops else None
                 check("sonos: end-of-speech LED anchors to clip load, not generation",
                       _fire_at is not None and _fire_at >= _speech_end,
@@ -1849,7 +1849,90 @@ def main():
                       _wwake.calls and _wwake.calls[-1][0] >= _wload - 0.05,
                       f"calls={[f'+{c[0] - _wgen:.2f}s' for c in _wwake.calls]} load=+{_wload - _wgen:.2f}s")
 
+                # ── LED ownership: one end message per reply, from the backend that sounds it ──
+                class _AwakeGate(_FakeWakeGate):
+                    state = "awake"
+                _ENDS = ("bot-stopped-speaking", "oww-sleeping", "purple")
+
+                async def _own_probe(zone, wiim_on=True):
+                    led, wake = _FakeLed(), _AwakeGate()
+                    wo = WiiMOutput(echo_gate=EchoGate(), wake_gate=wake, zone_selector=lambda: zone,
+                                    led=led, config_path=str(cfg_test))
+                    wo._enabled = wiim_on
+                    wo._zones = {"wz": {"ip": "127.0.0.2"}}
+                    _kw = ({"reply_elsewhere": lambda: wo.owns_reply()}
+                           if hasattr(wo, "owns_reply") else {})
+                    so = SonosOutput(echo_gate=EchoGate(), wake_gate=wake, zone_selector=lambda: zone,
+                                     led=led, config_path=str(cfg_test), **_kw)
+                    so._enabled = True
+                    so._duck_while_awake = False
+                    so._zones = {"sz": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                    for o in (so, wo):
+                        o._clip_server = _srv
+                        o.create_task = lambda coro, name=None, context=None: asyncio.create_task(coro)
+                    WIIM_PLAYED_AT[0] = None
+                    _pcm = b"\x00\x00" * int(_RATE * _SECS)
+                    t0 = time.monotonic()
+                    for _f in (_TTSStartedFrame(), _TTSAudioRawFrame(_pcm, _RATE, 1), _TTSStoppedFrame()):
+                        await so.process_frame(_f, _FrameDirection.DOWNSTREAM)
+                        await wo.process_frame(_f, _FrameDirection.DOWNSTREAM)
+                    await asyncio.sleep(3.0)
+                    ends = [(round(ts - t0, 2), m) for ts, m in led.sent if m in _ENDS]
+                    return ends, WIIM_PLAYED_AT[0] and round(WIIM_PLAYED_AT[0] - t0, 2)
+
+                _ow_ends, _ow_play = await _own_probe("wz")
+                _ow_speech_end = (_ow_play or 99) + 0.25 + _SECS + 0.35
+                check("led owner: a WiiM reply ends ONCE, with the firmware's message, after it sounds",
+                      len(_ow_ends) == 1 and _ow_ends[0][1] == "bot-stopped-speaking"
+                      and _ow_ends[0][0] >= _ow_speech_end - 0.05,
+                      f"ends={_ow_ends} play=+{_ow_play} speech_end=+{_ow_speech_end:.2f}")
+                _os_ends, _os_play = await _own_probe("sz")
+                check("led owner: a Sonos reply gets no WiiM end message and no WiiM play",
+                      [m for _, m in _os_ends] == ["bot-stopped-speaking"] and _os_play is None,
+                      f"ends={_os_ends} wiim_play={_os_play}")
+                _od_ends, _ = await _own_probe("sz", wiim_on=False)
+                check("led owner: WiiM disabled sends no instant end message on a Sonos reply",
+                      [m for _, m in _od_ends] == ["bot-stopped-speaking"]
+                      and _od_ends[0][0] >= _SECS, f"ends={_od_ends}")
+
             _asyncio.run(_run())
+
+            # ── WiiM volume: overlapping clips share one music snapshot ──
+            _DEV = {"vol": 23, "sets": []}
+
+            def _vol_api(ip, cmd, timeout=4.0):
+                if cmd.startswith("setPlayerCmd:vol:"):
+                    _DEV["vol"] = int(cmd.rsplit(":", 1)[1])
+                    _DEV["sets"].append((round(time.monotonic() - _DEV["t0"], 2), _DEV["vol"]))
+                return "OK"
+
+            _saved_status_v = _wo_mod.wiim_get_status
+            _wo_mod.wiim_api = _vol_api
+            _wo_mod.wiim_get_status = lambda ip, timeout=3.0: {"vol": str(_DEV["vol"])}
+            try:
+                async def _vol_probe():
+                    wo = WiiMOutput(echo_gate=EchoGate(), zone_selector=lambda: "wz", led=None,
+                                    config_path=str(cfg_test))
+                    wo._enabled = True
+                    wo._zones = {"wz": {"ip": "127.0.0.3"}}
+                    wo._zone_volumes = {"wz": 35}
+                    wo._clip_server = _srv
+                    _DEV["t0"] = time.monotonic()
+                    filler = asyncio.create_task(wo._speak_to_wiim(b"\x00\x00" * int(_RATE * 0.2)))
+                    await asyncio.sleep(0.3)
+                    reply = asyncio.create_task(wo._speak_to_wiim(b"\x00\x00" * int(_RATE * 0.6)))
+                    await asyncio.sleep(0.75)   # ~1.05 s: past the filler's restore, mid-reply
+                    mid = _DEV["vol"]
+                    await asyncio.gather(filler, reply)
+                    return mid, _DEV["vol"], list(_DEV["sets"])
+
+                _v_mid, _v_end, _v_sets = _asyncio.run(_vol_probe())
+            finally:
+                _wo_mod.wiim_get_status = _saved_status_v
+            check("wiim volume: the filler's restore doesn't dip the reply",
+                  _v_mid == 35, f"mid={_v_mid} sets={_v_sets}")
+            check("wiim volume: the music level comes back after overlapping clips",
+                  _v_end == 23, f"end={_v_end} sets={_v_sets}")
         finally:
             _wo_mod.wiim_api = _real_wiim_api
             if _saved_sonos_ws is None:
