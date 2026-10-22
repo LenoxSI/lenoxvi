@@ -2156,6 +2156,62 @@ def main():
             check("turns wake: two consecutive frames fire the interrupt, gate reopens",
                   len(_fired8) == 1 and _wf8._state is _TurnState.AWAKE,
                   f"fired={len(_fired8)} state={_wf8._state}")
+
+            # ── a long sentence keeps the AWAKE window open ──
+            import wake_word as _ww_mod
+            from pipecat.frames.frames import (
+                UserSpeakingFrame as _USpk,
+            )
+            from pipecat.frames.frames import (
+                VADUserStoppedSpeakingFrame as _VADStopW,
+            )
+
+            async def _hold_probe(talk_s, cap):
+                _ww_mod.SPEECH_HOLD_MAX = cap
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None)
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.0})
+                wf._name = "Hey_Willow"
+                wf._frame_size = 2560
+                wf._awake_timeout = 0.6
+
+                async def _noop(*a, **k):
+                    return None
+
+                wf.push_frame = _noop
+                wf._state = _TurnState.AWAKE
+                wf._last_activity = time.monotonic()
+                audio = _InputAudio(b"\x00" * 2560, 16000, 1)
+                await wf.process_frame(_VADStart(), _FD8.UPSTREAM)
+                t0, closed_at = time.monotonic(), None
+                while time.monotonic() - t0 < talk_s:
+                    await wf.process_frame(_USpk(), _FD8.UPSTREAM)
+                    await wf.process_frame(audio, _FD8.DOWNSTREAM)
+                    if closed_at is None and wf._state is _TurnState.IDLE:
+                        closed_at = time.monotonic() - t0
+                    await asyncio.sleep(0.1)
+                talking_state = wf._state
+                await wf.process_frame(_VADStopW(), _FD8.UPSTREAM)
+                await asyncio.sleep(0.8)
+                await wf.process_frame(audio, _FD8.DOWNSTREAM)
+                return talking_state, closed_at, wf._state
+
+            _orig_cap = getattr(_ww_mod, "SPEECH_HOLD_MAX", None)
+            try:
+                _h_talk, _h_closed, _h_after = _asyncio.run(_hold_probe(2.0, 30.0))
+                _c_talk, _c_closed, _c_after = _asyncio.run(_hold_probe(2.0, 0.5))
+            finally:
+                if _orig_cap is None:
+                    del _ww_mod.SPEECH_HOLD_MAX
+                else:
+                    _ww_mod.SPEECH_HOLD_MAX = _orig_cap
+            check("turns wake: talking past awake_timeout keeps the gate AWAKE",
+                  _h_talk is _TurnState.AWAKE and _h_closed is None,
+                  f"state={_h_talk} closed_at={_h_closed}")
+            check("turns wake: after speech stops the window still times out",
+                  _h_after is _TurnState.IDLE, f"state={_h_after}")
+            check("turns wake: nonstop speech (TV) still closes at the hold cap",
+                  _c_closed is not None and 0.9 <= _c_closed <= 1.6,
+                  f"closed_at={_c_closed} state={_c_talk}")
             # knob OFF = today's behavior: even two frames never fire.
             # NOTE: pinned on the instance — the suite copies the LIVE
             # config.yaml (which carries barge_in: true on the dev rig),
