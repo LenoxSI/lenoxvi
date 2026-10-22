@@ -39,6 +39,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     TTSSpeakFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
@@ -84,6 +85,11 @@ _DEFAULT_TIERS = [
 ]
 
 _LAST_FILLER = ""
+
+
+# Segmented STT: after VAD stop + lull, how much longer to wait for a
+# stretch's transcript before closing on what's already buffered.
+SEGMENT_TRANSCRIPT_GRACE = 1.5
 
 
 def _filler_tiers() -> list[tuple[float, list[str]]]:
@@ -255,6 +261,15 @@ class IntelligenceAgent(FrameProcessor):
         # once. Whisper only transcribes after the stop, so it's unchanged.
         self._vad_active = False
         self._vad_stopped_at = 0.0
+        # "finalized" means two different things: a streaming STT (Deepgram,
+        # which sends interims while you talk) finalizes the UTTERANCE, so
+        # that closes the turn at once; a segmented STT (Whisper: no interims)
+        # stamps EVERY VAD stretch finalized, so a breath pause would close
+        # the turn mid-thought. For segmented finals the lull counts from VAD
+        # stop and waits for that stretch's transcript (grace for a stretch
+        # that yields no text).
+        self._saw_interim = False
+        self._segmented_final = False
         # Dedup: same utterance re-heard inside this window is treated as an
         # echo/repeat (observed live: the lull-timer can double-fire while the
         # bot is still speaking a slow reply).
@@ -502,6 +517,8 @@ class IntelligenceAgent(FrameProcessor):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self._vad_active = False
             self._vad_stopped_at = time.monotonic()
+        elif isinstance(frame, InterimTranscriptionFrame):
+            self._saw_interim = True
         elif isinstance(frame, TranscriptionFrame):
             if frame.text.strip():
                 if self._echo_gate and self._echo_gate.blocked():
@@ -511,19 +528,33 @@ class IntelligenceAgent(FrameProcessor):
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()
-                    final_now = bool(getattr(frame, "finalized", False))
+                    if getattr(frame, "finalized", False):
+                        if self._saw_interim:
+                            final_now = True
+                        else:
+                            self._segmented_final = True
 
+        now_t = time.monotonic()
+        if self._segmented_final:
+            since_stop = now_t - self._vad_stopped_at
+            lull_done = since_stop >= self._lull_secs and (
+                self._last_transcription >= self._vad_stopped_at
+                or since_stop >= self._lull_secs + SEGMENT_TRANSCRIPT_GRACE)
+        else:
+            lull_done = (now_t - max(self._last_transcription, self._vad_stopped_at)
+                         >= self._lull_secs)
         if (
             self._speaking
             and self._flushed is False
             and self._buffer
             and self._last_transcription > 0
             and not self._vad_active
-            and (final_now or (time.monotonic() - max(self._last_transcription, self._vad_stopped_at))
-                 >= self._lull_secs)
+            and (final_now or lull_done)
         ):
             self._speaking = False
             self._flushed = True
+            self._saw_interim = False
+            self._segmented_final = False
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             if text:
@@ -622,6 +653,18 @@ class IntelligenceAgent(FrameProcessor):
                         if epoch != self._turn_epoch:
                             ask.cancel()
                             return  # superseded mid-filler — die quietly
+                        # Never talk over the user: hold the filler while
+                        # VAD says they're speaking (it would also arm the
+                        # echo gate and swallow what they're saying).
+                        while (self._vad_active and not ask.done()
+                               and epoch == self._turn_epoch):
+                            await asyncio.sleep(0.05)
+                        if epoch != self._turn_epoch:
+                            ask.cancel()
+                            return
+                        if ask.done():
+                            reply = await ask
+                            break
                         filler = _pick_filler(pool)
                         await self.push_frame(TTSSpeakFrame(text=filler))
                         self._register_echo(filler)

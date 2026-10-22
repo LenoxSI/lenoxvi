@@ -9,6 +9,13 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- A short breath pause no longer ends your request early with local Whisper:
+  the turn now waits out the full pause window from when you stopped
+  talking (streaming STT keeps its instant close).
+- Fillers ("Working on it…") no longer talk over you; they wait until you
+  stop, and are skipped if the answer lands first.
+- Whisper's made-up captions from background noise ("Thanks for watching!")
+  are dropped instead of being answered or cancelling your real question.
 - A long request no longer gets cut off: the listening window stays open while
   you are still talking and times out from when you stop (capped at 30 s of
   continuous speech, so a TV can't hold it open).
