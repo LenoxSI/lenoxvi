@@ -2528,6 +2528,129 @@ def main():
                     check("turns stop: wiim barge-in sends setPlayerCmd:stop",
                           any("setPlayerCmd:stop" in c for c in _WIIM_CMDS8),
                           f"cmds={_WIIM_CMDS8}")
+
+                    # ── barge-in vs a clip still in flight ──
+                    _BG = {"plays": [], "cancels": [], "entered": None}
+
+                    class _FakeSwBG:
+                        def __init__(self, ip, player_id=None):
+                            pass
+
+                        async def connect(self):
+                            return
+
+                        async def play_clip(self, url, volume=None):
+                            _BG["plays"].append(url)
+                            if _BG["entered"] is not None:
+                                _BG["entered"].set()
+                            await asyncio.sleep(0.2)
+                            return {"clipId": f"clip-bg{len(_BG['plays'])}"}
+
+                        async def cancel_clip(self, cid):
+                            _BG["cancels"].append(cid)
+
+                        async def close(self):
+                            return
+
+                    def _so_bg():
+                        so = _SO8(echo_gate=_EchoGate8(), zone_selector=lambda: "test",
+                                  led=None, config_path=str(cfg_test))
+                        so._enabled = True
+                        so._duck_while_awake = False
+                        so._zones = {"test": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                        so._clip_server = _srv8
+                        return so
+
+                    _pcm_bg = b"\x00\x00" * 7200
+
+                    async def _so_barge_probe(mode):
+                        _BG["plays"].clear()
+                        _BG["cancels"].clear()
+                        _BG["entered"] = asyncio.Event()
+                        so = _so_bg()
+                        _kw = ({"barge": so._barge_epoch}
+                               if hasattr(so, "_barge_epoch") else {})
+                        t = asyncio.create_task(so._speak_to_sonos(
+                            _pcm_bg, epoch=so._speech_epoch, **_kw))
+                        if mode == "before":
+                            await so.stop_current_clip()
+                        elif mode == "during":
+                            await asyncio.wait_for(_BG["entered"].wait(), 2.0)
+                            await so.stop_current_clip()
+                        await t
+                        return (list(_BG["plays"]), list(_BG["cancels"]),
+                                so._reply_clip_id, so._echo_gate.blocked(),
+                                round(so._echo_gate._blocked_until - time.monotonic(), 2))
+
+                    sys.modules["sonos_websocket"] = _types_module.SimpleNamespace(
+                        SonosWebsocket=_FakeSwBG)
+                    _bg_before = _asyncio.run(_so_barge_probe("before"))
+                    _bg_during = _asyncio.run(_so_barge_probe("during"))
+                    _bg_none = _asyncio.run(_so_barge_probe("none"))
+                    sys.modules["sonos_websocket"] = _types_module.SimpleNamespace(
+                        SonosWebsocket=_FakeSw8)
+                    check("barge clip: sonos - a barge-in before load plays nothing, gate not armed",
+                          _bg_before[0] == [] and _bg_before[3] is False, str(_bg_before))
+                    check("barge clip: sonos - a barge-in during load cancels that clip, keeps no id",
+                          len(_bg_during[0]) == 1 and _bg_during[1] == ["clip-bg1"]
+                          and _bg_during[2] is None and _bg_during[4] <= 0.6, str(_bg_during))
+                    check("barge clip: sonos - no barge-in still plays and holds the clip id",
+                          len(_bg_none[0]) == 1 and _bg_none[1] == [] and _bg_none[2] == "clip-bg1",
+                          str(_bg_none))
+
+                    import threading as _thr_bg
+                    _WBG = {"cmds": [], "in_play": _thr_bg.Event()}
+
+                    def _wiim_bg_api(ip, cmd, timeout=4.0):
+                        _WBG["cmds"].append(cmd)
+                        if cmd.startswith("setPlayerCmd:play:"):
+                            _WBG["in_play"].set()
+                            time.sleep(0.2)
+                            _WBG["cmds"].append("play-done")
+                        return "OK"
+
+                    _saved_status_bg = _wo8_mod.wiim_get_status
+                    _wo8_mod.wiim_api = _wiim_bg_api
+                    _wo8_mod.wiim_get_status = lambda ip, timeout=3.0: {"vol": "23"}
+
+                    async def _wo_barge_probe(mode):
+                        _WBG["cmds"].clear()
+                        _WBG["in_play"].clear()
+                        wo = _WO8(echo_gate=_EchoGate8(), zone_selector=lambda: "test",
+                                  led=None, config_path=str(cfg_test))
+                        wo._enabled = True
+                        wo._zones = {"test": {"ip": "127.0.0.1"}}
+                        wo._clip_server = _srv8
+                        _kw = ({"barge": wo._barge_epoch}
+                               if hasattr(wo, "_barge_epoch") else {})
+                        t = asyncio.create_task(wo._speak_to_wiim(
+                            _pcm_bg, epoch=wo._speech_epoch, **_kw))
+                        if mode == "before":
+                            await wo.stop_current_clip()
+                        else:
+                            while not _WBG["in_play"].is_set():
+                                await asyncio.sleep(0.01)
+                            await wo.stop_current_clip()
+                        await asyncio.wait_for(t, 3.0)
+                        return (list(_WBG["cmds"]), wo._echo_gate.blocked(),
+                                round(wo._echo_gate._blocked_until - time.monotonic(), 2))
+
+                    try:
+                        _wbg_before = _asyncio.run(_wo_barge_probe("before"))
+                        _wbg_during = _asyncio.run(_wo_barge_probe("during"))
+                    finally:
+                        _wo8_mod.wiim_get_status = _saved_status_bg
+                    check("barge clip: wiim - a barge-in before load plays nothing, gate not armed",
+                          not any(c.startswith("setPlayerCmd:play:") for c in _wbg_before[0])
+                          and _wbg_before[1] is False, str(_wbg_before))
+                    _wd = _wbg_during[0]
+                    # The stop must land AFTER the play call completes: a stop sent
+                    # while the play is still in flight can reach the unit first.
+                    _wplay = next((i for i, c in enumerate(_wd) if c == "play-done"), None)
+                    check("barge clip: wiim - a barge-in during load stops it and restores the volume",
+                          _wplay is not None and "setPlayerCmd:stop" in _wd[_wplay + 1:]
+                          and "setPlayerCmd:vol:23" in _wd[_wplay + 1:] and _wbg_during[2] <= 0.6,
+                          str(_wbg_during))
                 finally:
                     _wo8_mod.wiim_api = _saved_wiim_api8
             finally:
