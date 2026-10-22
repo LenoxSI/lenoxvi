@@ -3760,6 +3760,56 @@ def main():
     check("node command: once the late reply lands, a retry goes through with its own answer",
           _late14.get("retry2") == "answered muted=False", str(_late14))
 
+    # With request ids (firmware 1.2.37+): replies are matched by id, no settling.
+    _sent_id14 = []
+
+    def _ack_id14(cmd, rid, data):
+        _nc14.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": cmd,
+                                     "id": rid, "ok": True, "data": data}), "pc-t14id")
+
+    async def _id_probe14():
+        _nc14.registry.sender_for_room = lambda room: (object(), "pc-t14id")
+        _nc14._send = lambda out, payload: _sent_id14.append(payload) or True
+        out = {}
+        try:
+            t = _aio14.create_task(_nc14.request("suite-t14", "get_info", timeout=1.0))
+            await _aio14.sleep(0.05)
+            rid_info = _sent_id14[-1].get("id")
+            out["ids_sent"] = rid_info is not None
+            _ack_id14("get_info", rid_info, {"name": "suite-t14"})
+            await t
+            try:
+                await _nc14.request("suite-t14", "set_mute", {"mute": True}, timeout=0.2)
+            except TimeoutError:
+                pass
+            rid_old = _sent_id14[-1].get("id")
+            retry = _aio14.create_task(
+                _nc14.request("suite-t14", "set_mute", {"mute": False}, timeout=1.0))
+            await _aio14.sleep(0.05)
+            rid_new = _sent_id14[-1].get("id")
+            out["distinct_ids"] = rid_new is not None and rid_new != rid_old
+            _ack_id14("set_mute", rid_old, {"muted": True})    # the late reply, stale id
+            await _aio14.sleep(0.05)
+            out["late_ignored"] = not retry.done()
+            _ack_id14("set_mute", rid_new, {"muted": False})   # the retry's own reply
+            try:
+                r = await retry
+                out["retry"] = f"answered muted={r['data']['muted']}"
+            except Exception as e:  # noqa: BLE001
+                out["retry"] = type(e).__name__
+            return out
+        finally:
+            _nc14._send = _saved_send14
+            _nc14.registry.sender_for_room = _saved_sender14
+            getattr(_nc14, "_settling", {}).clear()
+            getattr(_nc14, "_echoes_id", set()).discard("pc-t14id")
+
+    _id14 = _aio14.run(_id_probe14())
+    check("node command: every request carries a unique id",
+          _id14.get("ids_sent") and _id14.get("distinct_ids"), str(_id14))
+    check("node command: an id-echoing node's retry goes out at once; the stale reply is ignored",
+          _id14.get("late_ignored") and _id14.get("retry") == "answered muted=False", str(_id14))
+
     # Wake-model select keys on name + SOURCE: with the
     # same basename in root and models/, a name-only select always
     # resolved to the models/ copy — clicking the ROOT row silently
