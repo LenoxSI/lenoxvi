@@ -8,10 +8,25 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.6.7] — 2026-10-22 — Two bug hunts, pipecat 1.13, silent unmapped rooms
+
+A stability release: every finding from two full read-only bug hunts is
+fixed (turn taking, threads and the event loop, speaker volume, renames,
+config writes, key routing, the dashboard), pipecat moves to 1.13, ElevenLabs
+speaks clock times cleanly, and a room with no speaker mapping now stays
+silent instead of borrowing another room's speaker.
+
+- Companion firmware (separate version stream): `array-v1.2.37` /
+  `flex-v1.2.37` / `waveshare-v1.2.37` — nodes echo each command's request id
+  so a retried command never gets the previous one's late answer; 1.2.35
+  accepts a 64-character hex Wi-Fi key and reports a Wi-Fi rollback.
+
+### Upgrade notes
+- Map every room to a speaker zone: an unmapped room is now silent (see
+  Changed).
+- Reload open dashboard tabs after updating.
+
 ### Fixed
-- `tts.elevenlabs_text_normalization: on` in config.yaml now actually turns
-  ElevenLabs' number and time normalization on (a bare `on` was read as a
-  YAML boolean and silently ignored).
 - A Pocket voice that can't load (for example a new voice picked while the
   internet is down) no longer stalls every new room session; Pocket uses the
   default voice and tries the chosen one again every few minutes.
@@ -33,10 +48,6 @@ The two version streams are independent.
 - A refused bot restart request is reported at once instead of after a
   90-second wait.
 - The dashboard token is now typed into a masked field.
-- A room with no speaker mapping no longer plays its replies on another
-  room's speaker or ducks music elsewhere: it stays silent, with one log
-  line per reply, until it is mapped (a built-in speaker counts once its
-  node confirms it).
 - A WiiM speaker shared by two rooms, or a reply that starts just as the
   previous one finishes, no longer leaves the music at the voice volume.
 - A WiiM reply that fails to start, or is cut off by a bot restart, now
@@ -60,9 +71,9 @@ The two version streams are independent.
 - The dashboard now refuses changes sent from a page on another port of the
   same address.
 - Zone names containing `/` are refused when added (such zones could never
-  be managed afterwards); saving the Intelligence card with an empty URL no
-  longer fails; a refused speech-to-text save no longer half-applies; saving
-  a room mapping after a node was renamed no longer undoes the rename.
+  be managed afterwards); a refused speech-to-text save no longer
+  half-applies; saving a room mapping after a node was renamed no longer
+  undoes the rename.
 - Retrying a node command (mute, scan, info) right after it timed out no
   longer shows the first command's late answer. Nodes on firmware 1.2.37+
   match every reply to its request by id, so the retry goes out at once;
@@ -71,8 +82,8 @@ The two version streams are independent.
   config.yaml (section notes, inline notes, and the note above the next
   section).
 - Deleting the default speaker zone now hands "default" to a remaining zone
-  (or clears it), so unmapped rooms' replies don't go to a zone that no
-  longer exists.
+  (or clears it) instead of leaving it pointing at a zone that no longer
+  exists.
 - Restarting the bot or uploading a wake-word model from the dashboard no
   longer freezes voice in every room while it runs.
 - Moving a zone volume slider, adding a zone or deleting a zone no longer
@@ -122,7 +133,8 @@ The two version streams are independent.
   says so in the bot log (firmware 1.2.35).
 - ElevenLabs Flash no longer garbles clock times ("9:11 PM" could come out as
   babble with seconds of silence): a new TTS setting turns on ElevenLabs' own
-  number normalization, which is off by default on Flash.
+  number normalization, which is off by default on Flash. A bare `on` in
+  config.yaml works (YAML reads it as a boolean; it is mapped back).
 - Intelligence Save files only the URL on screen, under the provider on
   screen: a URL typed for the other provider and never saved there can no
   longer receive that provider's key.
@@ -152,6 +164,16 @@ The two version streams are independent.
   dates before speaking and adds about 0.15 s before the first word.
 
 ### Changed
+- **A room with no speaker mapping is silent.** Its replies no longer play on
+  the Sonos or WiiM default zone, and nothing is ducked for it; the bot logs
+  one line per reply until the room is mapped. `default_zone` is still
+  accepted in config.yaml but no longer routes replies. A room mapped to a
+  node's built-in speaker plays once that node confirms its speaker (a few
+  seconds after it connects); a speaker node with no mapping still uses its
+  own speaker.
+- Intelligence Save sends only the URL for the provider on screen (the
+  per-provider `urls` map is no longer accepted in the request). Reload any
+  dashboard tab left open from an older version before saving.
 - Spoken replies are no longer stripped of `[bracketed]` text. The strip was a
   workaround for one agent's persona; the voice now speaks exactly what the
   agent writes.
