@@ -4141,6 +4141,40 @@ def main():
               str(_ra))
         registry.mark_disconnected("pc-ra")
 
+        # A TTS provider switch whose key isn't loaded yet keeps the boot provider
+        import keys_catalog as _kcp
+        _sp = getattr(_kcp, "session_tts_provider", None)
+        if _sp is None:
+            check("tts provider: keys_catalog.session_tts_provider exists", False, "missing")
+        else:
+            _EL, _DG = {"ELEVENLABS_API_KEY": "x"}, {"DEEPGRAM_API_KEY": "y"}
+            check("tts provider: key loaded -> the configured provider, no warning",
+                  _sp("deepgram", "elevenlabs", {**_EL, **_DG}) == ("deepgram", None))
+            _p, _w = _sp("deepgram-flux", "elevenlabs", _EL)
+            check("tts provider: key not loaded yet -> the boot provider + a warning naming the key",
+                  _p == "elevenlabs" and _w and "DEEPGRAM_API_KEY" in _w, f"{_p} {_w}")
+            check("tts provider: boot provider to keyless pocket works too",
+                  _sp("elevenlabs", "pocket", {})[0] == "pocket")
+            check("tts provider: no boot provider -> configured (construction fails loud)",
+                  _sp("deepgram", None, _EL) == ("deepgram", None))
+            check("tts provider: boot provider ALSO keyless-missing -> configured (fails loud)",
+                  _sp("deepgram", "elevenlabs", {}) == ("deepgram", None))
+            check("tts provider: pocket needs no key",
+                  _sp("pocket", "elevenlabs", {}) == ("pocket", None))
+        import ast as _astcp
+        _botcp = _astcp.parse((REPO_CORE.parent / "bot.py").read_text())
+        _rbcp = next((n for n in _astcp.walk(_botcp)
+                      if isinstance(n, _astcp.AsyncFunctionDef) and n.name == "run_bot"), None)
+        _rbsrc = _astcp.unparse(_rbcp) if _rbcp else ""
+        check("tts provider: run_bot resolves the provider against the loaded keys",
+              "session_tts_provider" in _rbsrc and _rbsrc.count("'tts', 'provider'") == 1,
+              f"reads={_rbsrc.count(chr(39) + 'tts' + chr(39) + ', ' + chr(39) + 'provider' + chr(39))}")
+        _mk = [i for i in range(len(_rbsrc)) if _rbsrc.startswith("tts_pocket.make_service(", i)]
+        _wm = [i for i in range(len(_rbsrc)) if _rbsrc.startswith("await tts_pocket.warm(", i)]
+        check("pocket: run_bot warms Pocket off the loop before every make_service",
+              len(_mk) == 2 and len(_wm) == 2 and all(w < m for w, m in zip(_wm, _mk)),
+              f"make={_mk} warm={_wm}")
+
         # Keys card: an agent used by a room is in use
         import keys_catalog as _kc57
         from dashboard import routes as _rRA

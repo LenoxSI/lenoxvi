@@ -608,6 +608,55 @@ FakeTTSModel.load_model = _orig_load
 tp._reset_for_tests()
 
 
+# warm(): the model loads in a thread (session setup runs on the event loop;
+# a load there stalls every room), and two rooms warming at once load ONCE.
+import asyncio as _aio_w
+import time as _t_w
+
+tp._reset_for_tests()
+LOADS["n"] = 0
+_orig_load_w = FakeTTSModel.load_model
+
+
+def _slow_load_w(**kw):
+    _t_w.sleep(0.4)
+    return _orig_load_w(**kw)
+
+
+FakeTTSModel.load_model = staticmethod(_slow_load_w)
+
+
+async def _warm_probe():
+    gaps, state = [], {"stop": False}
+
+    async def ticker():
+        last = _t_w.monotonic()
+        while not state["stop"]:
+            await _aio_w.sleep(0.02)
+            now = _t_w.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    t = _aio_w.create_task(ticker())
+    await _aio_w.sleep(0.05)
+    warm = getattr(tp, "warm", None)
+    if warm is None:  # pre-fix shape: the load ran inline on the loop
+
+        async def warm(v):
+            return tp.preload(v)
+    res = await _aio_w.gather(warm("alba"), warm("alba"))
+    state["stop"] = True
+    await t
+    return res, max(gaps) if gaps else None
+
+
+_w_res, _w_gap = _aio_w.run(_warm_probe())
+FakeTTSModel.load_model = staticmethod(_orig_load_w)
+check("pocket: warm() keeps the event loop responsive during a model load",
+      _w_gap is not None and _w_gap < 0.15, f"max loop gap={_w_gap}")
+check("pocket: two concurrent warms load the model once",
+      _w_res == [True, True] and LOADS["n"] == 1, f"res={_w_res} loads={LOADS['n']}")
+
 # R8 (minor): repeated warnings log once per process.
 _r8_lines = []
 from loguru import logger as _lg  # noqa: E402
