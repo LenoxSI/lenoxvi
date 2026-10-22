@@ -181,8 +181,27 @@ class _SessionStash:
         except OSError as e:
             logger.warning(f"intelligence_agent: session stash write failed: {e}")
 
+    def rename(self, old: str, new: str) -> bool:
+        try:
+            data = json.loads(self._path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict) or old not in data or new in data:
+            return False
+        data[new] = data.pop(old)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, self._path)
+        return True
+
 
 _session_stash = _SessionStash()
+
+
+def rename_session_history(old: str, new: str) -> bool:
+    """Move a sticky room's saved conversation to its new name (node rename).
+    Never overwrites history already stored under `new`."""
+    return _session_stash.rename(old, new)
 
 # Reasoning-preamble meter: [count] as a mutable cell so the
 # lane can count leaks without rebinding a module global per hit.

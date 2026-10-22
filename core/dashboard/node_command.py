@@ -205,31 +205,49 @@ def on_message(message, pc_id: str) -> None:
             spk = dict(config_store.read_section("node_speaker") or {})
             vols = dict(spk.get("volumes") or {})
             writes = {}
-            if old in mapping:
-                mapping[new] = mapping.pop(old)
+
+            def _carry(table: dict, what: str) -> bool:
+                # Never overwrite another room's entry: the dashboard refuses a
+                # rename onto an existing name, but a node renamed some other
+                # way can still collide. The old entry then stays where it is.
+                if old not in table:
+                    return False
+                if new in table:
+                    logger.warning(f"node_command: rename '{old}' -> '{new}': '{new}' already "
+                                   f"has a {what}; kept it, '{old}' left as-is")
+                    return False
+                table[new] = table.pop(old)
+                logger.info(f"node_command: rename carried {what} '{old}' -> '{new}'")
+                return True
+
+            if _carry(mapping, "zone mapping"):
                 writes["room_zones"] = mapping
-                logger.info(
-                    f"node_command: rename carried mapping '{old}' -> '{new}' "
-                    f"(zone '{mapping[new]}')"
-                )
             # per-room agent overrides (every intelligence system) follow too.
             ragents = dict(config_store.read_section("room_agents") or {})
             moved = False
             for kind, rooms in list(ragents.items()):
-                if isinstance(rooms, dict) and old in rooms:
+                if isinstance(rooms, dict):
                     rooms = dict(rooms)
-                    rooms[new] = rooms.pop(old)
-                    ragents[kind] = rooms
-                    moved = True
+                    if _carry(rooms, f"{kind} agent override"):
+                        ragents[kind] = rooms
+                        moved = True
             if moved:
                 writes["room_agents"] = ragents
-                logger.info(f"node_command: rename carried agent override(s) '{old}' -> '{new}'")
-            if old in vols:
-                vols[new] = vols.pop(old)
+            if _carry(vols, "speaker volume"):
                 writes["node_speaker"] = {**spk, "volumes": vols}
-                logger.info(f"node_command: rename carried speaker volume '{old}' -> '{new}'")
+            # Sticky/fresh conversation mode (bot.py reads session_modes[room]).
+            modes = dict(config_store.read_section("session_modes") or {})
+            if _carry(modes, "session mode"):
+                writes["session_modes"] = modes
             if writes:
                 config_store.write_sections(writes)  # one atomic pass
+            # A sticky room's saved conversation follows its name too.
+            try:
+                import intelligence_agent
+
+                intelligence_agent.rename_session_history(old, new)
+            except Exception as e:  # noqa: BLE001 — history is best-effort; the rename stands
+                logger.warning(f"node_command: session history not carried: {e}")
         registry.relabel_room(pc_id, info)
         if old and new and old != new:
             # The new name may carry a different mapping: re-tell the node

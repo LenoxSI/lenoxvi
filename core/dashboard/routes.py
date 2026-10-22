@@ -846,9 +846,31 @@ async def set_node_wifi(room: str, payload: WifiPayload):
     return reply
 
 
+def _room_name_taken(name: str, room: str) -> str | None:
+    """An existing room `name` would collide with (case-insensitive; the
+    room itself doesn't count, so a case-only rename is fine)."""
+    low = name.lower()
+    if low == room.lower():
+        return None
+    names = {r["room"] for r in registry.known_rooms()}
+    for section in ("room_zones", "session_modes"):
+        names |= set((config_store.read_section(section) or {}).keys())
+    for rooms in (config_store.read_section("room_agents") or {}).values():
+        if isinstance(rooms, dict):
+            names |= set(rooms.keys())
+    names |= set(((config_store.read_section("node_speaker") or {}).get("volumes") or {}).keys())
+    return next((str(n) for n in names if str(n).lower() == low), None)
+
+
 @router.post("/nodes/{room}/name", dependencies=GUARD)
 async def set_node_name(room: str, payload: NamePayload):
     _room_online(room)
+    # A rename onto an existing room would overwrite its zone, agent,
+    # volume and mode, and leave two sessions claiming one room.
+    taken = _room_name_taken(payload.name, room)
+    if taken:
+        raise HTTPException(status_code=409,
+                            detail=f"a room named '{taken}' already exists - pick another name")
     reply = await _node_cmd(room, "set_name", {"name": payload.name})
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"rename failed: {reply.get('data')}")

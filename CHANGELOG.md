@@ -9,6 +9,10 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Renaming a node to a name another room already uses is now refused,
+  instead of silently taking over that room's speaker, agent and settings.
+- A renamed room keeps its conversation mode (sticky/fresh) and, if sticky,
+  its saved conversation.
 - WiiM rooms: the ring no longer flips back to listening before the reply has
   finished, and a filler followed quickly by the answer no longer leaves the
   music at the voice volume.
