@@ -444,6 +444,56 @@ def main():
         _rRL.subprocess.run, _rRL._oww_validate, _rRL._oww_dir = _sub_saved, _val_saved, _dir_saved
     check("routes: restart scheduling doesn't block the event loop",
           _gap_restart < 0.15, f"max loop gap={_gap_restart:.2f}s")
+    # ── config writes keep the comments inside and between sections ──
+    _cfg_c = Path(tempfile.mkdtemp()) / "config.yaml"
+    _cfg_c.write_text(
+        "# header note\n"
+        "sonos:\n"
+        "  # about the sonos section\n"
+        "  enabled: true  # inline enabled note\n"
+        "  clip_volume: 30\n"
+        "  zones:\n"
+        "    # the kitchen speaker\n"
+        "    kitchen: {ip: 127.0.0.5, player_uid: RINCON_K}\n"
+        "  default_zone: kitchen\n"
+        "# about the wake section\n"
+        "wake:\n"
+        "  threshold: 0.5  # tuned by ear\n"
+        "  barge_in: false\n")
+    _oh_cfg_saved = os.environ.get("LVI_CONFIG")
+    os.environ["LVI_CONFIG"] = str(_cfg_c)
+    try:
+        _snap = dict(config_store.read_section("sonos"))   # plain copy, like the routes
+        _snap["clip_volume"] = 40
+        _snap["zones"] = {**dict(_snap["zones"]), "den": {"ip": "127.0.0.6", "player_uid": "RINCON_D"}}
+        _res = config_store.write_section("sonos", _snap)
+        config_store.write_sections({"wake": {"threshold": 0.45, "barge_in": False}})
+        _txt_c = _cfg_c.read_text()
+        _keep = ["# header note", "# about the sonos section", "# inline enabled note",
+                 "# the kitchen speaker", "# about the wake section", "# tuned by ear"]
+        _lost = [c for c in _keep if c not in _txt_c]
+        check("config comments: section, inline, nested and next-section comments survive writes",
+              not _lost, f"lost={_lost}")
+        _rt = config_store.read_sections(["sonos", "wake"])
+        check("config comments: the written values land",
+              _rt["sonos"]["clip_volume"] == 40 and "den" in _rt["sonos"]["zones"]
+              and _rt["wake"]["threshold"] == 0.45, str(_rt))
+        check("config comments: the returned 'before' is the pre-write state",
+              "den" not in (_res["before"].get("zones") or {}) and _res["before"]["clip_volume"] == 30,
+              str(_res["before"]))
+        config_store.write_section("sonos", {"enabled": True, "zones": {"kitchen": {
+            "ip": "127.0.0.5", "player_uid": "RINCON_K"}}, "default_zone": "kitchen"})
+        _rt2 = config_store.read_section("sonos")
+        _txt_c2 = _cfg_c.read_text()
+        check("config comments: a removed key goes; the other comments stay",
+              "clip_volume" not in _rt2 and "den" not in _rt2["zones"]
+              and "# the kitchen speaker" in _txt_c2 and "# about the wake section" in _txt_c2,
+              _txt_c2[:300])
+    finally:
+        if _oh_cfg_saved is None:
+            os.environ.pop("LVI_CONFIG", None)
+        else:
+            os.environ["LVI_CONFIG"] = _oh_cfg_saved
     check("routes: a wake-model upload doesn't block the event loop",
           _gap_upload < 0.15 and (_oww_tmp / "suite_loop.onnx").exists(),
           f"max loop gap={_gap_upload:.2f}s")
