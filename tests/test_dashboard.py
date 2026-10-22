@@ -2927,8 +2927,8 @@ def main():
             if self.fail_connect:
                 raise ConnectionError("suite: WAN still down")
             self._websocket = object()
-        async def _push_tts_frames(self, src_frame, *a, **k):
-            self.spokes.append(src_frame)
+        async def _synthesize_text(self, text, context_id):
+            self.spokes.append(text)
             return "spoke"
 
     class _Tracked13(_TTST13, _SpeakSink13):
@@ -2937,14 +2937,14 @@ def main():
     _s13 = _Tracked13()
     _s13.bind_tts_room("suite-t13")
     _aio13.run(_s13.set_usable(False))   # pipecat's permanent death verdict
-    _rc13 = _aio13.run(_s13._push_tts_frames("first speak"))
+    _rc13 = _aio13.run(_s13._synthesize_text("first speak", "suite-ctx"))
     check("tts reconnect: dead TTS retries the websocket on the next speak",
           _s13.is_usable and _s13.connects == 1 and _rc13 == "spoke"
           and _s13.spokes == ["first speak"],
           f"usable={_s13.is_usable} connects={_s13.connects} rc={_rc13}")
 
     _live13 = _Tracked13()
-    _rc13b = _aio13.run(_live13._push_tts_frames("live speak"))
+    _rc13b = _aio13.run(_live13._synthesize_text("live speak", "suite-ctx"))
     check("tts reconnect: a live TTS service never pays the revive",
           _live13.connects == 0 and _rc13b == "spoke",
           f"connects={_live13.connects} rc={_rc13b}")
@@ -2953,15 +2953,15 @@ def main():
     _dead13.bind_tts_room("suite-t13")
     _aio13.run(_dead13.set_usable(False))
     _dead13.fail_connect = True
-    _rc13c = _aio13.run(_dead13._push_tts_frames("during outage"))
+    _rc13c = _aio13.run(_dead13._synthesize_text("during outage", "suite-ctx"))
     check("tts reconnect: failed revive stays dead and never breaks the speak",
           (not _dead13.is_usable) and _dead13.connects == 1 and _rc13c == "spoke",
           f"usable={_dead13.is_usable} connects={_dead13.connects} rc={_rc13c}")
-    _aio13.run(_dead13._push_tts_frames("still down"))
+    _aio13.run(_dead13._synthesize_text("still down", "suite-ctx"))
     check("tts reconnect: cooldown throttles retries while the outage lasts",
           _dead13.connects == 1, f"connects={_dead13.connects}")
     _dead13._revive_last_attempt = 0.0   # simulate the cooldown expiring
-    _aio13.run(_dead13._push_tts_frames("after cooldown"))
+    _aio13.run(_dead13._synthesize_text("after cooldown", "suite-ctx"))
     check("tts reconnect: a later speak gets the next retry",
           _dead13.connects == 2 and not _dead13.is_usable,
           f"connects={_dead13.connects} usable={_dead13.is_usable}")
@@ -2974,19 +2974,26 @@ def main():
         _chip13 = _Tracked13()
         _chip13.bind_tts_room("suite-t13")
         _aio13.run(_chip13.set_usable(False))
-        _aio13.run(_chip13._push_tts_frames("revive me"))
+        _aio13.run(_chip13._synthesize_text("revive me", "suite-ctx"))
         check("tts reconnect: a revived TTS clears the dashboard tts-down chip",
               _notes13[-1] == ("suite-t13", "elevenlabs", True) and _chip13.is_usable,
               f"notes={_notes13}")
     finally:
         _reg13.note_tts = _orig_note13
 
+    # The revive hook must be a method pipecat's TTSService ITSELF defines
+    # (pipecat 1.13 removed _push_tts_frames: an override of a vanished
+    # method is never called, and the revive dies silently). Every speak
+    # reaches run_tts through _synthesize_text in pipecat 1.13.
+    from pipecat.services.tts_service import TTSService as _PipecatTTS13
     check("tts reconnect: the real ElevenLabs service rides the revive mixin",
           issubclass(_bot13.TrackedElevenLabsTTSService, _TTST13)
           and hasattr(_bot13.ElevenLabsTTSService, "_connect")
           and hasattr(_bot13.ElevenLabsTTSService, "_disconnect")
-          and hasattr(_bot13.ElevenLabsTTSService, "_push_tts_frames"),
-          "Tracked* must sit on TTSTracked over a websocket TTS service")
+          and "_synthesize_text" in _TTST13.__dict__
+          and "_synthesize_text" in _PipecatTTS13.__dict__,
+          "Tracked* must sit on TTSTracked over a websocket TTS service, and the "
+          "revive hook must override a method pipecat's TTSService defines")
 
     # Node-command error mapping: an in-flight duplicate is a
     # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a
