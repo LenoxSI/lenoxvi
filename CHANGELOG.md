@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- A long request no longer gets cut off: the listening window stays open while
+  you are still talking and times out from when you stop (capped at 30 s of
+  continuous speech, so a TV can't hold it open).
+- Repeating a question right after "I can't reach my intelligence" now gets an
+  answer instead of silence.
 - Dashboard fits a phone in portrait: no sideways page scroll at 360–430 px;
   wide tables scroll inside their cards instead of hiding columns.
 - ElevenLabs speed and stability sliders wrap with their labels on narrow

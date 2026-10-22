@@ -33,7 +33,9 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
+    UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -43,6 +45,10 @@ import wake_name
 WAKE_MODEL = wake_name.DEFAULT_MODEL
 WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
 AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
+# Ongoing speech keeps the AWAKE window open (VAD's UserSpeakingFrame
+# heartbeat), but only this long into one continuous stretch: a TV that never
+# pauses must not hold the gate open forever.
+SPEECH_HOLD_MAX = 30.0
 
 
 class TurnState(Enum):
@@ -122,6 +128,9 @@ class WakeWordFilter(FrameProcessor):
         self._awake_peak = 0
         self._awake_echo_blocked = False
         self._vad_fired = False
+        # Start of the current continuous speech stretch (VAD start .. stop);
+        # None = not speaking.
+        self._speaking_since: float | None = None
         # LOCKED safety cap — monotonic time after which
         # LOCKED releases itself if BotStoppedSpeakingFrame never arrives
         # (TTS error mid-stream). SonosOutput refines it via note_speech()
@@ -194,6 +203,8 @@ class WakeWordFilter(FrameProcessor):
                     self._audio_buf.clear()
                     self._state = TurnState.AWAKE
                     self._last_activity = now
+                    # VAD heard nothing while IDLE swallowed the audio.
+                    self._speaking_since = None
                     # Window forensics: reset the counters at window open.
                     self._awake_frames = 0
                     self._awake_peak = 0
@@ -349,6 +360,19 @@ class WakeWordFilter(FrameProcessor):
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # Real activity: user is talking (this is what keeps AWAKE alive)
             self._vad_fired = True
+            if self._speaking_since is None:
+                self._speaking_since = now
+            if self._state is TurnState.AWAKE:
+                self._last_activity = now
+        elif isinstance(frame, UserSpeakingFrame):
+            # Still talking: a long sentence must not time out mid-way (the
+            # timeout used to count from speech START). Capped per stretch.
+            if (self._state is TurnState.AWAKE and self._speaking_since is not None
+                    and now - self._speaking_since < SPEECH_HOLD_MAX):
+                self._last_activity = now
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            # The timeout counts from the end of what was said.
+            self._speaking_since = None
             if self._state is TurnState.AWAKE:
                 self._last_activity = now
         elif self._state is TurnState.AWAKE and (now - self._last_activity) > self._awake_timeout:
