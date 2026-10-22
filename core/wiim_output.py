@@ -99,6 +99,11 @@ class WiiMOutput(FrameProcessor):
         self._wake_gate = wake_gate
         self._led = led
         self._end_of_speech_timer = None
+        # Music-volume snapshot per speaker while any of our clips holds the
+        # voice volume, and the newest clip's token (only it restores).
+        self._vol_saved: dict[str, int | None] = {}
+        self._vol_token: dict[str, int] = {}
+        self._vol_lock = asyncio.Lock()
         self._pcm: list[bytes] = []
         self._sample_rate = 16000
         self._channels = 1
@@ -153,6 +158,18 @@ class WiiMOutput(FrameProcessor):
 
     def _barged(self, barge: int | None) -> bool:
         return barge is not None and barge != self._barge_epoch
+
+    def owns_reply(self) -> bool:
+        """This reply sounds on one of our (enabled) WiiM zones."""
+        if not self._enabled:
+            return False
+        zone_name = self._zone
+        if self._zone_selector:
+            try:
+                zone_name = self._zone_selector() or self._zone
+            except Exception:  # noqa: BLE001 — a routing hint must never break the reply
+                return False
+        return zone_name != BUILTIN and zone_name in self._zones
 
     async def _speak_to_wiim(self, pcm: bytes, epoch: int | None = None,
                              barge: int | None = None) -> None:
@@ -237,30 +254,41 @@ class WiiMOutput(FrameProcessor):
         # ── vol snapshot → set → play → confirm → restore ──
         # All API calls off the event loop (to_thread); 'OK' is cheap
         # (documented), so the play confirm rides getPlayerStatus.
-        def _net():
-            st = wiim_get_status(ip)
-            raw = st.get("vol") if st else None
-            before_vol = int(raw) if raw is not None else None
-            if before_vol is not None:
-                wiim_api(ip, f"setPlayerCmd:vol:{vol}")
-            wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
-            return before_vol
-
         if self._barged(barge):
             logger.info("wiim_output: barge-in during the encode, clip dropped")
             return
-        try:
-            before_vol = await asyncio.to_thread(_net)
-        except Exception as e:
-            logger.error(f"wiim_output: play failed on {ip}: {e}")
-            return
+        # Overlapping clips (a filler, then the reply) share ONE music-volume
+        # snapshot: re-snapshotting would save the filler's voice volume as
+        # the music level, and the filler's restore would dip the reply.
+        async with self._vol_lock:
+            need_snap = ip not in self._vol_saved
+            saved = self._vol_saved.get(ip)
+
+            def _net():
+                before = saved
+                if need_snap:
+                    st = wiim_get_status(ip)
+                    raw = st.get("vol") if st else None
+                    before = int(raw) if raw is not None else None
+                if before is not None:
+                    wiim_api(ip, f"setPlayerCmd:vol:{vol}")
+                wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
+                return before
+
+            try:
+                before_vol = await asyncio.to_thread(_net)
+            except Exception as e:
+                logger.error(f"wiim_output: play failed on {ip}: {e}")
+                return
+            self._vol_saved[ip] = before_vol
+            token = self._vol_token.get(ip, 0) + 1
+            self._vol_token[ip] = token
         if self._barged(barge):
             # The barge-in landed while the play command was in flight:
             # stop it and put the music volume back, no timers left behind.
             try:
                 await asyncio.to_thread(wiim_api, ip, "setPlayerCmd:stop")
-                if before_vol is not None:
-                    await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}")
+                await self._restore_volume(ip, token)
             except Exception as e:  # noqa: BLE001 — best-effort; the barge-in already stopped it once
                 logger.warning(f"wiim_output: late barge-in stop failed: {e}")
             logger.info("wiim_output: barge-in during load, clip stopped")
@@ -288,10 +316,18 @@ class WiiMOutput(FrameProcessor):
         # no-restore RATIFIED: music doesn't come back; its volume does).
         try:
             await asyncio.sleep(duration + 0.6)
-            if before_vol is not None:
-                await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}")
+            await self._restore_volume(ip, token)
         except Exception:
             pass  # restore is best-effort; the reply already played
+
+    async def _restore_volume(self, ip: str, token: int) -> None:
+        """Put the music volume back - only from the newest clip on `ip`
+        (an older clip's timer firing mid-reply would dip the reply)."""
+        if self._vol_token.get(ip) != token:
+            return
+        before = self._vol_saved.pop(ip, None)
+        if before is not None:
+            await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before}")
 
     # ── LED / end-of-speech ──────────────────────────────────────────────
 
@@ -313,7 +349,9 @@ class WiiMOutput(FrameProcessor):
         if self._led:
             state = getattr(self._wake_gate, "state", None)
             state_val = getattr(state, "value", state)
-            self._led.send("oww-sleeping" if state_val in (None, "idle") else "purple")
+            # The firmware's end message (rtvi.cpp); "purple" was ignored.
+            self._led.send("oww-sleeping" if state_val in (None, "idle")
+                           else "bot-stopped-speaking")
 
     # ── frame contract (same as SonosOutput) ─────────────────────────────
 
@@ -360,7 +398,10 @@ class WiiMOutput(FrameProcessor):
             self._sample_rate = frame.sample_rate or self._sample_rate
             self._channels = frame.num_channels or self._channels
         elif isinstance(frame, TTSStoppedFrame):
-            if self._enabled and len(self._pcm) > 0:
+            # Only replies in a WiiM zone are ours: for every other reply
+            # SonosOutput owns the LED end + speech timers (a second owner
+            # fired early here).
+            if self.owns_reply() and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
                 # Load-anchored timers — the play call
@@ -378,8 +419,8 @@ class WiiMOutput(FrameProcessor):
                     except Exception:
                         pass
                 self.create_task(self._speak_to_wiim(pcm, epoch=gen, barge=self._barge_epoch))
-            elif self._led:
-                self._schedule_end_of_speech(0.0)
+            else:
+                self._pcm.clear()
         elif isinstance(frame, CancelFrame):
             self._cancel_end_of_speech()
             if self._led:

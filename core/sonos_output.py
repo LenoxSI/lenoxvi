@@ -207,9 +207,14 @@ class SonosOutput(FrameProcessor):
     _audit_task = None  # keep a ref: a GC'd task dies mid-audit
 
     def __init__(self, config_path: str | None = None, echo_gate=None,
-                 zone_selector=None, wake_gate=None, led=None, **kwargs):
+                 zone_selector=None, wake_gate=None, led=None, reply_elsewhere=None,
+                 **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
+        # True while another backend (a WiiM zone) sounds the reply: that
+        # backend owns the LED end and speech timers; two owners meant this
+        # one's early generation-time fallback flipped the ring mid-reply.
+        self._reply_elsewhere = reply_elsewhere
         # Direct LED wire + the wake gate's state (bot.py wires both).
         # Speaking LEDs fire HERE, from real-time TTS frames — this
         # processor sits downstream of the intelligence, so TTSStarted/
@@ -795,6 +800,12 @@ class SonosOutput(FrameProcessor):
                 except Exception:
                     pass
 
+    def _reply_owned_elsewhere(self) -> bool:
+        try:
+            return bool(self._reply_elsewhere and self._reply_elsewhere())
+        except Exception:  # noqa: BLE001 — a routing hint must never break the reply
+            return False
+
     def _reply_is_builtin(self) -> bool:
         """This reply plays on the node's own speaker (zone `builtin`)."""
         if not self._zone_selector:
@@ -822,7 +833,9 @@ class SonosOutput(FrameProcessor):
             self._sample_rate = frame.sample_rate or self._sample_rate
             self._channels = frame.num_channels or self._channels
         elif isinstance(frame, TTSStoppedFrame):
-            if self._enabled and len(self._pcm) > 0:
+            if self._reply_owned_elsewhere():
+                self._pcm.clear()  # a WiiM zone sounds it; WiiMOutput owns the timers
+            elif self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()
                 # Timers anchor at CLIP-LOAD time, set

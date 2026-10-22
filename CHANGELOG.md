@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- WiiM rooms: the ring no longer flips back to listening before the reply has
+  finished, and a filler followed quickly by the answer no longer leaves the
+  music at the voice volume.
 - Switching the TTS provider from the dashboard before restarting no longer
   knocks rooms offline: until the restart loads the new key, reconnecting
   rooms keep the voice the bot started with.

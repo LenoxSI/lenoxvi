@@ -470,7 +470,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # closure reaches the backends through _outputs — set BEFORE the
     # pipeline task starts so the first interrupt can't race a None.
     sonos_out = SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
-                            wake_gate=wake_filter, led=led)
+                            wake_gate=wake_filter, led=led,
+                            reply_elsewhere=lambda: wiim_out.owns_reply())
     wiim_out = WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
                           wake_gate=wake_filter, led=led)
     _outputs.extend([sonos_out, wiim_out])
