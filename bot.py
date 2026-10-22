@@ -82,7 +82,7 @@ class TTSTracked:
     Reconnect-on-next-utterance (follow-on fix): an unusable
     websocket service refuses every speak, so its own run_tts reconnect
     never fires and the room stays mute until a node/bot restart.
-    _push_tts_frames gives a dead service one bounded websocket retry AT
+    _synthesize_text gives a dead service one bounded websocket retry AT
     the next speak — only a socket that actually opens clears the
     verdict, and the health note below carries the revival to the
     dashboard chip."""
@@ -114,7 +114,7 @@ class TTSTracked:
     async def _try_revive(self) -> None:
         """One bounded websocket retry for a service pipecat wrote off.
 
-        Called from _push_tts_frames when a speak arrives while the
+        Called from _synthesize_text when a speak arrives while the
         service is unusable. The retry is the same _connect() run_tts
         would have done, hoisted above the usability gate — with a
         _disconnect() first, because the death spiral leaves finished
@@ -146,15 +146,17 @@ class TTSTracked:
             logger.opt(exception=True).warning("tts revive: attempt failed "
                                                "(staying unusable)")
 
-    async def _push_tts_frames(self, src_frame, *args, **kwargs):
-        # Every speak funnels through here (all four of TTSService's call
-        # sites). A dead service normally skips silently inside pipecat's
-        # usability gate; the revive gives it one bounded shot at the
-        # websocket first. Fail-open: _try_revive never raises, so a
-        # revive bug can never eat the speak path.
+    async def _synthesize_text(self, text, context_id):
+        # Every speak funnels through here: since pipecat 1.13 it is the one
+        # place TTSService calls run_tts, and it holds the usability gate
+        # (1.11's _push_tts_frames is gone — an override of a vanished method
+        # is never called, so the suite pins this name on TTSService itself).
+        # A dead service normally skips silently at that gate; the revive
+        # gives it one bounded shot at the websocket first. Fail-open:
+        # _try_revive never raises, so a revive bug can never eat the speak.
         if not self.is_usable:
             await self._try_revive()
-        return await super()._push_tts_frames(src_frame, *args, **kwargs)
+        return await super()._synthesize_text(text, context_id)
 
 
 class TrackedElevenLabsTTSService(TTSTracked, ElevenLabsTTSService):
