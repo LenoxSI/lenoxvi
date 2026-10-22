@@ -369,6 +369,85 @@ def main():
     check("probe mapping actually gone from config",
           _probe is None, f"room_zones m14_probe_room={_probe}")
 
+    # ── deleting the default zone never leaves default_zone dangling ──
+    _sonos_saved = dict(config_store.read_section("sonos") or {})
+    _wiim_saved = dict(config_store.read_section("wiim") or {})
+    try:
+        config_store.write_section("sonos", {**_sonos_saved, "default_zone": "zdA", "zones": {
+            "zdA": {"ip": "127.0.0.9", "player_uid": "RINCON_ZDA00000000001400"},
+            "zdB": {"ip": "127.0.0.8", "player_uid": "RINCON_ZDB00000000001400"}}})
+        config_store.write_section("wiim", {**_wiim_saved, "default_zone": "zwA",
+                                            "zones": {"zwA": {"ip": "127.0.0.7"}}})
+        _d1 = client.delete("/api/dashboard/zones/zdA")
+        _dz1 = (config_store.read_section("sonos") or {}).get("default_zone")
+        check("zones: deleting the default hands default to a remaining zone",
+              _d1.status_code == 200 and _dz1 == "zdB" and _d1.json().get("default_zone") == "zdB",
+              f"{_d1.status_code} default={_dz1} body={_d1.text[:120]}")
+        _d2 = client.delete("/api/dashboard/zones/zdB")
+        _dz2 = (config_store.read_section("sonos") or {}).get("default_zone")
+        check("zones: deleting the last zone clears default_zone",
+              _d2.status_code == 200 and _dz2 is None, f"{_d2.status_code} default={_dz2}")
+        _d3 = client.delete("/api/dashboard/zones/zwA")
+        _dz3 = (config_store.read_section("wiim") or {}).get("default_zone")
+        check("zones: a WiiM default is cleared the same way",
+              _d3.status_code == 200 and _dz3 is None, f"{_d3.status_code} default={_dz3}")
+    finally:
+        config_store.write_section("sonos", _sonos_saved)
+        config_store.write_section("wiim", _wiim_saved)
+
+    # ── slow dashboard work never stalls the voice event loop ──
+    import asyncio as _aio_rl
+    import types as _types_rl
+
+    from dashboard import routes as _rRL
+
+    async def _loop_gap(coro):
+        gaps, st = [], {"stop": False}
+
+        async def ticker():
+            last = time.monotonic()
+            while not st["stop"]:
+                await _aio_rl.sleep(0.02)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+        t = _aio_rl.create_task(ticker())
+        await _aio_rl.sleep(0.05)
+        try:
+            await coro
+        finally:
+            st["stop"] = True
+            await t
+        return max(gaps)
+
+    _sub_saved, _val_saved, _dir_saved = _rRL.subprocess.run, _rRL._oww_validate, _rRL._oww_dir
+    _oww_tmp = Path(tempfile.mkdtemp())
+    try:
+        def _slow_run(*a, **k):
+            time.sleep(0.5)
+            return _types_rl.SimpleNamespace(returncode=0, stderr="", stdout="")
+        _rRL.subprocess.run = _slow_run
+        _gap_restart = _aio_rl.run(_loop_gap(_rRL.restart_bot()))
+
+        def _slow_validate(data):
+            time.sleep(0.5)
+        _rRL._oww_validate = _slow_validate
+        _rRL._oww_dir = lambda: _oww_tmp
+
+        class _Up:
+            filename = "suite_loop.onnx"
+
+            async def read(self):
+                return b"\x00" * 4096
+        _gap_upload = _aio_rl.run(_loop_gap(_rRL.oww_upload_model(file=_Up())))
+    finally:
+        _rRL.subprocess.run, _rRL._oww_validate, _rRL._oww_dir = _sub_saved, _val_saved, _dir_saved
+    check("routes: restart scheduling doesn't block the event loop",
+          _gap_restart < 0.15, f"max loop gap={_gap_restart:.2f}s")
+    check("routes: a wake-model upload doesn't block the event loop",
+          _gap_upload < 0.15 and (_oww_tmp / "suite_loop.onnx").exists(),
+          f"max loop gap={_gap_upload:.2f}s")
+
     # /mapping only runs soco name lookups on ?names=1, and only
     # for SONOS zones (the 5s UI poll used to hit every zone, WiiM
     # included, on every tick).
