@@ -8,6 +8,7 @@ and TranscriptionFrame plumbing for free.
 
 import asyncio
 import io
+import re
 import statistics
 import time
 from collections import deque
@@ -19,6 +20,36 @@ from openai.types.audio import Transcription
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 import stt_catalog
+
+# Whisper invents these from near-silence (caption-heavy training data).
+# Dropped only when the WHOLE utterance is one of them.
+_PHANTOM_PHRASES = frozenset({
+    "thanks for watching",
+    "thank you for watching",
+    "thanks for watching everyone",
+    "thank you so much for watching",
+    "please subscribe",
+    "like and subscribe",
+    "please like and subscribe",
+    "dont forget to subscribe",
+    "see you in the next video",
+})
+_PHANTOM_PREFIXES = ("subtitles by", "captions by", "transcribed by", "transcription by")
+
+
+def is_phantom_transcript(text: str, segments=()) -> bool:
+    """True when a transcript is Whisper making text out of noise: a known
+    caption phrase as the whole utterance, or every segment flagged by
+    Whisper's own no-speech rule (no_speech_prob > 0.6 and avg_logprob < -1)."""
+    norm = " ".join(re.sub(r"[^a-z0-9 ]+", "", (text or "").lower()).split())
+    if not norm:
+        return False
+    if norm in _PHANTOM_PHRASES or norm.startswith(_PHANTOM_PREFIXES):
+        return True
+    segs = list(segments)
+    return bool(segs) and all(
+        getattr(s, "no_speech_prob", 0.0) > 0.6 and getattr(s, "avg_logprob", 0.0) < -1.0
+        for s in segs)
 
 # ── what the dashboard's STT card shows (read by /status, no extra polling) ──
 # Load state of the ONE shared model, and per-command transcription time
@@ -247,7 +278,11 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             )
             # faster-whisper decodes lazily: the work happens while the
             # segments are drained, so the timer stops after the join.
-            text = " ".join(s.text.strip() for s in segments).strip()
+            segs = list(segments)
+            text = " ".join(s.text.strip() for s in segs).strip()
+            if is_phantom_transcript(text, segs):
+                logger.info(f"local-whisper dropped phantom [{text}]")
+                text = ""
             if _LAT_MODE["mode"] == "compute":
                 _LAT_MS.append((time.monotonic() - t0) * 1000)
             return text, info.language
