@@ -2081,6 +2081,56 @@ def main():
                   not any("weather" in h for h in _hist) and
                   any("time is it" in h for h in _hist), f"hist={_hist}")
 
+            # ── dedup vs retry ──
+            async def _dedup_probe(fail_first, slow_first):
+                agent = _Agent(echo_gate=_EchoGate8(), room="suite-dd",
+                               session_mode="fresh")
+                calls, spoken = {"n": 0}, []
+
+                def fake_ask(text):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        if slow_first:
+                            time.sleep(1.5)
+                        if fail_first:
+                            raise ConnectionRefusedError("suite: refused")
+                    return f"reply to {text}"
+
+                agent._ask_intelligence = fake_ask
+
+                async def fake_push(frame, direction=None):
+                    t = getattr(frame, "text", None)
+                    if t:
+                        spoken.append(t)
+
+                agent.push_frame = fake_push
+                from pipecat.frames.frames import (
+                    VADUserStoppedSpeakingFrame as _VADStopD,
+                )
+
+                async def turn(txt):
+                    await agent.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                    await agent.process_frame(_VADStopD(), _FD8.DOWNSTREAM)
+                    await agent.process_frame(_TF(txt, "", 0, 0, 0), _FD8.DOWNSTREAM)
+                    await asyncio.sleep(float(agent._lull_secs) + 0.2)
+                    await agent.process_frame(_TF("", "", 0, 0, 0), _FD8.DOWNSTREAM)
+
+                await turn("what time is it")
+                await asyncio.sleep(0.3 if not slow_first else 0.1)
+                await turn("what time is it")   # the retry / the double-fire
+                await asyncio.sleep(2.0)
+                return calls["n"], spoken
+
+            _dd_n, _dd_spoken = _asyncio.run(_dedup_probe(fail_first=True, slow_first=False))
+            check("turns dedup: a retry after a failed turn reaches the intelligence",
+                  _dd_n == 2 and any("reply to what time is it" in s for s in _dd_spoken)
+                  and any("can't reach" in s for s in _dd_spoken),
+                  f"calls={_dd_n} spoken={_dd_spoken}")
+            _df_n, _df_spoken = _asyncio.run(_dedup_probe(fail_first=False, slow_first=True))
+            check("turns dedup: the same utterance twice during a live turn still asks once",
+                  _df_n == 1 and sum("reply to" in s for s in _df_spoken) == 1,
+                  f"calls={_df_n} spoken={_df_spoken}")
+
             # ── barge-in wake detection ──
             async def _wake_probe():
                 fired = []
