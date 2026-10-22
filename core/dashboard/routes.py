@@ -1012,6 +1012,9 @@ class TTSPayload(BaseModel):
     # dialogue lane deliberately has no knobs (ElevenLabs guidance).
     elevenlabs_speed: float | None = Field(default=None, ge=0.7, le=1.2)
     elevenlabs_stability: float | None = Field(default=None, ge=0.0, le=1.0)
+    # ElevenLabs apply_text_normalization: auto (their default; OFF on
+    # Flash) | on (spell numbers/times/dates; ~+0.15 s) | off.
+    elevenlabs_text_normalization: str | None = Field(default=None, pattern="^(auto|on|off)$")
     # Pocket (local): a preset voice name only from the dashboard; a .wav
     # clone path is config-file-only (it needs gated weights + an HF login).
     pocket_voice: str | None = Field(default=None)
@@ -1079,6 +1082,8 @@ async def get_tts():
         "deepgram_flux_expressivity": tts_cfg.get("deepgram_flux_expressivity"),
         "elevenlabs_speed": tts_cfg.get("elevenlabs_speed"),
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
+        # None = unset = ElevenLabs' own default (auto).
+        "elevenlabs_text_normalization": tts_cfg.get("elevenlabs_text_normalization"),
         "pocket_voice": tts_cfg.get("pocket_voice") or tts_pocket.DEFAULT_VOICE,
         "fallback": tts_cfg.get("fallback") or None,
         "pocket_installed": tts_pocket.pocket_available(),
@@ -1111,6 +1116,8 @@ async def put_tts(payload: TTSPayload):
             current["elevenlabs_speed"] = payload.elevenlabs_speed
         if payload.elevenlabs_stability is not None:
             current["elevenlabs_stability"] = payload.elevenlabs_stability
+        if payload.elevenlabs_text_normalization is not None:
+            current["elevenlabs_text_normalization"] = payload.elevenlabs_text_normalization
     elif payload.provider == "deepgram":
         current["deepgram_voice"] = payload.deepgram_voice
     elif payload.provider == "pocket":

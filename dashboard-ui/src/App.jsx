@@ -1755,6 +1755,9 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
   // 0.0–1.0. Same draft law — synced once, committed on Save.
   const [elSpeed, setElSpeed] = useState(null)   // null = not set = ElevenLabs default
   const [elStab, setElStab] = useState(null)
+  // ElevenLabs text normalization (auto | on | off). null = unset = their
+  // default (auto, which is OFF on Flash). Same draft law.
+  const [elNorm, setElNorm] = useState(null)
   // Local hot standby (Pocket) behind a cloud provider. Same draft law.
   const [fallback, setFallback] = useState('off')
   // The fallback's voice (tts.pocket_voice — the same key Pocket-as-primary
@@ -1770,6 +1773,7 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
       setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
       setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
       setElStab(tts?.elevenlabs_stability != null ? parseFloat(tts.elevenlabs_stability) : null)
+      setElNorm(tts?.elevenlabs_text_normalization || null)
       setFallback(tts?.fallback === 'pocket' ? 'pocket' : 'off')
       setPocketVoice(tts?.pocket_voice || 'alba')
       setTtsSynced(true)
@@ -1796,6 +1800,7 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
       // Flash-v2.5 knobs ride on save (null = leave as-is/defaults).
       if (elSpeed != null) body.elevenlabs_speed = elSpeed
       if (elStab != null) body.elevenlabs_stability = elStab
+      if (elNorm != null) body.elevenlabs_text_normalization = elNorm
     } else if (provider === 'deepgram') {
       body.deepgram_voice = model
     } else if (provider === 'deepgram-flux') {
@@ -1880,6 +1885,17 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
                   className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
               </span>
+            </Field>
+          )}
+          {provider === 'elevenlabs' && model === 'eleven_flash_v2_5' && (
+            <Field label="Numbers & times">
+              <select id="tts-el-norm" className={`${INPUT_CLS} w-[200px]`} value={elNorm ?? 'auto'}
+                onChange={e => setElNorm(e.target.value)} aria-label="ElevenLabs text normalization"
+                title="On: ElevenLabs spells out numbers, times and dates before speaking (Flash skips this by default). Adds about 0.15 s.">
+                <option value="auto">Auto (ElevenLabs default)</option>
+                <option value="on">On — spell them out</option>
+                <option value="off">Off</option>
+              </select>
             </Field>
           )}
           {provider !== 'pocket' && (

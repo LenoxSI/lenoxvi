@@ -17,6 +17,15 @@ The two version streams are independent.
   1.2.35.
 - A node that rolls back to its previous network after a failed Wi-Fi change
   says so in the bot log (firmware 1.2.35).
+- ElevenLabs Flash no longer garbles clock times ("9:11 PM" could come out as
+  babble with seconds of silence): the bot spells clock times out before they
+  reach the voice, and a new TTS setting turns on ElevenLabs' own number
+  normalization (off by default on Flash).
+
+### Added
+- TTS card: "Numbers & times" for ElevenLabs Flash (Auto / On / Off), saved
+  as `tts.elevenlabs_text_normalization`. On spells out numbers, times and
+  dates before speaking and adds about 0.15 s before the first word.
 
 ### Changed
 - SmallWebRTC answers keep aiortc's default bundle policy, ready for the next

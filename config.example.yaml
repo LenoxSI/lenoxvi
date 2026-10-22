@@ -55,6 +55,10 @@ tts:
   voice_id: <elevenlabs-voice-id>   # e.g. your custom voice's ID
   model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
                              # the websocket handshake rejects v3 with HTTP 400
+  # elevenlabs_text_normalization: on     # auto (ElevenLabs default: OFF on Flash) | on | off
+  #                                       # on = ElevenLabs spells out numbers, times, dates
+  #                                       # (~+0.15 s to first audio). Clock times are
+  #                                       # spelled out by the bot either way.
   # deepgram_flux_voice: flux-hannah-en   # used when provider: deepgram-flux
   # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
   # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
