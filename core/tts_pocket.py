@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import threading
 from typing import Any
 
 from loguru import logger
@@ -43,6 +44,8 @@ _voice_states: dict[str, Any] = {}
 _service_cls: type | None = None
 _load_failed = False
 _warned: set[str] = set()
+# Two rooms reconnecting at once both warm() in threads: load the model once.
+_LOAD_LOCK = threading.Lock()
 
 
 def warn_once(key: str, msg: str) -> None:
@@ -107,6 +110,17 @@ def _usable_voice(voice: str) -> str | None:
 
 def preload(voice: str) -> bool:
     """Load the shared model + a usable voice state. Never raises."""
+    with _LOAD_LOCK:
+        return _preload_locked(voice)
+
+
+async def warm(voice: str | None) -> bool:
+    """preload() in a worker thread: session setup runs on the event loop,
+    and a model or voice-state load there stalls every room."""
+    return await asyncio.to_thread(preload, resolve_voice(voice))
+
+
+def _preload_locked(voice: str) -> bool:
     global _model, _load_failed
     if _model is None:
         if _load_failed:

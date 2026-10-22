@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Switching the TTS provider from the dashboard before restarting no longer
+  knocks rooms offline: until the restart loads the new key, reconnecting
+  rooms keep the voice the bot started with.
+- Turning on the Pocket fallback (or picking a new Pocket voice) from the
+  dashboard no longer freezes every room while the model loads.
 - Interrupting with the wake word while a reply is still loading on a Sonos
   or WiiM speaker now stops it; before, the reply played anyway and the mic
   stayed closed, so the question you interrupted with was lost.

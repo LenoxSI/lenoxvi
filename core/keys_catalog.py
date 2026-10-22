@@ -20,6 +20,34 @@ STATIC = [
 _AGENT_VAR = re.compile(r"^LVI_HERMES_KEY_([A-Z0-9_]+)$")
 
 
+def tts_secret(provider: str | None) -> str | None:
+    """The .env key a TTS provider needs (None = keyless, e.g. pocket)."""
+    p = str(provider or "")
+    if p.startswith("eleven"):
+        return "ELEVENLABS_API_KEY"
+    if p.startswith("deepgram"):
+        return "DEEPGRAM_API_KEY"
+    return None
+
+
+def session_tts_provider(configured: str, boot: str | None, environ) -> tuple[str, str | None]:
+    """The TTS provider a new session can actually build, plus a warning.
+
+    Dashboard config edits reach new sessions at once, but keys load only at
+    restart. A provider switch saved together with its new key would make
+    every reconnecting room fail to build a pipeline (and reboot-loop) until
+    the restart. Until then, keep the provider the bot booted with."""
+    need = tts_secret(configured)
+    if not need or environ.get(need):
+        return configured, None
+    if boot and boot != configured:
+        boot_need = tts_secret(boot)
+        if not boot_need or environ.get(boot_need):
+            return boot, (f"tts.provider is {configured!r} but {need} isn't loaded yet "
+                          f"(keys load at restart) - using {boot!r} until the bot restarts")
+    return configured, None
+
+
 def agent_of(var: str, known=()):
     """The Hermes agent a variable belongs to: a known agent name (config,
     discovery) whose key_var IS this variable wins; otherwise a best guess

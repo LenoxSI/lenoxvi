@@ -36,6 +36,7 @@ from sonos_output import SonosOutput
 from wiim_output import WiiMOutput
 from stt_local import LocalWhisperSTTService
 from wake_word import WakeWordFilter
+import keys_catalog
 import tts_text
 import webrtc_compat
 
@@ -182,6 +183,10 @@ else:
     TrackedDeepgramFluxTTSService = None
 
 
+# TTS provider at boot (set at startup): a session whose newly configured
+# provider's key isn't loaded yet keeps this one until the restart.
+_BOOT_TTS_PROVIDER: str | None = None
+
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
     from config import cfg, cfg_env
 
@@ -191,9 +196,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # fail-loud law as the intelligence key: construction survives,
     # the missing secret says its name.
     tts_provider = str(cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "elevenlabs")
-    _need_secret = ("ELEVENLABS_API_KEY" if tts_provider.startswith("eleven")
-                    else "DEEPGRAM_API_KEY" if tts_provider.startswith("deepgram")
-                    else None)
+    tts_provider, _tts_warn = keys_catalog.session_tts_provider(
+        tts_provider, _BOOT_TTS_PROVIDER, os.environ)
+    if _tts_warn:
+        logger.warning(_tts_warn)
+    _need_secret = keys_catalog.tts_secret(tts_provider)
     if _need_secret and not os.environ.get(_need_secret):
         raise RuntimeError(
             f"tts.provider is {tts_provider!r} but {_need_secret} is not set — "
@@ -212,7 +219,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # selects the engine; each provider's knobs live under its own config
     # key. ElevenLabs stays the default (a config without tts.provider —
     # the fresh-clone state — must land on a provider that speaks).
-    tts_provider = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
+    # (tts_provider was resolved above against the keys actually loaded.)
     if tts_provider == "pocket":
         # Pocket TTS (Kyutai, CPU-native, fully local: no key, no egress).
         # One model per process, preloaded at startup by tts_pocket.
@@ -220,9 +227,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         if not tts_pocket.pocket_available():
             raise RuntimeError("tts.provider=pocket but pocket-tts is not installed — "
                                f"run: {tts_pocket.INSTALL_HINT}")
-        tts = tts_pocket.make_service(
-            mixin=TTSTracked,
-            voice=cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba"))
+        _pv = cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")
+        await tts_pocket.warm(_pv)  # weights/voice load off the event loop
+        tts = tts_pocket.make_service(mixin=TTSTracked, voice=_pv)
         if tts is None:
             raise RuntimeError("tts.provider=pocket but the Pocket model failed to "
                                f"load — run: {tts_pocket.INSTALL_HINT}")
@@ -329,10 +336,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     tts_pocket_standby = None
     if _fallback == "pocket":
         import tts_pocket
-        tts_pocket_standby = (tts_pocket.make_service(
-            mixin=TTSTracked,
-            voice=cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba"))
-            if tts_pocket.pocket_available() else None)
+        tts_pocket_standby = None
+        if tts_pocket.pocket_available():
+            _pv = cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")
+            # Enabled from the dashboard after boot: load off the event loop,
+            # or every room stalls for the load (seconds; ~24 s offline).
+            await tts_pocket.warm(_pv)
+            tts_pocket_standby = tts_pocket.make_service(mixin=TTSTracked, voice=_pv)
         if tts_pocket_standby is None:
             tts_pocket.warn_once("fallback-unavailable",
                                  "tts.fallback: pocket requested but Pocket can't load — "
@@ -703,6 +713,7 @@ if __name__ == "__main__":
         from config import cfg_env as _cfg_env
 
         _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
+        _BOOT_TTS_PROVIDER = _tp or "elevenlabs"
         _fb = str(_cfg("tts", "fallback") or "").strip().lower()
         if _tp == "pocket" or _fb == "pocket":
             import tts_pocket
