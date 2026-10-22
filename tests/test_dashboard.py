@@ -2338,6 +2338,65 @@ def main():
             check("turns wake: nonstop speech (TV) still closes at the hold cap",
                   _c_closed is not None and 0.9 <= _c_closed <= 1.6,
                   f"closed_at={_c_closed} state={_c_talk}")
+
+            # ── thread pools: hung intelligence calls never starve wake scoring ──
+            _pool_n = min(32, (os.cpu_count() or 1) + 4) + 2  # > the default pool
+
+            async def _intel_storm_probe():
+                agent = _Agent(echo_gate=_EchoGate8(), room="suite-pool",
+                               session_mode="fresh")
+
+                def hung_ask(text):
+                    time.sleep(1.5)
+                    return "late"
+
+                agent._ask_intelligence = hung_ask
+
+                async def _noop(*a, **k):
+                    return None
+
+                agent.push_frame = _noop
+                turns = [asyncio.create_task(agent._run_turn(f"q{i}", agent._turn_epoch))
+                         for i in range(_pool_n)]
+                await asyncio.sleep(0.2)
+                t0 = time.monotonic()
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(lambda: 1), 1.0)
+                    lat = time.monotonic() - t0
+                except TimeoutError:
+                    lat = None
+                await asyncio.gather(*turns, return_exceptions=True)
+                return lat
+
+            async def _wake_starve_probe():
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None)
+                wf._oww = _NS8(predict=lambda a: {"Hey_Willow": 0.0})
+                wf._name = "Hey_Willow"
+                wf._frame_size = 2560
+
+                async def _noop(*a, **k):
+                    return None
+
+                wf.push_frame = _noop
+                hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, 1.5))
+                        for _ in range(_pool_n)]
+                await asyncio.sleep(0.2)
+                t0 = time.monotonic()
+                try:
+                    await asyncio.wait_for(wf.process_frame(
+                        _InputAudio(b"\x00" * 2560, 16000, 1), _FD8.DOWNSTREAM), 1.0)
+                    lat = time.monotonic() - t0
+                except TimeoutError:
+                    lat = None
+                await asyncio.gather(*hogs, return_exceptions=True)
+                return lat
+
+            _storm_lat = _asyncio.run(_intel_storm_probe())
+            _wake_lat = _asyncio.run(_wake_starve_probe())
+            check("thread pools: a storm of hung intelligence calls leaves the shared pool free",
+                  _storm_lat is not None and _storm_lat < 0.3, f"lat={_storm_lat} n={_pool_n}")
+            check("thread pools: wake scoring runs while the shared pool is jammed",
+                  _wake_lat is not None and _wake_lat < 0.3, f"lat={_wake_lat} n={_pool_n}")
             # knob OFF = today's behavior: even two frames never fire.
             # NOTE: pinned on the instance — the suite copies the LIVE
             # config.yaml (which carries barge_in: true on the dev rig),
