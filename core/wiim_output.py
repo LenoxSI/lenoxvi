@@ -24,6 +24,8 @@ semantics established by the 2026-10-04 arrival verify:
 
 Config: wiim: {enabled, default_zone, zones: {name: {ip}}, zone_volumes}
 — the same knob set Sonos has, minus player_uid (HTTP API is UID-less).
+default_zone is still read (old configs load fine) but no longer routes
+replies: a room with no speaker mapping stays silent until it is mapped.
 Zone volume resolution mirrors sonos_output: live override (dashboard
 slider) > config wiim.zone_volumes > global clip_volume.
 """
@@ -34,6 +36,7 @@ import ssl
 import time
 import urllib.request
 import urllib.parse
+import uuid
 from pathlib import Path
 
 from loguru import logger
@@ -88,6 +91,29 @@ def live_wiim_volume(zone: str) -> int | None:
 
 _LIVE_WIIM_VOLUMES: dict = {}
 
+# Music-volume snapshot per speaker IP while any clip holds the voice
+# volume, and the newest clip's token (only it restores). Module level, not
+# per WiiMOutput: two rooms can share one speaker, and a reconnecting
+# node's old pipeline can still be mid-clip, so per-pipeline copies saved
+# one pipeline's voice volume as another's music level.
+_VOL_SAVED: dict[str, int | None] = {}
+_VOL_TOKEN: dict[str, int] = {}
+_VOL_LOCKS: dict[str, tuple] = {}  # ip -> (event loop, asyncio.Lock)
+
+# Bound on the volume restore when the speak task is cancelled (bot
+# stopping mid-reply): best effort, never holds up shutdown for long.
+_RESTORE_ON_CANCEL_S = 3.0
+
+
+def _vol_lock(ip: str) -> asyncio.Lock:
+    """The per-speaker volume lock (one per event loop: an asyncio.Lock
+    must not be shared across loops)."""
+    loop = asyncio.get_running_loop()
+    held = _VOL_LOCKS.get(ip)
+    if held is None or held[0] is not loop:
+        held = _VOL_LOCKS[ip] = (loop, asyncio.Lock())
+    return held[1]
+
 
 class WiiMOutput(FrameProcessor):
     """Captures TTS audio and plays it on the zone's WiiM via play + vol snap/restore."""
@@ -99,11 +125,6 @@ class WiiMOutput(FrameProcessor):
         self._wake_gate = wake_gate
         self._led = led
         self._end_of_speech_timer = None
-        # Music-volume snapshot per speaker while any of our clips holds the
-        # voice volume, and the newest clip's token (only it restores).
-        self._vol_saved: dict[str, int | None] = {}
-        self._vol_token: dict[str, int] = {}
-        self._vol_lock = asyncio.Lock()
         self._pcm: list[bytes] = []
         self._sample_rate = 16000
         self._channels = 1
@@ -113,7 +134,7 @@ class WiiMOutput(FrameProcessor):
         from config import cfg, DEFAULT_CLIP_VOLUME
         wiim = cfg("wiim") or {}
         self._enabled = bool(wiim.get("enabled"))
-        self._zone = wiim.get("default_zone")
+        self._zone = wiim.get("default_zone")  # read for old configs; never a reply fallback
         self._volume = int(wiim.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
         self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
                               if isinstance(v, (int, float))}
@@ -137,7 +158,7 @@ class WiiMOutput(FrameProcessor):
             from sonos_output import shared_clip_server
             self._clip_server = await shared_clip_server()
             logger.info(f"wiim_output: backend ready — zones {list(self._zones)}, "
-                        f"default '{self._zone}', global vol {self._volume}")
+                        f"global vol {self._volume}")
 
     async def cleanup(self):
         # Shared server: do NOT stop it — other pipelines may reference
@@ -159,17 +180,24 @@ class WiiMOutput(FrameProcessor):
     def _barged(self, barge: int | None) -> bool:
         return barge is not None and barge != self._barge_epoch
 
+    def _reply_zone_name(self):
+        """The reply's zone from the room mapping, or None. None means the
+        room has no speaker: the reply is not played (default_zone is not
+        a fallback)."""
+        if not self._zone_selector:
+            return None
+        try:
+            return self._zone_selector() or None
+        except Exception as e:  # noqa: BLE001 — a routing hint must never break the reply
+            logger.debug(f"wiim_output: zone_selector failed: {e}")
+            return None
+
     def owns_reply(self) -> bool:
         """This reply sounds on one of our (enabled) WiiM zones."""
         if not self._enabled:
             return False
-        zone_name = self._zone
-        if self._zone_selector:
-            try:
-                zone_name = self._zone_selector() or self._zone
-            except Exception:  # noqa: BLE001 — a routing hint must never break the reply
-                return False
-        return zone_name != BUILTIN and zone_name in self._zones
+        zone_name = self._reply_zone_name()
+        return zone_name is not None and zone_name != BUILTIN and zone_name in self._zones
 
     async def _speak_to_wiim(self, pcm: bytes, epoch: int | None = None,
                              barge: int | None = None) -> None:
@@ -182,12 +210,10 @@ class WiiMOutput(FrameProcessor):
         if not self._enabled:
             logger.warning("wiim_output: reply dropped — backend disabled in config")
             return
-        zone_name = self._zone
-        if self._zone_selector:
-            try:
-                zone_name = self._zone_selector() or self._zone
-            except Exception as e:
-                logger.debug(f"wiim_output: zone_selector failed: {e}")
+        zone_name = self._reply_zone_name()
+        if zone_name is None:  # no speaker mapping: nothing plays
+            logger.debug("wiim_output: reply room has no speaker mapping, skipping")
+            return
         zone = self._zones.get(zone_name)
         if zone_name == BUILTIN:  # the node's own speaker plays it
             logger.debug("wiim_output: reply zone is the node's built-in speaker, skipping")
@@ -238,7 +264,10 @@ class WiiMOutput(FrameProcessor):
         except Exception as e:
             logger.error(f"wiim_output: encode failed: {e}")
             return
-        clip_path = Path("clips") / f"wiim-reply-{int(time.time())}-{id(self) % 10000}.mp3"
+        # Unique per clip: a filler and a fast reply in the same second
+        # must never share a name (the atomic write would swap the file
+        # under a fetch still in flight).
+        clip_path = Path("clips") / f"wiim-reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
         try:
             from sonos_output import _write_clip
             # off the loop, and awaited before the URL is handed out
@@ -261,9 +290,9 @@ class WiiMOutput(FrameProcessor):
         # Overlapping clips (a filler, then the reply) share ONE music-volume
         # snapshot: re-snapshotting would save the filler's voice volume as
         # the music level, and the filler's restore would dip the reply.
-        async with self._vol_lock:
-            need_snap = ip not in self._vol_saved
-            saved = self._vol_saved.get(ip)
+        async with _vol_lock(ip):
+            need_snap = ip not in _VOL_SAVED
+            saved = _VOL_SAVED.get(ip)
 
             def _net():
                 before = saved
@@ -273,7 +302,19 @@ class WiiMOutput(FrameProcessor):
                     before = int(raw) if raw is not None else None
                 if before is not None:
                     wiim_api(ip, f"setPlayerCmd:vol:{vol}")
-                wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
+                try:
+                    wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
+                except Exception:
+                    # Nothing restores a clip that never played: put the
+                    # music volume back now, or it stays at the voice
+                    # volume. Only the snapshot's owner does (a shared
+                    # snapshot is still restored by the clip that took it).
+                    if need_snap and before is not None:
+                        try:
+                            wiim_api(ip, f"setPlayerCmd:vol:{before}")
+                        except Exception as e:  # noqa: BLE001 — best effort; the play error is the one to report
+                            logger.warning(f"wiim_output: volume restore after a failed play failed on {ip}: {e}")
+                    raise
                 return before
 
             try:
@@ -281,9 +322,9 @@ class WiiMOutput(FrameProcessor):
             except Exception as e:
                 logger.error(f"wiim_output: play failed on {ip}: {e}")
                 return
-            self._vol_saved[ip] = before_vol
-            token = self._vol_token.get(ip, 0) + 1
-            self._vol_token[ip] = token
+            _VOL_SAVED[ip] = before_vol
+            token = _VOL_TOKEN.get(ip, 0) + 1
+            _VOL_TOKEN[ip] = token
         if self._barged(barge):
             # The barge-in landed while the play command was in flight:
             # stop it and put the music volume back, no timers left behind.
@@ -317,18 +358,35 @@ class WiiMOutput(FrameProcessor):
         # no-restore RATIFIED: music doesn't come back; its volume does).
         try:
             await asyncio.sleep(duration + 0.6)
+        except asyncio.CancelledError:
+            # The bot is stopping mid-reply: still put the music volume
+            # back, bounded so shutdown never waits on a napping unit.
+            try:
+                await asyncio.wait_for(self._restore_volume(ip, token, timeout=2.0),
+                                       timeout=_RESTORE_ON_CANCEL_S)
+            except BaseException:  # noqa: BLE001 — best effort; the cancel itself still propagates
+                pass
+            raise
+        try:
             await self._restore_volume(ip, token)
         except Exception:
             pass  # restore is best-effort; the reply already played
 
-    async def _restore_volume(self, ip: str, token: int) -> None:
+    async def _restore_volume(self, ip: str, token: int, timeout: float = 4.0) -> None:
         """Put the music volume back - only from the newest clip on `ip`
-        (an older clip's timer firing mid-reply would dip the reply)."""
-        if self._vol_token.get(ip) != token:
-            return
-        before = self._vol_saved.pop(ip, None)
-        if before is not None:
-            await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before}")
+        (an older clip's timer firing mid-reply would dip the reply).
+        Holds the speaker's lock: a clip arriving mid-restore must not find
+        the snapshot gone and save the voice volume as the music level."""
+        async with _vol_lock(ip):
+            if _VOL_TOKEN.get(ip) != token or ip not in _VOL_SAVED:
+                return
+            before = _VOL_SAVED[ip]
+            if before is not None:
+                await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before}", timeout)
+            # Dropped only once the music volume is back: after a failed
+            # write the next clip keeps this snapshot instead of saving
+            # the voice volume as the music level.
+            _VOL_SAVED.pop(ip, None)
 
     # ── LED / end-of-speech ──────────────────────────────────────────────
 
@@ -372,12 +430,7 @@ class WiiMOutput(FrameProcessor):
                 self._echo_gate.relax()
             except Exception:
                 pass
-        zone_name = self._zone
-        if self._zone_selector:
-            try:
-                zone_name = self._zone_selector() or self._zone
-            except Exception:
-                pass
+        zone_name = self._reply_zone_name()
         zone = self._zones.get(zone_name)
         if not zone:
             return

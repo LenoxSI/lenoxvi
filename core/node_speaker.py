@@ -9,13 +9,16 @@ Rules:
 - A node only counts as a speaker once it has PROVEN it: its set_speaker
   reply said speaker_ok=true this session. A capable board line alone
   (older firmware without set_speaker, or a speaker that didn't come up)
-  never resolves to `builtin`, so replies fall back to the shared zones
-  instead of going silent. Each session starts with a disabled probe.
+  never resolves to `builtin`; until the proof arrives the room has no
+  reply zone and its replies are not played. Each session starts with a
+  disabled probe.
+- A room with no speaker mapping (None) stays silent until it is mapped:
+  the backends' default_zone is not a fallback.
 - Exactly one output ever sounds a reply. Reply audio streams to EVERY
   node over its WebRTC track (it drives the node-side turn lock), so the
   node is told explicitly whether to play it: `set_speaker {enabled,
   volume}` after its fw_push, after any mapping PUT, after a volume PUT.
-  Sonos/WiiM skip a `builtin` reply (no default-zone fallback).
+  Sonos/WiiM skip a `builtin` reply.
 - Volume lives in bot config (`node_speaker.volumes`, default 40); the
   node stores nothing and boots disabled.
 """
@@ -32,12 +35,12 @@ DEFAULT_VOLUME = 40
 
 def resolve_zone(room, room_zones, has_speaker: bool):
     """The reply zone for `room`: its mapping, else `builtin` for a speaker
-    node, else None (the output backend's default zone)."""
+    node, else None (no speaker: the reply is not played anywhere)."""
     if not room or room == "unknown":
         return None
     mapped = (room_zones or {}).get(room)
     if mapped == BUILTIN and not has_speaker:
-        return None  # stale/unproven builtin: the default zone, never silence
+        return None  # unproven builtin: silent until the node confirms speaker_ok
     if mapped:
         return mapped
     return BUILTIN if has_speaker else None

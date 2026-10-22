@@ -244,7 +244,15 @@ def on_message(message, pc_id: str) -> None:
         info = data.get("data") if isinstance(data.get("data"), dict) else None
         old = registry.room_for_pc(pc_id)
         new = info.get("name") if info else None
-        if old and new and old != new:
+        # Another live session already answers to the new name (a rename
+        # that raced past the dashboard's check, or done some other way):
+        # carry nothing and relabel nothing — the node's next offer settles it.
+        clash = bool(old and new and old != new and registry.room_claimed(new, pc_id))
+        if clash:
+            logger.warning(f"node_command: rename '{old}' -> '{new}': another live session "
+                           f"holds '{new}'; config and registry left as-is")
+        relabeled = False
+        if old and new and old != new and not clash:
             from . import config_store
 
             mapping = dict(config_store.read_section("room_zones") or {})
@@ -288,15 +296,21 @@ def on_message(message, pc_id: str) -> None:
                 writes["session_modes"] = modes
             if writes:
                 config_store.write_sections(writes)  # one atomic pass
-            # A sticky room's saved conversation follows its name too.
+            # A sticky room's saved conversation follows its name too. The
+            # registry relabels under the stash's lock: the live session
+            # resolves its name there at every save, so a save in flight
+            # lands wholly under the old name (and is moved) or the new one.
             try:
                 import intelligence_agent
 
-                intelligence_agent.rename_session_history(old, new)
+                intelligence_agent.rename_session_history(
+                    old, new, then=lambda: registry.relabel_room(pc_id, info))
+                relabeled = True
             except Exception as e:  # noqa: BLE001 — history is best-effort; the rename stands
                 logger.warning(f"node_command: session history not carried: {e}")
-        registry.relabel_room(pc_id, info)
-        if old and new and old != new:
+        if not clash and not relabeled:
+            registry.relabel_room(pc_id, info)  # a no-op if it already ran
+        if old and new and old != new and not clash:
             # The new name may carry a different mapping: re-tell the node
             # whether it plays (never both outputs, never neither).
             import node_speaker

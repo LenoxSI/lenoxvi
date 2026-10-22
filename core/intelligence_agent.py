@@ -153,8 +153,9 @@ class _SessionStash:
         self._path = Path(path or os.getenv("LVI_SESSIONS", "data/sessions.json"))
         # Saves run in worker threads (off the event loop): two rooms saving
         # at once must not lose each other's read-modify-write or share the
-        # temp file mid-write.
-        self._lock = threading.Lock()
+        # temp file mid-write. Re-entrant: a live session holds it while it
+        # resolves its room name and saves (IntelligenceAgent._save_history).
+        self._lock = threading.RLock()
 
     def load(self, room: str) -> list:
         try:
@@ -180,28 +181,36 @@ class _SessionStash:
             except OSError as e:
                 logger.warning(f"intelligence_agent: session stash write failed: {e}")
 
-    def rename(self, old: str, new: str) -> bool:
+    def rename(self, old: str, new: str, then=None) -> bool:
+        """Move `old`'s history to `new`. `then` runs inside the lock after
+        the move (or the refusal), so a live session's save lands wholly
+        before both or wholly after both."""
         with self._lock:
             try:
-                data = json.loads(self._path.read_text())
-            except (OSError, json.JSONDecodeError):
-                return False
-            if not isinstance(data, dict) or old not in data or new in data:
-                return False
-            data[new] = data.pop(old)
-            tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data))
-            os.replace(tmp, self._path)
-            return True
+                try:
+                    data = json.loads(self._path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    return False
+                if not isinstance(data, dict) or old not in data or new in data:
+                    return False
+                data[new] = data.pop(old)
+                tmp = self._path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data))
+                os.replace(tmp, self._path)
+                return True
+            finally:
+                if then is not None:
+                    then()
 
 
 _session_stash = _SessionStash()
 
 
-def rename_session_history(old: str, new: str) -> bool:
+def rename_session_history(old: str, new: str, then=None) -> bool:
     """Move a sticky room's saved conversation to its new name (node rename).
-    Never overwrites history already stored under `new`."""
-    return _session_stash.rename(old, new)
+    Never overwrites history already stored under `new`. `then` (the
+    registry relabel) runs under the stash lock, right after the move."""
+    return _session_stash.rename(old, new, then)
 
 # Reasoning-preamble meter: [count] as a mutable cell so the
 # lane can count leaks without rebinding a module global per hit.
@@ -337,6 +346,9 @@ class IntelligenceAgent(FrameProcessor):
         # every session clean (privacy default — a bedroom mic must not
         # accumulate memory nobody asked for).
         self._room = room
+        # The name sticky history is saved under: follows a rename of the
+        # live session (see _stash_room).
+        self._stash_name = room
         self._sticky = session_mode == "sticky"
         if self._sticky and room:
             self._conversation = f"voice-{room}"
@@ -435,6 +447,28 @@ class IntelligenceAgent(FrameProcessor):
         self._routed_room = room
         logger.info(f"intelligence_agent: room '{room}' -> agent '{agent or 'default'}' ({how})")
 
+    def _stash_room(self) -> str | None:
+        """The room's CURRENT name. A dashboard rename relabels the live
+        session without a reconnect; saving under the name captured at
+        construction would freeze the moved history and leave a copy under
+        a name another node could take later. Keeps the last known name
+        once the session is gone (a save can land after the disconnect)."""
+        if self._room_resolver is not None:
+            try:
+                room = self._room_resolver()
+            except Exception:  # noqa: BLE001 — keep the last known name
+                room = None
+            if room and room != "unknown":
+                self._stash_name = room
+        return self._stash_name
+
+    def _save_history(self, history: list) -> None:
+        """Sticky save (worker thread). The name is resolved under the
+        stash lock: a rename moves the history and relabels the session
+        under that same lock, so this save never lands in between."""
+        with _session_stash._lock:
+            _session_stash.save(self._stash_room(), history)
+
     def _ask_intelligence(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
@@ -500,6 +534,12 @@ class IntelligenceAgent(FrameProcessor):
         with urllib.request.urlopen(req, timeout=120) as r:
             data = json.loads(r.read())
         reply = data["choices"][0]["message"]["content"].strip()
+        if not reply:
+            # e.g. a run that ended on a tool call with no closing text. A
+            # failed turn, not a silent one: the user hears the apology, no
+            # empty assistant message enters history, and a retry isn't
+            # dedup-dropped.
+            raise RuntimeError("the intelligence returned an empty reply")
         usage = data.get("usage", {})
         # Reasoning-preamble meter: the OpenClaw agent
         # on GLM 5.3 intermittently merges planning text into `content`
@@ -684,6 +724,7 @@ class IntelligenceAgent(FrameProcessor):
         (task.cancel from the supersede path); everything else is the
         broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
+        ask = None
         try:
             ask = asyncio.get_running_loop().run_in_executor(
                 _INTEL_POOL, self._ask_intelligence, text)
@@ -744,7 +785,7 @@ class IntelligenceAgent(FrameProcessor):
             # between the history write and the push); a copy, as the next
             # turn may append meanwhile.
             if not failed and self._sticky and self._room:
-                await asyncio.to_thread(_session_stash.save, self._room, list(self._history))
+                await asyncio.to_thread(self._save_history, list(self._history))
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
         except Exception as e:
@@ -763,3 +804,11 @@ class IntelligenceAgent(FrameProcessor):
                 return
             await self.push_frame(
                 TTSSpeakFrame(text="Sorry — I can't reach my intelligence right now."))
+        finally:
+            # Superseded, ended or failed: the shield kept the call alive
+            # through the filler waits, so drop it here. One still queued
+            # for a pool thread is never sent (a stale question must not
+            # reach the agent later or hold a slot); one already running
+            # finishes and its result is dropped.
+            if ask is not None and not ask.done():
+                ask.cancel()

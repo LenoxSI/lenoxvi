@@ -14,6 +14,12 @@ NORMALIZATION_MODES = ("auto", "on", "off")
 
 def normalization_mode(value) -> str | None:
     """Config value -> ElevenLabs apply_text_normalization, or None (unset or
-    unknown = ElevenLabs' own default; never a made-up value)."""
+    unknown = ElevenLabs' own default; never a made-up value).
+
+    config.py loads YAML 1.1, where a bare `on`/`off` (also yes/no,
+    true/false) parses as a boolean - the documented `on` arrives as True.
+    Map booleans back to the words they were written as."""
+    if isinstance(value, bool):
+        return "on" if value else "off"
     v = str(value).strip().lower() if value is not None else ""
     return v if v in NORMALIZATION_MODES else None

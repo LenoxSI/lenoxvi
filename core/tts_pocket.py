@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import threading
+import time
 from typing import Any
 
 from loguru import logger
@@ -41,6 +42,12 @@ GEN_LOCK = asyncio.Lock()
 
 _model: Any = None
 _voice_states: dict[str, Any] = {}
+# voice -> monotonic time it last failed to load. An uncached catalog voice
+# with the WAN down blocks for the weight host's timeout, and make_service()
+# runs on the event loop right after warm() tried it in a thread: reuse the
+# failure for a while instead of stalling every new session on it.
+_voice_failed_at: dict[str, float] = {}
+VOICE_RETRY_S = 300.0
 _service_cls: type | None = None
 _load_failed = False
 _warned: set[str] = set()
@@ -99,10 +106,15 @@ def _usable_voice(voice: str) -> str | None:
     A bad clone voice (missing .wav, gated weights not logged in) must not
     take Pocket down: the model is fine, only that voice isn't."""
     for v in dict.fromkeys((voice, DEFAULT_VOICE)):
+        failed_at = _voice_failed_at.get(v)
+        if failed_at is not None and time.monotonic() - failed_at < VOICE_RETRY_S:
+            continue
         try:
             _voice_state(v)
+            _voice_failed_at.pop(v, None)
             return v
         except Exception as e:
+            _voice_failed_at[v] = time.monotonic()
             warn_once(f"voice:{v}", f"pocket tts: voice {v!r} failed to load ({e})"
                       + (f"; using {DEFAULT_VOICE!r}" if v != DEFAULT_VOICE else ""))
     return None
@@ -198,4 +210,5 @@ def _reset_for_tests() -> None:
     _service_cls = None
     _load_failed = False
     _voice_states.clear()
+    _voice_failed_at.clear()
     _warned.clear()

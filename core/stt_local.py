@@ -37,19 +37,17 @@ _PHANTOM_PHRASES = frozenset({
 _PHANTOM_PREFIXES = ("subtitles by", "captions by", "transcribed by", "transcription by")
 
 
-def is_phantom_transcript(text: str, segments=()) -> bool:
+def is_phantom_transcript(text: str) -> bool:
     """True when a transcript is Whisper making text out of noise: a known
-    caption phrase as the whole utterance, or every segment flagged by
-    Whisper's own no-speech rule (no_speech_prob > 0.6 and avg_logprob < -1)."""
+    caption phrase as the whole utterance.
+
+    No segment-score test here: faster-whisper already skips segments with
+    no_speech_prob > 0.6 unless avg_logprob > -1 (its defaults, left on), so
+    no segment it yields could ever meet that rule here."""
     norm = " ".join(re.sub(r"[^a-z0-9 ]+", "", (text or "").lower()).split())
     if not norm:
         return False
-    if norm in _PHANTOM_PHRASES or norm.startswith(_PHANTOM_PREFIXES):
-        return True
-    segs = list(segments)
-    return bool(segs) and all(
-        getattr(s, "no_speech_prob", 0.0) > 0.6 and getattr(s, "avg_logprob", 0.0) < -1.0
-        for s in segs)
+    return norm in _PHANTOM_PHRASES or norm.startswith(_PHANTOM_PREFIXES)
 
 # ── what the dashboard's STT card shows (read by /status, no extra polling) ──
 # Load state of the ONE shared model, and per-command transcription time
@@ -280,7 +278,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             # segments are drained, so the timer stops after the join.
             segs = list(segments)
             text = " ".join(s.text.strip() for s in segs).strip()
-            if is_phantom_transcript(text, segs):
+            if is_phantom_transcript(text):
                 logger.info(f"local-whisper dropped phantom [{text}]")
                 text = ""
             if _LAT_MODE["mode"] == "compute":

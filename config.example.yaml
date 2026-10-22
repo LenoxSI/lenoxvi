@@ -127,7 +127,7 @@ session_modes: {}
 # ── Sonos output (Sonos audioClip overlay; S2 Port/Amp only) ────────────
 sonos:
   enabled: true
-  default_zone: <zone-name>
+  default_zone: <zone-name>  # legacy, still accepted; an unmapped room's reply plays nowhere
   # Voice-clip volume (0-100). 70 was the through-matrix sweet spot;
   # 35 is the ear-tuned direct-to-amp value (2026-10-04).
   clip_volume: 35
@@ -155,7 +155,7 @@ sonos:
 # clip. No player_uid needed (HTTP API is UID-less, HTTPS-only).
 wiim:
   enabled: true
-  default_zone: <zone-name>
+  default_zone: <zone-name>  # legacy, still accepted; an unmapped room's reply plays nowhere
   clip_volume: 35
   zone_volumes: {}
   zones: {}
@@ -172,8 +172,9 @@ clip_server:
 # Edited via the web dashboard (https://<bot-host-LAN-IP>:7860/dashboard)
 # — or by hand here. The mic node's firmware sends its room name in the
 # WebRTC offer; when a wake fires in a mapped room, the reply clip plays
-# in that room's zone instead of default_zone. Unmapped rooms and the
-# browser client keep using default_zone.
+# in that room's zone. An unmapped room's reply plays on no speaker until
+# the room is mapped (default_zone is not a fallback); the browser client
+# still hears its replies in the browser.
 room_zones:
   <room>: <zone-name>
 

@@ -9,6 +9,42 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- `tts.elevenlabs_text_normalization: on` in config.yaml now actually turns
+  ElevenLabs' number and time normalization on (a bare `on` was read as a
+  YAML boolean and silently ignored).
+- A Pocket voice that can't load (for example a new voice picked while the
+  internet is down) no longer stalls every new room session; Pocket uses the
+  default voice and tries the chosen one again every few minutes.
+- The Keys card's Add box saves only under a service you picked: it no
+  longer starts on a default choice that a refresh could swap under a pasted
+  key, and a pick that disappears clears the pasted key.
+- Restarting the bot again within 30 seconds of its last start no longer
+  reports "Bot is back" before the new process is up.
+- After a room mapping save, the row no longer flicks back to the old zone,
+  and saving a second row right away no longer undoes the first.
+- A room mapping draft that still holds a zone deleted elsewhere no longer
+  makes every row's Save fail.
+- With a dashboard token set, nodes on older firmware now ask for the token
+  to read their mute state instead of showing "Mute?" forever.
+- Double-clicking Wi-Fi Apply or Save name no longer shows a false failure
+  after the change succeeded.
+- The wake-word model picker no longer shows a model as picked when none of
+  the listed models is active.
+- A refused bot restart request is reported at once instead of after a
+  90-second wait.
+- The dashboard token is now typed into a masked field.
+- A room with no speaker mapping no longer plays its replies on another
+  room's speaker or ducks music elsewhere: it stays silent, with one log
+  line per reply, until it is mapped (a built-in speaker counts once its
+  node confirms it).
+- A WiiM speaker shared by two rooms, or a reply that starts just as the
+  previous one finishes, no longer leaves the music at the voice volume.
+- A WiiM reply that fails to start, or is cut off by a bot restart, now
+  puts the music volume back.
+- Two reply clips saved in the same second can no longer play each
+  other's audio.
+- Starting a session no longer reads config.yaml or prunes old clips on
+  the voice pipeline's event loop.
 - A question still being answered when a node disconnects is dropped: its
   reply no longer arrives late, and a sticky room's saved conversation is no
   longer overwritten by it.
@@ -39,6 +75,14 @@ The two version streams are independent.
   longer exists.
 - Restarting the bot or uploading a wake-word model from the dashboard no
   longer freezes voice in every room while it runs.
+- Moving a zone volume slider, adding a zone or deleting a zone no longer
+  undoes hand edits made to the `sonos` or `wiim` sections of config.yaml
+  since the last dashboard save.
+- Uploading firmware from the dashboard no longer briefly pauses voice in
+  every room while the image is saved and checked.
+- Two firmware uploads to the same line at once can no longer mix their
+  bytes into the served image, or serve one upload's image under the other's
+  version.
 - Renaming a node to a name another room already uses is now refused,
   instead of silently taking over that room's speaker, agent and settings.
 - A renamed room keeps its conversation mode (sticky/fresh) and, if sticky,
@@ -79,6 +123,27 @@ The two version streams are independent.
 - ElevenLabs Flash no longer garbles clock times ("9:11 PM" could come out as
   babble with seconds of silence): a new TTS setting turns on ElevenLabs' own
   number normalization, which is off by default on Flash.
+- Intelligence Save files only the URL on screen, under the provider on
+  screen: a URL typed for the other provider and never saved there can no
+  longer receive that provider's key.
+- Switching provider on the Intelligence card with no URL for the new
+  provider now asks for one, instead of saving the old provider's URL.
+- A new OpenClaw setup can be saved: Save stores the URL first, then the
+  agent list loads with the saved key so an agent can be picked.
+- An Intelligence URL with an invalid port (such as `:70000`) is refused
+  with a clear error instead of a server error.
+- Renaming a sticky room no longer splits its conversation: turns after the
+  rename are saved under the new name right away, not under the old name
+  until the node reconnects.
+- An empty answer from the intelligence is now treated as a failed turn: you
+  hear the usual apology, nothing empty is saved to the conversation, and
+  asking again works.
+- A question that was interrupted or whose session ended is no longer sent
+  to the intelligence later if it was still waiting for a free slot.
+- A node can no longer be renamed `unknown` or `browser` (names the bot uses
+  internally).
+- Two nodes renamed to the same name at the same moment: the second rename
+  is now refused instead of leaving both nodes in one room.
 
 ### Added
 - TTS card: a normalization picker beside the ElevenLabs Flash speed and

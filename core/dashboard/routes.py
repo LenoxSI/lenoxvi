@@ -14,10 +14,11 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 from os import getenv as _getenv
 
 import numpy as np
@@ -205,10 +206,6 @@ def _all_zones() -> dict:
 
 def _backend_of(name: str) -> str:
     return "wiim" if name in _wiim_zones() else "sonos"
-
-
-def _wiim_cfg() -> dict:
-    return dict(cfg("wiim") or {})
 
 
 def _sonos_names(zones: dict) -> dict:
@@ -499,26 +496,32 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
     loop and the restart contract would make it useless (2026-10-04).
     Resolution: live override > config per-zone > global clip_volume.
     """
-    if name not in _all_zones():
-        raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-    backend = _backend_of(name)
     from sonos_output import zone_volume_overrides
     from wiim_output import wiim_volume_overrides
-    if backend == "wiim":
-        section = dict(cfg("wiim") or {})
-    else:
-        section = dict(cfg("sonos") or {})
-    vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
-    before = vols.get(name)
-    if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
-        # Setting a zone back to the global value = no override needed;
-        # keep the config minimal (same pattern as session modes).
-        vols.pop(name, None)
-    else:
-        vols[name] = payload.volume
+
+    # Read-modify-write from the FILE, not the boot-cached cfg(): the cache
+    # only refreshes on dashboard writes, so rebuilding the section from it
+    # would silently undo any hand edit made since the last one.
+    def _write():
+        with config_store.LOCK:
+            fresh = config_store.read_sections(["sonos", "wiim"])
+            backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
+            section = dict(fresh[backend] or {})
+            if name not in (section.get("zones") or {}):
+                raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+            vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
+            before = vols.get(name)
+            if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
+                # Setting a zone back to the global value = no override needed;
+                # keep the config minimal (same pattern as session modes).
+                vols.pop(name, None)
+            else:
+                vols[name] = payload.volume
+            config_store.write_section(backend, {**section, "zone_volumes": vols})
+            return backend, vols, before
+
     try:
-        config_store.write_section("sonos" if backend == "sonos" else "wiim",
-                                   {**section, "zone_volumes": vols})
+        backend, vols, before = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     # Live layer: next clip in this zone plays at the new volume.
@@ -540,76 +543,86 @@ async def add_zone(payload: ZonePayload):
         raise HTTPException(status_code=400, detail="bad zone name: '.', ':' and '/' aren't allowed")
     if node_speaker.is_reserved_zone_name(name):
         raise HTTPException(status_code=400, detail=f"'{name}' is reserved (a node's built-in speaker)")
-    # Collision check across BOTH backends: one merged namespace (the
-    # mapping routes and the room_zones config key see one zone list).
-    if name in _all_zones():
-        raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
-    if payload.backend == "wiim":
-        # WiiM zones need no player_uid (HTTP API is UID-less); the
-        # payload validator already dropped any sent value. Adding a zone to a
-        # backend IMPLIES enabling it: the 2026-10-04 bedroom test went
-        # silent because the wiim section was written without
-        # enabled: true and WiiMOutput constructed disabled (replies
-        # dropped before ever reaching the network).
-        zones = _wiim_zones()
-        zones[name] = {"ip": payload.ip.strip()}
-        merged = {**_wiim_cfg(), "enabled": True, "zones": zones}
-        if not merged.get("default_zone"):
-            merged["default_zone"] = name
-        try:
-            config_store.write_section("wiim", merged)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-    else:
-        zones = _zones()
-        zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
-        try:
-            config_store.write_section("sonos", {**dict(cfg("sonos") or {}), "zones": zones})
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+
+    # Fresh read under the store's lock, same reason as the volume route:
+    # the cached cfg() would write back stale values over hand edits.
+    def _write():
+        with config_store.LOCK:
+            fresh = config_store.read_sections(["sonos", "wiim"])
+            sonos, wiim = dict(fresh["sonos"] or {}), dict(fresh["wiim"] or {})
+            # Collision check across BOTH backends: one merged namespace (the
+            # mapping routes and the room_zones config key see one zone list).
+            if name in (sonos.get("zones") or {}) or name in (wiim.get("zones") or {}):
+                raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
+            if payload.backend == "wiim":
+                # WiiM zones need no player_uid (HTTP API is UID-less); the
+                # payload validator already dropped any sent value. Adding a zone to a
+                # backend IMPLIES enabling it: a first WiiM zone once went
+                # silent because the wiim section was written without
+                # enabled: true and WiiMOutput constructed disabled (replies
+                # dropped before ever reaching the network).
+                zones = dict(wiim.get("zones") or {})
+                zones[name] = {"ip": payload.ip.strip()}
+                merged = {**wiim, "enabled": True, "zones": zones}
+                if not merged.get("default_zone"):
+                    merged["default_zone"] = name
+                config_store.write_section("wiim", merged)
+            else:
+                zones = dict(sonos.get("zones") or {})
+                zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
+                config_store.write_section("sonos", {**sonos, "zones": zones})
+            return zones
+
+    try:
+        zones = await asyncio.to_thread(_write)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {"ok": True, "zones": zones, "backend": payload.backend}
 
 
 @router.delete("/zones/{name}", dependencies=GUARD)
 async def delete_zone(name: str):
-    backend = _backend_of(name)
-    if backend == "wiim":
-        if name not in _wiim_zones():
-            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-        zones = _wiim_zones()
-        del zones[name]
-        # ONE atomic multi-section write — the old back-to-back
-        # write_section pair was non-atomic (crash between them left a
-        # deleted zone with dangling room mappings) and churned two
-        # backups. Sections dict preserves every OTHER key untouched.
-        sections = {"wiim": {**_wiim_cfg(), "zones": zones}}
-    else:
-        if name not in _zones():
-            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-        zones = _zones()
-        del zones[name]
-        sections = {"sonos": {**dict(cfg("sonos") or {}), "zones": zones}}
-    # The backend's default zone must not point at the deleted zone: every
-    # unmapped room's reply would go nowhere. Hand it to a remaining zone
-    # (add-zone sets the first one as default), or clear it.
-    sec = sections[backend if backend == "wiim" else "sonos"]
-    new_default = sec.get("default_zone")
-    if new_default == name:
-        new_default = next(iter(zones), None)
-        if new_default:
-            sec["default_zone"] = new_default
-        else:
-            sec.pop("default_zone", None)
-    # rooms mapped to a deleted zone become dangling — drop them in the
-    # SAME write (they're a separate section, same atomic pass)
-    mapping = dict(config_store.read_section("room_zones") or {})
-    dangling = [r for r, z in mapping.items() if z == name]
-    if dangling:
-        for r in dangling:
-            del mapping[r]
-        sections["room_zones"] = mapping
+    # Fresh read under the store's lock, same reason as the volume route:
+    # the cached cfg() would write back stale values over hand edits, and
+    # the default-zone handoff below must see the default as it is now.
+    def _write():
+        with config_store.LOCK:
+            fresh = config_store.read_sections(["sonos", "wiim", "room_zones"])
+            backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
+            sec = dict(fresh[backend] or {})
+            zones = dict(sec.get("zones") or {})
+            if name not in zones:
+                raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+            del zones[name]
+            sec["zones"] = zones
+            # ONE atomic multi-section write — the old back-to-back
+            # write_section pair was non-atomic (crash between them left a
+            # deleted zone with dangling room mappings) and churned two
+            # backups. Sections dict preserves every OTHER key untouched.
+            sections = {backend: sec}
+            # The backend's default zone must not point at the deleted zone: every
+            # unmapped room's reply would go nowhere. Hand it to a remaining zone
+            # (add-zone sets the first one as default), or clear it.
+            new_default = sec.get("default_zone")
+            if new_default == name:
+                new_default = next(iter(zones), None)
+                if new_default:
+                    sec["default_zone"] = new_default
+                else:
+                    sec.pop("default_zone", None)
+            # rooms mapped to a deleted zone become dangling — drop them in the
+            # SAME write (they're a separate section, same atomic pass)
+            mapping = dict(fresh["room_zones"] or {})
+            dangling = [r for r, z in mapping.items() if z == name]
+            if dangling:
+                for r in dangling:
+                    del mapping[r]
+                sections["room_zones"] = mapping
+            config_store.write_sections(sections)
+            return backend, new_default, dangling
+
     try:
-        config_store.write_sections(sections)
+        backend, new_default, dangling = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     # A speaker room mapped to the deleted zone is back on its own speaker
@@ -781,6 +794,16 @@ class NamePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     name: str = Field(min_length=1, max_length=31, pattern=r"^[A-Za-z0-9_-]+$")
 
+    @model_validator(mode="after")
+    def _not_reserved(self):
+        # The registry's own labels: a node named "unknown" would read as a
+        # session whose room isn't known yet (fw, mute and speaker never
+        # bind), and one named "browser" would share its room with every
+        # browser voice client.
+        if self.name.lower() in (registry.PROVISIONAL, registry.BROWSER):
+            raise ValueError(f"'{self.name}' is a reserved name - pick another name")
+        return self
+
 
 def _room_online(room: str) -> None:
     if not any(r["room"] == room and r["online"] for r in registry.known_rooms()):
@@ -876,6 +899,12 @@ def _room_name_taken(name: str, room: str) -> str | None:
     return next((str(n) for n in names if str(n).lower() == low), None)
 
 
+# Names a rename is waiting on its node for (lowercase). The name only
+# becomes taken when the node acks, up to 12 s later, so without this two
+# renames onto one name would both pass the check.
+_renames_in_flight: set = set()
+
+
 @router.post("/nodes/{room}/name", dependencies=GUARD)
 async def set_node_name(room: str, payload: NamePayload):
     _room_online(room)
@@ -885,7 +914,17 @@ async def set_node_name(room: str, payload: NamePayload):
     if taken:
         raise HTTPException(status_code=409,
                             detail=f"a room named '{taken}' already exists - pick another name")
-    reply = await _node_cmd(room, "set_name", {"name": payload.name})
+    target = payload.name.lower()
+    if target in _renames_in_flight:
+        raise HTTPException(status_code=409,
+                            detail=f"another node is being renamed '{payload.name}' - pick another name")
+    _renames_in_flight.add(target)
+    try:
+        reply = await _node_cmd(room, "set_name", {"name": payload.name})
+    finally:
+        # the ack (if any) has relabeled the registry by now, so the
+        # check above refuses the name from here on
+        _renames_in_flight.discard(target)
     if not reply.get("ok"):
         raise HTTPException(status_code=502, detail=f"rename failed: {reply.get('data')}")
     return reply
@@ -1478,25 +1517,37 @@ async def delete_key(var: str):
 _INTELLIGENCE_URL_RE = r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$"
 
 
+def _check_intelligence_url_port(url) -> None:
+    # The pattern lets a port like 70000 (or a second colon) through, and
+    # urlsplit().port raises on those — refuse them here so the caller gets
+    # a 422 instead of a 500, and such a URL is never saved.
+    if url is not None:
+        try:
+            urllib.parse.urlsplit(url).port
+        except ValueError:
+            raise ValueError("url has an invalid port") from None
+
+
 class IntelligencePayload(BaseModel):
     # hermes = today's api_server contract; openclaw = OpenClaw Gateway
     # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
     # conversation field). Any other kind 422s.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     kind: str = Field(pattern="^(hermes|openclaw)$")
+    # The URL on screen, filed under `kind` only (intelligence.urls[kind]
+    # is the per-kind recall map). There is deliberately no way to save the
+    # OTHER kind's URL from here: the stored key goes to a kind's saved URL,
+    # so only a URL the user saved while looking at that kind may land there.
     url: str | None = Field(default=None, max_length=200, pattern=_INTELLIGENCE_URL_RE)
-    # Per-kind URL memory (2026-10-08): the two lanes live at different
-    # addresses (api_server 8642 vs OpenClaw Gateway 18789). kind and url
-    # arrive together; the route files url under the kind being saved so
-    # the UI can offer the right one back on switch. `url` itself stays
-    # the live value the agent reads — this map is recall, not truth.
-    # Values pass the same check as `url`: a recalled URL becomes `url`
-    # on the next kind flip.
-    urls: dict[str, Annotated[str, Field(max_length=200, pattern=_INTELLIGENCE_URL_RE)]] | None = Field(default=None)
     # The agent for THIS kind: an OpenClaw agent id, or a Hermes profile
     # ("default" = the main agent). Filed under intelligence.agents[kind].
     agent: str | None = Field(default=None, min_length=1, max_length=64,
                               pattern=r"^[A-Za-z0-9_.-]+$")
+
+    @model_validator(mode="after")
+    def _url_port(self):
+        _check_intelligence_url_port(self.url)
+        return self
 
 
 # One lane, one variable, named for its intelligence (naming law
@@ -1564,27 +1615,38 @@ async def put_intelligence(payload: IntelligencePayload):
     section) — read-merge-write, so fillers/max_tokens/lull always
     survive. Applies on the next bot restart."""
     current = dict(config_store.read_section("intelligence") or {})
+    saved_kind = current.get("kind") or "hermes"
+    urls = dict(current.get("urls") or {})
+    if (payload.kind == "openclaw" and payload.agent is None and payload.url is not None
+            and not intelligence_target.agent_for(current, "openclaw")):
+        # New OpenClaw setup: its agents can't be listed until the URL is
+        # saved (discovery only sends the key to a saved URL), and the lane
+        # can't run without an agent. Save just the URL and leave the live
+        # lane as it is; the next Save, with an agent picked, switches it.
+        urls["openclaw"] = payload.url
+        current["urls"] = urls
+        if saved_kind == "openclaw":
+            current["url"] = payload.url
+        try:
+            config_store.write_section("intelligence", current)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        logger.info("dashboard: intelligence openclaw URL saved (no agent yet; live lane unchanged)")
+        return {"ok": True, "kind": saved_kind, "url_only": True}
     current["kind"] = payload.kind
     if payload.url is not None:
         current["url"] = payload.url
         # File the URL under the kind being saved (per-kind recall map).
-        urls = dict(current.get("urls") or {})
         urls[payload.kind] = payload.url
         current["urls"] = urls
-    else:
-        # Bare kind flip: restore THAT kind's remembered URL
-        # when one exists — keeping the old kind's URL would point the
-        # new lane at the wrong intelligence (api_server vs Gateway).
-        remembered = (current.get("urls") or {}).get(payload.kind)
-        if remembered:
-            current["url"] = remembered
-    if payload.urls is not None:
-        # UI may send the full recall map (it knows both kinds' URLs).
-        merged = dict(current.get("urls") or {})
-        for k, v in payload.urls.items():
-            if k in ("hermes", "openclaw") and isinstance(v, str) and v:
-                merged[k] = v
-        current["urls"] = merged
+    elif urls.get(payload.kind):
+        # Bare kind flip: restore THAT kind's remembered URL.
+        current["url"] = urls[payload.kind]
+    elif payload.kind != saved_kind:
+        # No URL for the new kind. Keeping the old kind's URL would point
+        # the new lane (and its key) at the wrong intelligence, and clearing
+        # it would fall back to LVI_HERMES_URL — refuse instead.
+        raise HTTPException(status_code=422, detail=f"set a URL for {payload.kind} first")
     if payload.agent is not None:
         agents = dict(current.get("agents") or {})
         agents[payload.kind] = payload.agent
@@ -1681,6 +1743,11 @@ class IntelligenceAgentsPayload(BaseModel):
     # The URL on screen (may be unsaved); omitted = that kind's saved URL.
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+
+    @model_validator(mode="after")
+    def _url_port(self):
+        _check_intelligence_url_port(self.url)
+        return self
 
 
 @router.post("/intelligence/agents", dependencies=GUARD)
@@ -2495,6 +2562,71 @@ async def oww_delete_model(name: str, source: str = ""):
 
 # ── firmware push (operator side of firmware_server.py) ─────────────
 
+_FIRMWARE_SWAP_LOCKS = {t: asyncio.Lock() for t in firmware_image.TRACKS}
+
+
+def _check_firmware_image(tmp: Path, size: int, track: str) -> str:
+    """Validate a staged upload for `track`; returns its version or raises
+    a 400 naming what's wrong. Blocking file reads — call in a thread."""
+    if size < 1024 * 200:
+        raise HTTPException(status_code=400, detail="file too small to be a firmware image")
+    # Version from the embedded descriptor: the .bin carries a 32-byte
+    # SPI image header, then esp_app_desc_t — magic 0xABCD5432 (LE) at
+    # byte 32, version[32] at byte 48 (measured against the real image
+    # 2026-09-29; an offset of 24 was wrong and rejected a good bin).
+    with open(tmp, "rb") as f:
+        head = f.read(256)
+    if head[32:36] != b"\x32\x54\xcd\xab":
+        raise HTTPException(
+            status_code=400,
+            detail="not an ESP32 app image (no app-descriptor magic) — is this a LenoxVI build?",
+        )
+    version = head[48:80].split(b"\x00")[0].decode(errors="replace").strip()
+    if not re.match(r"^\d+\.\d+\.\d+$", version):
+        raise HTTPException(
+            status_code=400,
+            detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a LenoxVI app image?",
+        )
+    # Board identity: the
+    # image proves its line — compiled-in OTA URL format, plus the project
+    # name on 1.2.9+ images (core/firmware_image.py). Refuse a mismatch
+    # BEFORE the swap — the served image and manifest stay untouched.
+    img_track = firmware_image.image_track(tmp.read_bytes())
+    if img_track is None:
+        raise HTTPException(
+            status_code=400,
+            detail="can't tell which board this image is for (no single OTA-track "
+                   "marker) — not uploading it to any track",
+        )
+    if img_track != track:
+        raise HTTPException(
+            status_code=400,
+            detail=f"this is {firmware_image.TRACK_LABEL[img_track]} firmware — it can't "
+                   f"go on the {firmware_image.TRACK_LABEL[track]} track (it would "
+                   f"cross-flash that node). Pick track '{img_track}'.",
+        )
+    return version
+
+
+def _swap_firmware_image(tmp: Path, dest: Path, version: str) -> None:
+    """Serve a validated staged image as `dest` and point the track's
+    manifest at it. Blocking file I/O — call in a thread, under the
+    track's swap lock."""
+    os.chmod(tmp, 0o644)  # mkstemp creates 0600; served images were always world-readable
+    tmp.replace(dest)  # validated: swap in atomically
+    manifest = {"version": version, "filename": dest.name}
+    mpath = dest.parent / "version.json"
+    mtmp = mpath.with_suffix(".json.tmp")
+    mtmp.write_text(json.dumps(manifest, indent=2))
+    mtmp.replace(mpath)
+    # The manifest now names only dest: any other .bin in the track dir
+    # (e.g. a pre-rename node_esp32.bin) is unreachable — remove it so the
+    # directory holds exactly what's served.
+    for stale in dest.parent.glob("*.bin"):
+        if stale.name != dest.name:
+            stale.unlink(missing_ok=True)
+
+
 @router.post("/firmware/upload", dependencies=GUARD)
 async def upload_firmware(
     file: UploadFile = File(...),
@@ -2527,70 +2659,37 @@ async def upload_firmware(
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
     dest_dir = Path(f"firmware/{track}")
-    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{track}_esp32.bin"  # fixed served name (manifest points here)
-    size = 0
+
     # Stage to a temp file FIRST: a rejected upload must never clobber
-    # the currently-served good image (loaded-gun rule).
-    tmp = dest.with_suffix(".bin.uploading")
-    with open(tmp, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            f.write(chunk)
-    if size < 1024 * 200:
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="file too small to be a firmware image")
-    # Version from the embedded descriptor: the .bin carries a 32-byte
-    # SPI image header, then esp_app_desc_t — magic 0xABCD5432 (LE) at
-    # byte 32, version[32] at byte 48 (measured against the real image
-    # 2026-09-29; an offset of 24 was wrong and rejected a good bin).
-    with open(tmp, "rb") as f:
-        head = f.read(256)
-    if head[32:36] != b"\x32\x54\xcd\xab":
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail="not an ESP32 app image (no app-descriptor magic) — is this a LenoxVI build?",
-        )
-    version = head[48:80].split(b"\x00")[0].decode(errors="replace").strip()
-    if not re.match(r"^\d+\.\d+\.\d+$", version):
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail=f"no valid version in image header (got '{version or 'nothing'}') — is this a LenoxVI app image?",
-        )
-    # Board identity: the
-    # image proves its line — compiled-in OTA URL format, plus the project
-    # name on 1.2.9+ images (core/firmware_image.py). Refuse a mismatch
-    # BEFORE the swap — the served image and manifest stay untouched.
-    img_track = firmware_image.image_track(tmp.read_bytes())
-    if img_track is None:
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail="can't tell which board this image is for (no single OTA-track "
-                   "marker) — not uploading it to any track",
-        )
-    if img_track != track:
-        tmp.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail=f"this is {firmware_image.TRACK_LABEL[img_track]} firmware — it can't "
-                   f"go on the {firmware_image.TRACK_LABEL[track]} track (it would "
-                   f"cross-flash that node). Pick track '{img_track}'.",
-        )
-    tmp.replace(dest)  # validated: swap in atomically
-    manifest = {"version": version, "filename": dest.name}
-    mpath = Path(f"firmware/{track}/version.json")
-    mtmp = mpath.with_suffix(".json.tmp")
-    mtmp.write_text(json.dumps(manifest, indent=2))
-    mtmp.replace(mpath)
-    # The manifest now names only dest: any other .bin in the track dir
-    # (e.g. a pre-rename node_esp32.bin) is unreachable — remove it so the
-    # directory holds exactly what's served.
-    for stale in dest_dir.glob("*.bin"):
-        if stale.name != dest.name:
-            stale.unlink(missing_ok=True)
+    # the currently-served good image (loaded-gun rule). One temp file per
+    # upload: with a shared name, two uploads to the same track interleaved
+    # their chunks, and the first swap moved the file the second was still
+    # writing into the served image.
+    def _open_staging():
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=dest_dir, prefix=f"{dest.name}.", suffix=".uploading")
+        return os.fdopen(fd, "wb"), Path(name)
+
+    # Every disk step runs in a thread: all rooms' audio shares this loop.
+    # Only the network read of each chunk stays on it.
+    f, tmp = await asyncio.to_thread(_open_staging)
+    size = 0
+    try:
+        try:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
+        version = await asyncio.to_thread(_check_firmware_image, tmp, size, track)
+        # Swap + manifest as one step per track, so the served image and
+        # the version that names it always come from the same upload.
+        async with _FIRMWARE_SWAP_LOCKS[track]:
+            await asyncio.to_thread(_swap_firmware_image, tmp, dest, version)
+    finally:
+        # Already gone after a swap; a refused or dropped upload leaves it.
+        await asyncio.to_thread(tmp.unlink, missing_ok=True)
     logger.info(f"dashboard: firmware {version} served on track '{track}' "
                 f"({size} bytes) — nodes on this track pick it up on next check")
     return {"ok": True, "filename": dest.name, "size": size, "version": version,

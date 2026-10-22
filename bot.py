@@ -369,8 +369,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     dash_registry.set_gate(gate)
 
     def _pipeline_room():
-        # This pipeline's room — fall back to None (-> default zone) if
-        # the tee hasn't correlated yet (ordering race, handled).
+        # This pipeline's room — None if the tee hasn't correlated yet
+        # (ordering race, handled: no room = no reply zone = silent).
         return dash_registry.room_for_pc(pc_id) if pc_id else None
 
     def _reply_zone():
@@ -378,7 +378,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         if not room or room == "unknown":
             return None
         # mapped zone, else a speaker node's own speaker ("builtin"),
-        # else None -> default zone fallback in the output backend.
+        # else None: the room has no speaker mapping and the reply plays
+        # on no Sonos/WiiM zone (default_zone is not a fallback).
         import node_speaker
         return node_speaker.resolve_zone(room, node_speaker._room_zones(),
                                          node_speaker._has_speaker(room))
@@ -471,7 +472,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # pipeline task starts so the first interrupt can't race a None.
     sonos_out = SonosOutput(echo_gate=gate, zone_selector=_reply_zone,
                             wake_gate=wake_filter, led=led,
-                            reply_elsewhere=lambda: wiim_out.owns_reply())
+                            reply_elsewhere=lambda: wiim_out.owns_reply(),
+                            room_selector=_pipeline_room)
     wiim_out = WiiMOutput(echo_gate=gate, zone_selector=_reply_zone,
                           wake_gate=wake_filter, led=led)
     _outputs.extend([sonos_out, wiim_out])

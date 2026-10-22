@@ -43,6 +43,7 @@ _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
 
 PROVISIONAL = "unknown"
+BROWSER = "browser"  # the label of a session whose offer names no room
 
 
 def _evict_other_sessions(pc_id, room):
@@ -248,7 +249,7 @@ def note_offer(pc_id, room):
     and stores the pair so later connects on the same pc_id resolve
     instantly (renegotiation re-offers).
     """
-    label = room or "browser"
+    label = room or BROWSER
     if not pc_id:
         return
     prev = _room_by_pc.get(pc_id)
@@ -388,6 +389,13 @@ def drop_sender(pc_id: str) -> None:
     _out_by_pc.pop(pc_id, None)
 
 
+def room_claimed(room: str, pc_id: str) -> bool:
+    """Another session than pc_id is bound to `room` (case-insensitive,
+    the same rule as the dashboard's rename check)."""
+    low = str(room).lower()
+    return any(p != pc_id and str(r).lower() == low for p, r in _room_by_pc.items())
+
+
 def relabel_room(pc_id: str, info: dict | None) -> None:
     """Node acked set_name: move its room record to the new name and
     keep the pc→room binding consistent (in-memory only — the offer
@@ -397,6 +405,11 @@ def relabel_room(pc_id: str, info: dict | None) -> None:
     if isinstance(info, dict):
         new = info.get("name")
     if not new or new == old:
+        return
+    if room_claimed(new, pc_id):
+        # Taking the name would leave two sessions in one room and drop the
+        # other room's record; the offer settles it when the node reconnects.
+        logger.warning(f"registry: '{old}' -> '{new}' not relabeled: another session holds '{new}'")
         return
     _room_by_pc[pc_id] = new
     rec = _known_rooms.pop(old, None)

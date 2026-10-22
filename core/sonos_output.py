@@ -10,6 +10,10 @@ Config (config.yaml):
     clip_server:
       host_ip, port
 
+default_zone is still read (old configs load fine) but no longer routes
+replies: a room with no speaker mapping (`room_zones`) stays silent until
+it is mapped, and nothing is ducked for it.
+
 The processor is pass-through: frames continue downstream, so the browser
 client keeps its audio while Sonos gets the same reply.
 
@@ -25,6 +29,7 @@ import asyncio
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import yaml
@@ -221,9 +226,12 @@ class SonosOutput(FrameProcessor):
 
     def __init__(self, config_path: str | None = None, echo_gate=None,
                  zone_selector=None, wake_gate=None, led=None, reply_elsewhere=None,
-                 **kwargs):
+                 room_selector=None, **kwargs):
         super().__init__(**kwargs)
         self._echo_gate = echo_gate
+        # Optional sync callable returning this pipeline's room name: only
+        # used to name the room in the "no speaker mapping" log line.
+        self._room_selector = room_selector
         # True while another backend (a WiiM zone) sounds the reply: that
         # backend owns the LED end and speech timers; two owners meant this
         # one's early generation-time fallback flipped the ring mid-reply.
@@ -270,15 +278,17 @@ class SonosOutput(FrameProcessor):
         # room's wake opened the turn; bot.py passes a selector that
         # maps it through config.yaml room_zones). Must never raise.
         self._zone_selector = zone_selector
-        # Read through core/config so LVI_CONFIG (if ever set) applies here
-        # too — a direct Path("config.yaml") default would let the bot read
-        # two different config files in one process.
-        from config import CONFIG_PATH, DEFAULT_CLIP_VOLUME
+        # Read through core/config's cached cfg() (LVI_CONFIG applies, and no
+        # file read on the event loop for every session). An explicit
+        # config_path (suite fixtures only) is still read directly.
+        from config import DEFAULT_CLIP_VOLUME, cfg
 
-        cfg = yaml.safe_load(Path(config_path or CONFIG_PATH).read_text()) or {}
-        sonos = cfg.get("sonos", {})
+        if config_path:
+            sonos = (yaml.safe_load(Path(config_path).read_text()) or {}).get("sonos") or {}
+        else:
+            sonos = cfg("sonos") or {}
         self._enabled = bool(sonos.get("enabled"))
-        self._zone = sonos.get("default_zone")
+        self._zone = sonos.get("default_zone")  # read for old configs; never a reply fallback
         self._volume = int(sonos.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
         # Per-zone volume overrides (2026-10-04, dashboard slider): config
         # `sonos.zone_volumes: {<zone>: int}` is the durable copy; the live
@@ -289,15 +299,13 @@ class SonosOutput(FrameProcessor):
                               if isinstance(v, (int, float))}
         self._zones = sonos.get("zones", {})
         self._duck_while_awake = bool(sonos.get("duck_while_awake", True))
-        cs = cfg.get("clip_server", {})
-        # Opportunistic clip pruning (2026-09-20): once at startup AND hourly
-        # via _clip_prune_loop (a quiet month with no restarts must not grow
-        # clips/ — the node holds one long-lived session, so construction
-        # alone fires ~never). Retention: sonos.clip_retention_days (48h).
+        # Opportunistic clip pruning (2026-09-20): once per pipeline at
+        # setup() (in a thread: the glob/stat/unlink pass grows with clips/)
+        # AND hourly via _clip_prune_loop (a quiet month with no restarts
+        # must not grow clips/ — the node holds one long-lived session, so
+        # setup alone fires ~never). Retention: sonos.clip_retention_days.
         retention_days = int(sonos.get("clip_retention_days", 7))
-        removed = _prune_clips(Path("clips"), retention_days)
-        if removed:
-            logger.info(f"sonos_output: pruned {removed} clip(s) older than {retention_days}d")
+        self._retention_days = retention_days
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
             try:
@@ -317,15 +325,12 @@ class SonosOutput(FrameProcessor):
         self._pcm = bytearray()
         self._sample_rate = 24000
         self._channels = 1
-        self._clip_count = 0
         self._speech_epoch = 0  # generation stamp; load-anchored timers re-anchor only while current
         # Bumped ONLY by a barge-in (a new generation must not kill an older
         # clip still loading). A speak task that sees it move drops its clip.
         self._barge_epoch = 0
         if not self._enabled:
             logger.info("sonos_output disabled in config.yaml")
-        elif self._zone not in self._zones:
-            logger.warning(f"sonos_output: zone '{self._zone}' not in config zones {list(self._zones)}")
         # Zone capability audit (2026-09-30): audioClip works on every S2
         # player (Era/Arc/Roam/Five/Ray/SYMFONISK included) but NOT on S1
         # legacy gear — and our playback path can't notice: we construct
@@ -360,6 +365,14 @@ class SonosOutput(FrameProcessor):
         # and bound HERE (or reused if WiiM/setup already bound it) —
         # never a second bind on the port.
         self._clip_server = await shared_clip_server()
+        # Startup prune pass, off the event loop.
+        try:
+            removed = await asyncio.to_thread(_prune_clips, Path("clips"), self._retention_days)
+        except Exception as e:  # noqa: BLE001 — pruning must never break pipeline setup
+            logger.warning(f"sonos_output: startup clip prune failed: {e}")
+            removed = 0
+        if removed:
+            logger.info(f"sonos_output: pruned {removed} clip(s) older than {self._retention_days}d")
         # Eternal duck-holder: poll the wake gate, hold the audioClip
         # duck while she's listening (2026-09-30).
         self._start_duck_holder()
@@ -514,15 +527,10 @@ class SonosOutput(FrameProcessor):
 
                 # Awake: ensure the duck is held
                 if sw is None:
-                    zone_name = self._zone
-                    if self._zone_selector:
-                        try:
-                            zone_name = self._zone_selector() or self._zone
-                        except Exception:
-                            pass
+                    zone_name = self._reply_zone_name()
                     zone = self._zones.get(zone_name)
                     if not zone:
-                        continue  # unmapped zone — can't duck
+                        continue  # unmapped room or not a Sonos zone: nothing to duck
                     from sonos_websocket import SonosWebsocket
 
                     try:
@@ -563,7 +571,7 @@ class SonosOutput(FrameProcessor):
                     # snappy cancel on release.
                     try:
                         resp = await asyncio.wait_for(
-                            sw.play_clip(url, volume=self._volume_for(zone_name or self._zone)), timeout=5.0
+                            sw.play_clip(url, volume=self._volume_for(zone_name)), timeout=5.0
                         )
                     except Exception as e:
                         # The websocket may be dead (Sonos reboot, wifi
@@ -647,6 +655,15 @@ class SonosOutput(FrameProcessor):
             # NodeSpeakerOutput (anchored at playback start).
             logger.debug("sonos_output: reply zone is the node's built-in speaker, skipping")
             return
+        # Zone first: a reply that plays nowhere must not arm the echo gate.
+        zone_name = self._reply_zone_name()
+        if zone_name is None:  # no speaker mapping: nothing plays
+            logger.debug("sonos_output: reply room has no speaker mapping, skipping")
+            return
+        zone = self._zones.get(zone_name)
+        if not zone:
+            logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
+            return
         # Barge-in while this clip was still being built: drop it. Checked
         # again after the encode and before the play call; arming the echo
         # gate for a dead clip would swallow the interrupting question.
@@ -668,16 +685,6 @@ class SonosOutput(FrameProcessor):
         state_val = getattr(gate_state, "value", gate_state)
         if self._duck_while_awake and state_val not in (None, "idle"):
             pcm = pcm + b"\x00" * int(2 * self._sample_rate * 8)
-        zone_name = self._zone
-        if self._zone_selector:
-            try:
-                zone_name = self._zone_selector() or self._zone
-            except Exception as e:  # routing hint must never break the reply
-                logger.debug(f"sonos_output: zone_selector failed: {e}")
-        zone = self._zones.get(zone_name)
-        if not zone:
-            logger.warning(f"sonos_output: zone '{zone_name}' not in config zones {list(self._zones)}, skipping Sonos playback")
-            return
         volume = self._volume_for(zone_name)
         # MP3, not WAV — the proven-working format for Sonos audioClip
         # (WAV is not in Sonos's documented supported set).
@@ -700,8 +707,10 @@ class SonosOutput(FrameProcessor):
             logger.info("sonos_output: barge-in during the encode, clip dropped")
             return
 
-        self._clip_count += 1
-        filename = f"reply-{int(time.time())}-{self._clip_count}.mp3"
+        # Unique across pipelines and restarts: two rooms replying in the
+        # same second must never share a name (the atomic write would swap
+        # one room's reply under the other zone's fetch).
+        filename = f"reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
         clip_path = Path("clips") / filename
         # Awaited before the URL exists: the speaker never fetches a
         # clip that isn't on disk yet.
@@ -788,13 +797,7 @@ class SonosOutput(FrameProcessor):
                 pass
         if not cid:
             return
-        zone_name = self._zone
-        if self._zone_selector:
-            try:
-                zone_name = self._zone_selector() or self._zone
-            except Exception:
-                pass
-        zone = self._zones.get(zone_name)
+        zone = self._zones.get(self._reply_zone_name())
         if not zone:
             return
         sw = None
@@ -818,6 +821,25 @@ class SonosOutput(FrameProcessor):
             return bool(self._reply_elsewhere and self._reply_elsewhere())
         except Exception:  # noqa: BLE001 — a routing hint must never break the reply
             return False
+
+    def _reply_zone_name(self):
+        """The reply's zone from the room mapping, or None. None means the
+        room has no speaker: the reply is not played and nothing is ducked
+        (default_zone is not a fallback)."""
+        if not self._zone_selector:
+            return None
+        try:
+            return self._zone_selector() or None
+        except Exception as e:  # noqa: BLE001 — a routing hint must never break the reply
+            logger.debug(f"sonos_output: zone_selector failed: {e}")
+            return None
+
+    def _room_label(self) -> str:
+        try:
+            room = self._room_selector() if self._room_selector else None
+        except Exception:  # noqa: BLE001 — a log label must never break the reply
+            room = None
+        return room or "unknown"
 
     def _reply_is_builtin(self) -> bool:
         """This reply plays on the node's own speaker (zone `builtin`)."""
@@ -848,6 +870,17 @@ class SonosOutput(FrameProcessor):
         elif isinstance(frame, TTSStoppedFrame):
             if self._reply_owned_elsewhere():
                 self._pcm.clear()  # a WiiM zone sounds it; WiiMOutput owns the timers
+            elif len(self._pcm) > 0 and self._reply_zone_name() is None:
+                # No speaker mapping for this room (or its built-in speaker
+                # isn't confirmed yet): no backend plays the reply. Nothing
+                # sounds, so the speaking LED ends now and the echo gate is
+                # never armed; the wake gate follows the transport's own
+                # speaking frames, which are untouched.
+                self._pcm.clear()
+                logger.info(f"sonos_output: room '{self._room_label()}' has no speaker mapping"
+                            f" - reply not played (a built-in speaker plays once its node confirms it)")
+                if self._led:
+                    self._schedule_end_of_speech(0.0)
             elif self._enabled and len(self._pcm) > 0:
                 pcm = bytes(self._pcm)
                 self._pcm.clear()

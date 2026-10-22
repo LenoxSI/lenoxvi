@@ -96,12 +96,17 @@ def same_target(a: str, b: str) -> bool:
     """True when two base URLs point at the same endpoint. Scheme, host and
     port must match exactly; a trailing /v1 and trailing slashes are ignored
     (with or without /v1 is the same gateway). Anything else — a different
-    host, port, or scheme — is a different target."""
+    host, port, or scheme — is a different target. A URL whose port can't be
+    read (out of range, not a number) matches nothing, so the key is never
+    attached to it."""
     def _n(u):
         p = urllib.parse.urlsplit((u or "").rstrip("/"))
         return (p.scheme.lower(), (p.hostname or "").lower(), p.port,
                 re.sub(r"/v1$", "", p.path or "").rstrip("/"))
-    return _n(a) == _n(b)
+    try:
+        return _n(a) == _n(b)
+    except ValueError:
+        return False
 
 
 def discover_agents(kind: str, url: str, env, timeout: float = 4.0,

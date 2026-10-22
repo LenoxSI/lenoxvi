@@ -15,16 +15,18 @@ const TOKEN_KEY = 'lenoxvi-dashboard-token'
 // every save. On a mutation 401: prompt (once, shared across concurrent
 // callers), remember in localStorage, retry the request once. A token
 // that 401s again is dropped so the next save asks fresh. Reads stay
-// open server-side, so GETs never prompt.
+// open server-side, so GETs never prompt — except a guarded read that
+// passes promptForToken (node /info talks to the node, so it's guarded).
+// The ask is TokenDialog's masked field: window.prompt showed the token
+// in plain text on screen.
 let tokenPrompt = null
+let tokenAsker = null  // set while TokenDialog is mounted
 function askToken(wasStored) {
   if (!tokenPrompt) {
-    tokenPrompt = Promise.resolve().then(() => {
-      const t = window.prompt(wasStored
-        ? 'Saved dashboard token was rejected. Enter the token (LVI_DASHBOARD_TOKEN on the bot):'
-        : 'This dashboard requires a token (LVI_DASHBOARD_TOKEN on the bot):')
-      return (t || '').trim() || null
-    }).finally(() => { setTimeout(() => { tokenPrompt = null }, 0) })
+    tokenPrompt = Promise.resolve()
+      .then(() => (tokenAsker ? tokenAsker(wasStored) : null))
+      .then(t => (t || '').trim() || null)
+      .finally(() => { setTimeout(() => { tokenPrompt = null }, 0) })
   }
   return tokenPrompt
 }
@@ -46,7 +48,7 @@ async function api(path, opts = {}, _retried = false) {
     throw e
   }
   const method = (opts.method || 'GET').toUpperCase()
-  if (r.status === 401 && method !== 'GET' && !_retried) {
+  if (r.status === 401 && (method !== 'GET' || opts.promptForToken) && !_retried) {
     const t = await askToken(!!tok)
     if (t) {
       localStorage.setItem(TOKEN_KEY, t)
@@ -94,6 +96,37 @@ function AppMsg({ msg }) {
   )
 }
 
+// The dashboard-token ask (askToken above). A password field, so the token
+// never shows on screen; Cancel or Escape answers null (the save is cancelled).
+function TokenDialog() {
+  const [ask, setAsk] = useState(null)  // { wasStored, resolve } while open
+  const [val, setVal] = useState('')
+  useEffect(() => {
+    tokenAsker = wasStored => new Promise(resolve => { setVal(''); setAsk({ wasStored, resolve }) })
+    return () => { tokenAsker = null }
+  }, [])
+  if (!ask) return null
+  const done = t => { ask.resolve(t); setAsk(null); setVal('') }
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Dashboard token"
+      style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.6)' }}>
+      <form className="rounded-2xl bg-[var(--surface)] p-4 grid gap-3" style={{ width: 'min(420px, 92vw)' }}
+        onSubmit={e => { e.preventDefault(); done(val) }}
+        onKeyDown={e => { if (e.key === 'Escape') done(null) }}>
+        <p className="text-[13.5px] m-0">{ask.wasStored
+          ? 'Saved dashboard token was rejected. Enter the token (LVI_DASHBOARD_TOKEN on the bot):'
+          : 'This dashboard requires a token (LVI_DASHBOARD_TOKEN on the bot):'}</p>
+        <input type="password" autoFocus autoComplete="off" spellCheck={false} aria-label="Dashboard token"
+          value={val} onChange={e => setVal(e.target.value)} className={INPUT_CLS} />
+        <div className="flex gap-2 justify-end">
+          <button type="button" className={BTN_DEFAULT} onClick={() => done(null)}>Cancel</button>
+          <button type="submit" className={BTN_PRIMARY}>OK</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 /* ── restart lane ──────────────────────────────────────────── */
 // restartBot has three call sites (Overview's button + offerRestart
 // from the OWW and Voice save lanes) and the React `rebooting` state can
@@ -106,6 +139,11 @@ async function restartBot(setMsg, setRebooting) {
   _botRestarting = true
   setRebooting(true)
   setMsg('Restarting…', 'pulse', 'Bot control')
+  // "Back" = a process that BOOTED after this request (browser clock minus
+  // the bot's uptime). A small uptime alone isn't enough: the old process
+  // answers for a few seconds after the request, and if it had itself
+  // booted under 30 s ago it looked like the new one.
+  const askedAt = Date.now() / 1000
   let postErr = null
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -113,16 +151,28 @@ async function restartBot(setMsg, setRebooting) {
       postErr = null
       break
     } catch (e) {
-      postErr = e.message
+      postErr = e
       await new Promise(r => setTimeout(r, 1500))
     }
+  }
+  if (postErr && !postErr.network) {
+    // The bot answered with a refusal (token cancelled, scheduling failed):
+    // nothing was scheduled, and waiting 90 s for it only kept the Restart
+    // button disabled. A network error is different — the request may have
+    // landed before the bot went down — so that one still waits.
+    setMsg(`restart request failed (${postErr.message}) — the bot was not restarted.`, 'err', 'Bot control')
+    setRebooting(false)
+    _botRestarting = false
+    return false
   }
   let up = 0
   for (let i = 0; i < 45; i++) {
     await new Promise(r => setTimeout(r, 2000))
     try {
       const s = await api('/api/dashboard/status')
-      if (s.uptime_secs != null && s.uptime_secs < 30) { up = 1; break }
+      // The new process boots 2 s+ after the request (the server's delay);
+      // the 1 s margin absorbs reply latency on the old one's answer.
+      if (s.uptime_secs != null && Date.now() / 1000 - s.uptime_secs > askedAt + 1) { up = 1; break }
     } catch { /* still down */ }
     setMsg(`Restarting… ${Math.min(90, (i + 1) * 2)}s`, 'pulse', 'Bot control')
   }
@@ -130,7 +180,7 @@ async function restartBot(setMsg, setRebooting) {
     setMsg('Bot is back — reloading panels…', 'ok', 'Bot control')
     window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
   } else {
-    setMsg((postErr ? `restart request failed (${postErr}) — ` : '') +
+    setMsg((postErr ? `restart request failed (${postErr.message}) — ` : '') +
       'uptime never reset within 90s; the old bot process is still running.', 'err', 'Bot control')
   }
   setRebooting(false)
@@ -289,7 +339,8 @@ function KeysCard({ setMsg, setRebooting }) {
   const [tests, setTests] = useState({})        // var -> {status, detail}
   const [agents, setAgents] = useState([])      // Hermes agents with no key yet
   const [agentNote, setAgentNote] = useState('')
-  const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'; '' = first offered
+  const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'; '' = nothing picked yet
+  const [addEpoch, setAddEpoch] = useState(0)    // remounts (clears) the Add box when its pick goes away
   const [busy, setBusy] = useState(false)        // an Add in flight (no double submit)
   const [loadErr, setLoadErr] = useState('')
   const msgRef = useRef(setMsg)
@@ -375,11 +426,17 @@ function KeysCard({ setMsg, setRebooting }) {
   const services = (keys || []).filter(r => !shown(r))
   const offered = v => (v.startsWith('agent:') ? agents.includes(v.slice(6))
     : services.some(r => r.var === v && keyRoute(r)))
-  const firstPick = services.find(r => keyRoute(r))?.var || (agents[0] ? `agent:${agents[0]}` : '')
-  // Never fall back silently: a pick that a refresh removed stays visible
-  // as "pick again" — the pasted key must not go to another service.
-  const pickValue = addPick || firstPick
+  // Only an explicit pick is ever saved to. A default first entry moved
+  // under a pasted key whenever a refresh changed the list, so the key went
+  // to a service nobody chose. A pick that a refresh removed stays visible
+  // as "pick again", and the pasted key is cleared with it.
+  const pickValue = addPick
   const stale = !!pickValue && !offered(pickValue)
+  useEffect(() => {
+    if (!stale || !readKey('keyin-add')) return
+    setAddEpoch(n => n + 1)
+    msgRef.current('The service you picked is no longer offered — the pasted key was cleared. Pick again.', 'err', 'Keys')
+  }, [stale])
   const add = async () => {
     if (busy) return
     if (!pickValue || stale) {
@@ -482,6 +539,7 @@ function KeysCard({ setMsg, setRebooting }) {
             <>
               <select id="key-add" aria-label="Key to add" className={`${INPUT_CLS} w-auto`} value={pickValue}
                 onChange={e => setAddPick(e.target.value)}>
+                {!pickValue && <option value="" disabled>pick a key…</option>}
                 {stale && <option value={pickValue} disabled>(no longer offered — pick again)</option>}
                 {services.length > 0 && (
                   <optgroup label="Services">
@@ -497,8 +555,8 @@ function KeysCard({ setMsg, setRebooting }) {
                   </optgroup>
                 )}
               </select>
-              <KeyInput id="keyin-add" key={`add-${epoch}`} hint="" placeholder="paste the key…" label="New key" />
-              <button className={BTN_PRIMARY} disabled={busy || !pickValue} onClick={add}>Add</button>
+              <KeyInput id="keyin-add" key={`add-${epoch}-${addEpoch}`} hint="" placeholder="paste the key…" label="New key" />
+              <button className={BTN_PRIMARY} disabled={busy || !pickValue || stale} onClick={add}>Add</button>
               {agentNote && agents.length === 0 && <span className="text-[13px] text-[var(--muted)]">{agentNote}</span>}
             </>
           )}
@@ -684,6 +742,9 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   const [muted, setMuted] = useState(false)  // confirmed from the node's ack, never optimistic
   const [muteUnknown, setMuteUnknown] = useState(false)  // every /info try failed this connection
   const [muteBusy, setMuteBusy] = useState(false)
+  // A Wi-Fi or name POST in flight. A second click reached a node already
+  // rebooting (or already renamed) and its failure overwrote the success.
+  const [sending, setSending] = useState(false)
 
   // Refresh the button from the NODE's truth on every mount (2026-10-07):
   // component state dies on page refresh, but the node remembers its mute
@@ -731,16 +792,19 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
     // Staleness = "a newer connection took over" (stamp moved), NOT effect
     // cleanup — StrictMode's dev double-invoke would cancel the only ask.
     const seq = muteSeqRef.current  // staleness vs a toggle fired mid-flight
-    api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`)
+    // /info is guarded server-side (it talks to the node), so a token-less
+    // browser must be asked for the token here — a GET never asks by default.
+    api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`, { promptForToken: true })
       .then(r => {
         if (askedAtRef.current !== stamp || muteSeqRef.current !== seq) return
         if (r?.ok) { setMuted(!!r?.data?.muted); setMuteUnknown(false) }
         else throw new Error('info not ok')
       })
-      .catch(() => {
+      .catch(e => {
         if (askedAtRef.current !== stamp || muteSeqRef.current !== seq) return
         // Out of tries: say so — never keep showing the LAST connection's state.
-        if (triesRef.current >= 3) { setMuteUnknown(true); return }
+        // A cancelled or rejected token ask isn't retried (no repeat asks).
+        if (triesRef.current >= 3 || e?.status === 401) { setMuteUnknown(true); return }
         setTimeout(() => {
           if (askedAtRef.current !== stamp) return
           askedAtRef.current = `${stamp}#retry`  // same connection, ask again
@@ -784,10 +848,12 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   }
 
   const rename = async () => {
+    if (sending) return
     if (!renameVal.trim()) { setMsg('New name required.', 'err', 'Nodes'); return }
     if (!/^[A-Za-z0-9_-]+$/.test(renameVal)) {
       setMsg('Name: letters, numbers, _ or - only (max 31).', 'err', 'Nodes'); return }
     setBusy('rename')
+    setSending(true)
     setMsg(`Renaming ${room} to ${renameVal}…`, 'pulse', 'Nodes')
     try {
       await post('name', { name: renameVal })
@@ -796,6 +862,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
       setBusy(null)
       await reloadAll()
     } catch (e) { setMsg('Rename failed: ' + e.message, 'err', 'Nodes') }  // form stays open to retry
+    finally { setSending(false) }
   }
 
   const scanForWifi = async () => {
@@ -818,8 +885,10 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
   }
 
   const applyWifi = async () => {
+    if (sending) return
     if (!wifiStage?.ssid) { setMsg('Pick a network first.', 'err', 'Nodes'); return }
     if (!wifiPass) { setMsg('Wi-Fi password required.', 'err', 'Nodes'); return }
+    setSending(true)
     setMsg(`Applying Wi-Fi to ${room}…`, 'pulse', 'Nodes')
     try {
       await post('wifi', { ssid: wifiStage.ssid, password: wifiPass })
@@ -828,6 +897,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
       setBusy(null)
       await reloadAll()
     } catch (e) { setMsg('Wi-Fi set failed: ' + e.message, 'err', 'Nodes') }  // form stays open to retry
+    finally { setSending(false) }
   }
 
   return (
@@ -863,7 +933,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
           <input className={`${INPUT_CLS} w-[160px] font-mono`} value={renameVal}
             onChange={e => setRenameVal(e.target.value)}
             placeholder="new-name" aria-label={`New name for ${room}`} />
-          <button className={BTN_PRIMARY} onClick={rename}>Save name</button>
+          <button className={BTN_PRIMARY} disabled={sending} onClick={rename}>Save name</button>
           <button className={BTN_DEFAULT} onClick={() => { setBusy(null); setRenameVal('') }}>Cancel</button>
         </div>
       )}
@@ -881,7 +951,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
             onChange={e => setWifiPass(e.target.value)}
             placeholder="Wi-Fi password" aria-label={`Password for ${room}`} />
           <div className="flex gap-2 justify-end">
-            <button className={BTN_PRIMARY} onClick={applyWifi}>Apply</button>
+            <button className={BTN_PRIMARY} disabled={sending} onClick={applyWifi}>Apply</button>
             <button className={BTN_DEFAULT} onClick={() => { setBusy(null); setWifiStage(null) }}>Cancel</button>
           </div>
         </div>
@@ -920,6 +990,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
   // Bug-class fix: the 5s poll refetches mapping and
   // used to clobber unsaved select edits — dirty holds user drafts.
   const [mapDirty, setMapDirty] = useState(false)
+  const draftEdits = useRef(0)  // bumped by every zone/agent pick (a save clears only its own)
   // Session-mode switches: optimistic pending until status confirms.
   const [pendingMode, setPendingMode] = useState({})
 
@@ -961,9 +1032,13 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
   // An unmapped speaker room defaults to its own speaker only once the
   // server resolves it there (the node proved its speaker this session).
   const defaultZone = room => (speakers[room]?.zone === BUILTIN ? BUILTIN : undefined)
+  // A zone deleted elsewhere while a draft held it: that draft entry is
+  // dropped from every Save (the server refuses an unknown zone, so one
+  // dead entry failed every row's Save until a page reload).
+  const liveZone = z => z === BUILTIN || zoneNames.includes(z)
   const saveMapping = async room => {
     const zone = mapDraft?.[room] ?? defaultZone(room)
-    if (!zone) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
+    if (!zone || !liveZone(zone)) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
     // PUT /mapping takes the FULL room_zones dict WRAPPED in a
     // room_zones key (MappingPayload contract, routes.py) — a bare
     // merged dict 422s (or worse: pre-forbid, silently wiped the
@@ -979,17 +1054,26 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
     const liveMap = mapping?.room_zones || {}
     const liveRooms = new Set([...Object.keys(liveMap), ...(status?.rooms || []).map(r => r.room)])
     const stillLive = draft => Object.fromEntries(Object.entries(draft || {}).filter(([r]) => liveRooms.has(r)))
-    const body = { room_zones: { ...liveMap, ...stillLive(mapDraft), [room]: zone } }
+    const liveZones = draft => Object.fromEntries(Object.entries(draft).filter(([, z]) => liveZone(z)))
+    const body = { room_zones: { ...liveMap, ...liveZones(stillLive(mapDraft)), [room]: zone } }
     // Only this system's overrides, and only when one was edited — an
     // untouched page leaves room_agents alone server-side.
     const liveAgentDraft = stillLive(agentDraft)
     const changed = Object.entries(liveAgentDraft).filter(([r, a]) => a !== (savedAgents[r] ?? ''))
     const agentEdits = changed.length > 0
     if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...liveAgentDraft } }
+    const editsAtSave = draftEdits.current
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
-      setMapDirty(false)
-      setAgentDraft({})
+      // Keep the draft until the saved map is back: clearing it first resynced
+      // the rows from the OLD mapping (the row flicked back), and a second
+      // Save in that window PUT the old zone over this one. An edit made
+      // meanwhile keeps the draft too.
+      await reloadAll()
+      if (draftEdits.current === editsAtSave) {
+        setMapDirty(false)
+        setAgentDraft({})
+      }
       if (agentEdits) {
         const picks = changed.map(([r, a]) => `${r} → ${a || `Default (${defaultAgent})`}`).join(', ')
         setMsg(`${room} → ${zoneLabel(zone)} saved. Agent ${picks} applies after a bot restart.`, 'ok', 'Room → zone mapping')
@@ -997,7 +1081,6 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
       } else {
         setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
       }
-      reloadAll()
     } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
   }
 
@@ -1034,7 +1117,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                         DISPLAYS the first zone while its value is '' — a
                         fake selection that Save would reject as "pick a zone". */}
                     <select value={zone}
-                      onChange={e => { setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
+                      onChange={e => { draftEdits.current++; setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
                       className={`${INPUT_CLS} w-[200px]`}>
                       {(zone === '' || (!zoneNames.includes(zone) && !(hasSpeaker && zone === BUILTIN))) &&
                         <option value="" disabled>{zoneNames.length ? 'pick a zone…' : 'add a zone below first'}</option>}
@@ -1046,7 +1129,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                   <td className="px-4 py-2">
                     <div className="grid gap-1">
                       <select value={agent} data-agent-room={room}
-                        onChange={e => setAgentDraft({ ...agentDraft, [room]: e.target.value })}
+                        onChange={e => { draftEdits.current++; setAgentDraft({ ...agentDraft, [room]: e.target.value }) }}
                         className={`${INPUT_CLS} w-[200px]`}>
                         <option value="">{`Default (${defaultAgent || '—'})`}</option>
                         {agent && !known && <option value={agent}>
@@ -1255,7 +1338,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                   </div>
                   {!inUse && (
                     <div className="text-[12px] text-[var(--muted)]">
-                      {`Not in use — replies go to ${esc(sp?.zone) || 'the default zone'}.`}
+                      {sp?.zone ? `Not in use — replies go to ${esc(sp.zone)}.` : 'Not in use — replies play nowhere until this room is mapped.'}
                     </div>
                   )}
                 </td>
@@ -1671,6 +1754,11 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
           <div className="flex items-center gap-2 flex-wrap">
             <select className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
               onChange={e => setSel(e.target.value)}>
+              {/* No listed model is active (e.g. the active one lives outside
+                  the list): without this the browser SHOWS the first model
+                  while the value is '', and Set active refuses it. */}
+              {models.length > 0 && !models.some(m => m.path === sel) &&
+                <option value="" disabled>pick a model…</option>}
               {models.map(m => (
                 <option key={m.path} value={m.path}>
                   {esc(m.name)}{m.source === 'root' ? ' (root)' : m.source === 'stock' ? ' (stock)' : ''}
@@ -2418,17 +2506,23 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <button className={BTN_PRIMARY} onClick={async () => {
               const kind = document.getElementById('int-kind').value
               const url = document.getElementById('int-url').value.trim()
-              // An empty URL is omitted, never sent as "" (the server's URL
-              // check 422s it); omitted = keep or recall the saved one.
-              const body = { kind }
-              if (url) body.url = url
+              const label = kind === 'openclaw' ? 'OpenClaw' : 'Hermes'
+              // Only the URL on screen is saved, under the kind on screen.
+              // The other kind's draft stays here: the stored key goes to a
+              // kind's saved URL, so it must be saved while looking at it.
+              if (!url) { setMsg(`Enter the ${label} URL first.`, 'err', 'Intelligence'); return }
+              const body = { kind, url }
               if (agentSel) body.agent = agentSel
-              // Ship the full per-kind recall map so the backend files
-              // the other kind's URL too (swap-on-switch memory).
-              const mem = Object.fromEntries(Object.entries({ ...urlDrafts.current, [kind]: url }).filter(([, u]) => u))
-              if (mem.hermes || mem.openclaw) body.urls = mem
               try {
-                await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
+                const r = await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
+                if (r?.url_only) {
+                  // New OpenClaw setup: the URL is saved, so discovery can
+                  // now use the stored key. Nothing live changed yet.
+                  setMsg(`${label} URL saved — pick an agent, then Save again to switch to ${label}.`, 'ok', 'Intelligence')
+                  reloadAll()
+                  discover(kind, url)
+                  return
+                }
                 setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
                 reloadAll()
                 offerRestart(setMsg, setRebooting)
@@ -2523,6 +2617,7 @@ export default function App() {
         <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
         <System intelligence={intelligence} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
       </div>
+      <TokenDialog />
     </div>
   )
 }
