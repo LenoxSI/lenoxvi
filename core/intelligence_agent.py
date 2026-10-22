@@ -54,18 +54,9 @@ VOICE_SYSTEM_PROMPT = (
     "never read out raw command output — summarize it conversationally."
 )
 
-# TTS audio tags ([laughs] etc.) render on eleven_v3 but flash_v2_5 speaks them
-# literally — strip from spoken text until the TTS backend renders tags.
-_TAG_RE = re.compile(r"\[[^\]]{1,20}\]")
-
-
 def _normalize(text: str) -> str:
     """Lowercase alphanumerics only — for echo containment checks."""
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-
-
-def _strip_tags(text: str) -> str:
-    return _TAG_RE.sub(" ", text).strip()
 
 
 # Tiered fillers (option B, 2026-10-03): one spoken line per latency tier so
@@ -643,7 +634,6 @@ class IntelligenceAgent(FrameProcessor):
                 reply = await ask
             if epoch != self._turn_epoch:
                 return  # superseded while thinking — discard, no history
-            reply = _strip_tags(reply)
             self._register_echo(reply)
             # A failed call never reached the intelligence — don't write the
             # exchange into server-side history.

@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "core")
 
-from intelligence_agent import _normalize, _strip_tags
+from intelligence_agent import _normalize
 
 # Case 1: the live failure — her reply + filler blob transcribed back
 echo_texts = [
@@ -27,14 +27,5 @@ rhits = {w for t in echo_texts for w in rw if w in set(_normalize(t).split())}
 rratio = len(rhits) / len(rw)
 print(f"real-command: {len(rhits)}/{len(rw)} overlap (ratio {rratio:.2f})")
 assert rratio < 0.6, "real command wrongly flagged as echo"
-
-# Case 3: tags stripped. _strip_tags replaces [tags] with a space, so
-# "Okay. [laughs] Either way, done." -> "Okay.  Either way, done." (double
-# space, then strip). Normalize both sides to keep the assertion honest —
-# the old `or True` here made this case structurally unable to fail.
-_got = _strip_tags("Okay. [laughs] Either way, done.")
-_expected = "Okay.  Either way, done."
-assert " ".join(_got.split()) == " ".join(_expected.split()), f"tag strip: {_got!r}"
-print("tag strip:", _got)
 
 print("CONTAINMENT-LOGIC-OK")

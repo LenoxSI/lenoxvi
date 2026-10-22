@@ -28,6 +28,9 @@ The two version streams are independent.
   dates before speaking and adds about 0.15 s before the first word.
 
 ### Changed
+- Spoken replies are no longer stripped of `[bracketed]` text. The strip was a
+  workaround for one agent's persona; the voice now speaks exactly what the
+  agent writes.
 - pipecat 1.11.0 -> 1.13.0 (pipecat-ai-prebuilt 1.1.0 -> 1.3.0): local Whisper
   decodes off the event loop, the ElevenLabs websocket keepalive no longer
   stops after one failure, a mid-turn TTS reconnect keeps its voice settings,
