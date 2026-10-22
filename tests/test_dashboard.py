@@ -2693,6 +2693,23 @@ def main():
                 _nk12 = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", {})
                 check("agent picker: openclaw discovery without a key says so",
                       _nk12["agents"] == [] and "key" in (_nk12.get("note") or ""), str(_nk12))
+                _nk12b = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", _env12,
+                                               attach_key=False)
+                check("agent picker: attach_key=False probes with no Authorization header",
+                      [a["id"] for a in _nk12b["agents"]] == ["default", "suite-a"]
+                      and _auth12[-1] is None, f"auth={_auth12[-1]!r}")
+                _nk12c = _it12.discover_agents("openclaw", f"http://127.0.0.1:{_port12}", {},
+                                               attach_key=False)
+                check("agent picker: attach_key=False still probes with no key saved",
+                      [a["id"] for a in _nk12c["agents"]] == ["default", "suite-a"]
+                      and _auth12[-1] is None, str(_nk12c)[:150])
+                check("agent picker: same_target tolerates /v1 and slash spellings, nothing else",
+                      _it12.same_target("http://h:18789", "http://h:18789/v1")
+                      and _it12.same_target("http://h:18789/v1/", "http://h:18789/v1")
+                      and _it12.same_target("http://H.test:1", "http://h.test:1")
+                      and not _it12.same_target("http://h:18789", "http://h:18790")
+                      and not _it12.same_target("http://h:18789", "https://h:18789")
+                      and not _it12.same_target("http://h:18789", "http://evil:1/v1"), "")
 
                 # route: kind validated, URL override, hermes via the status port
                 _os.environ["LVI_OPENCLAW_KEY"] = "ockey-abcdefghijkl"
@@ -2703,6 +2720,8 @@ def main():
                 check("agent picker: POST /intelligence/agents openclaw: agents + selected",
                       _ra12.status_code == 200 and [a["id"] for a in _ra12.json()["agents"]] == ["default", "suite-a"]
                       and "selected" in _ra12.json(), _ra12.text[:200])
+                check("agent picker: POST /intelligence/agents: unsaved URL probes WITHOUT the stored key",
+                      _auth12[-1] is None, f"Authorization went to an unsaved URL: {_auth12[-1]!r}")
                 _rh12 = client.post("/api/dashboard/intelligence/agents",
                                     json={"kind": "hermes", "url": "http://127.0.0.1:1/v1"})
                 check("agent picker: POST /intelligence/agents hermes: profiles via the status port, no key material",
