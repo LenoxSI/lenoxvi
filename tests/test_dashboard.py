@@ -3175,11 +3175,10 @@ def main():
           f"preload={_pre_tr} run_bot={_stt_tr}")
     _main_src = _astR.unparse(_botR)
     check("tts norm: the Flash lane sends tts.elevenlabs_text_normalization to ElevenLabs",
-          "apply_text_normalization=tts_text.normalization_mode(cfg('tts', 'elevenlabs_text_normalization'))"
-          in _main_src)
-    check("tts norm: both ElevenLabs lanes spell clock times (ClockTimeFilter)",
-          _main_src.count("text_filters=[tts_text.ClockTimeFilter()]") == 2,
-          f"count={_main_src.count('text_filters=[tts_text.ClockTimeFilter()]')}")
+          "el_norm = tts_text.normalization_mode(cfg('tts', 'elevenlabs_text_normalization'))"
+          in _main_src and "apply_text_normalization=el_norm" in _main_src)
+    check("tts norm: native ElevenLabs normalization only - no custom text filter on any lane",
+          "text_filters=" not in _main_src and "ClockTimeFilter" not in _main_src)
     check("fast restart: uvicorn.run is wrapped (TLS + graceful-shutdown deadline) before the runner starts",
           "wrap_uvicorn_run(uvicorn" in _main_src and _main_src.find("wrap_uvicorn_run(uvicorn") < _main_src.rfind("main()")
           and "_tls_run" not in _main_src, "wrapper missing / after main() / old TLS-only wrapper still there")
