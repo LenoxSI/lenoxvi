@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Saving settings from the dashboard no longer strips the comments in
+  config.yaml (section notes, inline notes, and the note above the next
+  section).
 - Deleting the default speaker zone now hands "default" to a remaining zone
   (or clears it), so unmapped rooms' replies don't go to a zone that no
   longer exists.

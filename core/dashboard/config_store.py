@@ -13,6 +13,7 @@ restarts the bot on its own (that is systemd's job, deliberately kept
 out of the web path for now).
 """
 
+import copy
 import os
 import shutil
 import threading
@@ -32,6 +33,33 @@ _YAML.preserve_quotes = True
 # could garble config.yaml — and a garbled config fails the next boot.
 # Re-entrant: read-modify-write callers hold it across both steps.
 LOCK = threading.RLock()
+
+
+def _merge_into(dst, src: dict) -> None:
+    """Update the loaded mapping `dst` IN PLACE to equal `src`.
+
+    Replacing a section object drops every comment ruamel stored on it -
+    its own notes and the comment block above the NEXT top-level key - and
+    most callers pass plain dict copies. Merging keeps existing keys (and
+    their comments) where they are: changed values update, new keys
+    append, keys missing from `src` are removed."""
+    for k in [k for k in dst if k not in src]:
+        del dst[k]
+    for k, v in src.items():
+        cur = dst.get(k) if k in dst else None
+        if isinstance(cur, dict) and isinstance(v, dict):
+            _merge_into(cur, v)
+        elif k not in dst or cur != v:
+            dst[k] = v
+
+
+def _set_section(data, section: str, value) -> None:
+    value = value or {}
+    cur = data.get(section)
+    if isinstance(cur, dict) and isinstance(value, dict):
+        _merge_into(cur, value)
+    else:
+        data[section] = value
 
 
 def _path() -> Path:
@@ -72,11 +100,9 @@ def write_section(section: str, value: dict) -> dict:
                 f"{p} not found — copy config.example.yaml to config.yaml first"
             )
         data = _YAML.load(p.read_text()) or {}
-        before = dict(data.get(section) or {})
-        if value:
-            data[section] = value
-        else:
-            data[section] = {}
+        # deep copy: the merge below updates nested maps in place
+        before = copy.deepcopy(dict(data.get(section) or {}))
+        _set_section(data, section, value)
         _atomic_write(p, data)
         logger.info(f"config_store: rewrote '{section}' via dashboard ({len(value)} entries)")
         return {"before": before, "after": dict(value)}
@@ -98,12 +124,9 @@ def write_sections(sections: dict) -> dict:
                 f"{p} not found — copy config.example.yaml to config.yaml first"
             )
         data = _YAML.load(p.read_text()) or {}
-        before = {k: dict(data.get(k) or {}) for k in sections}
+        before = {k: copy.deepcopy(dict(data.get(k) or {})) for k in sections}
         for section, value in sections.items():
-            if value:
-                data[section] = value
-            else:
-                data[section] = {}
+            _set_section(data, section, value)
         _atomic_write(p, data)
         for section in sections:
             logger.info(f"config_store: rewrote '{section}' via dashboard "
