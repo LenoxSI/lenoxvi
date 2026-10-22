@@ -4224,6 +4224,64 @@ def main():
               str(_ra))
         registry.mark_disconnected("pc-ra")
 
+        # ── rename: never onto an existing room; mode + history follow ──
+        import intelligence_agent as _iaRN
+        from dashboard import routes as _rRN
+        _rz_saved = dict(config_store.read_section("room_zones") or {})
+        _sm_saved = dict(config_store.read_section("session_modes") or {})
+        _calls_rn = []
+
+        async def _fake_cmd(room, cmd, args=None, **kw):
+            _calls_rn.append((room, cmd, args))
+            return {"ok": True, "data": {"name": (args or {}).get("name")}}
+
+        _orig_cmd_rn = _rRN._node_cmd
+        _rRN._node_cmd = _fake_cmd
+        _stash_path_saved = _iaRN._session_stash._path
+        _stash_tmp = Path(tempfile.mkdtemp()) / "sessions.json"
+        _iaRN._session_stash._path = _stash_tmp
+        try:
+            config_store.write_section("room_zones", {**_rz_saved, "suite-rnA": "ZoneA",
+                                                      "suite-rnB": "ZoneB"})
+            registry.mark_connected("pc-rn")
+            registry.note_offer("pc-rn", "suite-rnA")
+            _r1 = client.post("/api/dashboard/nodes/suite-rnA/name", json={"name": "suite-rnB"})
+            _r2 = client.post("/api/dashboard/nodes/suite-rnA/name", json={"name": "SUITE-RNB"})
+            check("rename: onto an existing room is refused before the node is asked",
+                  _r1.status_code == 409 and _r2.status_code == 409 and not _calls_rn,
+                  f"{_r1.status_code} {_r2.status_code} calls={_calls_rn}")
+            _r3 = client.post("/api/dashboard/nodes/suite-rnA/name", json={"name": "SUITE-RNA"})
+            check("rename: a case-only rename of the same room is allowed",
+                  _r3.status_code == 200 and len(_calls_rn) == 1, f"{_r3.status_code} {_r3.text[:120]}")
+            # a collision that arrives anyway (renamed outside the dashboard)
+            _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name",
+                                          "ok": True, "data": {"name": "suite-rnB"}}), "pc-rn")
+            _rz = config_store.read_section("room_zones") or {}
+            check("rename: a collision never overwrites the other room's zone",
+                  _rz.get("suite-rnB") == "ZoneB" and _rz.get("suite-rnA") == "ZoneA", str(
+                      {k: v for k, v in _rz.items() if k.startswith("suite-rn")}))
+            registry.mark_disconnected("pc-rn")
+            # mode + history follow a clean rename
+            config_store.write_section("session_modes", {**_sm_saved, "suite-st1": "sticky"})
+            _stash_tmp.write_text(json.dumps({"suite-st1": [{"role": "user", "content": "hi"}]}))
+            registry.mark_connected("pc-st")
+            registry.note_offer("pc-st", "suite-st1")
+            _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name",
+                                          "ok": True, "data": {"name": "suite-st2"}}), "pc-st")
+            _sm = config_store.read_section("session_modes") or {}
+            check("rename: the room's sticky/fresh mode follows the new name",
+                  _sm.get("suite-st2") == "sticky" and "suite-st1" not in _sm, str(
+                      {k: v for k, v in _sm.items() if k.startswith("suite-st")}))
+            _hist = json.loads(_stash_tmp.read_text())
+            check("rename: a sticky room's saved conversation follows the new name",
+                  "suite-st2" in _hist and "suite-st1" not in _hist, str(list(_hist)))
+            registry.mark_disconnected("pc-st")
+        finally:
+            _rRN._node_cmd = _orig_cmd_rn
+            _iaRN._session_stash._path = _stash_path_saved
+            config_store.write_section("room_zones", _rz_saved)
+            config_store.write_section("session_modes", _sm_saved)
+
         # A TTS provider switch whose key isn't loaded yet keeps the boot provider
         import keys_catalog as _kcp
         _sp = getattr(_kcp, "session_tts_provider", None)
