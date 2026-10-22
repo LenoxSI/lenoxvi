@@ -170,6 +170,24 @@ def main():
           rooms.get("kitchen", {}).get("online") is True and "unknown" not in rooms,
           f"rooms={list(rooms)}")
 
+    # Two nodes connect before the tee correlates either (every node
+    # re-offers at once after a bot restart): both rooms come online, and
+    # the shared placeholder goes only when the last one resolves.
+    registry.mark_connected("suite-pc-prov-a")
+    registry.mark_connected("suite-pc-prov-b")
+    registry.note_offer("suite-pc-prov-a", "suite-prov-a")
+    rooms = {r["room"]: r for r in registry.known_rooms()}
+    _prov_mid = "unknown" in rooms
+    registry.note_offer("suite-pc-prov-b", "suite-prov-b")
+    rooms = {r["room"]: r for r in registry.known_rooms()}
+    check("registry: two provisional connects both come online once correlated",
+          rooms.get("suite-prov-a", {}).get("online") is True
+          and rooms.get("suite-prov-b", {}).get("online") is True
+          and _prov_mid and "unknown" not in rooms,
+          f"rooms={ {k: v.get('online') for k, v in rooms.items()} } placeholder_mid={_prov_mid}")
+    registry.mark_disconnected("suite-pc-prov-a")
+    registry.mark_disconnected("suite-pc-prov-b")
+
     # browser client: no room
     resp = client.post("/api/offer", json={"sdp": "v=0\r\n", "type": "offer"})
     pc3 = resp.json().get("pc_id") if resp.status_code == 200 else None
@@ -210,6 +228,14 @@ def main():
     check("zone add ok", r.status_code == 200, f"status={r.status_code}")
     m = client.get("/api/dashboard/mapping").json()
     check("new zone visible in mapping GET", "test_zone" in m["zones"], f"zones={list(m['zones'])}")
+    # A '/' in a zone name broke every per-zone route (volume, test, delete
+    # take the name as one path segment): refused at add, with a reason.
+    r = client.post("/api/dashboard/zones", json={
+        "name": "suite/zone", "ip": "127.0.0.1", "player_uid": "RINCON_TEST"})
+    m = client.get("/api/dashboard/mapping").json()
+    check("zones: a name containing '/' is refused at add (400, says why)",
+          r.status_code == 400 and "/" in r.text and "suite/zone" not in m["zones"],
+          f"status={r.status_code} body={r.text[:120]} zones={list(m['zones'])}")
 
     # 7. validation: unknown zone in mapping rejected
     r = client.put("/api/dashboard/mapping",
@@ -543,12 +569,16 @@ def main():
         config_store.write_section("sonos", {**_sonos_sec_l3, "clip_volume": 61, "zone_volumes": {}})
         _so_l3.zone_volume_overrides({})
         _ev2 = client.get("/api/dashboard/mapping").json().get("effective_volumes") or {}
-        _wiim_glob = (config_store.read_section("wiim") or {}).get("clip_volume")
+        _wiim_sec_l3 = config_store.read_section("wiim") or {}
+        _wiim_glob = _wiim_sec_l3.get("clip_volume")
         _wiim_expect = int(_wiim_glob) if _wiim_glob is not None else getattr(_routes_l3, "DEFAULT_CLIP_VOLUME", None)
+        # a WiiM zone with its own saved volume keeps it (the copied config may carry one)
+        _wiim_zv_l3 = {k: int(v) for k, v in (_wiim_sec_l3.get("zone_volumes") or {}).items()}
         check("Sonos global moves Sonos zones only; WiiM resolves in its own section",
               bool(_ev2) and all(_ev2[z] == 61 for z in _sonos_keys_l3)
-              and all(_ev2[z] == _wiim_expect for z in _wiim_keys_l3 if z not in _wo_l3._LIVE_WIIM_VOLUMES),
-              f"ev2={_ev2} wiim_expect={_wiim_expect}")
+              and all(_ev2[z] == _wiim_zv_l3.get(z, _wiim_expect)
+                      for z in _wiim_keys_l3 if z not in _wo_l3._LIVE_WIIM_VOLUMES),
+              f"ev2={_ev2} wiim_expect={_wiim_expect} wiim_zone_volumes={_wiim_zv_l3}")
         # live slider layer wins
         if _sonos_keys_l3:
             _z = sorted(_sonos_keys_l3)[0]
@@ -2056,6 +2086,71 @@ def main():
                     return mid, _DEV["vol"], list(_DEV["sets"])
 
                 _v_mid, _v_end, _v_sets = _asyncio.run(_vol_probe())
+
+                # ── clip files: written off the event loop, on disk before the URL goes out ──
+                import threading as _thcw
+                _CW = []      # (file name, written on the loop thread?)
+                _CW_URL = []  # clip on disk when its URL was handed out?
+                _real_wb = Path.write_bytes
+
+                def _rec_wb(self, data):
+                    if "mp3" in self.name:
+                        _CW.append((self.name, _thcw.current_thread() is _thcw.main_thread()))
+                    return _real_wb(self, data)
+
+                def _url_chk(n):
+                    _CW_URL.append((Path("clips") / n).is_file())
+                    return f"http://127.0.0.1:9/clips/{n}"
+
+                async def _cw_probe():
+                    so = SonosOutput(echo_gate=EchoGate(), zone_selector=lambda: "sz", led=None,
+                                     config_path=str(cfg_test))
+                    so._enabled = True
+                    so._duck_while_awake = False
+                    so._zones = {"sz": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                    so._clip_server = _NS(url_for=_url_chk)
+                    await so._speak_to_sonos(b"\x00\x00" * int(_RATE * 0.2))
+                    wo = WiiMOutput(echo_gate=EchoGate(), zone_selector=lambda: "wz", led=None,
+                                    config_path=str(cfg_test))
+                    wo._enabled = True
+                    wo._zones = {"wz": {"ip": "127.0.0.3"}}
+                    wo._clip_server = _NS(url_for=_url_chk)
+                    await wo._speak_to_wiim(b"\x00\x00" * int(_RATE * 0.2))
+
+                Path.write_bytes = _rec_wb
+                try:
+                    _asyncio.run(_cw_probe())
+                finally:
+                    Path.write_bytes = _real_wb
+                check("clips: Sonos and WiiM reply clips are written off the event loop",
+                      len(_CW) == 2 and not any(on_loop for _, on_loop in _CW), str(_CW))
+                check("clips: each clip is on disk before its URL is handed out",
+                      _CW_URL == [True, True], str(_CW_URL))
+
+                # the hourly prune runs off the loop too
+                import sonos_output as _so_cw
+                _PR = []
+
+                class _StopPrune(Exception):
+                    pass
+
+                def _rec_prune(clips_dir, days):
+                    _PR.append(_thcw.current_thread() is _thcw.main_thread())
+                    raise _StopPrune
+
+                _real_prune, _real_sleep = _so_cw._prune_clips, asyncio.sleep
+
+                async def _no_wait(secs, *a, **k):
+                    return await _real_sleep(0)
+
+                _so_cw._prune_clips, asyncio.sleep = _rec_prune, _no_wait
+                try:
+                    _asyncio.run(_so_cw._clip_prune_loop(SCRATCH / "no-clips", 7))
+                except _StopPrune:
+                    pass
+                finally:
+                    _so_cw._prune_clips, asyncio.sleep = _real_prune, _real_sleep
+                check("clips: the hourly prune runs off the event loop", _PR == [False], str(_PR))
             finally:
                 _wo_mod.wiim_get_status = _saved_status_v
             check("wiim volume: the filler's restore doesn't dip the reply",
@@ -2141,6 +2236,53 @@ def main():
         check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
+
+    # 13b. Guard: an Origin must match the Host's port too (a page on another
+    # port of the same IP is another origin); a missing port is the scheme's.
+    # The empty mapping is refused by the route itself (400, nothing written)
+    # once the guard lets it through, so 400 = passed the guard, 403 = refused.
+    _gport = {}
+    for _base, _origin, _key in (
+            ("https://127.0.0.1:7860", "https://127.0.0.1:7860", "same"),
+            ("https://127.0.0.1:7860", "https://127.0.0.1:9119", "other_port"),
+            ("https://127.0.0.1:7860", "https://127.0.0.1", "default_vs_explicit"),
+            ("http://127.0.0.1", "http://127.0.0.1", "http_default"),
+            ("http://127.0.0.1", "http://127.0.0.1:80", "http_explicit_80"),
+            ("http://127.0.0.1", "https://127.0.0.1", "https_default_443"),
+            ("https://127.0.0.1", "https://127.0.0.1:443", "https_explicit_443")):
+        _gc = TestClient(app, base_url=_base, raise_server_exceptions=False)
+        _gport[_key] = _gc.put("/api/dashboard/mapping", json={"room_zones": {}},
+                               headers={"Origin": _origin}).status_code
+    check("guard: same-origin mutations pass (explicit port, or the scheme's default either way)",
+          all(_gport[k] == 400 for k in ("same", "http_default", "http_explicit_80", "https_explicit_443")),
+          str(_gport))
+    check("guard: an Origin on another port of the same host is refused",
+          all(_gport[k] == 403 for k in ("other_port", "default_vs_explicit", "https_default_443")),
+          str(_gport))
+
+    # 13c. Fire-and-forget sends hold a task reference until they finish
+    # (the loop keeps only weak ones; an unreferenced task can be collected).
+    async def _ref_probe():
+        import led_state as _ls_ref
+        from dashboard import node_command as _nc_ref
+        gate = asyncio.Event()
+
+        class _Out:
+            async def send_message(self, frame):
+                await gate.wait()
+
+        _ls_ref.LedSender(_Out()).send("oww-awake")
+        _nc_ref._send(_Out(), {"cmd": "pong"})
+        await asyncio.sleep(0)
+        held = (len(getattr(_ls_ref, "_inflight", ())), len(getattr(_nc_ref, "_inflight", ())))
+        gate.set()
+        await asyncio.sleep(0.05)
+        after = (len(getattr(_ls_ref, "_inflight", ())), len(getattr(_nc_ref, "_inflight", ())))
+        return held, after
+
+    _ref_held, _ref_after = _asyncio.run(_ref_probe())
+    check("tasks: LED and node-command sends are referenced while in flight, released when done",
+          _ref_held == (1, 1) and _ref_after == (0, 0), f"held={_ref_held} after={_ref_after}")
 
     # Epoch turns + wake-word barge-in: turns
     # run as background tasks (frame loop never blocks on the intelligence), a
@@ -2374,6 +2516,105 @@ def main():
             check("turns turn: no history write for the dead turn",
                   not any("weather" in h for h in _hist) and
                   any("time is it" in h for h in _hist), f"hist={_hist}")
+
+            # ── session end: the in-flight turn dies with the session ──
+            import threading as _thSE
+
+            import intelligence_agent as _iaSE
+            from pipecat.frames.frames import CancelFrame as _CancelSE
+            from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStopSE
+            _stash_saved_SE = _iaSE._session_stash._path
+            _iaSE._session_stash._path = SCRATCH / "sessions-end.json"
+
+            async def _session_end_probe(end):
+                agent = _Agent(echo_gate=_EchoGate8(), room="suite-se", session_mode="sticky")
+                pushed = []
+
+                def fake_ask(text):
+                    time.sleep(0.8)
+                    return "late reply"
+
+                agent._ask_intelligence = fake_ask
+
+                async def fake_push(frame, direction=None):
+                    t = getattr(frame, "text", None)
+                    if t:
+                        pushed.append(t)
+
+                agent.push_frame = fake_push
+                await agent.process_frame(_VADStart(), _FD8.DOWNSTREAM)
+                await agent.process_frame(_VADStopSE(), _FD8.DOWNSTREAM)
+                await agent.process_frame(_TF("what time is it", "", 0, 0, 0), _FD8.DOWNSTREAM)
+                await asyncio.sleep(float(agent._lull_secs) + 0.2)
+                await agent.process_frame(_TF("", "", 0, 0, 0), _FD8.DOWNSTREAM)
+                started = agent._turn_task is not None and not agent._turn_task.done()
+                err = None
+                try:
+                    if end == "cleanup":
+                        await agent.cleanup()
+                    else:
+                        await agent.process_frame(_CancelSE(), _FD8.DOWNSTREAM)
+                except Exception as e:  # noqa: BLE001 — reported in the check detail
+                    err = f"{type(e).__name__}: {e}"
+                await asyncio.sleep(1.2)  # the blocking call's thread finishes meanwhile
+                return started, err, pushed, list(agent._history)
+
+            try:
+                for _end in ("cleanup", "CancelFrame"):
+                    _iaSE._session_stash._path.unlink(missing_ok=True)
+                    _se_started, _se_err, _se_pushed, _se_hist = _asyncio.run(_session_end_probe(_end))
+                    _se_stash = _iaSE._session_stash.load("suite-se")
+                    check(f"turns: session end ({_end}) cancels the in-flight turn: no late reply, no history, no stash",
+                          _se_started and _se_err is None and "late reply" not in _se_pushed
+                          and _se_hist == [] and _se_stash == [],
+                          f"started={_se_started} err={_se_err} pushed={_se_pushed} hist={_se_hist} stash={_se_stash}")
+
+                # sticky stash save runs off the event loop (a worker thread)
+                _SAVES_SE = []
+                _real_save_SE = _iaSE._session_stash.save
+
+                def _rec_save(room, history):
+                    _SAVES_SE.append((room, _thSE.current_thread() is _thSE.main_thread()))
+                    return _real_save_SE(room, history)
+
+                async def _stash_probe():
+                    agent = _Agent(echo_gate=_EchoGate8(), room="suite-st8", session_mode="sticky")
+                    agent._ask_intelligence = lambda text: "quick reply"
+
+                    async def fake_push(frame, direction=None):
+                        return None
+
+                    agent.push_frame = fake_push
+                    await agent._run_turn("what time is it", agent._turn_epoch)
+
+                _iaSE._session_stash.save = _rec_save
+                try:
+                    _asyncio.run(_stash_probe())
+                finally:
+                    _iaSE._session_stash.save = _real_save_SE
+                check("turns: the sticky stash is saved off the event loop",
+                      _SAVES_SE == [("suite-st8", False)], str(_SAVES_SE))
+            finally:
+                _iaSE._session_stash._path = _stash_saved_SE
+
+            # ── supersede-ack gap: config.yaml wins, env is the fallback ──
+            _int_before_SE = dict(config_store.read_section("intelligence") or {})
+            _env_gap_SE = os.environ.pop("LVI_SUPERSEDE_ACK_GAP", None)
+            try:
+                config_store.write_section("intelligence", {**_int_before_SE, "supersede_ack_gap": 7})
+                _gap_cfg = getattr(_Agent(echo_gate=_EchoGate8(), room="suite-gap"), "_ack_gap", None)
+                config_store.write_section("intelligence", {k: v for k, v in _int_before_SE.items()
+                                                            if k != "supersede_ack_gap"})
+                os.environ["LVI_SUPERSEDE_ACK_GAP"] = "12"
+                _gap_env = getattr(_Agent(echo_gate=_EchoGate8(), room="suite-gap"), "_ack_gap", None)
+                os.environ.pop("LVI_SUPERSEDE_ACK_GAP", None)
+                _gap_def = getattr(_Agent(echo_gate=_EchoGate8(), room="suite-gap"), "_ack_gap", None)
+            finally:
+                config_store.write_section("intelligence", _int_before_SE)
+                if _env_gap_SE is not None:
+                    os.environ["LVI_SUPERSEDE_ACK_GAP"] = _env_gap_SE
+            check("turns: intelligence.supersede_ack_gap is read from config.yaml, env fallback, default 45",
+                  (_gap_cfg, _gap_env, _gap_def) == (7.0, 12.0, 45.0), f"{(_gap_cfg, _gap_env, _gap_def)}")
 
             # ── dedup vs retry ──
             async def _dedup_probe(fail_first, slow_first):
@@ -3016,6 +3257,23 @@ def main():
             _bad3 = client.put("/api/dashboard/intelligence",
                                json={"kind": "openclaw", "url": "ftp://nope"})
             check("intelligence: invalid url 422s", _bad3.status_code == 422, str(_bad3.status_code))
+            # urls values get the same check as url: a recalled URL becomes
+            # the live one on the next kind flip.
+            _urls_before = (_yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
+                            .get("intelligence") or {}).get("urls")
+            _bad4 = client.put("/api/dashboard/intelligence",
+                               json={"kind": "openclaw", "urls": {"hermes": "ftp://nope"}})
+            _urls_after = (_yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
+                           .get("intelligence") or {}).get("urls")
+            check("intelligence: an invalid urls value 422s and changes nothing",
+                  _bad4.status_code == 422 and _urls_after == _urls_before,
+                  f"{_bad4.status_code} before={_urls_before} after={_urls_after}")
+            # The card's Save shape with the URL box empty: no url key, only
+            # non-empty urls entries (the page used to send url:"" and 422).
+            _ok5 = client.put("/api/dashboard/intelligence",
+                              json={"kind": "openclaw", "urls": {"openclaw": "http://127.0.0.1:18789/v1"}})
+            check("intelligence: a save without a url is accepted", _ok5.status_code == 200,
+                  f"{_ok5.status_code} {_ok5.text[:120]}")
 
             # (c) lane dispatch: monkeypatched urlopen captures the request
             _cap9 = []
@@ -4671,6 +4929,25 @@ def main():
               _r.status_code == 200 and _r.json().get("restart_needed") is True
               and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("small", "cuda", "float16"), str(_c))
 
+        # A save the model claim refuses (a delete of that model in flight)
+        # changes nothing: the language in the same PUT isn't written either.
+        _before_busy = _sttstt()
+        _rstt._STT_BUSY.add("base")
+        try:
+            _r = client.put("/api/dashboard/stt", json={"model": "base",
+                                                         "language": "es" if _before_busy.get("language") != "es" else "it"})
+        finally:
+            _rstt._STT_BUSY.discard("base")
+        check("stt: a save refused with 409 (model busy) changes nothing, language included",
+              _r.status_code == 409 and _sttstt() == _before_busy, f"{_r.status_code} before={_before_busy} after={_sttstt()}")
+        # Model + language + provider in one save land together.
+        _lang_mx = "es" if _before_busy.get("language") != "es" else "it"
+        _r = client.put("/api/dashboard/stt", json={"model": "base", "language": _lang_mx})
+        _c = _sttstt()
+        check("stt: model and language in one save are both written",
+              _r.status_code == 200 and (_c.get("model"), _c.get("language")) == ("base", _lang_mx), str(_c))
+        client.put("/api/dashboard/stt", json={"model": "small", "language": _before_busy.get("language") or "auto"})
+
         # download-first: config never names a model that isn't on disk
         _r = client.put("/api/dashboard/stt", json={"model": "medium"})
         _j = _r.json()
@@ -5182,6 +5459,41 @@ def main():
               f"{len(_b)} {[x.read_text() for x in _b]}")
         check("backup: a hand-made .env.bak-* is never pruned; ours are UTC-stamped (…Z)",
               _hand.exists() and all(x.name.endswith("Z") for x in _b), f"{_hand.exists()} {[x.name for x in _b]}")
+
+        # The key file is private from the moment its temp file exists, and an
+        # `export VAR=` line is replaced in place (prefix kept), never duplicated.
+        _penv = SCRATCH / "private-test" / ".env"
+        _penv.parent.mkdir(exist_ok=True)
+        _penv.write_text("# keys\nexport P_KEY=old\nQ_KEY=q\n")
+        os.environ["LVI_ENV_FILE"] = str(_penv)
+        _MODES = []  # every mode the temp file was seen with before it became .env
+        _real_chmod, _real_replace = os.chmod, os.replace
+
+        def _seen_chmod(p, mode, *a, **k):
+            if str(p).endswith(".tmp"):
+                _MODES.append(os.stat(p).st_mode & 0o777)
+            return _real_chmod(p, mode, *a, **k)
+
+        def _seen_replace(src, dst, *a, **k):
+            if str(src).endswith(".tmp"):
+                _MODES.append(os.stat(src).st_mode & 0o777)
+            return _real_replace(src, dst, *a, **k)
+
+        _umask = os.umask(0o022)  # the common default: plain creates are world-readable
+        os.chmod, os.replace = _seen_chmod, _seen_replace
+        try:
+            _asyncio.run(_rk._write_env_key("P_KEY", "new"))
+            _asyncio.run(_rk._write_env_key("R_KEY", "r"))
+            _asyncio.run(_rk._remove_env_key("Q_KEY"))
+        finally:
+            os.chmod, os.replace = _real_chmod, _real_replace
+            os.umask(_umask)
+        check("keys: .env and its temp file are never group/world-readable (writer and remover)",
+              len(_MODES) >= 3 and all(m == 0o600 for m in _MODES)
+              and (_penv.stat().st_mode & 0o777) == 0o600, f"temp modes={[oct(m) for m in _MODES]}")
+        _plines = _penv.read_text().splitlines()
+        check("keys: an `export VAR=` line is replaced in place, keeping `export`, not duplicated",
+              _plines == ["# keys", "export P_KEY=new", "R_KEY=r"], str(_plines))
     finally:
         if _k_saved_fns[0] is not None:
             _rk._keys_http = _k_saved_fns[0]
