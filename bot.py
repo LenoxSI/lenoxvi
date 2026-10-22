@@ -289,12 +289,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                     model=el_model,
                     voice=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
                 ),
-                # Clock times go out spelled ("nine eleven PM"): ElevenLabs
-                # garbles "9:11 PM" on Flash; harmless on every model.
-                text_filters=[tts_text.ClockTimeFilter()],
             )
             logger.info(f"tts backend: elevenlabs {el_model} (text-to-dialogue)")
         else:
+            # Number/time/date spelling on ElevenLabs' side: auto (their
+            # default - OFF on Flash for latency) | on | off.
+            el_norm = tts_text.normalization_mode(cfg("tts", "elevenlabs_text_normalization"))
             tts = TrackedElevenLabsTTSService(
                 api_key=os.environ["ELEVENLABS_API_KEY"],
                 voice_id=cfg_env("tts", "voice_id", "LVI_TTS_VOICE_ID"),
@@ -310,12 +310,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                         cfg("tts", "elevenlabs_speed")),
                     stability=(lambda v: float(v) if v not in (None, "") else None)(
                         cfg("tts", "elevenlabs_stability")),
-                    # Number/time/date spelling on ElevenLabs' side: auto
-                    # (their default - OFF on Flash for latency) | on | off.
-                    apply_text_normalization=tts_text.normalization_mode(
-                        cfg("tts", "elevenlabs_text_normalization")),
+                    apply_text_normalization=el_norm,
                 ),
-                text_filters=[tts_text.ClockTimeFilter()],
             )
             logger.info(f"tts backend: elevenlabs {el_model}")
     # Hot standby (tts.fallback: pocket): the primary gets wrapped in

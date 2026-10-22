@@ -57,8 +57,8 @@ tts:
                              # the websocket handshake rejects v3 with HTTP 400
   # elevenlabs_text_normalization: on     # auto (ElevenLabs default: OFF on Flash) | on | off
   #                                       # on = ElevenLabs spells out numbers, times, dates
-  #                                       # (~+0.15 s to first audio). Clock times are
-  #                                       # spelled out by the bot either way.
+  #                                       # (~+0.15 s to first audio). Recommended on
+  #                                       # for Flash: it garbles clock times without it.
   # deepgram_flux_voice: flux-hannah-en   # used when provider: deepgram-flux
   # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
   # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)

@@ -18,9 +18,8 @@ The two version streams are independent.
 - A node that rolls back to its previous network after a failed Wi-Fi change
   says so in the bot log (firmware 1.2.35).
 - ElevenLabs Flash no longer garbles clock times ("9:11 PM" could come out as
-  babble with seconds of silence): the bot spells clock times out before they
-  reach the voice, and a new TTS setting turns on ElevenLabs' own number
-  normalization (off by default on Flash).
+  babble with seconds of silence): a new TTS setting turns on ElevenLabs' own
+  number normalization, which is off by default on Flash.
 
 ### Added
 - TTS card: "Numbers & times" for ElevenLabs Flash (Auto / On / Off), saved
