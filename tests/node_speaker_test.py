@@ -32,12 +32,12 @@ check("speaker resolve: mapped zone wins", ns.resolve_zone("den", rz, has_speake
 check("speaker resolve: mapped builtin", ns.resolve_zone("bench", rz, has_speaker=True) == "builtin")
 check("speaker resolve: unmapped speaker node -> builtin (default, no config write)",
       ns.resolve_zone("new", rz, has_speaker=True) == "builtin")
-check("speaker resolve: unmapped mic-only node -> None (backend default zone)",
+check("speaker resolve: unmapped mic-only node -> None (no speaker: silent until mapped)",
       ns.resolve_zone("new", rz, has_speaker=False) is None)
 check("speaker resolve: None/unknown room -> None",
       ns.resolve_zone(None, rz, has_speaker=True) is None
       and ns.resolve_zone("unknown", rz, has_speaker=True) is None)
-check("speaker resolve: a stale builtin mapping on a node without a (proven) speaker -> default zone, never silence",
+check("speaker resolve: a builtin mapping on a node without a (proven) speaker -> None (silent)",
       ns.resolve_zone("bench", rz, has_speaker=False) is None)
 check("speaker resolve: tolerates a missing room_zones section",
       ns.resolve_zone("new", None, has_speaker=True) == "builtin")
@@ -242,7 +242,7 @@ check("speaker: echo gate anchored at the FIRST audio frame (playback start), no
 gate, pushed = _run_reply("Dining Room")
 check("speaker: shared-zone reply: stage leaves the gate to the Sonos/WiiM backend", gate.blocks == [] and len(pushed) == 3)
 gate, _ = _run_reply(None)
-check("speaker: no zone (backend default): stage stays out of it", gate.blocks == [])
+check("speaker: no zone (unmapped room): stage stays out of it", gate.blocks == [])
 
 # ── R-I5 speaker-only install (Sonos disabled): LEDs + wake gate follow the reply ──
 import sonos_output as _so
@@ -290,8 +290,60 @@ check("speaker: Sonos disabled + builtin reply: wake gate gets the real speech w
 led, wg, ends = _sonos_disabled_reply(None)
 check("speaker: Sonos disabled, no builtin: unchanged (LED ends at once, no speech window)", ends == [0.0] and wg.speech == [])
 
-# ── bot wiring (source pins) ─────────────────────────────────────────
+# ── speakers: a room with no speaker mapping stays silent until it is mapped ──
 import inspect
+
+import wiim_output as _wo_un
+
+
+def _unmapped_reply(zone, room="probe-room"):
+    """Both backends enabled, each with a default_zone configured: a None
+    reply zone must still play nowhere."""
+    led, wg = _Led(), _WakeGate()
+    gate = _Gate()
+    wo = _wo_un.WiiMOutput(echo_gate=gate, zone_selector=lambda: zone, wake_gate=wg, led=led)
+    wo._enabled, wo._zones, wo._zone = True, {"wz": {"ip": "127.0.0.1"}}, "wz"
+    kw = ({"room_selector": lambda: room}
+          if "room_selector" in inspect.signature(_so.SonosOutput.__init__).parameters else {})
+    so = _so.SonosOutput(echo_gate=gate, zone_selector=lambda: zone, wake_gate=wg, led=led,
+                         reply_elsewhere=lambda: wo.owns_reply(), **kw)
+    so._enabled, so._zones, so._zone = True, {"sz": {"ip": "127.0.0.1", "player_uid": "RINCON_X"}}, "sz"
+    so._duck_while_awake = False
+    tasks, ends = [], []
+    for o in (so, wo):
+        o._schedule_end_of_speech = lambda s: ends.append(s)
+        o._cancel_end_of_speech = lambda: None
+        o.create_task = lambda coro, name=None, context=None: tasks.append(coro) or coro.close()
+
+        async def _pf(frame, direction=FrameDirection.DOWNSTREAM):
+            pass
+        o.push_frame = _pf
+
+    async def go():
+        for f in (TTSStartedFrame(), TTSAudioRawFrame(audio=b"\x00\x00" * 24000, sample_rate=24000, num_channels=1),
+                  TTSStoppedFrame()):
+            await so.process_frame(f, FrameDirection.DOWNSTREAM)
+            await wo.process_frame(f, FrameDirection.DOWNSTREAM)
+    asyncio.run(go())
+    return wo, tasks, ends, wg, gate
+
+
+_wo, _tasks, _ends, _wg, _g = _unmapped_reply(None)
+check("speakers: unmapped room: neither backend claims or plays the reply (default_zone unused)",
+      _wo.owns_reply() is False and _tasks == [], f"owns={_wo.owns_reply()} tasks={len(_tasks)}")
+check("speakers: unmapped room: LED ends at once, no speech window, echo gate never armed",
+      _ends == [0.0] and _wg.speech == [] and _g.blocks == [], f"ends={_ends} speech={_wg.speech} blocks={_g.blocks}")
+# An unproven builtin resolves to None (silent), and to builtin once speaker_ok arrives.
+_rz_b = {"bench": "builtin"}
+_wo, _tasks, _ends, _wg, _g = _unmapped_reply(ns.resolve_zone("bench", _rz_b, has_speaker=False))
+check("speakers: an unproven builtin room is silent (no shared-zone fallback) until speaker_ok",
+      _tasks == [] and _ends == [0.0] and ns.resolve_zone("bench", _rz_b, has_speaker=True) == ns.BUILTIN,
+      f"tasks={len(_tasks)} ends={_ends}")
+_wo, _tasks, _ends, _wg, _g = _unmapped_reply("sz")
+check("speakers: a mapped Sonos room still plays (one speak task, speech window set)",
+      len(_tasks) == 1 and _wg.speech == [1.0], f"tasks={len(_tasks)} speech={_wg.speech}")
+
+# ── bot wiring (source pins) ─────────────────────────────────────────
 from pathlib import Path
 
 _bot = (Path(CORE).parent / "bot.py").read_text()

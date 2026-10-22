@@ -20,9 +20,28 @@ def check(name, cond, detail=""):
 
 
 for v, want in [("on", "on"), ("ON", "on"), (" off ", "off"), ("auto", "auto"),
-                (None, None), ("", None), ("yes", None), (True, None), (1, None)]:
+                (None, None), ("", None), ("yes", None), (True, "on"), (False, "off"),
+                (1, None)]:
     got = tts_text.normalization_mode(v)
     check(f"tts_text: normalization_mode({v!r}) -> {want!r}", got == want, f"got {got!r}")
+
+# Through the real config loader: a bare `on` in config.yaml (the documented
+# spelling) must reach ElevenLabs as "on", not vanish as a YAML boolean.
+import tempfile
+
+for raw, want in [("on", "on"), ("off", "off"), ('"on"', "on"), ("auto", "auto")]:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "config.yaml")
+        with open(path, "w") as f:
+            f.write(f"tts:\n  elevenlabs_text_normalization: {raw}\n")
+        os.environ["LVI_CONFIG"] = path
+        import importlib
+
+        import config
+        importlib.reload(config)
+        got = tts_text.normalization_mode(config.cfg("tts", "elevenlabs_text_normalization"))
+        check(f"tts_text: config.yaml `{raw}` -> {want!r} through cfg()", got == want, f"got {got!r}")
+os.environ.pop("LVI_CONFIG", None)
 
 # Native normalization only: no home-made speller rides alongside it (the two
 # collided - ElevenLabs' normalizer garbled our spelled-out times).

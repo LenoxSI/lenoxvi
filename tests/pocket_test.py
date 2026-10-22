@@ -666,6 +666,55 @@ for _ in range(2):
 _lg.remove(_sink)
 check("pocket: R8 warn_once logs a repeated warning once", sum("suite warning" in s for s in _r8_lines) == 1)
 
+# ── pocket: failed voice is not retried on the event loop ──
+# An uncached catalog voice with the WAN down blocks for the weight host's
+# timeout. warm() tries it in a thread; make_service() runs on the loop right
+# after, so it must reuse that failure instead of trying the voice again.
+_fv_calls = {"vera": 0}
+_fv_ok = {"vera": False}
+
+
+class _OfflineVoiceModel(FakeModel):
+    def get_state_for_audio_prompt(self, voice):
+        if voice == "vera":
+            _fv_calls["vera"] += 1
+            if not _fv_ok["vera"]:
+                raise OSError("voice weights unreachable (WAN dead)")
+        return {"voice": voice}
+
+
+_orig_load_fv = FakeTTSModel.load_model
+FakeTTSModel.load_model = staticmethod(lambda **kw: _OfflineVoiceModel())
+tp._reset_for_tests()
+_fv_warm = asyncio.run(tp.warm("vera"))
+_fv_after_warm = _fv_calls["vera"]
+_fv_svc = tp.make_service(mixin=Mixin, voice="vera")
+check("pocket: failed voice: warm() falls back to the default voice",
+      _fv_warm is True and _fv_after_warm == 1, f"warm={_fv_warm} tries={_fv_after_warm}")
+check("pocket: failed voice: make_service does not retry it on the event loop",
+      _fv_calls["vera"] == _fv_after_warm, f"tries {_fv_after_warm} -> {_fv_calls['vera']}")
+check("pocket: failed voice: the session still gets the default voice",
+      _fv_svc is not None and _fv_svc._voice_state == {"voice": "alba"}, f"svc={_fv_svc}")
+_fv_sessions = [tp.make_service(mixin=Mixin, voice="vera") for _ in range(3)]
+check("pocket: failed voice: later sessions inside the retry interval skip it",
+      _fv_calls["vera"] == _fv_after_warm and all(s is not None for s in _fv_sessions),
+      f"tries={_fv_calls['vera']}")
+# Once the retry interval has passed (WAN back), the next warm loads it.
+_fv_ok["vera"] = True
+_fv_saved_retry = getattr(tp, "VOICE_RETRY_S", None)
+tp.VOICE_RETRY_S = 0.0
+asyncio.run(tp.warm("vera"))
+_fv_back = tp.make_service(mixin=Mixin, voice="vera")
+check("pocket: failed voice: retried after the interval and used once it loads",
+      _fv_back is not None and _fv_back._voice_state == {"voice": "vera"}, f"svc={_fv_back}")
+if _fv_saved_retry is None:
+    del tp.VOICE_RETRY_S
+else:
+    tp.VOICE_RETRY_S = _fv_saved_retry
+FakeTTSModel.load_model = _orig_load_fv
+tp._reset_for_tests()
+# ── end pocket: failed voice ──
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)

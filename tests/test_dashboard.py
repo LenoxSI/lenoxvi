@@ -2151,6 +2151,277 @@ def main():
                 finally:
                     _so_cw._prune_clips, asyncio.sleep = _real_prune, _real_sleep
                 check("clips: the hourly prune runs off the event loop", _PR == [False], str(_PR))
+
+                # ══ speakers: shared WiiM volume snapshot, unmapped rooms, unique clips ══
+                import inspect as _insp_spk
+
+                from loguru import logger as _lg_spk
+                _SPK = {"vol": 23, "cmds": [], "fail_play": False, "slow_vol": None}
+                _spk_slow_started = _thcw.Event()
+
+                def _spk_api(ip, cmd, timeout=4.0):
+                    _SPK["cmds"].append(cmd)
+                    if cmd.startswith("setPlayerCmd:play:") and _SPK["fail_play"]:
+                        raise OSError("unit napping")
+                    if cmd.startswith("setPlayerCmd:vol:"):
+                        _v = int(cmd.rsplit(":", 1)[1])
+                        if _SPK["slow_vol"] is not None and _v == _SPK["slow_vol"]:
+                            _spk_slow_started.set()
+                            time.sleep(0.4)  # the restore write is in flight
+                        _SPK["vol"] = _v
+                    return "OK"
+
+                def _spk_secs(s, rate=16000):
+                    return b"\x00\x00" * int(rate * s)
+
+                def _spk_wiim(ip, selector=lambda: "wz", **kw):
+                    wo = WiiMOutput(echo_gate=EchoGate(), zone_selector=selector, led=None,
+                                    config_path=str(cfg_test), **kw)
+                    wo._enabled = True
+                    wo._zones = {"wz": {"ip": ip}}
+                    wo._zone_volumes = {"wz": 35}
+                    wo._clip_server = _srv
+                    return wo
+
+                _SPK_SW = []
+
+                class _SpkSw:
+                    def __init__(self, ip, player_id=None):
+                        _SPK_SW.append(ip)
+
+                    async def connect(self):
+                        return
+
+                    async def play_clip(self, url, volume=None):
+                        return {"clipId": "spk-1"}
+
+                    async def cancel_clip(self, cid):
+                        return
+
+                    async def close(self):
+                        return
+
+                class _SpkAwake:
+                    state = "awake"
+
+                    def __init__(self):
+                        self.calls = []
+
+                    def note_speech(self, s):
+                        self.calls.append(s)
+
+                async def _spk_shared():
+                    # two pipelines (two rooms) sounding clips on ONE speaker
+                    _SPK.update(vol=23, cmds=[])
+                    a, b = _spk_wiim("127.0.0.4"), _spk_wiim("127.0.0.4")
+                    ta = asyncio.create_task(a._speak_to_wiim(_spk_secs(0.8)))
+                    await asyncio.sleep(0.3)
+                    tb = asyncio.create_task(b._speak_to_wiim(_spk_secs(0.8)))
+                    await asyncio.sleep(1.25)  # ~1.55 s: past A's restore (~1.4 s), mid B (~1.7 s)
+                    mid = _SPK["vol"]
+                    await asyncio.gather(ta, tb)
+                    return mid, _SPK["vol"]
+
+                async def _spk_restore_race():
+                    # a new clip lands while the previous clip's restore write is in flight
+                    _SPK.update(vol=23, cmds=[], slow_vol=23)
+                    _spk_slow_started.clear()
+                    wo = _spk_wiim("127.0.0.5")
+                    ta = asyncio.create_task(wo._speak_to_wiim(_spk_secs(0.2)))
+                    await asyncio.to_thread(_spk_slow_started.wait, 5.0)
+                    tb = asyncio.create_task(wo._speak_to_wiim(_spk_secs(0.2)))
+                    await asyncio.gather(ta, tb)
+                    _SPK["slow_vol"] = None
+                    return _SPK["vol"]
+
+                async def _spk_play_fail():
+                    _SPK.update(vol=23, cmds=[], fail_play=True)
+                    try:
+                        await _spk_wiim("127.0.0.6")._speak_to_wiim(_spk_secs(0.2))
+                    finally:
+                        _SPK["fail_play"] = False
+                    return _SPK["vol"], list(_SPK["cmds"])
+
+                async def _spk_cancel():
+                    _SPK.update(vol=23, cmds=[])
+                    t = asyncio.create_task(_spk_wiim("127.0.0.7")._speak_to_wiim(_spk_secs(2.0)))
+                    await asyncio.sleep(0.5)  # sounding at the voice volume
+                    playing = _SPK["vol"]
+                    t.cancel()
+                    try:
+                        await t
+                    except asyncio.CancelledError:
+                        pass
+                    return playing, _SPK["vol"], t.cancelled()
+
+                async def _spk_unmapped():
+                    # zone None (unmapped room) with a default_zone configured on BOTH backends
+                    _SPK.update(vol=23, cmds=[])
+                    _SPK_SW.clear()
+                    led, wake = _FakeLed(), _SpkAwake()
+                    wgate, sgate = EchoGate(), EchoGate()
+                    wo = _spk_wiim("127.0.0.8", selector=lambda: None, wake_gate=wake)
+                    wo._led, wo._echo_gate = led, wgate
+                    wo._zone = "wz"
+                    _kw = ({"room_selector": lambda: "probe-room"}
+                           if "room_selector" in _insp_spk.signature(SonosOutput.__init__).parameters else {})
+                    so = SonosOutput(echo_gate=sgate, wake_gate=wake, zone_selector=lambda: None, led=led,
+                                     config_path=str(cfg_test), reply_elsewhere=lambda: wo.owns_reply(), **_kw)
+                    so._enabled = True
+                    so._duck_while_awake = True
+                    so._zones = {"sz": {"ip": "127.0.0.9", "player_uid": "RINCON_TEST"}}
+                    so._zone = "sz"
+                    pushed = []
+
+                    async def _pf(frame, direction=_FrameDirection.DOWNSTREAM):
+                        pushed.append(frame)
+                    for o in (so, wo):
+                        o._clip_server = _srv
+                        o.create_task = lambda coro, name=None, context=None: asyncio.create_task(coro)
+                        o.push_frame = _pf
+                    holder = asyncio.create_task(so._duck_holder_loop())
+                    t0 = time.monotonic()
+                    for _f in (_TTSStartedFrame(), _TTSAudioRawFrame(_spk_secs(0.8, 24000), 24000, 1),
+                               _TTSStoppedFrame()):
+                        await so.process_frame(_f, _FrameDirection.DOWNSTREAM)
+                        await wo.process_frame(_f, _FrameDirection.DOWNSTREAM)
+                    await asyncio.sleep(1.5)
+                    holder.cancel()
+                    try:
+                        await holder
+                    except asyncio.CancelledError:
+                        pass
+                    ends = [(round(ts - t0, 2), m) for ts, m in led.sent
+                            if m in ("bot-stopped-speaking", "oww-sleeping")]
+                    return {"owns": wo.owns_reply(),
+                            "plays": [c for c in _SPK["cmds"] if c.startswith("setPlayerCmd:play:")],
+                            "vol_writes": [c for c in _SPK["cmds"] if c.startswith("setPlayerCmd:vol:")],
+                            "sonos": list(_SPK_SW), "ends": ends, "speech": list(wake.calls),
+                            "echo_open": max(wgate._blocked_until, sgate._blocked_until) <= time.monotonic(),
+                            "pushed": len(pushed)}
+
+                async def _spk_names():
+                    names = []
+                    nsrv = _NS(url_for=lambda n: names.append(n) or f"http://127.0.0.1:9/clips/{n}")
+                    outs = []
+                    for _ in range(2):  # two rooms' pipelines, both fresh after a restart
+                        so = SonosOutput(echo_gate=EchoGate(), zone_selector=lambda: "sz", led=None,
+                                         config_path=str(cfg_test))
+                        so._enabled = True
+                        so._duck_while_awake = False
+                        so._zones = {"sz": {"ip": "127.0.0.1", "player_uid": "RINCON_TEST"}}
+                        so._clip_server = nsrv
+                        outs.append(so)
+                    await asyncio.gather(*(o._speak_to_sonos(_spk_secs(0.1, 24000)) for o in outs))
+                    wo = _spk_wiim("127.0.0.10")
+                    wo._clip_server = nsrv
+                    # a filler and a fast reply from one pipeline, same second
+                    await asyncio.gather(wo._speak_to_wiim(_spk_secs(0.1)), wo._speak_to_wiim(_spk_secs(0.1)))
+                    return names
+
+                _spk_saved = (_wo_mod.wiim_api, _wo_mod.wiim_get_status, sys.modules.get("sonos_websocket"))
+                _wo_mod.wiim_api = _spk_api
+                _wo_mod.wiim_get_status = lambda ip, timeout=3.0: {"vol": str(_SPK["vol"])}
+                sys.modules["sonos_websocket"] = _types.SimpleNamespace(SonosWebsocket=_SpkSw)
+                _spk_log = []
+                _spk_sink = _lg_spk.add(lambda m: _spk_log.append(str(m)), level="INFO")
+                try:
+                    _sh_mid, _sh_end = _asyncio.run(_spk_shared())
+                    check("wiim: two pipelines on one speaker share the music snapshot (no mid-reply dip)",
+                          _sh_mid == 35, f"mid={_sh_mid}")
+                    check("wiim: two pipelines on one speaker put the music level back afterwards",
+                          _sh_end == 23, f"end={_sh_end}")
+                    _rr_end = _asyncio.run(_spk_restore_race())
+                    check("wiim: a clip arriving mid-restore keeps the music level (restore holds the lock)",
+                          _rr_end == 23, f"end={_rr_end} cmds={_SPK['cmds']}")
+                    _pf_vol, _pf_cmds = _asyncio.run(_spk_play_fail())
+                    check("wiim: a failed play command puts the music volume back",
+                          _pf_vol == 23, f"vol={_pf_vol} cmds={_pf_cmds}")
+                    _cn_playing, _cn_end, _cn_cancelled = _asyncio.run(_spk_cancel())
+                    check("wiim: a reply cancelled mid-clip (bot stopping) still restores the music volume",
+                          _cn_playing == 35 and _cn_end == 23 and _cn_cancelled,
+                          f"playing={_cn_playing} end={_cn_end} cancelled={_cn_cancelled}")
+                    _um = _asyncio.run(_spk_unmapped())
+                    _um_log = "\n".join(_spk_log)
+                    check("speakers: an unmapped room's reply plays on no WiiM (default_zone is not a fallback)",
+                          _um["owns"] is False and _um["plays"] == [] and _um["vol_writes"] == [], str(_um))
+                    check("speakers: an unmapped room's reply plays on no Sonos and ducks nothing",
+                          _um["sonos"] == [], str(_um))
+                    check("speakers: an unmapped room's reply ends the speaking LED at once, exactly once",
+                          len(_um["ends"]) == 1 and _um["ends"][0][0] < 0.3, str(_um["ends"]))
+                    check("speakers: an unmapped room's reply never arms the echo gate",
+                          _um["echo_open"], str(_um))
+                    check("speakers: an unmapped room's reply still reaches the transport (every frame passed on)",
+                          _um["pushed"] == 6, str(_um["pushed"]))
+                    check("speakers: an unmapped room logs one 'no speaker mapping' line naming the room",
+                          _um_log.count("has no speaker mapping") == 1 and "probe-room" in _um_log,
+                          _um_log[-400:])
+                    _nm = _asyncio.run(_spk_names())
+                    _nm_s = [n for n in _nm if n.startswith("reply-")]
+                    _nm_w = [n for n in _nm if n.startswith("wiim-reply-")]
+                    check("clips: two Sonos pipelines replying in the same second get distinct clip names",
+                          len(_nm_s) == 2 and len(set(_nm_s)) == 2, str(_nm_s))
+                    check("clips: two WiiM clips from one pipeline in the same second get distinct names",
+                          len(_nm_w) == 2 and len(set(_nm_w)) == 2, str(_nm_w))
+                finally:
+                    _lg_spk.remove(_spk_sink)
+                    _wo_mod.wiim_api, _wo_mod.wiim_get_status = _spk_saved[0], _spk_saved[1]
+                    if _spk_saved[2] is None:
+                        sys.modules.pop("sonos_websocket", None)
+                    else:
+                        sys.modules["sonos_websocket"] = _spk_saved[2]
+
+                # SonosOutput construction stays off the disk; the startup prune runs in setup(), in a thread
+                from config import cfg as _cfg_spk
+                from pipecat.processors.frame_processor import FrameProcessor as _FP_spk
+                _PR_SPK, _RT_SPK = [], []
+                _real_prune_spk, _real_rt_spk = _so_cw._prune_clips, Path.read_text
+                _real_setup_spk, _real_scs_spk = _FP_spk.setup, _so_cw.shared_clip_server
+                _real_audited_spk = SonosOutput._zones_audited
+
+                def _rec_prune_spk(clips_dir, days):
+                    _PR_SPK.append(_thcw.current_thread() is _thcw.main_thread())
+                    return 0
+
+                def _rec_rt_spk(self, *a, **k):
+                    if self.suffix in (".yaml", ".yml"):
+                        _RT_SPK.append(self.name)
+                    return _real_rt_spk(self, *a, **k)
+
+                async def _noop_setup_spk(self, setup):
+                    return
+
+                async def _fake_scs_spk():
+                    return _srv
+
+                async def _spk_construct():
+                    _cfg_spk("sonos")  # the bot's config cache is warm long before a session starts
+                    SonosOutput._zones_audited = True  # no capability audit task here
+                    Path.read_text = _rec_rt_spk
+                    try:
+                        so = SonosOutput(echo_gate=None, zone_selector=lambda: None, led=None)
+                    finally:
+                        Path.read_text = _real_rt_spk
+                    built = list(_PR_SPK)
+                    so._duck_while_awake = False
+                    await so.setup(None)
+                    return built, list(_PR_SPK)
+
+                _so_cw._prune_clips = _rec_prune_spk
+                _FP_spk.setup, _so_cw.shared_clip_server = _noop_setup_spk, _fake_scs_spk
+                try:
+                    _spk_built, _spk_after = _asyncio.run(_spk_construct())
+                finally:
+                    _so_cw._prune_clips = _real_prune_spk
+                    _FP_spk.setup, _so_cw.shared_clip_server = _real_setup_spk, _real_scs_spk
+                    SonosOutput._zones_audited = _real_audited_spk
+                check("sonos: constructing the output reads no config file (cached config)",
+                      _RT_SPK == [], str(_RT_SPK))
+                check("sonos: constructing the output does no clip prune",
+                      _spk_built == [], str(_spk_built))
+                check("sonos: setup() runs the startup clip prune once, off the event loop",
+                      _spk_after == [False], str(_spk_after))
+                # ══ end speakers block ══
             finally:
                 _wo_mod.wiim_get_status = _saved_status_v
             check("wiim volume: the filler's restore doesn't dip the reply",
@@ -3257,8 +3528,8 @@ def main():
             _bad3 = client.put("/api/dashboard/intelligence",
                                json={"kind": "openclaw", "url": "ftp://nope"})
             check("intelligence: invalid url 422s", _bad3.status_code == 422, str(_bad3.status_code))
-            # urls values get the same check as url: a recalled URL becomes
-            # the live one on the next kind flip.
+            # A urls map in the payload is refused outright (only the URL on
+            # screen is ever saved), so a bad value can't land either.
             _urls_before = (_yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
                             .get("intelligence") or {}).get("urls")
             _bad4 = client.put("/api/dashboard/intelligence",
@@ -3268,10 +3539,10 @@ def main():
             check("intelligence: an invalid urls value 422s and changes nothing",
                   _bad4.status_code == 422 and _urls_after == _urls_before,
                   f"{_bad4.status_code} before={_urls_before} after={_urls_after}")
-            # The card's Save shape with the URL box empty: no url key, only
-            # non-empty urls entries (the page used to send url:"" and 422).
-            _ok5 = client.put("/api/dashboard/intelligence",
-                              json={"kind": "openclaw", "urls": {"openclaw": "http://127.0.0.1:18789/v1"}})
+            # A save with no url key (never url:"", which 422s) keeps the
+            # kind's remembered URL. The payload has no urls map: Save files
+            # only the URL on screen, under the kind on screen.
+            _ok5 = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
             check("intelligence: a save without a url is accepted", _ok5.status_code == 200,
                   f"{_ok5.status_code} {_ok5.text[:120]}")
 
@@ -3725,6 +3996,137 @@ def main():
                       and "URLError" in _tr2.get("error", ""), str(_tr2)[:120])
             finally:
                 _routes9._intelligence_probe = _saved_probe9
+
+            # ── intelligence: the OpenClaw key only reaches a URL saved for OpenClaw ──
+            # Save files ONLY the URL on screen, under the kind on screen: the
+            # other kind's typed-but-unsaved draft must never become its saved
+            # URL, because discovery attaches the key to the saved URL. A kind
+            # switch with no URL for the new kind refuses instead of keeping the
+            # old kind's URL. A new OpenClaw setup can save its URL before any
+            # agent is known, so discovery can then list agents with the key.
+            # A bad port is a 422, never a 500. Pinned at urlopen: the header
+            # that actually leaves the box.
+            import intelligence_target as _it13
+            _icfg_saved13 = dict(config_store.read_section("intelligence") or {})
+            _okey_saved13 = _os.environ.get("LVI_OPENCLAW_KEY")
+            _saved_open13 = _urq9.urlopen
+            _auth13 = []
+
+            def _models13(req, timeout=None):
+                _auth13.append((req.full_url, req.get_header("Authorization")))
+                return _FakeResp9(json.dumps({"object": "list", "data": [{"id": "openclaw/main"}]}).encode())
+
+            def _icfg13():
+                return _yaml9.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()).get("intelligence") or {}
+
+            def _put_cfg13(**kv):
+                config_store.write_section("intelligence", {**_base13, **kv})
+            _H13 = "http://hm.test:8642/v1"
+            _O13 = "http://oc.test:18789/v1"
+            _T13 = "http://typo.test:18789/v1"
+            _base13 = {k: v for k, v in _icfg_saved13.items()
+                       if k not in ("kind", "url", "urls", "agent", "agents")}
+            try:
+                _os.environ["LVI_OPENCLAW_KEY"] = "ockey13-abcdefghijkl"
+                _urq9.urlopen = _models13
+                # Save on Hermes while an OpenClaw draft sits in the other slot
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13})
+                _r13 = client.put("/api/dashboard/intelligence", json={
+                    "kind": "hermes", "url": _H13, "urls": {"hermes": _H13, "openclaw": _T13}})
+                check("intelligence: Save never files another kind's unsaved URL",
+                      _r13.status_code == 422 and "openclaw" not in (_icfg13().get("urls") or {}),
+                      f"{_r13.status_code} urls={_icfg13().get('urls')}")
+                _auth13.clear()
+                _d13 = client.post("/api/dashboard/intelligence/agents", json={"kind": "openclaw", "url": _T13})
+                check("intelligence: a URL never saved for OpenClaw is probed without the key",
+                      _d13.status_code == 200 and _auth13 and all(a is None for _, a in _auth13),
+                      f"{_d13.status_code} {[(u, (a or '')[:10]) for u, a in _auth13]}")
+
+                # kind switch with no URL for the new kind: refuse, change nothing
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13}, agents={"openclaw": "main"})
+                _r13b = client.put("/api/dashboard/intelligence", json={"kind": "openclaw", "agent": "main"})
+                _c13b = _icfg13()
+                check("intelligence: switching to OpenClaw with no OpenClaw URL refuses, keeps the Hermes config",
+                      _r13b.status_code == 422 and "openclaw" in _r13b.text.lower() and "url" in _r13b.text.lower()
+                      and _c13b.get("kind") == "hermes" and _c13b.get("url") == _H13,
+                      f"{_r13b.status_code} {_r13b.text[:120]} kind={_c13b.get('kind')} url={_c13b.get('url')}")
+                _put_cfg13(kind="openclaw", url=_O13, urls={"openclaw": _O13}, agents={"openclaw": "main"})
+                _r13c = client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
+                _c13c = _icfg13()
+                check("intelligence: switching to Hermes with no Hermes URL refuses, keeps the OpenClaw config",
+                      _r13c.status_code == 422 and _c13c.get("kind") == "openclaw" and _c13c.get("url") == _O13,
+                      f"{_r13c.status_code} kind={_c13c.get('kind')} url={_c13c.get('url')}")
+                _put_cfg13(kind="hermes", url=_H13)
+                _r13d = client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "default"})
+                check("intelligence: a same-kind save without a URL keeps that kind's URL",
+                      _r13d.status_code == 200 and _icfg13().get("url") == _H13,
+                      f"{_r13d.status_code} url={_icfg13().get('url')}")
+
+                # new OpenClaw setup: the URL saves first, the live lane stays put
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13})
+                _r13e = client.put("/api/dashboard/intelligence", json={"kind": "openclaw", "url": _O13})
+                _c13e = _icfg13()
+                check("intelligence: a new OpenClaw URL saves before any agent is known, live lane unchanged",
+                      _r13e.status_code == 200 and _r13e.json().get("url_only") is True
+                      and (_c13e.get("urls") or {}).get("openclaw") == _O13
+                      and _c13e.get("kind") == "hermes" and _c13e.get("url") == _H13
+                      and not (_c13e.get("agents") or {}).get("openclaw") and not _c13e.get("agent"),
+                      f"{_r13e.status_code} {_r13e.text[:120]} cfg={dict(_c13e)}")
+                _auth13.clear()
+                _d13e = client.post("/api/dashboard/intelligence/agents", json={"kind": "openclaw", "url": _O13})
+                check("intelligence: once its URL is saved, OpenClaw discovery sends the key and lists agents",
+                      _d13e.status_code == 200 and [a["id"] for a in _d13e.json().get("agents") or []] == ["main"]
+                      and _auth13 and (_auth13[-1][1] or "").startswith("Bearer "),
+                      f"{_d13e.text[:160]} {[(u, (a or '')[:10]) for u, a in _auth13]}")
+                _r13f = client.put("/api/dashboard/intelligence",
+                                   json={"kind": "openclaw", "url": _O13, "agent": "main"})
+                _c13f = _icfg13()
+                check("intelligence: picking an agent then switches the lane to OpenClaw",
+                      _r13f.status_code == 200 and not _r13f.json().get("url_only")
+                      and _c13f.get("kind") == "openclaw" and _c13f.get("url") == _O13
+                      and (_c13f.get("agents") or {}).get("openclaw") == "main",
+                      f"{_r13f.status_code} {_r13f.text[:120]}")
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13, "openclaw": _O13})
+                _r13g = client.put("/api/dashboard/intelligence", json={"kind": "openclaw"})
+                check("intelligence: switching to OpenClaw with no URL to save and no agent still 422s",
+                      _r13g.status_code == 422 and "agent" in _r13g.text and _icfg13().get("kind") == "hermes",
+                      f"{_r13g.status_code} {_r13g.text[:120]}")
+
+                # bad ports: a validation 422, never a 500
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13})
+                _r13h = client.post("/api/dashboard/intelligence/agents",
+                                    json={"kind": "openclaw", "url": "http://oc.test:70000/v1"})
+                _r13i = client.put("/api/dashboard/intelligence",
+                                   json={"kind": "hermes", "url": "http://hm.test:70000/v1"})
+                _r13j = client.post("/api/dashboard/intelligence/agents",
+                                    json={"kind": "hermes", "url": "http://hm.test:1:2/v1"})
+                check("intelligence: an out-of-range or malformed port is a 422, never a 500 or a save",
+                      (_r13h.status_code, _r13i.status_code, _r13j.status_code) == (422, 422, 422)
+                      and _icfg13().get("url") == _H13,
+                      f"{_r13h.status_code} {_r13i.status_code} {_r13j.status_code} url={_icfg13().get('url')}")
+                # a hand-edited saved URL with a bad port: the probe compares
+                # against it and must answer, unauthenticated, not 500
+                _put_cfg13(kind="hermes", url=_H13, urls={"hermes": _H13, "openclaw": "http://oc.test:70000/v1"})
+                _auth13.clear()
+                _r13k = client.post("/api/dashboard/intelligence/agents", json={"kind": "openclaw", "url": _O13})
+                check("intelligence: a saved URL with a bad port never 500s discovery and never gets the key",
+                      _r13k.status_code == 200 and all(a is None for _, a in _auth13),
+                      f"{_r13k.status_code} {[(u, (a or '')[:10]) for u, a in _auth13]}")
+                try:
+                    _st13 = (_it13.same_target("http://h:70000", "http://h:1"),
+                             _it13.same_target("http://h:1:2", "http://h:1"),
+                             _it13.same_target("http://h:70000", "http://h:70000"))
+                except ValueError as _e13:
+                    _st13 = repr(_e13)
+                check("intelligence: same_target treats a bad port as a different target, never raises",
+                      _st13 == (False, False, False), str(_st13))
+            finally:
+                _urq9.urlopen = _saved_open13
+                if _okey_saved13 is None:
+                    _os.environ.pop("LVI_OPENCLAW_KEY", None)
+                else:
+                    _os.environ["LVI_OPENCLAW_KEY"] = _okey_saved13
+                config_store.write_section("intelligence", _icfg_saved13)
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
@@ -4142,12 +4544,42 @@ def main():
     check("whisper phantom: real speech that contains a phrase is kept",
           not _phantom("thanks for watching the kids last night")
           and not _phantom("thank you, that's all") and not _phantom("Thank you."))
-    check("whisper phantom: Whisper's own no-speech rule drops a noise segment",
-          _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-1.4)]))
-    check("whisper phantom: a confident segment is kept even with a high no-speech score",
-          not _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-0.3)])
-          and not _phantom("Okay.", [_NSeg(no_speech_prob=0.8, avg_logprob=-1.4),
-                                     _NSeg(no_speech_prob=0.1, avg_logprob=-0.2)]))
+    # ── whisper phantom: segment scores are left to faster-whisper ──
+    # faster-whisper already skips a segment with a high no-speech score
+    # unless its log-probability is high too (its defaults, left on), so a
+    # second copy of that rule here could never fire on a real segment.
+    # Only the phrase list filters after transcribe.
+    import stt_local as _sttph
+    _capph = {}
+
+    class _FWph:
+        def __init__(self, segs):
+            self.segs = segs
+
+        def transcribe(self, audio, **kw):
+            _capph.clear()
+            _capph.update(kw)
+            return iter(self.segs), _NSeg(language="en")
+
+    def _heard_ph(segs):
+        svc = _sttph.LocalWhisperSTTService.__new__(_sttph.LocalWhisperSTTService)
+        svc._fw_model = _FWph(segs)
+        svc._language = None
+
+        async def _noop():
+            return None
+        svc.ensure_model = _noop
+        return _aiolk.run(svc._transcribe(b"RIFF")).text
+
+    check("whisper phantom: a transcript is never dropped on segment scores alone",
+          _heard_ph([_NSeg(text=" Okay.", no_speech_prob=0.8, avg_logprob=-1.4)]) == "Okay.")
+    check("whisper phantom: a caption phrase is still dropped on the transcribe path",
+          _heard_ph([_NSeg(text=" Thanks for watching!", no_speech_prob=0.1,
+                           avg_logprob=-0.2)]) == "")
+    check("whisper phantom: faster-whisper's own no-speech rule stays at its defaults",
+          "no_speech_threshold" not in _capph and "log_prob_threshold" not in _capph,
+          str(_capph))
+    # ── end whisper phantom: segment scores ──
     from pipecat.services.whisper.base_stt import BaseWhisperSTTService as _BWS
 
     class _FakeClient:
@@ -4837,6 +5269,228 @@ def main():
                 os.environ[_k] = _v
         for _sec, _val in _57_cfg.items():
             config_store.write_section(_sec, _val or {})
+
+    # ── rename: live sessions, reserved names, concurrent renames; ──────
+    # ── intelligence: empty replies and queued calls of dead turns ──────
+    import threading as _thRN2
+    import urllib.request as _urqRN2
+    from concurrent.futures import ThreadPoolExecutor as _TPERN2
+
+    import intelligence_agent as _iaRN2
+    from dashboard import node_command as _ncRN2
+    from dashboard import routes as _rRN2
+    from fastapi import HTTPException as _HTTPExcRN2
+
+    def _set_name_ack(pc, name):
+        _ncRN2.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name",
+                                      "ok": True, "data": {"name": name}}), pc)
+
+    def _lock_held(lock):
+        # probe from another thread: an RLock held by THIS thread would
+        # otherwise just be re-entered
+        box = []
+
+        def _try():
+            got = lock.acquire(blocking=False)
+            box.append(got)
+            if got:
+                lock.release()
+        t = _thRN2.Thread(target=_try)
+        t.start()
+        t.join(2)
+        return box == [False]
+
+    _stash_path_RN2 = _iaRN2._session_stash._path
+    _stash_tmp_RN2 = Path(tempfile.mkdtemp()) / "sessions.json"
+    _iaRN2._session_stash._path = _stash_tmp_RN2
+    _sm_saved_RN2 = dict(config_store.read_section("session_modes") or {})
+    _rz_saved_RN2 = dict(config_store.read_section("room_zones") or {})
+    try:
+        # a sticky room renamed mid-session keeps saving under its NEW name
+        config_store.write_section("session_modes", {**_sm_saved_RN2, "suite-rlA": "sticky"})
+        _stash_tmp_RN2.write_text(json.dumps({"suite-rlA": [{"role": "user", "content": "earlier"},
+                                                            {"role": "assistant", "content": "noted"}]}))
+        registry.mark_connected("pc-rl")
+        registry.note_offer("pc-rl", "suite-rlA")
+        _held_at_resolve = []
+
+        def _resolver_rl():
+            _held_at_resolve.append(_lock_held(_iaRN2._session_stash._lock))
+            return registry.room_for_pc("pc-rl")
+        _ag_rl = _iaRN2.IntelligenceAgent(room="suite-rlA", session_mode="sticky", room_resolver=_resolver_rl)
+        _ag_rl._ask_intelligence = lambda text: "after the rename"
+
+        async def _sink_rl(frame, direction=None):
+            return None
+        _ag_rl.push_frame = _sink_rl
+        _held_at_relabel = []
+        _real_relabel_RN2 = registry.relabel_room
+
+        def _rec_relabel(pc, info):
+            _held_at_relabel.append(_lock_held(_iaRN2._session_stash._lock))
+            return _real_relabel_RN2(pc, info)
+        registry.relabel_room = _rec_relabel
+        try:
+            _set_name_ack("pc-rl", "suite-rlB")
+        finally:
+            registry.relabel_room = _real_relabel_RN2
+        _held_at_resolve.clear()
+        asyncio.run(_ag_rl._run_turn("what changed", _ag_rl._turn_epoch))
+        _st_rl = json.loads(_stash_tmp_RN2.read_text())
+        _new_rl = [h.get("content") for h in _st_rl.get("suite-rlB") or []]
+        check("rename: a live sticky session saves under the room's new name, never the old one",
+              "suite-rlA" not in _st_rl and _new_rl[:2] == ["earlier", "noted"]
+              and "after the rename" in _new_rl, f"stash={_st_rl}")
+        check("rename: the registry relabel happens under the conversation stash's lock",
+              _held_at_relabel == [True], str(_held_at_relabel))
+        check("rename: a sticky save resolves the room under the conversation stash's lock",
+              _held_at_resolve == [True], str(_held_at_resolve))
+        registry.mark_disconnected("pc-rl")
+
+        # reserved registry labels are never a node name
+        _calls_RN2 = []
+
+        async def _fake_cmd_RN2(room, cmd, args=None, **kw):
+            _calls_RN2.append((room, cmd, args))
+            await asyncio.sleep(0.3)  # the node takes its time to ack
+            return {"ok": True, "data": {"name": (args or {}).get("name")}}
+
+        _orig_cmd_RN2 = _rRN2._node_cmd
+        _rRN2._node_cmd = _fake_cmd_RN2
+        try:
+            registry.mark_connected("pc-rs")
+            registry.note_offer("pc-rs", "suite-rsA")
+            # as after a restart: no placeholder or browser record exists, so
+            # the existing-room check alone can't refuse these names
+            _held_rs = {k: registry._known_rooms.pop(k) for k in ("unknown", "browser")
+                        if k in registry._known_rooms}
+            try:
+                _codes_rs = [client.post("/api/dashboard/nodes/suite-rsA/name", json={"name": n}).status_code
+                             for n in ("unknown", "Unknown", "browser", "BROWSER")]
+            finally:
+                registry._known_rooms.update(_held_rs)
+            check("rename: the registry's reserved labels (unknown, browser, any case) are refused",
+                  all(400 <= c < 500 for c in _codes_rs) and not _calls_RN2, f"{_codes_rs} calls={_calls_RN2}")
+            registry.mark_disconnected("pc-rs")
+
+            # two concurrent renames onto one name: the second is refused
+            registry.mark_connected("pc-ccA")
+            registry.note_offer("pc-ccA", "suite-ccA")
+            registry.mark_connected("pc-ccB")
+            registry.note_offer("pc-ccB", "suite-ccB")
+
+            async def _two_renames():
+                async def one(room, name):
+                    try:
+                        await _rRN2.set_node_name(room, _rRN2.NamePayload(name=name))
+                        return 200
+                    except _HTTPExcRN2 as e:
+                        return e.status_code
+                return await asyncio.gather(one("suite-ccA", "suite-ccX"), one("suite-ccB", "suite-ccX"))
+            _calls_RN2.clear()
+            _cc = sorted(asyncio.run(_two_renames()))
+            check("rename: two concurrent renames onto one name -> one goes through, the other 409",
+                  _cc == [200, 409] and len(_calls_RN2) == 1, f"{_cc} calls={_calls_RN2}")
+            _calls_RN2.clear()
+
+            async def _after():
+                await _rRN2.set_node_name("suite-ccB", _rRN2.NamePayload(name="suite-ccX"))
+                return 200
+            check("rename: the in-flight reservation is released once the node answers",
+                  asyncio.run(_after()) == 200 and len(_calls_RN2) == 1, str(_calls_RN2))
+
+            # an ack onto a name another live session holds never relabels
+            config_store.write_section("room_zones", {**_rz_saved_RN2, "suite-ccA": "ZoneCA"})
+            _set_name_ack("pc-ccA", "suite-ccB")
+            _rz_cc = config_store.read_section("room_zones") or {}
+            check("rename: an ack onto a name another live session holds leaves both sessions as they were",
+                  registry.room_for_pc("pc-ccA") == "suite-ccA" and registry.room_for_pc("pc-ccB") == "suite-ccB"
+                  and _rz_cc.get("suite-ccA") == "ZoneCA" and "suite-ccB" not in _rz_cc,
+                  f"A={registry.room_for_pc('pc-ccA')} B={registry.room_for_pc('pc-ccB')} "
+                  f"zones={ {k: v for k, v in _rz_cc.items() if k.startswith('suite-cc')} }")
+            registry.mark_disconnected("pc-ccA")
+            registry.mark_disconnected("pc-ccB")
+        finally:
+            _rRN2._node_cmd = _orig_cmd_RN2
+    finally:
+        _iaRN2._session_stash._path = _stash_path_RN2
+        config_store.write_section("session_modes", _sm_saved_RN2)
+        config_store.write_section("room_zones", _rz_saved_RN2)
+
+    # an empty reply is a failed turn: apology, no history, retry not deduped
+    class _RespRN2:
+        def __init__(self, content):
+            self._body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, *a):
+            return self._body
+
+    async def _empty_probe(content):
+        a = _iaRN2.IntelligenceAgent(room="suite-empty", session_mode="fresh")
+        a._key = "k-suite"
+        spoken = []
+
+        async def push(frame, direction=None):
+            t = getattr(frame, "text", None)
+            if t is not None:
+                spoken.append(t)
+        a.push_frame = push
+        a._last_user_text, a._last_user_time = "what time is it", time.monotonic()
+        await a._run_turn("what time is it", a._turn_epoch)
+        return spoken, list(a._history), a._last_user_text
+
+    _real_urlopen_RN2 = _urqRN2.urlopen
+    try:
+        for _content in ("", "   \n"):
+            _urqRN2.urlopen = lambda req, timeout=None, _c=_content: _RespRN2(_c)
+            _sp_e, _hi_e, _lu_e = asyncio.run(_empty_probe(_content))
+            check(f"intelligence: an empty reply ({_content!r}) is a failed turn: apology, no history, retry allowed",
+                  _sp_e == ["Sorry — I can't reach my intelligence right now."] and _hi_e == [] and _lu_e == "",
+                  f"spoken={_sp_e} history={_hi_e} last={_lu_e!r}")
+    finally:
+        _urqRN2.urlopen = _real_urlopen_RN2
+
+    # a dead turn's call still queued for a pool thread is dropped, never sent
+    async def _queued_probe(end):
+        a = _iaRN2.IntelligenceAgent(room="suite-queued", session_mode="fresh")
+        sent = []
+        a._ask_intelligence = lambda text: sent.append(text) or "late"
+
+        async def _noop(*args, **kw):
+            return None
+        a.push_frame = _noop
+        a._turn_task = asyncio.create_task(a._run_turn("stale question", a._turn_epoch))
+        await asyncio.sleep(0.2)  # parked on the queued call
+        if end == "supersede":
+            a._turn_task.cancel()
+            try:
+                await a._turn_task
+            except asyncio.CancelledError:
+                pass
+        else:
+            await a._end_turn()
+        return sent
+
+    _pool_saved_RN2 = _iaRN2._INTEL_POOL
+    try:
+        for _end in ("supersede", "session end"):
+            _pool_q = _TPERN2(max_workers=1)
+            _free_q = _thRN2.Event()
+            _pool_q.submit(_free_q.wait, 5)   # the only thread is busy
+            _iaRN2._INTEL_POOL = _pool_q
+            _sent_q = asyncio.run(_queued_probe(_end))
+            _free_q.set()
+            _pool_q.shutdown(wait=True)
+            check(f"intelligence: a {_end} drops the turn's queued call (the stale question is never sent)",
+                  _sent_q == [], f"sent={_sent_q}")
+    finally:
+        _iaRN2._INTEL_POOL = _pool_saved_RN2
 
     # ── stt STT card (routes) ─────────────────────────────────────────
     import time as _tstt
@@ -5619,6 +6273,222 @@ def main():
           f"errs={_errs[:3]} a={_final.get('zz_a')} b={_final.get('zz_b')}")
     check("config_store exposes LOCK for read-modify-write callers", hasattr(config_store, "LOCK"))
     config_store.write_sections({"zz_a": {}, "zz_b": {}})
+
+    # ════ zone routes + firmware upload: fresh config reads, off-loop disk work, concurrent uploads ════
+    # Zone volume/add/delete must rebuild sonos/wiim from the FILE: the
+    # boot cache (config.cfg) only refreshes on dashboard writes, so a hand
+    # edit made after the last one was written back over (or deleted).
+    import config as _cfghe
+    import yaml as _yhe
+    _he_path = Path(os.environ["LVI_CONFIG"])
+    _he_saved = config_store.read_sections(["sonos", "wiim", "room_zones"])
+    _he_saved = {k: dict(v or {}) for k, v in _he_saved.items()}
+
+    def _he_raw():
+        return _yhe.safe_load(_he_path.read_text()) or {}
+
+    def _he_stale_then_edit(edit):
+        # Warm the boot cache, THEN edit the file by hand (no cache refresh).
+        _cfghe.cfg("sonos")
+        raw = _he_raw()
+        edit(raw)
+        _he_path.write_text(_yhe.safe_dump(raw, sort_keys=False))
+
+    try:
+        config_store.write_sections({
+            "sonos": {**_he_saved["sonos"], "clip_volume": 30, "default_zone": "heA", "zone_volumes": {},
+                      "zones": {"heA": {"ip": "192.0.2.71", "player_uid": "RINCON_HEA000000000001400"},
+                                "heB": {"ip": "192.0.2.72", "player_uid": "RINCON_HEB000000000001400"},
+                                "heC": {"ip": "192.0.2.73", "player_uid": "RINCON_HEC000000000001400"}}},
+            "wiim": {**_he_saved["wiim"], "default_zone": "heW", "zones": {"heW": {"ip": "192.0.2.74"}}}})
+
+        def _ed_vol(raw):
+            raw["sonos"]["zones"]["heA"]["ip"] = "192.0.2.99"
+            raw["sonos"]["hand_note"] = "vol"
+        _he_stale_then_edit(_ed_vol)
+        _rv = client.put("/api/dashboard/zones/heA/volume", json={"volume": 41})
+        _sv = _he_raw().get("sonos") or {}
+        check("zones: a volume move keeps hand edits made since the last dashboard write",
+              _rv.status_code == 200 and _sv.get("hand_note") == "vol"
+              and _sv["zones"]["heA"]["ip"] == "192.0.2.99" and (_sv.get("zone_volumes") or {}).get("heA") == 41,
+              f"{_rv.status_code} note={_sv.get('hand_note')} ip={_sv['zones']['heA'].get('ip')} "
+              f"vols={_sv.get('zone_volumes')}")
+
+        def _ed_add(raw):
+            raw["wiim"]["hand_note"] = "add"
+            raw["wiim"]["zones"]["heHand"] = {"ip": "192.0.2.75"}
+        _he_stale_then_edit(_ed_add)
+        _ra = client.post("/api/dashboard/zones", json={"name": "heW2", "backend": "wiim", "ip": "192.0.2.76"})
+        _wa = _he_raw().get("wiim") or {}
+        check("zones: adding a zone keeps hand edits (an extra key and a hand-added zone)",
+              _ra.status_code == 200 and _wa.get("hand_note") == "add"
+              and set(_wa.get("zones") or {}) == {"heW", "heHand", "heW2"},
+              f"{_ra.status_code} note={_wa.get('hand_note')} zones={sorted(_wa.get('zones') or {})}")
+        _he_stale_then_edit(lambda raw: raw["wiim"]["zones"].update({"heHand2": {"ip": "192.0.2.77"}}))
+        _rdup = client.post("/api/dashboard/zones", json={"name": "heHand2", "backend": "wiim", "ip": "192.0.2.78"})
+        check("zones: adding a zone that was hand-added since the last write is refused, not overwritten",
+              _rdup.status_code == 400
+              and (_he_raw().get("wiim") or {}).get("zones", {}).get("heHand2", {}).get("ip") == "192.0.2.77",
+              f"{_rdup.status_code} {_rdup.text[:120]}")
+
+        def _ed_del(raw):
+            raw["sonos"]["default_zone"] = "heC"
+            raw["sonos"]["hand_note"] = "del"
+        _he_stale_then_edit(_ed_del)
+        _rdl = client.delete("/api/dashboard/zones/heA")
+        _sd = _he_raw().get("sonos") or {}
+        check("zones: delete works from the default as it is NOW (hand-set default kept, hand edits kept)",
+              _rdl.status_code == 200 and _sd.get("default_zone") == "heC"
+              and _rdl.json().get("default_zone") == "heC" and _sd.get("hand_note") == "del"
+              and set(_sd.get("zones") or {}) == {"heB", "heC"},
+              f"{_rdl.status_code} default={_sd.get('default_zone')} body={_rdl.text[:120]} "
+              f"note={_sd.get('hand_note')} zones={sorted(_sd.get('zones') or {})}")
+        _he_stale_then_edit(lambda raw: raw["sonos"].update({"default_zone": "heB"}))
+        _rdl2 = client.delete("/api/dashboard/zones/heB")
+        check("zones: deleting the hand-set default still hands default to a remaining zone",
+              _rdl2.status_code == 200 and (_he_raw().get("sonos") or {}).get("default_zone") == "heC"
+              and _rdl2.json().get("default_zone") == "heC",
+              f"{_rdl2.status_code} {_rdl2.text[:120]}")
+    finally:
+        config_store.write_sections(_he_saved)
+
+    # Firmware upload: only the network read of each chunk may run on the
+    # loop — staging writes, validation, swap and manifest go to threads.
+    import threading as _thfw
+
+    class _FwUp:
+        """Async upload stand-in: small chunks with a yield between them,
+        like a real multipart stream."""
+
+        def __init__(self, data, chunk=64 * 1024):
+            self.filename, self._data, self._chunk, self._pos = "fw.bin", data, chunk, 0
+
+        async def read(self, n=-1):
+            await asyncio.sleep(0)
+            out = self._data[self._pos:self._pos + self._chunk]
+            self._pos += len(out)
+            return out
+
+    _cwd_fw = os.getcwd()
+    os.chdir(SCRATCH)  # uploads are relative to cwd; keep them in scratch
+    _it_fw, _dumps_fw = _rRL.firmware_image.image_track, _rRL.json.dumps
+    _fw_on_main = {"image_track": [], "manifest": []}
+    try:
+        def _slow_image_track(data):
+            _fw_on_main["image_track"].append(_thfw.current_thread() is _thfw.main_thread())
+            time.sleep(0.5)
+            return _it_fw(data)
+
+        def _rec_dumps(*a, **k):
+            _fw_on_main["manifest"].append(_thfw.current_thread() is _thfw.main_thread())
+            return _dumps_fw(*a, **k)
+        _rRL.firmware_image.image_track = _slow_image_track
+        _rRL.json.dumps = _rec_dumps
+        try:
+            _gap_fw = asyncio.run(_loop_gap(_rRL.upload_firmware(
+                file=_FwUp(_fake_image5b("1.9.9", "array")), track="array")))
+        finally:
+            _rRL.firmware_image.image_track, _rRL.json.dumps = _it_fw, _dumps_fw
+        check("firmware upload: validation, swap and manifest write run off the event loop",
+              _gap_fw < 0.15 and _fw_on_main["image_track"] == [False] and _fw_on_main["manifest"] == [False],
+              f"max loop gap={_gap_fw:.2f}s on-main={_fw_on_main}")
+
+        # Two uploads to the same track at once: each must stage its own
+        # file, and the served image + manifest must come from ONE upload.
+        _imgA = _fake_image5b("1.9.9", "array") + b"\xaa" * (300 * 1024)
+        _imgB = _fake_image5b("1.9.8", "array") + b"\xbb" * (200 * 1024)
+
+        async def _both():
+            return await asyncio.gather(
+                _rRL.upload_firmware(file=_FwUp(_imgA), track="array"),
+                _rRL.upload_firmware(file=_FwUp(_imgB), track="array"),
+                return_exceptions=True)
+        _res_cc = asyncio.run(_both())
+        _served = Path("firmware/array/array_esp32.bin").read_bytes()
+        _man_cc = json.loads(Path("firmware/array/version.json").read_text())
+        _want_ver = {_imgA: "1.9.9", _imgB: "1.9.8"}.get(_served)
+        check("firmware upload: concurrent uploads to one track each succeed and never mix their bytes",
+              all(isinstance(r, dict) and r.get("ok") for r in _res_cc) and _want_ver is not None,
+              f"results={[type(r).__name__ if not isinstance(r, dict) else r.get('version') for r in _res_cc]} "
+              f"served={len(_served)} bytes, matches={'A' if _served == _imgA else 'B' if _served == _imgB else 'neither'}")
+        check("firmware upload: after concurrent uploads the manifest names the version actually served",
+              _want_ver is not None and _man_cc.get("version") == _want_ver
+              and _man_cc.get("filename") == "array_esp32.bin",
+              f"manifest={_man_cc} served-version={_want_ver}")
+        _left_cc = [q.name for q in Path("firmware/array").iterdir() if q.name.endswith(".uploading")]
+        check("firmware upload: concurrent uploads leave no staging files behind", not _left_cc, str(_left_cc))
+        _rx_cc = client.post("/api/dashboard/firmware/upload",
+                             files={"file": ("x.bin", _fake_image5b("1.9.1", "flex"), "application/octet-stream")},
+                             data={"track": "array"})
+        check("firmware upload: cross-line refusal unchanged, served array image untouched",
+              _rx_cc.status_code == 400 and "reSpeaker Flex firmware" in _rx_cc.text
+              and Path("firmware/array/array_esp32.bin").read_bytes() == _served
+              and not [q for q in Path("firmware/array").iterdir() if q.name.endswith(".uploading")],
+              f"{_rx_cc.status_code} {_rx_cc.text[:120]}")
+    finally:
+        os.chdir(_cwd_fw)
+    # ════ end zone routes + firmware upload block ════
+    # ── dashboard ui (App.jsx): restart wait, Add key, mapping save, node
+    # forms, wake-model picker, token prompt ───────────────────────────────
+    # The host has no JS runtime for the React app, so these read App.jsx and
+    # pin the shape of the exact function that carried each defect.
+    import re as _reui
+    _appsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
+
+    def _jsbody(src, head):
+        """Text of the block opened by `head` (which ends in '{'), brace-matched."""
+        i = src.find(head)
+        if i < 0 or not head.endswith("{"):
+            return ""
+        depth, j = 0, i + len(head) - 1
+        for k in range(j, len(src)):
+            depth += {"{": 1, "}": -1}.get(src[k], 0)
+            if depth == 0:
+                return src[j:k + 1]
+        return ""
+
+    _rb = _jsbody(_appsrc, "async function restartBot(setMsg, setRebooting) {")
+    check("dashboard ui: restart waits for a NEW bot process (an old process under 30 s old is not 'back')",
+          bool(_rb) and "uptime_secs < 30" not in _rb and "Date.now()" in _rb
+          and _rb.find("Date.now()") < _rb.find("/api/dashboard/restart"), _rb[:120])
+    _pe, _wl = _rb.find("if (postErr"), _rb.find("i < 45")
+    check("dashboard ui: a refused restart request is reported at once, not after the 90 s wait",
+          0 <= _pe < _wl and "return" in _rb[_pe:_wl], f"postErr@{_pe} loop@{_wl}")
+
+    _kc = _jsbody(_appsrc, "function KeysCard({ setMsg, setRebooting }) {")
+    _kadd = _reui.search(r'<select id="key-add".*?</select>', _kc, _reui.DOTALL)
+    check("dashboard ui: Add key saves only under an explicitly picked service (no implicit first pick)",
+          bool(_kc) and "firstPick" not in _kc and "addPick ||" not in _kc
+          and bool(_kadd) and 'value="" disabled' in _kadd.group(0), (_kadd.group(0)[:160] if _kadd else "no select"))
+    check("dashboard ui: a picked service that a refresh removed clears the pasted key and blocks Add",
+          "[stale])" in _kc and "addEpoch" in _kc and "disabled={busy || !pickValue || stale}" in _kc)
+
+    _sm = _jsbody(_appsrc, "const saveMapping = async room => {")
+    check("dashboard ui: a mapping save keeps its draft until the saved map is reloaded (no flick back, no revert)",
+          "await reloadAll()" in _sm and _sm.find("await reloadAll()") < _sm.find("setMapDirty(false)"), _sm[-300:])
+    check("dashboard ui: a mapping save drops draft rows whose zone no longer exists",
+          "liveZone(" in _sm and "const liveZone = z => z === BUILTIN || zoneNames.includes(z)" in _appsrc)
+
+    _apib = _jsbody(_appsrc, "async function api(path, opts = {}, _retried = false) {")
+    check("dashboard ui: the node /info read may ask for the dashboard token (its route is guarded)",
+          "promptForToken" in _apib
+          and _reui.search(r"nodes/\$\{encodeURIComponent\(room\)\}/info`, \{ promptForToken: true \}", _appsrc) is not None)
+
+    _na = _jsbody(_appsrc, "function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll }) {")
+    _wf = _jsbody(_na, "const applyWifi = async () => {")
+    _rn = _jsbody(_na, "const rename = async () => {")
+    check("dashboard ui: Wi-Fi Apply and Save name ignore a second click while the first is in flight",
+          "if (sending) return" in _wf and "if (sending) return" in _rn
+          and _reui.search(r"<button[^>]*disabled=\{sending\}[^>]*onClick=\{applyWifi\}", _na) is not None
+          and _reui.search(r"<button[^>]*disabled=\{sending\}[^>]*onClick=\{rename\}", _na) is not None)
+
+    _ow = _jsbody(_appsrc, "function OwwPanel({ setMsg, setRebooting, reloadAll }) {")
+    check("dashboard ui: the wake-model picker shows a placeholder when no listed model is active",
+          '<option value="" disabled>pick a model' in _ow)
+
+    _td = _jsbody(_appsrc, "function TokenDialog() {")
+    check("dashboard ui: the dashboard token is typed into a masked field, never window.prompt",
+          "window.prompt(" not in _appsrc and 'type="password"' in _td)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
