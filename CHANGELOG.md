@@ -15,6 +15,14 @@ The two version streams are independent.
   the nanobot server, and per-room agent overrides work as for the other
   systems.
 
+### Changed
+- Keys card: saving or removing a key that nothing uses yet (for example a
+  Nanobot key while Hermes is the intelligence) no longer offers a restart
+  or shows "restart to apply"; switching to that provider offers the restart.
+- Keys card: testing a key before its provider is set up (no URL saved, or
+  no OpenClaw agent picked) shows what to do next as a note instead of a
+  red "unreachable" failure.
+
 ## [0.6.7] — 2026-10-22 — Two bug hunts, pipecat 1.13, silent unmapped rooms
 
 A stability release: every finding from two full read-only bug hunts is

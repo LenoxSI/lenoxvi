@@ -329,9 +329,14 @@ function keyRoute(row) {
 function keyState(row) {
   // Chip words: lowercase, one or two words (brand Chip rule); the restart
   // note moves to the hover. Warning tone = needs a restart or a key.
-  if (!row.set && row.pending_restart) return { text: 'removed', cls: WARN_CHIP_CLS, title: 'Removed. Restart the bot to apply.' }
+  // A key nothing uses yet needs no restart: neutral tone, no restart note.
+  if (!row.set && row.pending_restart) return row.in_use
+    ? { text: 'removed', cls: WARN_CHIP_CLS, title: 'Removed. Restart the bot to apply.' }
+    : { text: 'removed', cls: CHIP_CLS, title: 'Removed. Nothing uses it, so no restart is needed.' }
   if (!row.set) return row.in_use ? { text: 'missing', cls: WARN_CHIP_CLS } : { text: 'not set', cls: CHIP_CLS }
-  if (row.pending_restart) return { text: `saved · ${row.hint || ''}`, cls: WARN_CHIP_CLS, title: 'Saved. Restart the bot to apply.' }
+  if (row.pending_restart) return row.in_use
+    ? { text: `saved · ${row.hint || ''}`, cls: WARN_CHIP_CLS, title: 'Saved. Restart the bot to apply.' }
+    : { text: `saved · ${row.hint || ''}`, cls: CHIP_CLS, title: 'Saved. Not in use yet: switching to it offers the restart.' }
   return { text: `set · ${row.hint || ''}`, cls: CHIP_CLS }
 }
 
@@ -390,11 +395,20 @@ function KeysCard({ setMsg, setRebooting }) {
       const r = await api(route, { method: 'PUT', json: { ...extra, api_key: key } })
       setOpen(null); setEpoch(n => n + 1)
       setTests(t => ({ ...t, [row.var]: undefined }))
-      await load()
+      const d = await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
-      setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
-      if (offer) offerRestart(setMsg, setRebooting)
-      return r || {}
+      // Only a key the running setup uses needs a restart. A key for a
+      // provider not picked yet is read when that provider is switched on,
+      // and that save offers the restart itself.
+      const var_ = (r && r.var) || row.var
+      const inUse = !!(d?.keys || []).find(k => k.var === var_)?.in_use
+      if (inUse) {
+        setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
+        if (offer) offerRestart(setMsg, setRebooting)
+      } else {
+        setMsg(`${row.label} key saved. Not in use yet — switching to ${row.label} offers the restart.`, 'ok', 'Keys')
+      }
+      return { ...(r || {}), in_use: inUse }
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys'); return null }
   }
 
@@ -409,8 +423,12 @@ function KeysCard({ setMsg, setRebooting }) {
       setOpen(null); setTests(t => ({ ...t, [row.var]: undefined }))
       await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
-      setMsg(`${row.label} key removed — applies on bot restart.`, 'ok', 'Keys')
-      offerRestart(setMsg, setRebooting)
+      if (row.in_use) {
+        setMsg(`${row.label} key removed — applies on bot restart.`, 'ok', 'Keys')
+        offerRestart(setMsg, setRebooting)
+      } else {
+        setMsg(`${row.label} key removed. Nothing used it, so no restart is needed.`, 'ok', 'Keys')
+      }
     } catch (e) { setMsg('Remove failed: ' + e.message, 'err', 'Keys') }
   }
 
@@ -455,7 +473,7 @@ function KeysCard({ setMsg, setRebooting }) {
       if (!v) return
       setAddPick('')
       await test({ var: v })  // the saved key, checked BEFORE any restart
-      offerRestart(setMsg, setRebooting)
+      if (r.in_use) offerRestart(setMsg, setRebooting)  // a key nothing uses yet needs none
     } finally { setBusy(false) }
   }
   const shownRows = (keys || []).filter(shown)
@@ -523,8 +541,9 @@ function KeysCard({ setMsg, setRebooting }) {
                       {t && t.status !== 'testing' && (
                         <tr>
                           <td colSpan={5} data-role="test"
-                            className={`px-4 py-2 text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
-                            {t.status === 'ok' ? '✓ ' : '✗ '}{t.detail || t.status}
+                            className={`px-4 py-2 text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]'
+                              : t.status === 'needs_setup' ? 'text-[var(--muted)]' : 'text-[var(--danger)]'}`}>
+                            {t.status === 'ok' ? '✓ ' : t.status === 'needs_setup' ? 'ⓘ ' : '✗ '}{t.detail || t.status}
                           </td>
                         </tr>
                       )}

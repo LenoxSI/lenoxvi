@@ -1418,9 +1418,14 @@ def _key_test_inner(row: dict, key: str) -> dict:
         url = (icfg.get("urls") or {}).get(kind) or \
             (icfg.get("url") if (icfg.get("kind") or "hermes") == kind else None) or ""
         if kind == "openclaw":
+            # Setup not finished yet is not a failure: "needs_setup" says
+            # what to do next instead of a red "unreachable".
+            if not url:
+                return {"ok": False, "status": "needs_setup",
+                        "detail": "save the OpenClaw URL on the Intelligence card first"}
             agent = intelligence_target.agent_for(icfg, "openclaw")
             if not agent:
-                return {"ok": False, "status": "unreachable",
+                return {"ok": False, "status": "needs_setup",
                         "detail": "pick an OpenClaw agent on the Intelligence card first"}
         else:
             agent = row.get("agent") or "default"
@@ -1446,7 +1451,7 @@ def _key_test_inner(row: dict, key: str) -> dict:
                (icfg.get("url") if (icfg.get("kind") or "hermes") == "nanobot" else None) or "").rstrip("/")
         url = intelligence_target.request_url("nanobot", url) if url else url
         if not url:
-            return {"ok": False, "status": "unreachable",
+            return {"ok": False, "status": "needs_setup",
                     "detail": "save the Nanobot URL on the Intelligence card first"}
         try:
             code, _body = _keys_http("GET", url + "/models", {"Authorization": f"Bearer {key}"})
