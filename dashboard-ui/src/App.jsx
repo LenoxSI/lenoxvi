@@ -225,6 +225,7 @@ const LINE_TITLE = {
 const BTN = 'rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50'
 const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]`
 const BTN_PRIMARY = `${BTN} bg-[var(--accent)] text-[var(--accent-foreground)]`
+const BTN_WARNING = `${BTN} bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]`
 const BTN_DANGER = `${BTN} bg-transparent border border-[var(--danger)] text-[var(--danger)]`
 
 // One logo — dark is the only theme (index.css, no light variant
@@ -486,7 +487,7 @@ function KeysCard({ setMsg, setRebooting }) {
           <div style={{ overflowX: 'auto' }}>
             <table id="keys-table" className="w-full text-[14px]">
               <thead>
-                <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+                <tr className="text-[12px] text-[var(--muted)]">
                   <th className="text-left px-4 py-2">Key</th>
                   <th className="text-left px-4 py-2">Used by</th>
                   <th className="text-left px-4 py-2">In use</th>
@@ -619,7 +620,7 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
     <Section id="overview" title="Overview"
       note=""
       action={
-        <button className={BTN_DANGER} disabled={rebooting}
+        <button className={BTN_DEFAULT} disabled={rebooting}
           onClick={() => {
             if (window.confirm('Restart the bot? Config changes apply on restart.')) {
               restartBot(setMsg, setRebooting)
@@ -930,7 +931,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
           onClick={restart} title="Reboot the node (~15s reconnect).">
           {busy === 'restart' ? 'Restarting…' : 'Restart'}
         </button>
-        <button className={muted ? BTN_PRIMARY : BTN_DEFAULT} disabled={!online || busy || muteBusy}
+        <button className={muted ? BTN_WARNING : BTN_DEFAULT} disabled={!online || busy || muteBusy}
           onClick={toggleMute}
           title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
             : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
@@ -1120,7 +1121,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
         <div className="rounded-2xl bg-[var(--surface)] overflow-hidden" style={{ overflowX: 'auto' }}>
           <table className="w-full text-[14px]">
             <thead>
-              <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+              <tr className="text-[12px] text-[var(--muted)]">
                 <th className="text-left px-4 py-2">Room (mic node)</th>
                 <th className="text-left px-4 py-2">Zone</th>
                 <th className="text-left px-4 py-2">Agent</th>
@@ -1189,10 +1190,10 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
         <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-[14px]">
             <thead>
-              <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+              <tr className="text-[12px] text-[var(--muted)]">
                 <th className="text-left px-4 py-2">Node</th>
                 <th className="text-left px-4 py-2">Status</th>
-                <th className="text-left px-4 py-2">Last seen</th>
+                <th className="text-left px-4 py-2">Since</th>
                 <th className="text-left px-4 py-2">Firmware</th>
                 <th className="text-left px-4 py-2">Session</th>
                 <th className="text-right px-4 py-2">Actions</th>
@@ -1332,7 +1333,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
       <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
         <table className="w-full text-[14px]">
           <thead>
-            <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+            <tr className="text-[12px] text-[var(--muted)]">
               <th className="text-left px-4 py-2">Name</th>
               <th className="text-left px-4 py-2">Backend</th>
               <th className="text-left px-4 py-2">Volume</th>
@@ -1506,7 +1507,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
       `Push ${fwFile.name} to the ${trackLabel(fwTrack)} track?\n\n` +
       `Every ${trackLabel(fwTrack).toLowerCase()} node OTAs this image on its next check. ` +
       `Wrong line = dead node (USB rescue).` +
-      (mismatch ? `\n\n⚠ The filename looks like a ${trackLabel(hinted)} build, but you picked ${trackLabel(fwTrack)}.` : '')))
+      (mismatch ? `\n\nThe filename looks like a ${trackLabel(hinted)} build, but you picked ${trackLabel(fwTrack)}.` : '')))
       return
     setPushing(true)
     setPickup(null)
@@ -1676,7 +1677,7 @@ function WakeNameCard({ setMsg }) {
               <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
                 value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
               <button className={`${BTN_DEFAULT} w-[136px]`}
-                onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Set wake word</button>
+                onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Save</button>
             </Field>
           </div>
           <div className="md:col-start-2 md:row-start-1">
@@ -1704,7 +1705,7 @@ function WakeNameCard({ setMsg }) {
         </div>
 
         <div className="grid gap-1">
-          <div className="text-[12px] uppercase tracking-wide text-[var(--muted)]">Heard right after a wake</div>
+          <div className="text-[12px] text-[var(--muted)]">Heard right after a wake</div>
           {(w.recent || []).length === 0 &&
             <div className="text-[13px] text-[var(--muted)]">Nothing yet — say the wake word. Kept in memory only.</div>}
           {(w.recent || []).map((r, i) => (
@@ -1814,7 +1815,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
         <div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-[14px]">
             <thead>
-              <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+              <tr className="text-[12px] text-[var(--muted)]">
                 <th className="text-left px-4 py-2">Model</th>
                 <th className="text-left px-4 py-2">Source</th>
                 <th className="text-left px-4 py-2">Size</th>
@@ -2291,7 +2292,7 @@ function SttCard({ status, setMsg, setRebooting }) {
         {cloudPick && data && !data.deepgram_key_set && <MissingKey label="Deepgram" />}
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
-            <tr className="text-[12px] uppercase tracking-wide text-[var(--muted)]">
+            <tr className="text-[12px] text-[var(--muted)]">
               <th className="text-left px-4 py-2">Model</th>
               <th className="text-left px-4 py-2">On disk</th>
               <th className="text-left px-4 py-2"></th>
@@ -2322,8 +2323,8 @@ function SttCard({ status, setMsg, setRebooting }) {
 }
 
 const TUNING_FIELDS = [
-  ['wake_threshold', 'Wake sensitivity', 0.30, 0.60, 0.01,
-    'OWW score needed to wake. Real wakes usually score well above TV/ad audio — tune by ear.'],
+  ['wake_threshold', 'Wake threshold', 0.30, 0.60, 0.01,
+    'Wake-word score needed to wake. Real wakes usually score well above TV/ad audio — tune by ear.'],
   ['wake_awake_timeout', 'Awake timeout (s)', 5, 60, 1,
     'Seconds of silence before she stops listening.'],
   ['vad_confidence', 'VAD confidence', 0.30, 0.90, 0.05,

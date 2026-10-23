@@ -16,6 +16,11 @@ The two version streams are independent.
   `LVI_DASHBOARD_TOKEN` set: without a token the recorder routes refuse, so
   no one on the LAN can record a room or download a recording.
 
+### Changed
+- Dashboard: sentence-case table headers, Restart is no longer red, a muted node's Mute button is amber instead
+  of lime, "Wake sensitivity" is now "Wake threshold", the Nodes column reads "Since", and the wake name
+  button reads "Save".
+
 ### Fixed
 - Speakers: a Sonos or WiiM zone added (or a room mapped to it) after a node
   connected now gets that room's replies right away, as the dashboard says;
