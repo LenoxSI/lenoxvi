@@ -8,12 +8,23 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.6.8] — 2026-10-22 — Nanobot intelligence, friendlier key setup
+
+A third agentic brain behind the same rooms and speakers: nanobot, set up
+entirely from the dashboard, plus a Keys card that no longer asks for
+needless restarts or calls an unfinished setup a failure.
+
+- Companion firmware (separate version stream): unchanged —
+  `array-v1.2.37` / `flex-v1.2.37` / `waveshare-v1.2.37`.
+
 ### Added
 - Nanobot as a third intelligence: pick Nanobot on the Intelligence card,
   enter its URL, add its key on the Keys card (`LVI_NANOBOT_KEY`), optionally
   pick its model, Save and restart. Each room keeps its own conversation on
   the nanobot server, and per-room agent overrides work as for the other
-  systems.
+  systems. A bare `http://host:port` URL works (`/v1` is added). Nanobot
+  takes no system prompt from LenoxVI, so set its spoken style (short
+  plain sentences, no markdown) in the nanobot agent's own instructions.
 
 ### Changed
 - Keys card: saving or removing a key that nothing uses yet (for example a
