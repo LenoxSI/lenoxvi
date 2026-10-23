@@ -1187,6 +1187,10 @@ def main():
                 _routes_live_kinds = True
     check("bot.py: intelligence dispatch routes hermes AND openclaw to the real agent",
           _routes_live_kinds, "construction ternary must accept both live kinds")
+    _routes_nanobot = _brain_exp is not None and any(
+        isinstance(_sub, _ast.Constant) and _sub.value == "nanobot" for _sub in _ast.walk(_brain_exp.test))
+    check("nanobot: bot.py: intelligence dispatch routes nanobot to the real agent (not the echo stub)",
+          _routes_nanobot, "construction ternary must accept kind nanobot")
     # Naming rule (2026-10-17): the intelligence step is named for what it
     # is, not for one of its two kinds. The dispatch's live branch must
     # build IntelligenceAgent, and the old module must be gone — a stale
@@ -3738,17 +3742,20 @@ def main():
                     # GET reports key status for EVERY kind (chip follows
                     # the kind on screen).
                     _skh9 = _os.environ.pop("LVI_HERMES_KEY", None)
+                    _skn9 = _os.environ.pop("LVI_NANOBOT_KEY", None)
                     _sko9 = _os.environ.get("LVI_OPENCLAW_KEY")
                     _os.environ["LVI_OPENCLAW_KEY"] = "suite-oc-token-123"
                     try:
                         _gk9 = client.get("/api/dashboard/intelligence").json()
                         check("intelligence: GET keys_set per kind",
-                              _gk9.get("keys_set") == {"hermes": False, "openclaw": True}
+                              _gk9.get("keys_set") == {"hermes": False, "openclaw": True, "nanobot": False}
                               and "suite-oc-token-123" not in str(_gk9),
                               str(_gk9.get("keys_set")))
                     finally:
                         if _skh9 is not None:
                             _os.environ["LVI_HERMES_KEY"] = _skh9
+                        if _skn9 is not None:
+                            _os.environ["LVI_NANOBOT_KEY"] = _skn9
                         if _sko9 is None:
                             _os.environ.pop("LVI_OPENCLAW_KEY", None)
                         else:
@@ -3897,7 +3904,7 @@ def main():
                       and _c12.get("agent") == "suite-a", str(_c12.get("agents")) + " agent=" + str(_c12.get("agent")))
                 _g12 = client.get("/api/dashboard/intelligence").json()
                 check("agent picker: GET agents per kind + first-4 key hints, never the key",
-                      _g12.get("agents") == {"hermes": "home-helper", "openclaw": "suite-a"}
+                      _g12.get("agents") == {"hermes": "home-helper", "openclaw": "suite-a", "nanobot": None}
                       and (_g12.get("key_hints") or {}).get("openclaw") == "ocke" + _M12
                       and "abcdefghijkl" not in json.dumps(_g12), str(_g12)[:240])
 
@@ -5873,7 +5880,7 @@ def main():
     # ── Keys card: every API key in one place (presence + hint only) ──
     from dashboard import routes as _rk
     _K_VARS = ("LVI_ENV_FILE", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "LVI_HERMES_KEY",
-               "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER", "LVI_HERMES_KEY_STRAY")
+               "LVI_OPENCLAW_KEY", "LVI_NANOBOT_KEY", "LVI_HERMES_KEY_HA_BUTLER", "LVI_HERMES_KEY_STRAY")
     _k_before_env = {k: os.environ.get(k) for k in _K_VARS}
     _k_before_cfg = {sec: dict(config_store.read_section(sec) or {}) for sec in ("tts", "stt", "intelligence")}
     _k_saved_fns = (_rk._keys_http if hasattr(_rk, "_keys_http") else None, _rk._intelligence_probe)
@@ -5886,6 +5893,7 @@ def main():
     os.environ.update({"LVI_ENV_FILE": str(_kenv), "DEEPGRAM_API_KEY": "dg-old-SECRET-1111",
                        "ELEVENLABS_API_KEY": "el-live-SECRET-5555", "LVI_HERMES_KEY": "hk-same-SECRET-3333"})
     os.environ.pop("LVI_OPENCLAW_KEY", None)
+    os.environ.pop("LVI_NANOBOT_KEY", None)
     os.environ.pop("LVI_HERMES_KEY_HA_BUTLER", None)
     os.environ["LVI_HERMES_KEY_STRAY"] = "stray-SECRET-6666"   # process-only: must never become a row
     _SECRETS = ("dg-new-SECRET-2222", "dg-old-SECRET-1111", "hk-same-SECRET-3333", "hb-agent-SECRET-4444",
@@ -5899,7 +5907,8 @@ def main():
         _kk = {r["var"]: r for r in (_kr.json().get("keys") or [])} if _kr.status_code == 200 else {}
         check("keys GET: static rows in order, then agent rows found in .env",
               [r["var"] for r in _kr.json().get("keys", [])] == ["ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_HERMES_KEY",
-                                                                 "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY_HA_BUTLER"]
+                                                                 "LVI_OPENCLAW_KEY", "LVI_NANOBOT_KEY",
+                                                                 "LVI_HERMES_KEY_HA_BUTLER"]
               if _kr.status_code == 200 else False, _kr.text[:300])
         check("keys GET: no key value anywhere in the response", not any(x in _kr.text for x in _SECRETS), _kr.text[:300])
         _dg = _kk.get("DEEPGRAM_API_KEY", {})
@@ -6159,6 +6168,459 @@ def main():
                 os.environ[_k] = _v
         for _sec, _val in _k_before_cfg.items():
             config_store.write_section(_sec, _val)
+
+    # ── nanobot: the third intelligence lane, against a fake that enforces its contract ──
+    # A local stand-in for nanobot's API server, shaped by what a real
+    # nanobot v0.3.5 answered: Bearer key or 401 (/v1/models and chat);
+    # exactly ONE user message or 400; a model other than the configured
+    # one -> 400; session_id isolates conversations and an omitted one lands
+    # in a single shared "default" session; /health needs no key. It records
+    # what actually arrives on the wire (bodies before they are judged).
+    import http.server as _hsNB
+    import threading as _thNB
+    import urllib.request as _urqNB
+
+    import intelligence_agent as _iaNB
+    from dashboard import routes as _rNB
+    from loguru import logger as _lgNB
+
+    import intelligence_target as _itNB
+
+    _NB_KEY = "nb-suite-key-abcdefghijkl"
+    _NB_WRONG = "nb-wrong-key-abcdefghijkl"
+    _NB_MODEL = "glm-suite"
+    _NB_APOLOGY = "Sorry — I can't reach my intelligence right now."
+    _NB = {"chat": [], "models": [], "health": 0, "sessions": {}, "force": None}
+
+    class _NBHandler(_hsNB.BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _err(self, code, msg, etype="invalid_request_error"):
+            self._send(code, {"error": {"message": msg, "type": etype, "code": code}})
+
+        def _authed(self):
+            return self.headers.get("Authorization") == f"Bearer {_NB_KEY}"
+
+        def do_GET(self):
+            if self.path == "/health":
+                _NB["health"] += 1
+                return self._send(200, {"status": "ok"})
+            if self.path == "/v1/models":
+                _NB["models"].append(self.headers.get("Authorization"))
+                if not self._authed():
+                    return self._err(401, "Invalid API key", "authentication_error")
+                return self._send(200, {"object": "list", "data": [
+                    {"id": _NB_MODEL, "object": "model", "owned_by": "nanobot"}]})
+            return self._err(404, "Not Found")
+
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = None
+            _NB["chat"].append({"path": self.path, "body": body if isinstance(body, dict) else {},
+                                "headers": {k.lower(): v for k, v in self.headers.items()}})
+            if self.path != "/v1/chat/completions":
+                return self._err(404, "Not Found")
+            if not self._authed():
+                return self._err(401, "Invalid API key", "authentication_error")
+            if _NB["force"]:
+                return self._err(*_NB["force"])
+            msgs = (body or {}).get("messages") if isinstance(body, dict) else None
+            if not (isinstance(msgs, list) and len(msgs) == 1 and isinstance(msgs[0], dict)
+                    and msgs[0].get("role") == "user"):
+                return self._err(400, "Only a single user message is supported")
+            if "model" in body and body["model"] != _NB_MODEL:
+                return self._err(400, f"Only configured model '{_NB_MODEL}' is available")
+            turns = _NB["sessions"].setdefault(body.get("session_id") or "default", [])
+            turns.append(msgs[0].get("content"))
+            return self._send(200, {
+                "id": "chatcmpl-suite", "object": "chat.completion", "model": _NB_MODEL,
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant", "content": f"nanobot turn {len(turns)}"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 3}})
+
+        def log_message(self, *a):
+            pass
+
+    # Two servers, same contract: the second is "another host" — a URL that
+    # is NOT nanobot's saved one, so the stored key must never reach it.
+    _srvNB = _hsNB.ThreadingHTTPServer(("127.0.0.1", 0), _NBHandler)
+    _srvNB2 = _hsNB.ThreadingHTTPServer(("127.0.0.1", 0), _NBHandler)
+    for _s in (_srvNB, _srvNB2):
+        _thNB.Thread(target=_s.serve_forever, daemon=True).start()
+    _NB_URL = f"http://127.0.0.1:{_srvNB.server_address[1]}/v1"
+    _NB_OTHER = f"http://127.0.0.1:{_srvNB2.server_address[1]}/v1"
+    _NB_HERMES = "http://127.0.0.1:9/v1"
+
+    _nb_cfg = {sec: config_store.read_section(sec) for sec in ("intelligence", "room_agents", "room_zones")}
+    _nb_vars = ("LVI_NANOBOT_KEY", "LVI_HERMES_KEY", "LVI_OPENCLAW_KEY", "LVI_ENV_FILE", "LVI_CONVERSATION")
+    _nb_env = {k: os.environ.get(k) for k in _nb_vars}
+    _nb_base = {k: v for k, v in dict(_nb_cfg["intelligence"] or {}).items()
+                if k not in ("kind", "url", "urls", "agent", "agents", "model")}
+    _nb_env_file = SCRATCH / "nanobot.env"
+    _nb_saved_wek = _rNB._write_env_key
+    _nb_real_open = _urqNB.urlopen
+
+    def _nb_put_cfg(**kv):
+        config_store.write_section("intelligence", {**_nb_base, **kv})
+
+    def _nb_icfg():
+        return dict(config_store.read_section("intelligence") or {})
+
+    def _nb_last():
+        return _NB["chat"][-1] if _NB["chat"] else {"path": None, "body": {}, "headers": {}}
+
+    def _nb_ask(agent, text):
+        try:
+            return agent._ask_intelligence(text), None
+        except Exception as e:  # noqa: BLE001 — a failed ask is a check result
+            return None, e
+
+    async def _nb_turn(agent, text):
+        spoken = []
+
+        async def push(frame, direction=None):
+            t = getattr(frame, "text", None)
+            if t is not None:
+                spoken.append(t)
+        agent.push_frame = push
+        agent._last_user_text, agent._last_user_time = text, time.monotonic()
+        await agent._run_turn(text, agent._turn_epoch)
+        return spoken
+
+    try:
+        _nb_env_file.write_text(f"LVI_NANOBOT_KEY={_NB_KEY}\n")
+        os.environ.update({"LVI_NANOBOT_KEY": _NB_KEY, "LVI_ENV_FILE": str(_nb_env_file)})
+        os.environ.pop("LVI_CONVERSATION", None)   # a pinned id would merge every fresh room
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL}, max_tokens=300)
+        config_store.write_section("room_agents", {})
+
+        # ── the lane on the wire ──
+        _nbF = _iaNB.IntelligenceAgent(room="suite-nb-fresh", session_mode="fresh")
+        _r1, _e1 = _nb_ask(_nbF, "what time is it")
+        _c1 = _nb_last()
+        # local history the bot keeps must never be sent
+        _nbF._history = [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "before"}]
+        _r2, _e2 = _nb_ask(_nbF, "and the weather")
+        _c2 = _nb_last()
+        check("nanobot: a turn sends exactly ONE user message (no system prompt, no local history) and is answered",
+              _e1 is None and _e2 is None and _r2 == "nanobot turn 2"
+              and _c2["body"].get("messages") == [{"role": "user", "content": "and the weather"}],
+              f"err={_e1 or _e2} reply={_r2!r} body={str(_c2['body'])[:200]}")
+        check("nanobot: the request is POST <url>/chat/completions with Bearer LVI_NANOBOT_KEY, "
+              "stream off, max_tokens, and no Hermes/OpenClaw fields",
+              _c2["path"] == "/v1/chat/completions"
+              and _c2["headers"].get("authorization") == f"Bearer {_NB_KEY}"
+              and _c2["body"].get("stream") is False and _c2["body"].get("max_tokens") == 300
+              and "conversation" not in _c2["body"]
+              and "x-openclaw-session-key" not in _c2["headers"] and "x-hermes-session-key" not in _c2["headers"],
+              f"path={_c2['path']} body={str(_c2['body'])[:160]} hdrs={sorted(_c2['headers'])}")
+        _sidF = _c2["body"].get("session_id")
+        check("nanobot: a fresh room ALWAYS sends session_id = its connection's conversation id (both turns, one session)",
+              bool(_sidF) and _sidF == _c1["body"].get("session_id") == _nbF._conversation
+              and _sidF.startswith("voice-") and _NB["sessions"].get(_sidF) == ["what time is it", "and the weather"],
+              f"sid={_sidF!r} first={_c1['body'].get('session_id')!r} conv={_nbF._conversation!r}")
+        _nbF2 = _iaNB.IntelligenceAgent(room="suite-nb-fresh", session_mode="fresh")
+        _nb_ask(_nbF2, "hello")
+        _sidF2 = _nb_last()["body"].get("session_id")
+        check("nanobot: a new connection of a fresh room gets its own session; nothing falls into the shared default",
+              bool(_sidF2) and _sidF2 != _sidF and "default" not in _NB["sessions"],
+              f"{_sidF!r} vs {_sidF2!r} sessions={sorted(_NB['sessions'])}")
+        _nbS = _iaNB.IntelligenceAgent(room="suite-nb-sticky", session_mode="sticky")
+        _nb_ask(_nbS, "remember the milk")
+        check("nanobot: a sticky room sends session_id voice-<room> (one long-lived conversation per room)",
+              _nb_last()["body"].get("session_id") == "voice-suite-nb-sticky",
+              str(_nb_last()["body"].get("session_id")))
+        check("nanobot: no agent picked -> the model field is omitted (nanobot uses its own)",
+              "model" not in _c2["body"] and "model" not in _nb_last()["body"], str(_c2["body"])[:160])
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL}, max_tokens=300,
+                    agents={"nanobot": _NB_MODEL})
+        _nbA = _iaNB.IntelligenceAgent(room="suite-nb-fresh", session_mode="fresh")
+        _rA, _eA = _nb_ask(_nbA, "hi")
+        check("nanobot: an agent picked -> sent as the model field, and the server accepts it",
+              _eA is None and _nb_last()["body"].get("model") == _NB_MODEL and _rA == "nanobot turn 1",
+              f"err={_eA} body={str(_nb_last()['body'])[:160]}")
+
+        # ── failures: the existing failure path, nanobot's own message in the log ──
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL}, max_tokens=300,
+                    agents={"nanobot": "glm-wrong"})
+        _nbW = _iaNB.IntelligenceAgent(room="suite-nb-fresh", session_mode="fresh")
+        _rW, _eW = _nb_ask(_nbW, "hi")
+        check("nanobot: a wrong model (HTTP 400) raises with nanobot's own message, never the key",
+              _rW is None and isinstance(_eW, RuntimeError) and "400" in str(_eW)
+              and "Only configured model" in str(_eW) and _NB_KEY not in str(_eW), repr(_eW)[:200])
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL}, max_tokens=300)
+        os.environ["LVI_NANOBOT_KEY"] = _NB_WRONG
+        _nbK = _iaNB.IntelligenceAgent(room="suite-nb-fresh", session_mode="fresh")
+        os.environ["LVI_NANOBOT_KEY"] = _NB_KEY
+        _rK, _eK = _nb_ask(_nbK, "hi")
+        check("nanobot: a wrong key (HTTP 401) raises naming the status, never the key",
+              _rK is None and isinstance(_eK, RuntimeError) and "401" in str(_eK)
+              and _NB_WRONG not in str(_eK) and _NB_KEY not in str(_eK), repr(_eK)[:200])
+        _nbT = _iaNB.IntelligenceAgent(room="suite-nb-turn", session_mode="fresh")
+        _logsNB = []
+        _sinkNB = _lgNB.add(lambda m: _logsNB.append(str(m)), level="ERROR")
+        _turnsNB = {}
+        try:
+            _turnsNB["400"] = (asyncio.run(_nb_turn(_nbW, "is the door locked")), _nbW)
+            _turnsNB["401"] = (asyncio.run(_nb_turn(_nbK, "is the door locked")), _nbK)
+            _NB["force"] = (500, "upstream model exploded", "server_error")
+            _turnsNB["500"] = (asyncio.run(_nb_turn(_nbT, "is the door locked")), _nbT)
+        finally:
+            _NB["force"] = None
+            _lgNB.remove(_sinkNB)
+        check("nanobot: a 400, 401 or 5xx is a failed turn: the apology, no history write, the retry not dedup-dropped",
+              all(sp == [_NB_APOLOGY] and ag._history == [] and ag._last_user_text == ""
+                  for sp, ag in _turnsNB.values()) and len(_turnsNB) == 3,
+              str({k: (sp, len(ag._history), ag._last_user_text) for k, (sp, ag) in _turnsNB.items()}))
+        check("nanobot: the failure log carries nanobot's own message, never the key",
+              any("upstream model exploded" in ln for ln in _logsNB)
+              and any("Only configured model" in ln for ln in _logsNB)
+              and not any(_NB_KEY in ln or _NB_WRONG in ln for ln in _logsNB), str(_logsNB)[:300])
+        _spR = asyncio.run(_nb_turn(_nbT, "is the door locked"))
+        check("nanobot: a retry after a failed turn is answered and written to history",
+              _spR == ["nanobot turn 1"] and len(_nbT._history) == 2, f"spoken={_spR} history={_nbT._history}")
+
+        # ── discovery: the configured model is the agent; the key only goes to the saved URL ──
+        _NB["models"].clear()
+        _dNB = _itNB.discover_agents("nanobot", _NB_URL, {"LVI_NANOBOT_KEY": _NB_KEY})
+        check("nanobot: discovery lists the server's configured model as its agent (GET /v1/models, key sent)",
+              [a["id"] for a in _dNB["agents"]] == [_NB_MODEL] and _dNB.get("source") == "nanobot-models"
+              and _NB["models"] == [f"Bearer {_NB_KEY}"] and _NB_KEY not in json.dumps(_dNB), str(_dNB)[:200])
+        _NB["models"].clear()
+        _rdS = client.post("/api/dashboard/intelligence/agents", json={"kind": "nanobot"})
+        _rdS2 = client.post("/api/dashboard/intelligence/agents", json={"kind": "nanobot", "url": _NB_URL[:-3]})
+        check("nanobot: POST /intelligence/agents on the SAVED URL (omitted, or with/without /v1) sends the key, lists the model",
+              _rdS.status_code == 200 and _rdS2.status_code == 200
+              and [a["id"] for a in _rdS.json().get("agents") or []] == [_NB_MODEL]
+              and [a["id"] for a in _rdS2.json().get("agents") or []] == [_NB_MODEL]
+              and _NB["models"] == [f"Bearer {_NB_KEY}"] * 2
+              and _NB_KEY not in _rdS.text + _rdS2.text, f"{_rdS.text[:160]} auth={_NB['models']}")
+        _NB["models"].clear()
+        _rdO = client.post("/api/dashboard/intelligence/agents", json={"kind": "nanobot", "url": _NB_OTHER})
+        check("nanobot: a URL that is not nanobot's saved one is probed WITHOUT the key (its 401 is reported)",
+              _rdO.status_code == 200 and _NB["models"] == [None] and _rdO.json().get("agents") == []
+              and "401" in (_rdO.json().get("note") or ""), f"{_rdO.text[:200]} auth={_NB['models']}")
+
+        # ── Keys card ──
+        _kNB = client.get("/api/dashboard/keys")
+        _rowNB = {r["var"]: r for r in _kNB.json().get("keys") or []}.get("LVI_NANOBOT_KEY") or {}
+        check("nanobot: the Keys card lists LVI_NANOBOT_KEY (Nanobot, used by Intelligence): set, in use, hint only",
+              _rowNB.get("label") == "Nanobot" and _rowNB.get("kind") == "nanobot"
+              and _rowNB.get("used_by") == ["Intelligence"] and _rowNB.get("set") is True
+              and _rowNB.get("in_use") is True and _rowNB.get("hint") == _itNB.key_hint(_NB_KEY)
+              and _NB_KEY not in _kNB.text, str(_rowNB))
+        _NB["models"].clear()
+        _ktNB = client.post("/api/dashboard/keys/test", json={"var": "LVI_NANOBOT_KEY"})
+        check("nanobot: key Test GETs the saved URL's /models with the SAVED key -> ok",
+              _ktNB.status_code == 200 and _ktNB.json().get("status") == "ok"
+              and _NB["models"] == [f"Bearer {_NB_KEY}"] and _NB_KEY not in _ktNB.text, _ktNB.text[:200])
+        _nb_env_file.write_text(f"LVI_NANOBOT_KEY={_NB_WRONG}\n")
+        _ktNB2 = client.post("/api/dashboard/keys/test", json={"var": "LVI_NANOBOT_KEY"})
+        check("nanobot: key Test with a wrong key -> rejected (HTTP 401), never the key",
+              _ktNB2.json().get("status") == "rejected" and "rejected" in (_ktNB2.json().get("detail") or "")
+              and _NB_WRONG not in _ktNB2.text, _ktNB2.text[:200])
+        _nb_env_file.write_text(f"LVI_NANOBOT_KEY={_NB_KEY}\n")
+        _nb_put_cfg(kind="hermes", url=_NB_HERMES, urls={"hermes": _NB_HERMES})
+        _NB["models"].clear()
+        _ktNB3 = client.post("/api/dashboard/keys/test", json={"var": "LVI_NANOBOT_KEY"})
+        check("nanobot: key Test with no saved Nanobot URL -> a clear message, no outbound call",
+              _ktNB3.json().get("ok") is False and "URL" in (_ktNB3.json().get("detail") or "")
+              and _NB["models"] == [], _ktNB3.text[:200])
+        # A bare host:port (no /v1) is what a user types: turns, the Test
+        # probe and the key Test all reach nanobot's /v1 routes anyway.
+        check("nanobot: request_url adds /v1 to a bare host:port, leaves a /v1 or custom path alone",
+              _itNB.request_url("nanobot", "http://192.0.2.5:8900") == "http://192.0.2.5:8900/v1"
+              and _itNB.request_url("nanobot", "http://192.0.2.5:8900/") == "http://192.0.2.5:8900/v1"
+              and _itNB.request_url("nanobot", "http://192.0.2.5:8900/v1") == "http://192.0.2.5:8900/v1"
+              and _itNB.request_url("nanobot", "http://192.0.2.5/nb/v1") == "http://192.0.2.5/nb/v1"
+              and _itNB.request_url("openclaw", "http://192.0.2.5:18789") == "http://192.0.2.5:18789",
+              _itNB.request_url("nanobot", "http://192.0.2.5:8900"))
+        _NB_ROOT = _NB_URL[:-3]
+        _nb_put_cfg(kind="nanobot", url=_NB_ROOT, urls={"nanobot": _NB_ROOT, "hermes": _NB_HERMES})
+        _NB["models"].clear()
+        _ktNB4 = client.post("/api/dashboard/keys/test", json={"var": "LVI_NANOBOT_KEY"})
+        _NB["chat"].clear()
+        _rRoot, _eRoot = _nb_ask(_iaNB.IntelligenceAgent(room="suite-nb-root", session_mode="fresh"), "hi")
+        check("nanobot: a URL saved without /v1 still passes the key Test and turns post to /v1/chat/completions",
+              _ktNB4.json().get("status") == "ok" and _NB["models"] == [f"Bearer {_NB_KEY}"]
+              and _eRoot is None and _nb_last()["path"] == "/v1/chat/completions",
+              f"keytest={_ktNB4.text[:120]} err={_eRoot!r} path={_nb_last()['path']}")
+        _nb_put_cfg(kind="hermes", url=_NB_HERMES, urls={"hermes": _NB_HERMES})
+        _wekNB = []
+
+        async def _fake_wekNB(var, value):
+            _wekNB.append(var)
+            return True
+        _rNB._write_env_key = _fake_wekNB
+        _ksNB = client.put("/api/dashboard/intelligence/key", json={"kind": "nanobot", "api_key": "nb-new-key-abcdefghijkl"})
+        _ksNB2 = client.put("/api/dashboard/intelligence/key",
+                            json={"kind": "nanobot", "agent": _NB_MODEL, "api_key": "nb-new-key-abcdefghijkl"})
+        _rNB._write_env_key = _nb_saved_wek
+        check("nanobot: key save writes LVI_NANOBOT_KEY only (an agent never changes the variable), never echoed",
+              _ksNB.status_code == 200 and _ksNB2.status_code == 200 and _wekNB == ["LVI_NANOBOT_KEY"] * 2
+              and _ksNB.json().get("var") == "LVI_NANOBOT_KEY"
+              and "nb-new-key-abcdefghijkl" not in _ksNB.text + _ksNB2.text, f"{_wekNB} {_ksNB.text[:120]}")
+
+        # ── Intelligence card: PUT/GET round-trip, no agent required ──
+        _legacyNB = _nb_icfg().get("agent")
+        _p0 = client.put("/api/dashboard/intelligence", json={"kind": "nanobot"})
+        check("nanobot: switching to Nanobot with no Nanobot URL refuses (set a URL for nanobot first)",
+              _p0.status_code == 422 and "set a URL for nanobot first" in _p0.text and _nb_icfg().get("kind") == "hermes",
+              f"{_p0.status_code} {_p0.text[:120]}")
+        _p1 = client.put("/api/dashboard/intelligence", json={"kind": "nanobot", "url": _NB_URL})
+        _cNB = _nb_icfg()
+        check("nanobot: PUT kind nanobot + URL with NO agent saves and switches the lane",
+              _p1.status_code == 200 and not _p1.json().get("url_only") and _cNB.get("kind") == "nanobot"
+              and _cNB.get("url") == _NB_URL and (_cNB.get("urls") or {}).get("nanobot") == _NB_URL
+              and (_cNB.get("urls") or {}).get("hermes") == _NB_HERMES
+              and not (_cNB.get("agents") or {}).get("nanobot"), f"{_p1.status_code} {_p1.text[:120]} {_cNB}")
+        _gNB = client.get("/api/dashboard/intelligence").json()
+        check("nanobot: GET round-trips kind nanobot, its URL, no agent, and its key status (hint only)",
+              _gNB.get("kind") == "nanobot" and _gNB.get("url") == _NB_URL
+              and (_gNB.get("urls") or {}).get("nanobot") == _NB_URL
+              and "nanobot" in (_gNB.get("agents") or {}) and _gNB["agents"]["nanobot"] is None
+              and (_gNB.get("keys_set") or {}).get("nanobot") is True
+              and (_gNB.get("key_hints") or {}).get("nanobot") == _itNB.key_hint(_NB_KEY)
+              and _gNB.get("key_kind") == "lvi_nanobot_key" and _NB_KEY not in json.dumps(_gNB), str(_gNB)[:300])
+        _p2 = client.put("/api/dashboard/intelligence", json={"kind": "nanobot", "agent": _NB_MODEL})
+        _cNB2 = _nb_icfg()
+        check("nanobot: PUT with an agent files it under agents.nanobot; the legacy agent key is untouched",
+              _p2.status_code == 200 and (_cNB2.get("agents") or {}).get("nanobot") == _NB_MODEL
+              and _cNB2.get("agent") == _legacyNB and _cNB2.get("url") == _NB_URL, f"{_p2.text[:120]} {_cNB2}")
+        _stNB = client.get("/api/dashboard/status").json()
+        _mNB = client.get("/api/dashboard/mapping").json()
+        check("nanobot: rig facts read 'Nanobot · <agent>'; the Rooms card's system is nanobot with that default",
+              _stNB.get("intelligence") == f"Nanobot · {_NB_MODEL}" and _mNB.get("agent_kind") == "nanobot"
+              and _mNB.get("default_agent") == _NB_MODEL,
+              f"{_stNB.get('intelligence')} {_mNB.get('agent_kind')} {_mNB.get('default_agent')}")
+
+        # ── per-room agent overrides ──
+        config_store.write_section("room_agents", {"nanobot": {"suite-nb-kids": "glm-kids"},
+                                                   "hermes": {"suite-nb-kids": "kids-agent"}})
+        _aKids = _iaNB.IntelligenceAgent(room="suite-nb-kids", session_mode="fresh")
+        _aKids._ensure_route()
+        _aDen = _iaNB.IntelligenceAgent(room="suite-nb-den", session_mode="fresh")
+        _aDen._ensure_route()
+        check("nanobot: a room override picks that room's nanobot agent (hermes overrides ignored); others get the default",
+              _aKids._agent == "glm-kids" and _aKids._key_var == "LVI_NANOBOT_KEY" and _aKids._key == _NB_KEY
+              and _aKids._url == _NB_URL and _aDen._agent == _NB_MODEL,
+              f"{_aKids._agent} {_aKids._key_var} {_aKids._url} / {_aDen._agent}")
+        _nb_ask(_aKids, "hi")
+        check("nanobot: the overridden room's REQUEST names its agent as the model, with its own session_id",
+              _nb_last()["body"].get("model") == "glm-kids"
+              and _nb_last()["body"].get("session_id") == _aKids._conversation, str(_nb_last()["body"])[:200])
+        _zNB = next(iter(_mNB.get("zones") or {}), None)
+        if _zNB:
+            _rzNB = {**(_mNB.get("room_zones") or {}), "suite-nb-kids": _zNB}
+            _pmNB = client.put("/api/dashboard/mapping", json={
+                "room_zones": _rzNB, "room_agents": {"nanobot": {"suite-nb-kids": "glm-other"}}})
+            _raNB = config_store.read_section("room_agents") or {}
+            check("nanobot: PUT /mapping accepts nanobot room overrides and leaves the other systems' alone",
+                  _pmNB.status_code == 200 and _raNB.get("nanobot") == {"suite-nb-kids": "glm-other"}
+                  and _raNB.get("hermes") == {"suite-nb-kids": "kids-agent"}, f"{_pmNB.status_code} {_pmNB.text[:160]}")
+        else:
+            check("nanobot: PUT /mapping accepts nanobot room overrides (needs a zone in the throwaway config)",
+                  False, "no zone configured")
+
+        # ── Test saved config: a throwaway session, never a room's ──
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL})
+        _NB["chat"].clear()
+        _h0NB = _NB["health"]
+        _t1NB = client.post("/api/dashboard/intelligence/test").json()
+        _t2NB = client.post("/api/dashboard/intelligence/test").json()
+        _sidsNB = [c["body"].get("session_id") for c in _NB["chat"]]
+        check("nanobot: Test saved config answers through the full contract (health at the server root, no model field)",
+              _t1NB.get("ok") is True and _t2NB.get("ok") is True and _NB["health"] >= _h0NB + 2
+              and all("model" not in c["body"] and len(c["body"].get("messages") or []) == 1 for c in _NB["chat"]),
+              f"{_t1NB} health={_NB['health'] - _h0NB}")
+        check("nanobot: every Test uses its OWN throwaway lenoxvi-test-* session, never a voice session",
+              len(_sidsNB) == 2 and all(s and s.startswith("lenoxvi-test-") for s in _sidsNB)
+              and _sidsNB[0] != _sidsNB[1], str(_sidsNB))
+        _nb_put_cfg(kind="nanobot", url=_NB_URL, urls={"nanobot": _NB_URL}, agents={"nanobot": "glm-wrong"})
+        _t3NB = client.post("/api/dashboard/intelligence/test").json()
+        check("nanobot: Test reports nanobot's own refusal (wrong model), never the key",
+              _t3NB.get("ok") is False and "Only configured model" in (_t3NB.get("error") or "")
+              and _NB_KEY not in json.dumps(_t3NB), str(_t3NB)[:200])
+
+        # ── the other lanes are untouched ──
+        _capNB = []
+
+        class _RespNB:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, *a):
+                return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+
+        def _fake_openNB(req, timeout=None):
+            _capNB.append((req.full_url, {k.lower(): v for k, v in req.headers.items()}, json.loads(req.data)))
+            return _RespNB()
+        os.environ.update({"LVI_HERMES_KEY": "hm-suite-key-abcdefghijkl", "LVI_OPENCLAW_KEY": "oc-suite-key-abcdefghijkl"})
+        _histNB = [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "before"}]
+        _urqNB.urlopen = _fake_openNB
+        try:
+            _nb_put_cfg(kind="hermes", url="http://hm.test:8642/v1", urls={"hermes": "http://hm.test:8642/v1"},
+                        model="hermes-agent")
+            _aHm = _iaNB.IntelligenceAgent(room="suite-nb-h", session_mode="fresh")
+            _aHm._history = list(_histNB)
+            _aHm._ask_intelligence("hi")
+            _uH, _hH, _bH = _capNB[-1]
+            check("nanobot: the Hermes payload is unchanged (system prompt + history + user, conversation + "
+                  "session header, no session_id)",
+                  _uH == "http://hm.test:8642/v1/chat/completions"
+                  and set(_bH) == {"model", "stream", "max_tokens", "conversation", "messages"}
+                  and _bH["messages"][0] == {"role": "system", "content": _iaNB.VOICE_SYSTEM_PROMPT}
+                  and _bH["messages"][1:] == [*_histNB, {"role": "user", "content": "hi"}]
+                  and _hH.get("x-hermes-session-key") == _bH["conversation"] == _aHm._conversation,
+                  f"{_uH} {str(_bH)[:200]}")
+            _nb_put_cfg(kind="openclaw", url="http://oc.test:18789/v1", urls={"openclaw": "http://oc.test:18789/v1"},
+                        agents={"openclaw": "main"})
+            _aOc = _iaNB.IntelligenceAgent(room="suite-nb-o", session_mode="sticky")
+            _aOc._history = list(_histNB)
+            _aOc._ask_intelligence("hi")
+            _uO, _hO, _bO = _capNB[-1]
+            check("nanobot: the OpenClaw payload is unchanged (model openclaw/<agent>, system prompt + history, "
+                  "session-key header, no session_id)",
+                  _uO == "http://oc.test:18789/v1/chat/completions"
+                  and set(_bO) == {"model", "stream", "max_tokens", "messages"} and _bO["model"] == "openclaw/main"
+                  and _bO["messages"][0]["role"] == "system"
+                  and _bO["messages"][1:] == [*_histNB, {"role": "user", "content": "hi"}]
+                  and _hO.get("x-openclaw-session-key") == "voice-suite-nb-o"
+                  and _hO.get("authorization") == "Bearer oc-suite-key-abcdefghijkl", f"{_uO} {str(_bO)[:200]}")
+        finally:
+            _urqNB.urlopen = _nb_real_open
+
+        # ── dashboard ui (App.jsx) ──
+        _appNB = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
+        _sysNB = _appNB[_appNB.find("function System({"):]
+        check("nanobot: dashboard ui: the provider dropdown offers Nanobot and the Keys card can save its key",
+              '<option value="nanobot">Nanobot</option>' in _sysNB and "row.kind !== 'nanobot'" in _appNB
+              and "nanobot: 'Nanobot'" in _appNB, "")
+    finally:
+        _rNB._write_env_key = _nb_saved_wek
+        _urqNB.urlopen = _nb_real_open
+        _NB["force"] = None
+        for _s in (_srvNB, _srvNB2):
+            _s.shutdown()
+        for _k, _v in _nb_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _sec, _val in _nb_cfg.items():
+            config_store.write_section(_sec, _val or {})
 
     # ── cloud STT provider (Deepgram) ─────────────────────────────────
     from dashboard import routes as _rdg
