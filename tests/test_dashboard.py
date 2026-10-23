@@ -6954,9 +6954,10 @@ def main():
     check("dashboard ui: a key Test whose setup isn't finished shows an info note, not a red failure",
           "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'ⓘ '" in _kc)
 
-    _sm = _jsbody(_appsrc, "const saveMapping = async room => {")
+    _sm = _jsbody(_appsrc, "const saveMapping = async say => {")
     check("dashboard ui: a mapping save keeps its draft until the saved map is reloaded (no flick back, no revert)",
-          "await reloadAll()" in _sm and _sm.find("await reloadAll()") < _sm.find("setMapDirty(false)"), _sm[-300:])
+          "await reloadAll()" in _sm and 0 <= _sm.find("await reloadAll()") < _sm.find("zones.settle(sentZones)")
+          and _sm.find("await reloadAll()") < _sm.find("agents.settle(sentAgents)"), _sm[-300:])
     check("dashboard ui: a mapping save drops draft rows whose zone no longer exists",
           "liveZone(" in _sm and "const liveZone = z => z === BUILTIN || zoneNames.includes(z)" in _appsrc)
 
@@ -7486,11 +7487,10 @@ def main():
     check("intelligence ui: Save always sends nanobot's pick ('' clears it); other kinds send an agent only when one is set",
           "if (agentSel || kind === 'nanobot') body.agent = agentSel" in _sysUI
           and "if (agentSel) body.agent = agentSel" not in _sysUI)
-    _syncUI = _ws(_jsbody(_sysUI, "if (intelligence && !intSynced) {"))
     check("intelligence ui: a saved nanobot model is what shows after reload (pick synced from the saved agents)",
           _selUI.startswith("intKind === 'nanobot' ? intAgent :")
-          and "agentDrafts.current = { ...(intelligence.agents || {}) }" in _syncUI
-          and "setIntAgent(agentDrafts.current[kind] || '')" in _syncUI, _syncUI[:200])
+          and "[`agent:${k}`, intelligence?.agents?.[k] || null]" in _sysUI
+          and "const intAgent = d.val(`agent:${intKind}`) || ''" in _sysUI, _selUI[:200])
     _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
     check("zones ui: 'nanobot's own model' lives only on the Intelligence card, never in the per-room agent picker",
           "nanobot's own model" in _sysUI and bool(_rmUI) and "nanobot's own model" not in _rmUI
@@ -7544,7 +7544,7 @@ def main():
           and '<tr className="text-[12px] text-[var(--muted)]">' in _appsrc,
           f"uppercase x{_appsrc.count('uppercase')}, tracking-wide x{_appsrc.count('tracking-wide')}")
     check("dashboard ui: the Overview Restart button is the default style, not danger (danger stays on Remove/Delete)",
-          'className={pending.length ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}' in _appsrc
+          'className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}' in _appsrc
           and 'className={BTN_DANGER} disabled={rebooting}' not in _appsrc
           and 'const BTN_DANGER' in _appsrc,
           f"BTN_DANGER buttons: {_appsrc.count('className={BTN_DANGER}')}")
@@ -7563,9 +7563,9 @@ def main():
     check("dashboard ui: the firmware mismatch confirm has no emoji; the sentence starts with 'The filename looks like'",
           '⚠' not in _appsrc and 'The filename looks like' in _appsrc,
           f"⚠ present: {'⚠' in _appsrc}")
-    check("dashboard ui: the wake name card's button reads 'Save', not 'Set wake word'",
+    check("dashboard ui: the wake name has no 'Set wake word' button (the unsaved bar saves it)",
           'Set wake word' not in _appsrc
-          and "setDraft(null) }}>Save</button>" in _appsrc,
+          and "useUnsaved('wake-name-card', { label: 'wake name'" in _appsrc,
           f"Set wake word: {'Set wake word' in _appsrc}")
 
     # ── restart pending: one Overview state instead of per-save restart
@@ -7699,13 +7699,13 @@ def main():
         _wvoRP({})
         _cfgRP._BOOT = _rp_boot
 
-    # UI: no save offers a restart; Overview's button carries the pending state.
-    _ovRP = _fnUI("function Overview(")
+    # UI: no save offers a restart; the header's Restart button carries the pending state.
+    _ovRP = _fnUI("function RestartButton(")
     check("restart pending: no save asks to restart (offerRestart and its confirm are gone)",
           "offerRestart" not in _appsrc and "Restart the bot now to apply?" not in _appsrc)
-    check("restart pending: with nothing pending the Overview button is 'Restart bot' in the default style",
+    check("restart pending: with nothing pending the Restart button is 'Restart bot' in the default style",
           "const pending = status?.restart_pending || []" in _ovRP
-          and "className={pending.length ? BTN_PRIMARY : BTN_DEFAULT}" in _ovRP and "'Restart bot'" in _ovRP, _ovRP[:300])
+          and "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT}" in _ovRP and "'Restart bot'" in _ovRP, _ovRP[:300])
     check("restart pending: with items pending it reads 'Restart to apply (N)' and lists them on hover",
           "`Restart to apply (${pending.length})`" in _ovRP and "`Pending: ${pending.join(', ')}`" in _ovRP, _ovRP[:300])
     check("restart pending: the button keeps its one confirm and restarts through restartBot",
@@ -7716,21 +7716,21 @@ def main():
           and _rb.count("_botRestarting = false") == 2 and "i < 45" in _rb, _rb[:200])
     for _whatRP, _fnRP, _pinRP in (
             ("tts", "function Voice(", ("await api('/api/dashboard/tts', { method: 'PUT', json: body }) "
-                                       "setMsg('Saved — restart to apply.', 'ok', 'TTS') reloadAll()")),
-            ("voice tuning", "function Tuning(", ("window.dispatchEvent(new CustomEvent('lenoxvi:reload-all')) "
-                                                 "// pull the saved truth back setMsg('Saved — restart to apply.', 'ok', 'Voice tuning')")),
-            ("intelligence", "function System(", "setMsg('Saved — restart to apply.', 'ok', 'Intelligence') reloadAll()"),
-            ("wake model", "function OwwPanel(", ("setMsg('Saved — restart to apply.', 'ok', 'Wake word model') "
+                                       "say('Saved — restart to apply.', 'ok', 'TTS') await reloadAll()")),
+            ("voice tuning", "function Tuning(", ("say('Saved — restart to apply.', 'ok', 'Voice tuning') "
+                                                 "await reloadAll() // pull the saved truth back")),
+            ("intelligence", "function System(", "say('Saved — restart to apply.', 'ok', 'Intelligence') await reloadAll()"),
+            ("wake model", "function OwwPanel(", ("say('Saved — restart to apply.', 'ok', 'Wake word model') "
                                                  "await load() reloadAll()")),
             ("stt", "function SttCard(", (": 'Saved — restart to apply.', 'ok', 'STT') "
                                          "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
             ("stt download", "function SttCard(", ("msgRef.current(`Downloaded ${dl.model} — restart to apply.`, 'ok', 'STT') "
                                                   "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
-            ("room agents", "function Rooms(", "setMsg(`Saved — restart to apply (agent ${picks}).`")):
+            ("room agents", "function Rooms(", "say(`Saved — restart to apply (agent ${picks}).`")):
         check(f"restart pending: the {_whatRP} save says 'restart to apply' and refreshes status",
               _pinRP in _ws(_fnUI(_fnRP)), _pinRP[:80])
     check("restart pending: live saves keep their own messages",
-          "replies now route to this zone (live, no restart)." in _fnUI("function Rooms(")
+          "replies now route there (live, no restart)." in _fnUI("function Rooms(")
           and "'Saved — applies to the next thing you say.'" in _fnUI("function SttCard("))
     # ── dashboard ui (App.jsx): honest Overview chips, honest table states ──
     def _retsHO(body):
@@ -7745,7 +7745,7 @@ def main():
     _intHO = _jsbody(_appsrc, "function intelligenceChip(status, intel) {")
     _nodHO = _jsbody(_appsrc, "function nodesChip(rooms, mapping) {")
     _chipHO = _jsbody(_appsrc, "function StatChip({ stat, tone = 'neutral', text, title, muted, href, className, style, children }) {")
-    _ovHO = _fnUI("function Overview({ status, tts, intelligence, mapping, setMsg, setRebooting, rebooting }) {")
+    _ovHO = _fnUI("function Overview({ status, tts, intelligence, mapping }) {")
     check("overview: the chips get the TTS, intelligence and mapping data App already loads",
           "<Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping}" in _appsrc
           and "{...ttsChip(status, tts)}" in _ovHO and "{...intelligenceChip(status, intelligence)}" in _ovHO
@@ -7806,7 +7806,7 @@ def main():
           len(_withHO) == 4 and all(n == c for n, c in _withHO), str(_withHO))
     _rmHO = _ws(_rmUI)
     check("rooms ui: the mapping table says loading, a failed /mapping, or the new empty copy",
-          "<TableState cols={4} error={mapping?.loadError}" in _rmHO
+          "<TableState cols={3} error={mapping?.loadError}" in _rmHO
           and "loading={!roomRows.length && !(mapping?.room_zones && status)}" in _rmHO
           and "'No mic nodes yet. A flashed node appears here when it connects.'" in _rmHO
           and "power one on" not in _appsrc and 'colSpan="3"' not in _appsrc)
@@ -7875,6 +7875,322 @@ def main():
           and _appsrc.count("const toggleMute = async () => {") == 1,
           f"renderRow x{_naMut.count('renderRow')}, "
           f"muted useState x{_appsrc.count('const [muted, setMuted] = useState(false)')}")
+
+    # ── tabs (App.jsx): Rooms, Voice and System as tabs, picked by the hash ──
+    # The page was one long scroll; now one tab shows at a time. All three
+    # stay mounted (hidden attribute) so a card's unsaved edits and its own
+    # loading survive a switch. Restart sits in the header row; the status
+    # chips render under the header on every tab.
+    _appTB = _fnUI("export default function App() {")
+    _hdrTB = _reui.search(r"<header .*?</header>", _appTB, _reui.DOTALL)
+    _hdrTB = _hdrTB.group(0) if _hdrTB else ""
+    _tabsTB = _reui.search(r"const TABS = \[(.*?)\]", _appsrc, _reui.DOTALL)
+    _tabsTB = _reui.findall(r"\{ id: '(\w+)', label: '(\w+)' \}", _tabsTB.group(1)) if _tabsTB else []
+    _wrapTB = _reui.findall(r'<div data-tab="(\w+)" hidden=\{tab !== \'(\w+)\'\} className="grid grid-cols-1 gap-10">'
+                            r'\s*<(\w+) ', _appTB)
+    _tabOfTB = {comp: t for t, t2, comp in _wrapTB if t == t2}
+    _htTB = _jsbody(_appsrc, "function useHashTab() {")
+    _goTB = _jsbody(_htTB, "const go = () => {")
+    _scrollTB = _htTB[_htTB.find("if (!nav.id) return"):]
+
+    def _ownerTB(pos):
+        """Name of the top-level function whose source holds position pos."""
+        heads = [m for m in _reui.finditer(r"\n(?:export default )?(?:async )?function (\w+)\(", _appsrc)
+                 if m.start() < pos]
+        return heads[-1].group(1) if heads else ""
+
+    def _tabTB(elid):
+        """The tab whose wrapper renders the element with this id (up the component chain)."""
+        i = _appsrc.find(f'id="{elid}"')
+        name, seen = (_ownerTB(i) if i >= 0 else ""), set()
+        while name and name not in _tabOfTB and name not in seen:
+            seen.add(name)
+            j = _appsrc.find(f"<{name} ")
+            name = _ownerTB(j) if j >= 0 else ""
+        return _tabOfTB.get(name)
+
+    check("tabs: three tabs, Rooms, Voice and System; the section rail and its observer are gone",
+          _tabsTB == [("rooms", "Rooms"), ("voice", "Voice"), ("system", "System")]
+          and "SECTIONS" not in _appsrc and "useActiveSection" not in _appsrc
+          and "IntersectionObserver" not in _appsrc, str(_tabsTB))
+    check("tabs: the file's header comment no longer says there are no tabs",
+          "no tabs" not in _appsrc[:300] and "in tabs" in _appsrc[:200], _appsrc[:160])
+    check("tabs: each tab is a real link to its hash, the active one marked aria-current in the accent style",
+          '<nav className="flex gap-2" aria-label="Tabs">' in _hdrTB and "{TABS.map(t => (" in _hdrTB
+          and "href={`#${t.id}`} aria-current={tab === t.id ? 'page' : undefined}" in _hdrTB
+          and "${tab === t.id ? 'text-[var(--accent)] font-semibold' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}"
+          in _ws(_hdrTB) and "const tab = useHashTab()" in _appTB, _hdrTB[:300])
+    check("tabs: all three tabs stay mounted, each in a data-tab wrapper the hidden attribute turns off",
+          _wrapTB == [("rooms", "rooms", "Rooms"), ("voice", "voice", "Voice"), ("system", "system", "System")]
+          and not _reui.search(r"tab === '\w+' &&|\? <(Rooms|Voice|System)", _appTB), str(_wrapTB))
+    check("tabs: every tab renders its component with the same props as before",
+          "<Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB
+          and "<Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB
+          and "<System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB)
+    check("tabs: the tab comes from location.hash on load and on hashchange, default rooms",
+          "useState({ tab: 'rooms', id: '' })" in _htTB and "window.location.hash.slice(1)" in _goTB
+          and "go() window.addEventListener('hashchange', go) "
+              "return () => window.removeEventListener('hashchange', go)" in _ws(_htTB), _htTB[:300])
+    _elTB, _clTB, _nmTB = (_goTB.find("document.getElementById(id)"), _goTB.find("el?.closest('[data-tab]')?.dataset.tab"),
+                           _goTB.find("(TABS.some(t => t.id === id) ? id : 'rooms')"))
+    check("tabs: any other hash opens the tab holding that element; the element wins over a tab name",
+          0 <= _elTB < _clTB < _nmTB, f"getElementById@{_elTB} closest@{_clTB} name@{_nmTB}")
+    check("tabs: the scroll runs after the tab is shown: a tab opens at the top, a card scrolls to its section",
+          "}, [nav])" in _htTB and "scroll" not in _goTB
+          and "if (TABS.some(t => t.id === nav.id)) { window.scrollTo(0, 0); return }" in _scrollTB
+          and "scrollToCard(nav.id)" in _scrollTB,
+          _scrollTB[:240])
+    _stcTB = _jsbody(_appsrc, "function scrollToCard(id) {")
+    check("tabs: a card scrolls to just under the pinned header's real height (it wraps taller on a phone)",
+          "const card = el?.closest('section') || el" in _stcTB
+          and "document.querySelector('header')?.offsetHeight" in _stcTB
+          and "window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY - head - 12)" in _stcTB
+          and "scrollIntoView" not in _appsrc,
+          _stcTB[:240])
+    _wantTB = {"rooms": "rooms", "voice": "voice", "system": "system", "keys": "system", "intelligence": "system",
+               "stt": "voice", "wake-name-card": "voice"}
+    _gotTB = {i: _tabTB(i) for i in _wantTB}
+    check("tabs: section ids named like tabs (#voice, #system, #rooms) and card ids resolve to the tab that holds them",
+          _gotTB == _wantTB and all(_appsrc.count(f'id="{t}"') == 1 for t, _ in _tabsTB)
+          and "data-tab" not in _appsrc.replace('<div data-tab="', "").replace("[data-tab]", ""), str(_gotTB))
+    _linksTB = set(_reui.findall(r"href: '#([\w-]+)'", _appsrc)) | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))
+    check("tabs: the warning chips' links and the missing-key link land on the tab with their card",
+          _linksTB == {"intelligence", "keys", "rooms", "system"}
+          and all(_tabTB(i) in ("rooms", "voice", "system") for i in _linksTB)
+          and _tabTB("keys") == _tabTB("system") == _tabTB("intelligence") == "system" and _tabTB("rooms") == "rooms",
+          f"{sorted(_linksTB)} -> {[(i, _tabTB(i)) for i in sorted(_linksTB)]}")
+    _wkTB = _fnUI("function WakeNameCard({ setMsg }) {")
+    check("tabs: the wake name card keeps its id while loading, so #wake-name-card finds its tab on a fresh load",
+          _wkTB.count('id="wake-name-card"') == 2
+          and _wkTB.find('id="wake-name-card"') < _wkTB.find("{loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}"))
+
+    # Header: wordmark, tabs, Restart, then the message strip.
+    _hpTB = [_hdrTB.find(s) for s in ("<Wordmark />", '<nav className="flex gap-2" aria-label="Tabs">',
+                                      ("<RestartButton status={status} setMsg={setMsg} setRebooting={setRebooting} "
+                                       "rebooting={rebooting} unsaved={unsaved > 0} />"), "<AppMsg msg={msg} />")]
+    check("header: the sticky header holds the wordmark, the tabs, the Restart button (row end) and the message strip",
+          _hdrTB.startswith('<header className="sticky top-0') and all(p >= 0 for p in _hpTB) and _hpTB == sorted(_hpTB)
+          and _appTB.count("<AppMsg") == 1 and _appTB.count("<RestartButton") == 1, str(_hpTB))
+    _rbtTB = _ws(_fnUI("function RestartButton({ status, setMsg, setRebooting, rebooting, unsaved }) {"))
+    check("header: the Restart button keeps its pending label, title, style, one confirm and restartBot call",
+          "const pending = status?.restart_pending || []" in _rbtTB
+          and "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}" in _rbtTB
+          and "title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}" in _rbtTB
+          and "if (window.confirm('Restart the bot? Every node reboots and reconnects.')) { "
+              "restartBot(setMsg, setRebooting) }" in _rbtTB
+          and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
+          and _rbtTB.count("window.confirm(") == 1
+          and _appsrc.count("restartBot(setMsg, setRebooting)") == 2, _rbtTB[:300])
+
+    # Overview: the chip row, under the header, above the tab; no title.
+    _ovTB = _fnUI("function Overview({ status, tts, intelligence, mapping }) {")
+    _ovAt = _appTB.find("<Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />")
+    check("overview: the status chips render under the header, above every tab, on every tab",
+          0 <= _appTB.find("</header>") < _ovAt < _appTB.find("data-tab=") and _appTB.count("<Overview ") == 1
+          and _ovAt >= 0 and _hdrTB.find("<Overview") < 0, f"overview@{_ovAt}")
+    check("overview: the chip row has no title, no pinning and no Restart button",
+          bool(_ovTB) and "<Section" not in _ovTB and "sticky" not in _ovTB and "restart" not in _ovTB.lower()
+          and 'title="Overview"' not in _appsrc and 'id="overview"' not in _appsrc, _ovTB[:200])
+    check("overview: the chip row keeps all seven chips in their order",
+          _reui.findall(r'<StatChip stat="([\w-]+)"', _ovTB)
+          == ["uptime", "intelligence", "nodes", "last-wake", "version", "stt", "tts"],
+          str(_reui.findall(r'<StatChip stat="([\w-]+)"', _ovTB)))
+    # Still holds: the poll, reload-all and the token dialog are untouched.
+    check("tabs: the 5 s poll, reload-all and the token dialog still run in App (still holds)",
+          "const t = setInterval(() => { if (!document.hidden) reloadAll() }, 5000)" in _appTB
+          and "window.addEventListener('lenoxvi:reload-all', h)" in _appTB
+          and "document.addEventListener('visibilitychange', vis)" in _appTB
+          and _appTB.find("<TokenDialog />") > _appTB.find('data-tab="system"') >= 0)
+
+    # ── unsaved changes (App.jsx): one page-wide bar saves every settings
+    # card; "changed" means the draft differs from the saved value ─────────
+    # Settings cards register their changed-field count, save and discard
+    # (useUnsaved); the bar pinned to the bottom saves them in page order and
+    # sums up in one message. Actions (keys, volumes, node, zone and model
+    # buttons, alias chips) stay instant.
+    _drUS = _fnUI("function useDraft(saved, { scope = '', blank = {} } = {}) {")
+    _barUS = _fnUI("function UnsavedBar({ cards, units, setMsg }) {")
+    _allUS = _jsbody(_barUS, "const saveAll = async () => {")
+    _voUS = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
+    _stUS = _fnUI("function SttCard({ status, setMsg }) {")
+    _tuUS = _fnUI("function Tuning({ tuning, reloadAll }) {")
+    _wkUS = _fnUI("function WakeNameCard({ setMsg }) {")
+    _owUS = _fnUI("function OwwPanel({ setMsg, reloadAll }) {")
+    _syUS = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
+    _roUS = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _saveUS = {
+        "tts": _jsbody(_voUS, "const saveTTS = async say => {"),
+        "stt": _jsbody(_stUS, "const save = async say => {"),
+        "voice tuning": _jsbody(_tuUS, "const save = async say => {"),
+        "intelligence": _jsbody(_syUS, "const save = async say => {"),
+        "room mapping": _jsbody(_roUS, "const saveMapping = async say => {"),
+        "wake model": _jsbody(_owUS, "const select = async say => {"),
+        "wake name": _jsbody(_wkUS, "const saveName = async say => {"),
+    }
+    check("unsaved: changed means differs from saved: numbers as numbers, strings trimmed, unset as ''",
+          "const norm = v => (v == null ? '' : typeof v === 'string' ? v.trim() : v)" in _appsrc
+          and "!isNaN(x) && !isNaN(y) && Number(x) === Number(y)" in _appsrc
+          and "const eq = (k, v) => same(v ?? blank[k], saved[k] ?? blank[k])" in _drUS, _drUS[:200])
+    check("unsaved: a draft holds only differing fields; reverting one drops it at once",
+          "val: k => (k in d ? d[k] : saved[k])" in _drUS and "changed: k => k in d && !eq(k, d[k])" in _drUS
+          and "if (v === undefined || (eq(k, v) && norm(v) === v)) delete n[k]" in _drUS, _drUS[:300])
+    check("unsaved: a poll never overwrites a changed field; one that brings the saved value level drops the draft",
+          "if (state.seen !== seen)" in _drUS and "without(state.d, (k, v) => k in saved && eq(k, v))" in _drUS
+          and "setMapDraft(" not in _appsrc and "setVals(prev =>" not in _appsrc and "ttsSynced" not in _appsrc
+          and "setModel(m => m ?? d.current.model)" not in _appsrc and "urlDrafts" not in _appsrc, _drUS[:200])
+    check("unsaved: after a save the sent fields settle only once the reload is back; an edit made meanwhile stays",
+          "settle: sent => edit(cur => without(cur, (k, v) => k in sent && v === sent[k]))" in _drUS
+          and all(0 <= b.find("await api(") < b.find(".settle(") and ".settle(" not in b[b.find("} catch"):]
+                  for n, b in _saveUS.items() if n != "wake name")
+          and "if (ok) name.settle(sent)" in _saveUS["wake name"], str({n: b.find(".settle(") for n, b in _saveUS.items()}))
+    _regUS = _reui.findall(r"useUnsaved\('([\w-]+)', \{\s*label: '([\w ]+)'", _appsrc)
+    _orderUS = _reui.search(r"const UNSAVED_ORDER = \[(.*?)\]", _appsrc)
+    _orderUS = _reui.findall(r"'([\w-]+)'", _orderUS.group(1)) if _orderUS else []
+    check("unsaved: the seven settings cards register once each, under their section id and lowercase label",
+          sorted(_regUS) == sorted([("rooms", "room mapping"), ("voice", "tts"), ("stt", "stt"), ("tuning", "voice tuning"),
+                                    ("wake-name-card", "wake name"), ("wake-model", "wake model"),
+                                    ("intelligence", "intelligence")])
+          and all(_appsrc.count(f'id="{k}"') >= 1 for k, _ in _regUS), str(_regUS))
+    check("unsaved: the bar lists and saves cards in page order, tab by tab",
+          _orderUS == ["rooms", "voice", "stt", "tuning", "wake-name-card", "wake-model", "intelligence"]
+          and "const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)" in _barUS, str(_orderUS))
+    _wantUS = {"rooms": "rooms", "voice": "voice", "stt": "voice", "tuning": "voice", "wake-name-card": "voice",
+               "wake-model": "voice", "intelligence": "system"}
+    check("unsaved: each label links to its card's hash, which the tab router already resolves (still holds)",
+          {k: _tabTB(k) for k in _orderUS} == _wantUS and "<a href={`#${k}`}" in _barUS
+          and "scrollToCard(k)" in _barUS,
+          str({k: _tabTB(k) for k in _orderUS}))
+    check("unsaved: each count is that card's changed fields (rooms: rows whose zone or agent differs)",
+          "const changedRooms = roomRows.filter(r => zones.changed(r) || agents.changed(r))" in _roUS
+          and "count: changedRooms.length" in _roUS
+          and "count: ttsFields.filter(t.changed).length" in _voUS
+          and "count: Object.keys(sttBody()).length" in _stUS
+          and "const dirtyFields = TUNING_FIELDS.map(([f]) => f).filter(vals.changed)" in _tuUS
+          and "count: dirtyFields.length" in _tuUS
+          and "count: intFields.filter(d.changed).length" in _syUS
+          and "count: name.changed('name') ? 1 : 0" in _wkUS and "count: pick.changed('model') ? 1 : 0" in _owUS)
+    check("unsaved: voice tuning marks a knob changed by value, not by touch (the dot stays the marker)",
+          "{label}{vals.changed(f) ? ' •' : ''}" in _tuUS and "markDirty" not in _tuUS and "dirtyRef" not in _tuUS
+          and "onChange={e => vals.set({ [f]: e.target.value })}" in _tuUS, _tuUS[:200])
+    _btnUS = {"tts": _voUS[:_voUS.find("<SttCard ")], "stt": _stUS, "voice tuning": _tuUS, "wake name": _wkUS,
+              "wake model": _owUS, "intelligence": _syUS, "room mapping": _roUS}
+    check("unsaved: the seven cards have no Save button of their own, and the wake model no Set active",
+          all(">Save</button>" not in s and "onClick={save}" not in s and "onClick={saveTTS}" not in s
+              and "saveMapping(room)" not in s for s in _btnUS.values())
+          and "Set active" not in _appsrc and "`Save (${dirtyFields.length})`" not in _appsrc
+          and "<th className=\"text-left px-4 py-2\"></th>" not in _roUS[:_roUS.find("</thead>")],
+          str([n for n, s in _btnUS.items() if ">Save</button>" in s]))
+    check("unsaved: card saves report through say and return true or false, so no message flashes over another",
+          all(b and "setMsg(" not in b and ("return true" in b or "return ok" in b) and "return false" in b
+              for n, b in _saveUS.items() if n != "wake name")
+          and "const save = async (body, note, say = setMsg) => {" in _wkUS
+          and "await save({ name: (name.val('name') ?? '').trim() }, null, say)" in _saveUS["wake name"],
+          str([n for n, b in _saveUS.items() if not b or "setMsg(" in b]))
+    check("unsaved: instant actions never register: keys, zones, volumes, nodes, firmware, alias chips, uploads",
+          all("useUnsaved(" not in _fnUI(h) for h in ("function KeysCard(", "function ZoneList(", "function VolSlider(",
+                                                       "function NodeActions(", "function FirmwarePanel("))
+          and _wkUS.count("useUnsaved(") == 1 and _owUS.count("useUnsaved(") == 1
+          and "return save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)" in _wkUS
+          and "onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}"
+          in _wkUS and "onClick={upload}" in _owUS and "onClick={() => del(m.name, m.source)}" in _owUS
+          and "onChange={sticky => toggleMode(r.room, sticky)}" in _roUS and "onClick={() => del(m)}" in _stUS)
+    check("unsaved: the bar renders once in App, pinned to the bottom, full width, header background, safe area",
+          _appTB.count("<UnsavedBar cards={cards} units={units} setMsg={setMsg} />") == 1
+          and "<UnsavedCtx.Provider value={putUnsaved}>" in _appTB and "if (!total) return null" in _barUS
+          and "style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 10, "
+              "paddingBottom: 'env(safe-area-inset-bottom)' }}" in _barUS
+          and 'className="border-t border-[var(--separator)] bg-[var(--background)]"' in _barUS
+          and "bg-[var(--background)]" in _hdrTB, _barUS[:300])
+    check("unsaved: while the bar shows, the page gets room under the last card",
+          "style={unsaved ? { paddingBottom: 'calc(10rem + env(safe-area-inset-bottom))' } : undefined}" in _appTB)
+    check("unsaved: the bar reads 'N unsaved:' then each card's label; Discard default, Save lime, both off while saving",
+          "{total} unsaved: " in _barUS and "{i > 0 && ' · '}" in _barUS and "{units[k].label}</a>" in _barUS
+          and "<button className={BTN_DEFAULT} disabled={saving} onClick={discard}>Discard</button>" in _barUS
+          and "<button className={BTN_PRIMARY} disabled={saving} onClick={saveAll}>{saving ? 'Saving…' : 'Save'}</button>"
+          in _barUS, _barUS[-600:])
+    _disUS = _jsbody(_barUS, "const discard = () => {")
+    check("unsaved: Discard asks 'Discard N unsaved changes?' once, then puts every listed card back to saved",
+          "if (!window.confirm(`Discard ${total} unsaved change${total === 1 ? '' : 's'}?`)) return" in _disUS
+          and "for (const k of keys) cards.current[k]?.discard()" in _disUS and _barUS.count("window.confirm(") == 1, _disUS)
+    check("unsaved: Save runs each listed card's save in order, one after another, buttons off throughout",
+          0 <= _allUS.find("setSaving(true)") < _allUS.find("for (const k of keys) {")
+          < _allUS.find("await cards.current[k]?.save(") < _allUS.find("setSaving(false)"), _allUS[:300])
+    check("unsaved: one summary at the end: 'Saved.' (+ ' Restart to apply.') or 'Saved X of N.' plus each failure",
+          _barUS.count("setMsg(") == 1 and _allUS.find("setMsg(") > _allUS.find("setSaving(false)")
+          and ": `Saved.${restart ? ' Restart to apply.' : ''}`" in _allUS
+          and "`Saved ${done} of ${keys.length}. ${failed.join(' ')}`" in _allUS
+          and "failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))" in _allUS
+          and "if (!ok) {" in _allUS and "continue" in _allUS, _allUS[-500:])
+    check("unsaved: 'Saved — …' messages fold into the summary and flag a restart; any other message is kept as a note",
+          "if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))" in _allUS
+          and "else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true" in _allUS)
+    check("unsaved: one lime per view: the header Restart is default style while the bar shows",
+          "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT}" in _rbtTB
+          and "unsaved={unsaved > 0}" in _hdrTB
+          and "const unsaved = UNSAVED_ORDER.reduce((n, k) => n + (units[k]?.count || 0), 0)" in _appTB)
+    check("unsaved: leaving the page warns while anything is unsaved",
+          "if (!unsaved) return" in _appTB and "const warn = e => { e.preventDefault(); e.returnValue = '' }" in _appTB
+          and "window.addEventListener('beforeunload', warn)" in _appTB
+          and "return () => window.removeEventListener('beforeunload', warn)" in _appTB and "}, [unsaved])" in _appTB)
+    check("unsaved: TTS fields follow the server until edited; the voice id is a draft, not a DOM read",
+          "fluxTouched" not in _voUS and "document.getElementById('tts-voice')" not in _appsrc
+          and '<input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })}' in _voUS
+          and "blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 }" in _voUS
+          and "const onProviderChange = p => t.set({ provider: p, [`model:${p}`]: undefined })" in _voUS)
+    check("unsaved: STT picks follow the server until changed; a model already downloading counts as saved",
+          "const s = useDraft({ model: pendingModel || data?.current?.model" in _stUS and "setBusy(" not in _stUS
+          and "if (downloading && body.model) {" in _saveUS["stt"]
+          and _saveUS["stt"].find("if (downloading && body.model) {") < _saveUS["stt"].find("await api("))
+    check("unsaved: intelligence keeps a URL and agent draft per kind; switching kinds only changes which show",
+          "[`url:${k}`, savedUrls[k] || '']" in _syUS and "const switchKind = kind => {" in _syUS
+          and "d.set({ kind })" in _jsbody(_syUS, "const switchKind = kind => {")
+          and "urlEl.value" not in _syUS
+          and "<input id=\"int-url\" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}"
+          in _syUS)
+    _uoUS = _saveUS["intelligence"]
+    _uoUS = _uoUS[_uoUS.find("if (r?.url_only) {"):_uoUS.find("return true")]
+    check("unsaved: a URL-only intelligence save settles the URL and keeps the kind as a draft",
+          "d.settle(sentUrl)" in _uoUS and "d.settle(sent)" not in _uoUS
+          and "sentUrl = d.snap([`url:${kind}`])" in _saveUS["intelligence"], _uoUS[:200])
+    check("unsaved: nothing in the bar shows a key value: keys never register, the bar renders labels only",
+          bool(_barUS) and "useUnsaved(" not in _fnUI("function KeysCard(") and "hint" not in _barUS
+          and "readKey(" not in _barUS and "units[k].label" in _barUS)
+    # Still holds: the same request bodies as before for the same edits.
+    _smUS = _saveUS["room mapping"]
+    check("unsaved: the mapping save keeps the full-map wrapper and drops stale rooms and dead zones (still holds)",
+          "const body = { room_zones: { ...liveMap, ...liveZones(stillLive(mapDraft)), ...Object.fromEntries(picked) } }"
+          in _smUS and "const liveAgentDraft = stillLive(agentDraft)" in _smUS
+          and "if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...liveAgentDraft } }" in _smUS
+          and "if (picked.some(([, z]) => !z || !liveZone(z))) { say('Pick a zone first.'" in _smUS
+          and _smUS.count("await api('/api/dashboard/mapping', { method: 'PUT', json: body })") == 1, _smUS[:300])
+    check("unsaved: voice tuning still sends only the changed knobs (still holds)",
+          "for (const f of dirtyFields) body[f] = parseFloat(vals.val(f))" in _saveUS["voice tuning"]
+          and "await api('/api/dashboard/voice-tuning', { method: 'PUT', json: body })" in _saveUS["voice tuning"])
+    _ttsUS = _ws(_saveUS["tts"])
+    check("unsaved: the TTS save still sends the whole provider set (still holds)",
+          all(p in _ttsUS for p in (
+              "const body = { provider }", "body.model = model body.voice_id = voice_id",
+              "if (elSpeed != null) body.elevenlabs_speed = elSpeed", "if (elStab != null) body.elevenlabs_stability = elStab",
+              "if (elNorm != null) body.elevenlabs_text_normalization = elNorm", "body.deepgram_voice = model",
+              "body.deepgram_flux_voice = model", "body.deepgram_flux_speed = parseFloat(fluxSpeed)",
+              "body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)", "body.pocket_voice = model",
+              "if (provider !== 'pocket') body.fallback = fallback",
+              "if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice")), _ttsUS[:300])
+    check("unsaved: the STT save still starts a model download and the 0.5 s progress poll follows it (still holds)",
+          "if (r.download === 'started') {" in _saveUS["stt"]
+          and "`Downloading ${model} — restart to apply once it's on disk.`" in _saveUS["stt"]
+          and "}, 500)" in _stUS and "if (!downloading) return" in _stUS)
+    check("unsaved: the intelligence save body and 'Test saved config' stay as they were (still holds)",
+          "const body = { kind, url }" in _saveUS["intelligence"]
+          and "if (agentSel || kind === 'nanobot') body.agent = agentSel" in _saveUS["intelligence"]
+          and "if (!url) { say(`Enter the ${label} URL first.`" in _saveUS["intelligence"]
+          and '<button id="btn-int-test" className={BTN_DEFAULT}' in _syUS and ">Test saved config</button>" in _syUS)
+    check("unsaved: restartBot's latch and the Restart confirm are unchanged (still holds)",
+          "if (_botRestarting) return false" in _rb and _rb.count("_botRestarting = false") == 2
+          and "if (window.confirm('Restart the bot? Every node reboots and reconnects.')) { "
+              "restartBot(setMsg, setRebooting) }" in _rbtTB
+          and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
+          and "title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}" in _rbtTB)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
