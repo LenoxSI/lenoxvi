@@ -334,6 +334,10 @@ def main():
     _saved_el = os.environ.pop("ELEVENLABS_API_KEY", None)
     _saved_dg = os.environ.pop("DEEPGRAM_API_KEY", None)
     os.environ["LVI_TTS_PROVIDER"] = "elevenlabs"
+    # config.yaml wins over the env var, and the throwaway config is a copy
+    # of the live one: pin the provider there too, whatever the house runs.
+    _saved_tts = dict(config_store.read_section("tts") or {})
+    config_store.write_section("tts", {**_saved_tts, "provider": "elevenlabs"})
     try:
         importlib.reload(_cfg_mod)
         _prov = _cfg_mod.cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")
@@ -348,6 +352,7 @@ def main():
         if _saved_dg is not None:
             os.environ["DEEPGRAM_API_KEY"] = _saved_dg
         os.environ.pop("LVI_TTS_PROVIDER", None)
+        config_store.write_section("tts", _saved_tts)
         importlib.reload(_cfg_mod)
     # Zone DELETE with a dangling room mapping does ONE atomic
     # multi-section write (zone gone + mapping cleaned, same pass).
@@ -6648,7 +6653,8 @@ def main():
         _g = _gr.json()
         check("cloud stt GET: provider defaults to whisper; providers listed with availability",
               _g.get("current", {}).get("provider") == "whisper"
-              and [(p["name"], p.get("available")) for p in _g.get("providers", [])] == [("whisper", True), ("deepgram", True)],
+              and [(p["name"], p.get("available")) for p in _g.get("providers", [])]
+              == [("whisper", True), ("deepgram", True), ("elevenlabs", True)],
               str({k: _g.get(k) for k in ("providers",)}) + str(_g.get("current")))
         check("cloud stt GET: deepgram_key_set true, and the key value never appears",
               _g.get("deepgram_key_set") is True and "dg-secret-xyz123" not in _gr.text, str(_g.get("deepgram_key_set")))
@@ -8191,6 +8197,241 @@ def main():
               "restartBot(setMsg, setRebooting) }" in _rbtTB
           and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
           and "title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}" in _rbtTB)
+
+    # ── cloud STT provider: ElevenLabs Scribe on the STT card. The TTS
+    # ElevenLabs key, local Whisper on standby, Deepgram's rules. ─────────
+    import config as _cfgEL
+    import keys_catalog as _kcEL
+    import stt_fallback as _sfEL
+
+    _EL_VARS = ("LVI_ENV_FILE", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_STT_PROVIDER", "LVI_STT_LANGUAGE",
+                "LVI_TTS_PROVIDER")
+    _el_env = {k: os.environ.get(k) for k in _EL_VARS}
+    _el_cfg = {s: copy.deepcopy(dict(config_store.read_section(s) or {})) for s in ("stt", "tts")}
+    _el_boot = copy.deepcopy(getattr(_cfgEL, "_BOOT", None))
+    _el_running = _sfEL._STATE["provider"]
+    _el_envfile = SCRATCH / "elevenlabs-stt.env"
+    _EL_SECRETS = ("el-stt-SECRET-0001", "el-stt-SECRET-0002")
+
+    def _el_stt():
+        return dict(config_store.read_section("stt") or {})
+
+    def _el_set(stt=None, tts=None):
+        if stt is not None:
+            config_store.write_section("stt", {**{k: v for k, v in _el_cfg["stt"].items() if k != "provider"}, **stt})
+        if tts is not None:
+            config_store.write_section("tts", {**_el_cfg["tts"], "provider": tts})
+
+    def _el_reboot():
+        """What a real restart does: a new process loads config afresh."""
+        _cfgEL._BOOT = None
+        _cfgEL._load.cache_clear()
+        _cfgEL._load()
+
+    def _el_pending():
+        r = client.get("/api/dashboard/status")
+        return r.json().get("restart_pending") if r.status_code == 200 else None
+
+    def _el_keys():
+        return {r["var"]: r for r in client.get("/api/dashboard/keys").json().get("keys", [])}
+
+    try:
+        for _k in _EL_VARS:
+            os.environ.pop(_k, None)
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
+        os.environ.update({"LVI_ENV_FILE": str(_el_envfile), "ELEVENLABS_API_KEY": "el-stt-SECRET-0001"})
+        _sfEL.set_provider("whisper")
+        _el_set(stt={"language": "auto"}, tts="pocket")
+
+        # GET / PUT /stt
+        _gr = client.get("/api/dashboard/stt")
+        _g = _gr.json()
+        _elp = next((p for p in _g.get("providers", []) if p.get("name") == "elevenlabs"), {})
+        check("elevenlabs stt GET: the third provider, 'ElevenLabs Scribe v2 (cloud)', available with no extra package",
+              [p.get("name") for p in _g.get("providers", [])] == ["whisper", "deepgram", "elevenlabs"]
+              and _elp.get("label") == "ElevenLabs Scribe v2 (cloud)" and _elp.get("cloud") is True
+              and _elp.get("available") is True, str(_g.get("providers")))
+        check("elevenlabs stt GET: elevenlabs_key_set comes from the shared ElevenLabs key; the value never appears",
+              _g.get("elevenlabs_key_set") is True and not any(s in _gr.text for s in _EL_SECRETS)
+              and "deepgram_key_set" in _g, str({k: _g.get(k) for k in ("elevenlabs_key_set", "deepgram_key_set")}))
+        _r = client.put("/api/dashboard/stt", json={"provider": "elevenlabs"})
+        check("elevenlabs stt PUT: saved, restart needed, key present -> no key_needed",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True and _r.json().get("key_needed") is False
+              and _el_stt().get("provider") == "elevenlabs", f"{_r.text[:160]} cfg={_el_stt()}")
+        _r = client.put("/api/dashboard/stt", json={"provider": "elevenlabs"})
+        check("elevenlabs stt PUT the same provider again: no restart",
+              _r.status_code == 200 and _r.json().get("restart_needed") is False, _r.text[:120])
+        _r = client.put("/api/dashboard/stt", json={"language": "de"})
+        check("elevenlabs stt: a language change while Scribe is saved needs a restart (fixed when the session is built)",
+              _r.status_code == 200 and _r.json().get("restart_needed") is True and _el_stt().get("language") == "de",
+              _r.text[:160])
+        _before = _el_stt()
+        _refused = [client.put("/api/dashboard/stt", json=b).status_code for b in (
+            {"provider": "grok"}, {"provider": "ElevenLabs"}, {"language": "xx"},
+            {"provider": "elevenlabs", "keyterms": ["Jarvis"]}, {"provider": "elevenlabs", "elevenlabs_model": "scribe_v1"})]
+        check("stt PUT still refuses unknown providers, unknown languages and extra keys, changing nothing (still holds)",
+              _refused == [422] * 5 and _el_stt() == _before, f"{_refused} cfg={_el_stt()}")
+        _el_envfile.write_text("")
+        os.environ.pop("ELEVENLABS_API_KEY", None)
+        client.put("/api/dashboard/stt", json={"provider": "whisper"})
+        _r = client.put("/api/dashboard/stt", json={"provider": "elevenlabs"})
+        _g = client.get("/api/dashboard/stt").json()
+        check("elevenlabs stt without a key: allowed, key_needed true, GET says the key isn't set",
+              _r.status_code == 200 and _r.json().get("key_needed") is True and _g.get("elevenlabs_key_set") is False,
+              f"{_r.text[:160]} set={_g.get('elevenlabs_key_set')}")
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
+        os.environ["ELEVENLABS_API_KEY"] = "el-stt-SECRET-0001"
+        _sfEL.set_provider("elevenlabs")
+        try:
+            _r1 = client.put("/api/dashboard/stt", json={"provider": "whisper"})
+            _r2 = client.put("/api/dashboard/stt", json={"language": "it"})
+        finally:
+            _sfEL.set_provider("whisper")
+        check("elevenlabs stt: leaving a RUNNING Scribe for Whisper needs a restart",
+              _r1.status_code == 200 and _r1.json().get("restart_needed") is True, _r1.text[:120])
+        check("elevenlabs stt: a language change while Scribe is RUNNING needs a restart (even if Whisper is saved)",
+              _r2.status_code == 200 and _r2.json().get("restart_needed") is True, _r2.text[:120])
+        _r = client.put("/api/dashboard/stt", json={"language": "fr"})
+        check("stt: a language change on Whisper alone stays live, no restart (still holds)",
+              _r.status_code == 200 and _r.json().get("restart_needed") is False, _r.text[:120])
+
+        # /status: the running provider's block
+        _sfEL.set_provider("elevenlabs")
+        _ownEL = object()
+        try:
+            _sfEL.note_active("suite-el-room", "elevenlabs", owner=_ownEL)
+            _s1 = client.get("/api/dashboard/status").json()
+            _sfEL.note_active("suite-el-room", "whisper", "ElevenLabs STT rejected the key", owner=_ownEL)
+            _s2 = client.get("/api/dashboard/status").json()
+        finally:
+            _sfEL.forget("suite-el-room", owner=_ownEL)
+            _sfEL.set_provider("whisper")
+        _st1, _st2 = _s1.get("stt") or {}, _s2.get("stt") or {}
+        check("elevenlabs stt /status: on Scribe -> provider and active elevenlabs, model scribe_v2_realtime",
+              _st1.get("provider") == "elevenlabs" and _st1.get("active") == "elevenlabs"
+              and _st1.get("cloud_model") == "scribe_v2_realtime", str(_st1))
+        check("elevenlabs stt /status: failed over -> active whisper with the reason and the room",
+              _st2.get("active") == "whisper" and _st2.get("fallback_rooms") == ["suite-el-room"]
+              and "rejected" in (_st2.get("fallback_reason") or ""), str(_st2))
+        _EL_FIELDS = ("uptime_secs", "version", "wake_model", "stt_model", "stt", "tts_provider", "intelligence",
+                      "active_room", "last_wake", "rooms", "session_modes", "note", "restart_pending")
+        check("/status keeps every field it returns today, with Scribe running too (still holds)",
+              all(k in _s1 for k in _EL_FIELDS) and all(k in _s2 for k in _EL_FIELDS), str(sorted(_s1)))
+
+        # Keys card: the ElevenLabs row
+        _el_set(stt={"provider": "elevenlabs"}, tts="pocket")
+        _kk = _el_keys()
+        check("elevenlabs keys: STT on Scribe -> the ElevenLabs row is used by TTS + STT and in use (TTS on pocket), "
+              "the Deepgram key is not",
+              _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS", "STT"]
+              and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is True
+              and _kk.get("DEEPGRAM_API_KEY", {}).get("in_use") is False,
+              f"{_kk.get('ELEVENLABS_API_KEY')} {_kk.get('DEEPGRAM_API_KEY', {}).get('in_use')}")
+        _el_set(stt={"provider": "whisper"}, tts="pocket")
+        _kk = _el_keys()
+        check("elevenlabs keys: Whisper + pocket -> ElevenLabs used by TTS only, not in use (still holds)",
+              _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS"]
+              and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is False, str(_kk.get("ELEVENLABS_API_KEY")))
+        _el_set(stt={"provider": "whisper"}, tts="elevenlabs")
+        _kk = _el_keys()
+        check("elevenlabs keys: ElevenLabs TTS + Whisper -> in use, used by TTS only (still holds)",
+              _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS"]
+              and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is True, str(_kk.get("ELEVENLABS_API_KEY")))
+        _el_set(stt={"provider": "deepgram"}, tts="pocket")
+        _kk = _el_keys()
+        check("elevenlabs keys: Deepgram STT still uses the Deepgram key, used by TTS + STT; ElevenLabs not (still holds)",
+              _kk.get("DEEPGRAM_API_KEY", {}).get("in_use") is True
+              and _kk.get("DEEPGRAM_API_KEY", {}).get("used_by") == ["TTS", "STT"]
+              and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is False, str(_kk.get("DEEPGRAM_API_KEY")))
+        check("elevenlabs keys: the TTS side of the key is untouched (still holds)",
+              _kcEL.tts_secret("elevenlabs") == "ELEVENLABS_API_KEY" and _kcEL.tts_secret("pocket") is None
+              and _kcEL.session_tts_provider("elevenlabs", None, {"ELEVENLABS_API_KEY": "x"}) == ("elevenlabs", None)
+              and _kcEL.session_tts_provider("elevenlabs", "pocket", {})[0] == "pocket")
+
+        # Restart pending: Scribe fixes its language at session build
+        _el_set(stt={"provider": "elevenlabs", "language": "auto"}, tts="pocket")
+        _el_reboot()
+        _p0 = _el_pending()
+        _el_set(stt={"provider": "elevenlabs", "language": "de"})
+        _p1 = _el_pending()
+        check("elevenlabs restart pending: a saved language change counts on Scribe",
+              isinstance(_p0, list) and "stt" not in _p0 and isinstance(_p1, list) and "stt" in _p1, f"{_p0} -> {_p1}")
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0002\n")
+        _p2 = _el_pending()
+        check("elevenlabs restart pending: a new ElevenLabs key counts while only STT uses it (TTS on pocket)",
+              isinstance(_p2, list) and "elevenlabs key" in _p2, str(_p2))
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
+        _el_set(stt={"provider": "whisper", "language": "auto"}, tts="pocket")
+        _el_reboot()
+        _el_set(stt={"provider": "whisper", "language": "de"})
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0002\n")
+        _p3 = _el_pending()
+        check("restart pending: on Whisper a language change stays live and an unused ElevenLabs key never counts (still holds)",
+              isinstance(_p3, list) and "stt" not in _p3 and "elevenlabs key" not in _p3, str(_p3))
+        _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
+        _el_set(stt={"provider": "deepgram", "language": "auto"})
+        _el_reboot()
+        _el_set(stt={"provider": "deepgram", "language": "de"})
+        _p4 = _el_pending()
+        check("restart pending: on Deepgram a language change still counts (still holds)",
+              isinstance(_p4, list) and "stt" in _p4, str(_p4))
+        check("restart pending: labels only, never an ElevenLabs key value (still holds)",
+              not any(s in str(x) for x in (_p0, _p1, _p2, _p3, _p4) for s in _EL_SECRETS))
+    finally:
+        for _k, _v in _el_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _s, _v in _el_cfg.items():
+            config_store.write_section(_s, _v)
+        _sfEL.set_provider(_el_running)
+        _cfgEL._BOOT = _el_boot
+
+    # bot.py: the cloud branch builds the picked provider and wraps it
+    check("elevenlabs bot.py: any cloud provider gets the Whisper-standby switcher, built for the picked provider",
+          "if stt_catalog.is_cloud(stt_provider):" in _main_src
+          and "stt_fallback.make_cloud(stt_provider, cfg_env('stt', 'language', 'LVI_STT_LANGUAGE'))" in _main_src
+          and "provider=stt_provider)" in _main_src and "if stt_provider == 'deepgram':" not in _main_src,
+          "cloud branch missing")
+    check("elevenlabs bot.py: the switcher still closes with the session, the timer still runs (still holds)",
+          "wrap_stt_with_fallback(" in _main_src and _main_src.count("close_stt_fallback(") >= 2 and "SttTimer(" in _main_src)
+
+    # UI: one table of cloud providers drives the chips, the key line and the save message
+    _clEL = _reui.search(r"const STT_CLOUD = \{(.*?)\n\}", _appsrc, _reui.DOTALL)
+    _clEL = _ws(_clEL.group(1)) if _clEL else ""
+    _chEL = _jsbody(_appsrc, "function sttChip(st, configuredModel) {")
+    _scEL = _fnUI("function SttCard({ status, setMsg }) {")
+    _svEL = _ws(_jsbody(_scEL, "const save = async say => {"))
+    check("elevenlabs ui: the cloud table names Deepgram and ElevenLabs with their GET /stt key flags",
+          "deepgram: { name: 'Deepgram', key: 'deepgram_key_set', chip: st => `deepgram ${st.cloud_model || ''}`.trim() }"
+          in _clEL and "elevenlabs: { name: 'ElevenLabs', key: 'elevenlabs_key_set', chip: () => 'elevenlabs scribe' }"
+          in _clEL, _clEL[:300])
+    _gEL = client.get("/api/dashboard/stt").json()
+    check("elevenlabs ui: every key flag the card reads is one GET /stt returns",
+          bool(_reui.findall(r"key: '(\w+)'", _clEL)) and all(k in _gEL for k in _reui.findall(r"key: '(\w+)'", _clEL)),
+          str(_reui.findall(r"key: '(\w+)'", _clEL)))
+    check("elevenlabs ui: the Overview chip reads 'elevenlabs scribe' on Scribe and 'whisper fallback' naming ElevenLabs",
+          "const cloud = STT_CLOUD[st.provider]" in _chEL and "const onWhisper = !cloud || st.active === 'whisper'" in _chEL
+          and "if (cloud && st.active === 'whisper') {" in _chEL and "`${cloud.name} unreachable`" in _chEL
+          and "if (cloud) return { text: cloud.chip(st) }" in _chEL and "'deepgram'" not in _chEL, _chEL[:400])
+    check("elevenlabs ui: the Overview chip keeps Whisper's words (still holds)",
+          "text: 'whisper failed'" in _chEL and "text: 'whisper fallback'" in _chEL
+          and "return { text: whisper.toLowerCase() }" in _chEL and "text: 'loading', muted: true" in _chEL, _chEL[:300])
+    check("elevenlabs ui: the STT card shows the running cloud provider's chip, 'Fallback model' and its own missing key",
+          "const cloud = STT_CLOUD[st?.provider]" in _scEL and "const onCloud = !!cloud && st.active === st.provider" in _scEL
+          and "const onFallback = !!cloud && st.active === 'whisper'" in _scEL
+          and "const cloudPick = STT_CLOUD[provider]" in _scEL
+          and "<span className={CHIP_CLS}>{cloud.chip(st)}</span>" in _scEL
+          and "<Field label={cloudPick ? 'Fallback model' : 'Model'}>" in _scEL
+          and "{cloudPick && data && !data[cloudPick.key] && <MissingKey label={cloudPick.name} />}" in _scEL
+          and "'deepgram'" not in _scEL and 'label="Deepgram"' not in _scEL, _scEL[:300])
+    check("elevenlabs ui: 'add your key' names the saved provider; the restart message is unchanged",
+          "say(r.key_needed ? `Saved — add your ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key below, then restart.`"
+          in _svEL and ": 'Saved — restart to apply.', 'ok', 'STT')" in _svEL, _svEL[:400])
+    check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
+          "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
+          and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
