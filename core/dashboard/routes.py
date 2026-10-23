@@ -26,7 +26,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -35,6 +35,7 @@ from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
 import intelligence_target
 import node_speaker
+import room_recorder
 import tts_pocket
 import wake_name
 
@@ -966,6 +967,52 @@ async def set_node_mute(room: str, payload: MutePayload):
     if isinstance(data.get("muted"), bool):
         registry.note_muted_room(room, data["muted"])
     return reply  # {"ok": true, "data": {"muted": bool}}
+
+
+class RecordPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    seconds: int = Field(ge=1, le=room_recorder.MAX_SECONDS)
+
+
+@router.post("/nodes/{room}/record", dependencies=GUARD)
+async def start_recording(room: str, payload: RecordPayload):
+    """Record this room's raw mic audio for `seconds` (max 10 min) to a
+    WAV on the appliance. Only an online room; one recording per room."""
+    _room_online(room)
+    try:
+        return {"ok": True, **room_recorder.start(room, payload.seconds)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+
+@router.post("/nodes/{room}/record/stop", dependencies=GUARD)
+async def stop_recording(room: str):
+    done = await room_recorder.stop(room)
+    if done is None:
+        raise HTTPException(status_code=404, detail=f"'{room}' is not recording")
+    return {"ok": True, **done}
+
+
+@router.get("/recordings", dependencies=GUARD)
+async def list_recordings():
+    return room_recorder.listing()
+
+
+@router.get("/recordings/{name}", dependencies=GUARD)
+async def get_recording(name: str):
+    p = room_recorder.path_for(name)
+    if p is None:
+        raise HTTPException(status_code=404, detail="no such recording")
+    return FileResponse(p, media_type="audio/wav", filename=p.name)
+
+
+@router.delete("/recordings/{name}", dependencies=GUARD)
+async def delete_recording(name: str):
+    p = room_recorder.path_for(name)
+    if p is None:
+        raise HTTPException(status_code=404, detail="no such recording")
+    p.unlink()
+    return {"ok": True, "deleted": name}
 
 
 @router.get("/nodes/{room}/info", dependencies=GUARD)

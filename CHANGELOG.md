@@ -8,6 +8,12 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- Room recorder: save one room's raw mic audio to a WAV on the appliance
+  (up to 10 minutes, one recording per room, owner-only files in
+  `captures/`, deleted after 7 days) through the dashboard API — see
+  "Recording a room" in the README. Off unless asked for.
+
 ## [0.6.8] — 2026-10-22 — Nanobot intelligence, friendlier key setup
 
 A third agentic brain behind the same rooms and speakers: nanobot, set up

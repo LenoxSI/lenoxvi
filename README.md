@@ -46,6 +46,7 @@ harness — the dashboard's job is operating the rig, not talking to it.
     audio overlays (S2 only, vol ~70; WiiM `setPlayerCmd` stop path)
   - `echo_gate.py` — room-echo containment (permanent safety net behind
     the turn lock; `relax()` on confirmed wake/barge-in, ~0.5s tail)
+  - `room_recorder.py` — time-boxed raw mic capture of one room to a WAV
   - `led_state.py` — node ring-LED state machine
   - `firmware_server.py` — `/firmware/*` OTA delivery for mic nodes
   - `dashboard/` — the operator surface (see below)
@@ -149,6 +150,22 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
 ```
 
 `npm run build` regenerates `dist/` — commit it with the UI change.
+
+### Recording a room
+
+The bot can save one room's raw mic audio (what the wake word hears, before
+any gating) to a WAV on the appliance, for diagnostics or voice samples.
+Off unless asked; up to 10 minutes per recording; one recording per room;
+files land in `captures/` (owner-only, never committed) and are deleted
+after 7 days.
+
+```
+POST   /api/dashboard/nodes/<room>/record      {"seconds": 120}
+POST   /api/dashboard/nodes/<room>/record/stop
+GET    /api/dashboard/recordings               # live recordings + saved files
+GET    /api/dashboard/recordings/<file>        # download
+DELETE /api/dashboard/recordings/<file>
+```
 
 ## Fresh clone → running bot
 

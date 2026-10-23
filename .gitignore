@@ -42,3 +42,6 @@ firmware/xvf3800/
 # sticky-session history stash (dashboard checkbox; holds conversation text)
 data/
 config.yaml.bak-*
+
+# room recorder output (local mic captures, never commit)
+captures/
