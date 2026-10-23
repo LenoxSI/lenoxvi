@@ -7535,6 +7535,37 @@ def main():
               and "catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones'); return false }" in _svUI,
               _svUI[:240])
 
+    # ── dashboard ui (App.jsx): UX pack — sentence-case headers, neutral
+    # Restart, amber Mute, honest wake copy ────────────────────────────────
+    check("dashboard ui: table headers are sentence case (no uppercase/tracking-wide classes, other classes kept)",
+          "uppercase" not in _appsrc and "tracking-wide" not in _appsrc
+          and '<tr className="text-[12px] text-[var(--muted)]">' in _appsrc,
+          f"uppercase x{_appsrc.count('uppercase')}, tracking-wide x{_appsrc.count('tracking-wide')}")
+    check("dashboard ui: the Overview Restart button is the default style, not danger (danger stays on Remove/Delete)",
+          'className={BTN_DEFAULT} disabled={rebooting}' in _appsrc
+          and 'className={BTN_DANGER} disabled={rebooting}' not in _appsrc
+          and 'const BTN_DANGER' in _appsrc,
+          f"BTN_DANGER buttons: {_appsrc.count('className={BTN_DANGER}')}")
+    check("dashboard ui: a muted node's Mute button is the amber warning style; unmuted stays default",
+          'muted ? BTN_WARNING : BTN_DEFAULT' in _appsrc
+          and 'muted ? BTN_PRIMARY' not in _appsrc
+          and 'const BTN_WARNING = `${BTN} bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]`' in _appsrc,
+          f"mute button uses BTN_PRIMARY: {'muted ? BTN_PRIMARY' in _appsrc}")
+    check("dashboard ui: the wake slider is labelled 'Wake threshold' with a wake-word-score hint",
+          "'Wake threshold'" in _appsrc and "'Wake sensitivity'" not in _appsrc
+          and 'Wake-word score needed to wake' in _appsrc and 'OWW score' not in _appsrc,
+          f"old label: {'Wake sensitivity' in _appsrc}, old hint: {'OWW score' in _appsrc}")
+    check("dashboard ui: the Nodes table column reads 'Since', not 'Last seen'",
+          '>Since<' in _appsrc and 'Last seen' not in _appsrc,
+          f"Last seen: {'Last seen' in _appsrc}")
+    check("dashboard ui: the firmware mismatch confirm has no emoji; the sentence starts with 'The filename looks like'",
+          '⚠' not in _appsrc and 'The filename looks like' in _appsrc,
+          f"⚠ present: {'⚠' in _appsrc}")
+    check("dashboard ui: the wake name card's button reads 'Save', not 'Set wake word'",
+          'Set wake word' not in _appsrc
+          and "setDraft(null) }}>Save</button>" in _appsrc,
+          f"Set wake word: {'Set wake word' in _appsrc}")
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")
