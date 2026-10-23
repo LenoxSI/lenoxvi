@@ -6979,6 +6979,166 @@ def main():
     check("dashboard ui: the dashboard token is typed into a masked field, never window.prompt",
           "window.prompt(" not in _appsrc and 'type="password"' in _td)
 
+
+    # ── room recorder: time-boxed raw mic capture ────────────────────
+    import asyncio as _asyncioREC
+    import stat as _statREC
+    import wave as _waveREC
+
+    import room_recorder as _rrREC
+    from dashboard import registry as _regREC
+    from pipecat.frames.frames import InputAudioRawFrame as _IARF_REC
+    from pipecat.frames.frames import TextFrame as _TF_REC
+    from pipecat.processors.frame_processor import FrameDirection as _FD_REC
+    _capREC = SCRATCH / "captures"
+    _saved_capREC = os.environ.get("LVI_CAPTURES_DIR")
+    os.environ["LVI_CAPTURES_DIR"] = str(_capREC)
+    try:
+        _pcmA = b"\x01\x00" * 320  # 20 ms @ 16 kHz
+        _infoA = _rrREC.start("suite-rec-a", 5)
+        _rrREC.feed("suite-rec-a", _pcmA, 16000, 1)
+        _rrREC.feed("suite-rec-a", _pcmA, 16000, 1)
+        _rrREC.feed("suite-rec-other", _pcmA, 16000, 1)  # another room: ignored
+        _rrREC.feed("suite-rec-a", b"\x02\x00" * 480, 24000, 1)  # format change: ignored
+        _stopA = _asyncioREC.run(_rrREC.stop("suite-rec-a"))
+        _fA = _capREC / _infoA["file"]
+        with _waveREC.open(str(_fA), "rb") as _w:
+            _wA = (_w.getframerate(), _w.getnchannels(), _w.getsampwidth(), _w.readframes(10_000))
+        check("recorder: a recording saves exactly the room's audio as a 16 kHz mono 16-bit WAV",
+              _stopA == {"room": "suite-rec-a", "file": _infoA["file"]}
+              and _wA == (16000, 1, 2, _pcmA * 2), str(_wA[:3]))
+        check("recorder: files are owner-only and the folder is private",
+              _statREC.S_IMODE(_fA.stat().st_mode) == 0o600
+              and _statREC.S_IMODE(_capREC.stat().st_mode) == 0o700,
+              f"{oct(_fA.stat().st_mode)} {oct(_capREC.stat().st_mode)}")
+        check("recorder: no partial file is left behind", not list(_capREC.glob(".*part")))
+        check("recorder: the file name carries the room, never a path",
+              _infoA["file"].startswith("suite-rec-a-") and "/" not in _infoA["file"])
+
+        _bad = []
+        for _s in (0, -1, _rrREC.MAX_SECONDS + 1, True, 2.5):
+            try:
+                _rrREC.start("suite-rec-b", _s)
+                _bad.append(_s)
+                _asyncioREC.run(_rrREC.stop("suite-rec-b"))
+            except ValueError:
+                pass
+        check("recorder: lengths outside 1-600 whole seconds are refused", not _bad, str(_bad))
+        _rrREC.start("suite-rec-b", 3)
+        try:
+            _rrREC.start("suite-rec-b", 3)
+            _dup = False
+        except RuntimeError:
+            _dup = True
+        check("recorder: a room already recording refuses a second recording", _dup)
+        # the time box: a frame after the deadline closes and saves the file
+        _rrREC._active["suite-rec-b"].deadline = 0
+        _nameB = _rrREC._active["suite-rec-b"].name
+        _rrREC.feed("suite-rec-b", _pcmA, 16000, 1)
+        check("recorder: a frame past the time box closes the recording and saves it",
+              not _rrREC.is_recording("suite-rec-b") and (_capREC / _nameB).is_file())
+
+        # the timer closes a recording whose node stopped sending audio
+        async def _timer_probe():
+            _i = _rrREC.start("suite-rec-c", 1)
+            _rrREC.feed("suite-rec-c", _pcmA, 16000, 1)
+            await _asyncioREC.sleep(2.6)
+            return _i
+        _iC = _asyncioREC.run(_timer_probe())
+        check("recorder: a node that goes quiet still gets its recording closed by the timer",
+              not _rrREC.is_recording("suite-rec-c") and (_capREC / _iC["file"]).is_file())
+
+        _old = _capREC / "old-room-20200101-000000.wav"
+        _old.write_bytes(b"x")
+        os.utime(_old, (time.time() - 8 * 86400,) * 2)
+        _rrREC.start("suite-rec-d", 2)
+        _asyncioREC.run(_rrREC.stop("suite-rec-d"))
+        check("recorder: recordings older than 7 days are pruned when a new one starts",
+              not _old.exists())
+
+        # the tap: passes every frame on, feeds only input audio for its room
+        _pushed = []
+        _tap = _rrREC.RecorderTap(lambda: "suite-rec-e")
+
+        async def _push(f, d=_FD_REC.DOWNSTREAM):
+            _pushed.append(f)
+        _tap.push_frame = _push
+
+        async def _tap_probe():
+            _i = _rrREC.start("suite-rec-e", 5)
+            for _f in (_IARF_REC(audio=_pcmA, sample_rate=16000, num_channels=1), _TF_REC("hi")):
+                await _tap.process_frame(_f, _FD_REC.DOWNSTREAM)
+            await _rrREC.stop("suite-rec-e")
+            return _i
+        _iE = _asyncioREC.run(_tap_probe())
+        with _waveREC.open(str(_capREC / _iE["file"]), "rb") as _w:
+            _eFrames = _w.readframes(10_000)
+        check("recorder: the tap passes every frame on and records only input audio",
+              len(_pushed) == 2 and _eFrames == _pcmA, f"pushed={len(_pushed)} bytes={len(_eFrames)}")
+
+        _bot_tree = _astR.parse((REPO_CORE.parent / "bot.py").read_text())
+        _plist = next((n for n in _astR.walk(_bot_tree) if isinstance(n, _astR.Call)
+                       and getattr(n.func, "id", "") == "Pipeline"), None)
+        _elts = [_astR.unparse(e) for e in _plist.args[0].elts] if _plist else []
+        check("recorder: bot.py taps raw audio right after the transport input",
+              _elts[:2] == ["transport.input()", "RecorderTap(_pipeline_room)"], str(_elts[:3]))
+
+        # routes
+        _regREC.note_offer("suite-rec-pc", "suite-rec-live")
+        _regREC.mark_connected("suite-rec-pc")
+        _rOff = client.post("/api/dashboard/nodes/suite-rec-nowhere/record", json={"seconds": 5})
+        check("recorder api: an offline room can't record", _rOff.status_code == 409, _rOff.text[:120])
+        _r422 = [client.post("/api/dashboard/nodes/suite-rec-live/record", json=_b).status_code
+                 for _b in ({}, {"seconds": 0}, {"seconds": 601}, {"seconds": 5, "bogus": 1})]
+        check("recorder api: missing, out-of-range or unknown fields are refused",
+              _r422 == [422, 422, 422, 422], str(_r422))
+        _r1 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30})
+        _r2 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30})
+        check("recorder api: start answers the file name; a second start is a 409",
+              _r1.status_code == 200 and _r1.json().get("file", "").endswith(".wav")
+              and _r2.status_code == 409, f"{_r1.text[:120]} {_r2.status_code}")
+        _rList = client.get("/api/dashboard/recordings").json()
+        check("recorder api: the listing shows the live recording with its time left",
+              any(r["room"] == "suite-rec-live" and 0 < r["seconds_left"] <= 30 for r in _rList["recording"]),
+              str(_rList["recording"]))
+        _rS = client.post("/api/dashboard/nodes/suite-rec-live/record/stop")
+        _rS2 = client.post("/api/dashboard/nodes/suite-rec-live/record/stop")
+        _fname = _r1.json().get("file", "")
+        check("recorder api: stop saves the file before answering; stopping again is a 404",
+              _rS.status_code == 200 and (_capREC / _fname).is_file() and _rS2.status_code == 404,
+              f"{_rS.text[:120]} {_rS2.status_code}")
+        _rG = client.get(f"/api/dashboard/recordings/{_fname}")
+        check("recorder api: a recording downloads as audio/wav",
+              _rG.status_code == 200 and _rG.headers.get("content-type", "").startswith("audio/wav")
+              and _rG.content[:4] == b"RIFF", str(_rG.status_code))
+        (SCRATCH / "secret.wav").write_bytes(b"RIFFsecret")
+        _trav = [client.get(f"/api/dashboard/recordings/{_n}").status_code
+                 for _n in ("..%2Fsecret.wav", "%2E%2E%2Fsecret.wav", ".hidden.wav", "x.txt")]
+        _travD = client.delete("/api/dashboard/recordings/..%2Fsecret.wav").status_code
+        check("recorder api: names outside the captures folder are never served or deleted",
+              all(c == 404 for c in _trav) and _travD == 404 and (SCRATCH / "secret.wav").exists(),
+              f"{_trav} {_travD}")
+        _pf = [_rrREC.path_for(_n) for _n in ("../secret.wav", "..", ".hidden.wav", "a/../../secret.wav",
+                                              str(SCRATCH / "secret.wav"), "")]
+        check("recorder: path_for refuses any name that isn't a plain file in the captures folder",
+              _pf == [None] * 6 and _rrREC.path_for(_fname) == _capREC / _fname, str(_pf))
+        _rX = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 5},
+                          headers={"Origin": "http://evil.example"})
+        _rXd = client.delete(f"/api/dashboard/recordings/{_fname}", headers={"Origin": "http://evil.example"})
+        check("recorder api: cross-site pages can't start a recording or delete one",
+              _rX.status_code == 403 and _rXd.status_code == 403 and (_capREC / _fname).is_file(),
+              f"{_rX.status_code} {_rXd.status_code}")
+        _rD = client.delete(f"/api/dashboard/recordings/{_fname}")
+        check("recorder api: delete removes the file",
+              _rD.status_code == 200 and not (_capREC / _fname).exists(), _rD.text[:120])
+    finally:
+        for _room in list(_rrREC._active):
+            _rrREC._finish(_rrREC._active[_room])
+        if _saved_capREC is None:
+            os.environ.pop("LVI_CAPTURES_DIR", None)
+        else:
+            os.environ["LVI_CAPTURES_DIR"] = _saved_capREC
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")
