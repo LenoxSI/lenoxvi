@@ -6992,7 +6992,10 @@ def main():
     from pipecat.processors.frame_processor import FrameDirection as _FD_REC
     _capREC = SCRATCH / "captures"
     _saved_capREC = os.environ.get("LVI_CAPTURES_DIR")
+    _saved_tokREC = os.environ.get("LVI_DASHBOARD_TOKEN")
     os.environ["LVI_CAPTURES_DIR"] = str(_capREC)
+    # The recorder routes need a dashboard token configured (and sent).
+    _hREC = {"X-Dashboard-Token": "suite-rec-token"}
     try:
         _pcmA = b"\x01\x00" * 320  # 20 ms @ 16 kHz
         _infoA = _rrREC.start("suite-rec-a", 5)
@@ -7084,37 +7087,38 @@ def main():
               _elts[:2] == ["transport.input()", "RecorderTap(_pipeline_room)"], str(_elts[:3]))
 
         # routes
+        os.environ["LVI_DASHBOARD_TOKEN"] = _hREC["X-Dashboard-Token"]
         _regREC.note_offer("suite-rec-pc", "suite-rec-live")
         _regREC.mark_connected("suite-rec-pc")
-        _rOff = client.post("/api/dashboard/nodes/suite-rec-nowhere/record", json={"seconds": 5})
+        _rOff = client.post("/api/dashboard/nodes/suite-rec-nowhere/record", json={"seconds": 5}, headers=_hREC)
         check("recorder api: an offline room can't record", _rOff.status_code == 409, _rOff.text[:120])
-        _r422 = [client.post("/api/dashboard/nodes/suite-rec-live/record", json=_b).status_code
+        _r422 = [client.post("/api/dashboard/nodes/suite-rec-live/record", json=_b, headers=_hREC).status_code
                  for _b in ({}, {"seconds": 0}, {"seconds": 601}, {"seconds": 5, "bogus": 1})]
         check("recorder api: missing, out-of-range or unknown fields are refused",
               _r422 == [422, 422, 422, 422], str(_r422))
-        _r1 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30})
-        _r2 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30})
+        _r1 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30}, headers=_hREC)
+        _r2 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30}, headers=_hREC)
         check("recorder api: start answers the file name; a second start is a 409",
               _r1.status_code == 200 and _r1.json().get("file", "").endswith(".wav")
               and _r2.status_code == 409, f"{_r1.text[:120]} {_r2.status_code}")
-        _rList = client.get("/api/dashboard/recordings").json()
+        _rList = client.get("/api/dashboard/recordings", headers=_hREC).json()
         check("recorder api: the listing shows the live recording with its time left",
               any(r["room"] == "suite-rec-live" and 0 < r["seconds_left"] <= 30 for r in _rList["recording"]),
               str(_rList["recording"]))
-        _rS = client.post("/api/dashboard/nodes/suite-rec-live/record/stop")
-        _rS2 = client.post("/api/dashboard/nodes/suite-rec-live/record/stop")
+        _rS = client.post("/api/dashboard/nodes/suite-rec-live/record/stop", headers=_hREC)
+        _rS2 = client.post("/api/dashboard/nodes/suite-rec-live/record/stop", headers=_hREC)
         _fname = _r1.json().get("file", "")
         check("recorder api: stop saves the file before answering; stopping again is a 404",
               _rS.status_code == 200 and (_capREC / _fname).is_file() and _rS2.status_code == 404,
               f"{_rS.text[:120]} {_rS2.status_code}")
-        _rG = client.get(f"/api/dashboard/recordings/{_fname}")
+        _rG = client.get(f"/api/dashboard/recordings/{_fname}", headers=_hREC)
         check("recorder api: a recording downloads as audio/wav",
               _rG.status_code == 200 and _rG.headers.get("content-type", "").startswith("audio/wav")
               and _rG.content[:4] == b"RIFF", str(_rG.status_code))
         (SCRATCH / "secret.wav").write_bytes(b"RIFFsecret")
-        _trav = [client.get(f"/api/dashboard/recordings/{_n}").status_code
+        _trav = [client.get(f"/api/dashboard/recordings/{_n}", headers=_hREC).status_code
                  for _n in ("..%2Fsecret.wav", "%2E%2E%2Fsecret.wav", ".hidden.wav", "x.txt")]
-        _travD = client.delete("/api/dashboard/recordings/..%2Fsecret.wav").status_code
+        _travD = client.delete("/api/dashboard/recordings/..%2Fsecret.wav", headers=_hREC).status_code
         check("recorder api: names outside the captures folder are never served or deleted",
               all(c == 404 for c in _trav) and _travD == 404 and (SCRATCH / "secret.wav").exists(),
               f"{_trav} {_travD}")
@@ -7123,21 +7127,413 @@ def main():
         check("recorder: path_for refuses any name that isn't a plain file in the captures folder",
               _pf == [None] * 6 and _rrREC.path_for(_fname) == _capREC / _fname, str(_pf))
         _rX = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 5},
-                          headers={"Origin": "http://evil.example"})
-        _rXd = client.delete(f"/api/dashboard/recordings/{_fname}", headers={"Origin": "http://evil.example"})
+                          headers={**_hREC, "Origin": "http://evil.example"})
+        _rXd = client.delete(f"/api/dashboard/recordings/{_fname}",
+                             headers={**_hREC, "Origin": "http://evil.example"})
         check("recorder api: cross-site pages can't start a recording or delete one",
               _rX.status_code == 403 and _rXd.status_code == 403 and (_capREC / _fname).is_file(),
               f"{_rX.status_code} {_rXd.status_code}")
-        _rD = client.delete(f"/api/dashboard/recordings/{_fname}")
+        _rD = client.delete(f"/api/dashboard/recordings/{_fname}", headers=_hREC)
         check("recorder api: delete removes the file",
               _rD.status_code == 200 and not (_capREC / _fname).exists(), _rD.text[:120])
     finally:
         for _room in list(_rrREC._active):
             _rrREC._finish(_rrREC._active[_room])
-        if _saved_capREC is None:
-            os.environ.pop("LVI_CAPTURES_DIR", None)
+        for _k, _v in (("LVI_CAPTURES_DIR", _saved_capREC), ("LVI_DASHBOARD_TOKEN", _saved_tokREC)):
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+
+    # ── recorder: token-only, honest saves, its own files only ──────────
+    import types as _typesRG
+
+    from dashboard import guard as _gdRG
+    from dashboard import routes as _rtRG
+    from fastapi.routing import APIRoute as _APIRouteRG
+    _capRG = SCRATCH / "captures-guard"
+    _saved_envRG = {k: os.environ.get(k) for k in ("LVI_CAPTURES_DIR", "LVI_DASHBOARD_TOKEN")}
+    _realTimeRG = _rrREC.time
+    os.environ["LVI_CAPTURES_DIR"] = str(_capRG)
+    _tokRG = "suite-rec2-token"
+    _hRG = {_gdRG.TOKEN_HEADER: _tokRG}
+    _pcmRG = b"\x01\x00" * 320
+    try:
+        _regREC.note_offer("suite-rec2-pc", "suite-rec2-live")
+        _regREC.mark_connected("suite-rec2-pc")
+        _capRG.mkdir(parents=True, exist_ok=True)
+        _keepRG = "suite-rec2-keep-20261023-120000.wav"
+        (_capRG / _keepRG).write_bytes(b"RIFFkeep")
+
+        def _detail(r):
+            try:
+                body = r.json()
+            except ValueError:  # a WAV download
+                return None
+            return body.get("detail") if isinstance(body, dict) else None
+
+        def _rec_routes(headers=None):
+            """(status, detail) from each recorder route, in a fixed order."""
+            _rs = [client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 5}, headers=headers),
+                   client.post("/api/dashboard/nodes/suite-rec2-live/record/stop", headers=headers),
+                   client.get("/api/dashboard/recordings", headers=headers),
+                   client.get(f"/api/dashboard/recordings/{_keepRG}", headers=headers),
+                   client.delete(f"/api/dashboard/recordings/{_keepRG}", headers=headers)]
+            return [(r.status_code, _detail(r)) for r in _rs]
+
+        # no token configured: every recorder route refuses, nothing starts or goes
+        os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+        _noTok = _rec_routes(_hRG)
+        check("recorder api: with no dashboard token every recorder route refuses (403, says to set LVI_DASHBOARD_TOKEN)",
+              _noTok == [(403, "recording needs a dashboard token: set LVI_DASHBOARD_TOKEN")] * 5
+              and not _rrREC.is_recording("suite-rec2-live") and (_capRG / _keepRG).is_file(), str(_noTok))
+        _xNoTok = client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 5},
+                              headers={"Origin": "http://evil.example"})
+        check("recorder api: a cross-site request still gets the cross-origin 403, token or not",
+              _xNoTok.status_code == 403 and "cross-origin" in _xNoTok.text, _xNoTok.text[:120])
+        _stRG = client.get("/api/dashboard/status")
+        _muRG = client.post("/api/dashboard/nodes/suite-rec2-nowhere/mute", json={"mute": True})
+        check("guard: other routes behave the same with no token configured (reads open, mutations not refused)",
+              _stRG.status_code == 200 and _muRG.status_code == 409, f"{_stRG.status_code} {_muRG.status_code}")
+        _depRG = getattr(_gdRG, "recording_guard", object())
+        _withRG = {(m, r.path) for r in _rtRG.router.routes if isinstance(r, _APIRouteRG)
+                   and any(d.call is _depRG for d in r.dependant.dependencies) for m in r.methods}
+        check("recorder api: only the five recorder routes need a configured token",
+              _withRG == {("POST", "/api/dashboard/nodes/{room}/record"),
+                          ("POST", "/api/dashboard/nodes/{room}/record/stop"),
+                          ("GET", "/api/dashboard/recordings"),
+                          ("GET", "/api/dashboard/recordings/{name}"),
+                          ("DELETE", "/api/dashboard/recordings/{name}")}, str(sorted(_withRG)))
+
+        # token configured: every recorder route, reads included, needs it
+        os.environ["LVI_DASHBOARD_TOKEN"] = _tokRG
+        _bare = [s for s, _d in _rec_routes()]
+        check("recorder api: with a token set, every recorder route (reads included) needs the header",
+              _bare == [401] * 5 and not _rrREC.is_recording("suite-rec2-live") and (_capRG / _keepRG).is_file(),
+              str(_bare))
+        _rmuRG = client.post("/api/dashboard/nodes/suite-rec2-nowhere/mute", json={"mute": True}, headers=_hRG)
+        check("guard: with a token set, other mutations pass the guard with the header as before",
+              _rmuRG.status_code == 409, str(_rmuRG.status_code))
+
+        # a stop whose file can't be written is an error, without paths or error text
+        _sF = client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 30}, headers=_hRG)
+        _nF = _sF.json().get("file", "")
+        (_capRG / _nF).mkdir()  # the final rename lands on a directory: the save fails
+        _rF = client.post("/api/dashboard/nodes/suite-rec2-live/record/stop", headers=_hRG)
+        _dF = str(_rF.json().get("detail")) if _rF.status_code != 200 else ""
+        check("recorder api: a stop whose file can't be written answers 500 with a short detail (no path, no error text)",
+              _sF.status_code == 200 and _rF.status_code == 500 and _dF and "/" not in _dF
+              and _nF not in _dF and "Error" not in _dF and not _rrREC.is_recording("suite-rec2-live")
+              and not list(_capRG.glob(".*part")), f"{_rF.status_code} {_rF.text[:160]}")
+        (_capRG / _nF).rmdir()
+        # a time-box close has no caller: it only logs
+        _nB = _rrREC.start("suite-rec2-box", 5)["file"]
+        (_capRG / _nB).mkdir()
+        _rrREC._active["suite-rec2-box"].deadline = 0
+        try:
+            _rrREC.feed("suite-rec2-box", _pcmRG, 16000, 1)
+            _eB = None
+        except Exception as e:  # noqa: BLE001 — a raise here is the failure
+            _eB = e
+        check("recorder: a time-box close that can't save just logs (no raise, nothing left behind)",
+              _eB is None and not _rrREC.is_recording("suite-rec2-box") and (_capRG / _nB).is_dir()
+              and not list(_capRG.glob(".*part")), repr(_eB))
+        (_capRG / _nB).rmdir()
+
+        # names: a clash in the same second gets -2, -3..., never an overwrite
+        _rrREC.time = _typesRG.SimpleNamespace(strftime=lambda fmt, *a: "20261023-120000",
+                                               time=time.time, monotonic=time.monotonic)
+        try:
+            (_capRG / "suite-rec2-u-20261023-120000.wav").write_bytes(b"first")
+            _u2 = _rrREC.start("suite-rec2-u", 5)["file"]
+            _u3 = _rrREC.start("suite rec2 u", 5)["file"]  # same slug, recording at once
+            _rrREC.feed("suite-rec2-u", _pcmRG, 16000, 1)
+            _rrREC.feed("suite rec2 u", _pcmRG, 16000, 1)
+            asyncio.run(_rrREC.stop("suite-rec2-u"))
+            asyncio.run(_rrREC.stop("suite rec2 u"))
+        finally:
+            _rrREC.time = _realTimeRG
+        _namesRG = [f["name"] for f in _rrREC.listing()["files"]]
+        check("recorder: a recording named like an existing or live one gets -2, -3... instead of overwriting",
+              (_u2, _u3) == ("suite-rec2-u-20261023-120000-2.wav", "suite-rec2-u-20261023-120000-3.wav")
+              and (_capRG / "suite-rec2-u-20261023-120000.wav").read_bytes() == b"first"
+              and {_u2, _u3} <= set(_namesRG) and _rrREC.path_for(_u3) == _capRG / _u3,
+              f"{_u2} {_u3} listed={_namesRG}")
+
+        # only the recorder's own files: other .wav files are left alone
+        _foreign = [_capRG / "notes.wav", _capRG / "take-1.wav"]
+        for _p in _foreign:
+            _p.write_bytes(b"RIFFmine")
+            os.utime(_p, (time.time() - 8 * 86400,) * 2)
+        _rrREC.start("suite-rec2-p", 2)
+        asyncio.run(_rrREC.stop("suite-rec2-p"))
+        check("recorder: pruning only touches the recorder's own files",
+              all(_p.is_file() for _p in _foreign), str([_p.name for _p in _foreign if not _p.exists()]))
+        _lsRG = client.get("/api/dashboard/recordings", headers=_hRG).json()
+        _gfRG = client.get("/api/dashboard/recordings/notes.wav", headers=_hRG).status_code
+        _dfRG = client.delete("/api/dashboard/recordings/take-1.wav", headers=_hRG).status_code
+        check("recorder api: other .wav files in the folder are never listed, served or deleted",
+              not {"notes.wav", "take-1.wav"} & {f["name"] for f in _lsRG.get("files") or []}
+              and _keepRG in {f["name"] for f in _lsRG.get("files") or []}
+              and _gfRG == 404 and _dfRG == 404 and all(_p.is_file() for _p in _foreign),
+              f"{[f['name'] for f in _lsRG.get('files') or []]} get={_gfRG} del={_dfRG}")
+    finally:
+        _rrREC.time = _realTimeRG
+        for _room in list(_rrREC._active):
+            _rrREC._finish(_rrREC._active[_room])
+        for _k, _v in _saved_envRG.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+
+    # ── intelligence: nanobot's saved model can be cleared ──────────────
+    import urllib.request as _urqCL
+
+    import intelligence_agent as _iaCL
+    _clCfg = {sec: config_store.read_section(sec) for sec in ("intelligence", "room_agents")}
+    _clEnv = os.environ.get("LVI_NANOBOT_KEY")
+    _clOpen = _urqCL.urlopen
+    _clURLS = {"hermes": "http://192.0.2.20:8642/v1", "openclaw": "http://192.0.2.21:18789/v1",
+               "nanobot": "http://192.0.2.22:8900/v1"}
+    _clAgents = {"hermes": "suite-profile", "openclaw": "suite-main", "nanobot": "suite-model"}
+
+    def _cl_reset():
+        config_store.write_section("intelligence", {"kind": "nanobot", "url": _clURLS["nanobot"],
+                                                    "urls": dict(_clURLS), "agents": dict(_clAgents),
+                                                    "agent": "suite-main"})
+
+    def _cl_icfg():
+        return dict(config_store.read_section("intelligence") or {})
+    try:
+        config_store.write_section("room_agents", {})
+        _cl_reset()
+        _pC = client.put("/api/dashboard/intelligence", json={"kind": "nanobot", "agent": ""})
+        _cC = _cl_icfg()
+        check("intelligence: nanobot with agent \"\" removes its saved model and keeps the other kinds' agents",
+              _pC.status_code == 200 and "nanobot" not in (_cC.get("agents") or {})
+              and _cC.get("agents") == {"hermes": "suite-profile", "openclaw": "suite-main"}
+              and _cC.get("agent") == "suite-main" and _cC.get("kind") == "nanobot",
+              f"{_pC.status_code} {_pC.text[:160]} {_cC.get('agents')}")
+        _nbBody = []
+
+        class _RespCL:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, *a):
+                return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+
+        def _fake_openCL(req, timeout=None):
+            _nbBody.append(json.loads(req.data))
+            return _RespCL()
+        os.environ["LVI_NANOBOT_KEY"] = "nb-suite-key-abcdefghijkl"
+        _urqCL.urlopen = _fake_openCL
+        _aCL = None
+        try:
+            _aCL = _iaCL.IntelligenceAgent(room="suite-cl-room", session_mode="fresh")
+            _aCL._ask_intelligence("hi")
+        except Exception as e:  # noqa: BLE001 — a failed ask is a check result
+            _nbBody.append({"error": repr(e)})
+        finally:
+            _urqCL.urlopen = _clOpen
+        check("intelligence: a nanobot turn with no saved model omits the model field",
+              getattr(_aCL, "_agent", None) == "" and len(_nbBody) == 1 and "model" not in _nbBody[0],
+              str(_nbBody)[:200])
+
+        _bad = {}
+        for _k in ("hermes", "openclaw"):
+            _cl_reset()
+            _r = client.put("/api/dashboard/intelligence", json={"kind": _k, "agent": ""})
+            _bad[_k] = (_r.status_code, _r.text[:160], _cl_icfg().get("agents") == _clAgents
+                        and _cl_icfg().get("kind") == "nanobot")
+        check("intelligence: agent \"\" for hermes or openclaw is a 422 that says it needs an agent; nothing saved",
+              all(s == 422 and "needs an agent" in t and same for s, t, same in _bad.values()), str(_bad))
+
+        _kept = {}
+        for _k in ("hermes", "openclaw", "nanobot"):
+            for _body in ({"kind": _k}, {"kind": _k, "agent": None}):
+                _cl_reset()
+                _r = client.put("/api/dashboard/intelligence", json=_body)
+                _kept[f"{_k}{'+null' if 'agent' in _body else ''}"] = (_r.status_code, _cl_icfg().get("agents"))
+        check("intelligence: an omitted or null agent leaves every kind's saved agent alone",
+              all(s == 200 and a == _clAgents for s, a in _kept.values()), str(_kept))
+
+        _cl_reset()
+        _pO = client.put("/api/dashboard/intelligence", json={"kind": "openclaw", "agent": "suite-other"})
+        _cO = _cl_icfg()
+        check("intelligence: an openclaw save still writes the legacy top-level agent key",
+              _pO.status_code == 200 and _cO.get("agent") == "suite-other"
+              and (_cO.get("agents") or {}).get("openclaw") == "suite-other", f"{_pO.text[:120]} {_cO}")
+        _cl_reset()
+        _pX = client.put("/api/dashboard/intelligence", json={"kind": "nanobot", "agent": "", "bogus": 1})
+        check("intelligence: unknown fields still 422 and save nothing",
+              _pX.status_code == 422 and _cl_icfg().get("agents") == _clAgents, f"{_pX.status_code}")
+    finally:
+        _urqCL.urlopen = _clOpen
+        if _clEnv is None:
+            os.environ.pop("LVI_NANOBOT_KEY", None)
         else:
-            os.environ["LVI_CAPTURES_DIR"] = _saved_capREC
+            os.environ["LVI_NANOBOT_KEY"] = _clEnv
+        for _sec, _val in _clCfg.items():
+            config_store.write_section(_sec, _val or {})
+
+
+    # ── speakers: zone settings reach sessions that are already running ──
+    from sonos_output import SonosOutput as _SOLZ
+    from sonos_output import zone_volume_overrides as _zvoLZ
+    from wiim_output import WiiMOutput as _WOLZ
+    from wiim_output import wiim_volume_overrides as _wvoLZ
+    _sonos_before = copy.deepcopy(config_store.read_section("sonos") or {})
+    _wiim_before = copy.deepcopy(config_store.read_section("wiim") or {})
+    try:
+        # a session built BEFORE the zone exists (the fresh-install order:
+        # node connects, then the first speaker is added and mapped)
+        config_store.write_section("wiim", {**_wiim_before, "enabled": False,
+                                            "zones": {}, "zone_volumes": {}})
+        _woLZ = _WOLZ(zone_selector=lambda: "lz_wiim")
+        _owns0 = _woLZ.owns_reply()
+        _rLZ = client.post("/api/dashboard/zones", json={"name": "lz_wiim", "backend": "wiim", "ip": "192.0.2.61"})
+        check("speakers: a WiiM zone added after the session started (backend off until then) takes that "
+              "session's next reply",
+              _rLZ.status_code == 200 and _owns0 is False and _woLZ.owns_reply() is True
+              and _woLZ._zones.get("lz_wiim", {}).get("ip") == "192.0.2.61",
+              f"status={_rLZ.status_code} before={_owns0} after={_woLZ.owns_reply()}")
+        _soLZ = _SOLZ(zone_selector=lambda: "lz_sonos")
+        _rLZs = client.post("/api/dashboard/zones", json={"name": "lz_sonos", "ip": "192.0.2.62",
+                                                          "player_uid": "RINCON_LZTEST01"})
+        check("speakers: a Sonos zone added after the session started is found at reply time",
+              _rLZs.status_code == 200 and (_soLZ._zones.get("lz_sonos") or {}).get("ip") == "192.0.2.62",
+              f"status={_rLZs.status_code} zones={list(_soLZ._zones)}")
+
+        # volume: zone at 50 over a global of 35; slider to 40, then back to 35
+        _sec = config_store.read_section("sonos") or {}
+        config_store.write_section("sonos", {**_sec, "clip_volume": 35, "zone_volumes": {"lz_sonos": 50}})
+        _soV = _SOLZ(zone_selector=lambda: "lz_sonos")
+        _v50 = _soV._volume_for("lz_sonos")
+        _r40 = client.put("/api/dashboard/zones/lz_sonos/volume", json={"volume": 40})
+        _v40 = _soV._volume_for("lz_sonos")
+        _r35 = client.put("/api/dashboard/zones/lz_sonos/volume", json={"volume": 35})
+        _v35 = _soV._volume_for("lz_sonos")
+        check("speakers: a Sonos zone slider moved back to the global volume plays at the global volume",
+              (_r40.status_code, _r35.status_code) == (200, 200) and (_v50, _v40, _v35) == (50, 40, 35),
+              f"{_v50}/{_v40}/{_v35}")
+        _sw = config_store.read_section("wiim") or {}
+        config_store.write_section("wiim", {**_sw, "clip_volume": 35, "zone_volumes": {"lz_wiim": 50}})
+        _woV = _WOLZ(zone_selector=lambda: "lz_wiim")
+        _w50 = _woV._volume_for("lz_wiim")
+        client.put("/api/dashboard/zones/lz_wiim/volume", json={"volume": 40})
+        client.put("/api/dashboard/zones/lz_wiim/volume", json={"volume": 35})
+        check("speakers: a WiiM zone slider moved back to the global volume plays at the global volume",
+              (_w50, _woV._volume_for("lz_wiim")) == (50, 35), f"{_w50}/{_woV._volume_for('lz_wiim')}")
+
+        # MUST STILL HOLD: saved zone volumes apply to a fresh session (a restart)
+        _zvoLZ({})
+        _wvoLZ({})
+        config_store.write_section("sonos", {**(config_store.read_section("sonos") or {}),
+                                             "zone_volumes": {"lz_sonos": 47}})
+        check("speakers: a saved zone volume still applies with no live override (after a restart)",
+              _SOLZ(zone_selector=lambda: "lz_sonos")._volume_for("lz_sonos") == 47)
+        # MUST STILL HOLD: an explicit config file stays that file's values,
+        # and assigning an attribute pins it for that instance
+        _cfgLZ = SCRATCH / "lz-config.yaml"
+        _cfgLZ.write_text("sonos:\n  enabled: true\n  clip_volume: 22\n  zones:\n    filez:\n"
+                          "      ip: 192.0.2.63\n      player_uid: RINCON_LZFILE01\n")
+        _soF = _SOLZ(config_path=str(_cfgLZ))
+        _soP = _SOLZ()
+        _soP._zones = {"pinned": {"ip": "127.0.0.1"}}
+        _soP._enabled = False
+        check("speakers: a session built from an explicit config file keeps that file's zones; pinned "
+              "attributes stay pinned",
+              list(_soF._zones) == ["filez"] and _soF._volume == 22 and _soF._enabled is True
+              and list(_soP._zones) == ["pinned"] and _soP._enabled is False,
+              f"{list(_soF._zones)} {_soF._volume} {list(_soP._zones)}")
+    finally:
+        _zvoLZ({})
+        _wvoLZ({})
+        config_store.write_section("sonos", _sonos_before)
+        config_store.write_section("wiim", _wiim_before)
+    # ── dashboard ui (App.jsx): nanobot model pick, stale agent discovery,
+    # zone volume slider after a refused save ─────────────────────────────
+    def _ws(s):
+        return _reui.sub(r"\s+", " ", s)
+
+    def _fnUI(head):
+        """A top-level component's source, up to the next top-level function."""
+        i = _appsrc.find(head)
+        j = _reui.search(r"\n(export default )?function ", _appsrc[i + 1:]) if i >= 0 else None
+        return "" if i < 0 else _appsrc[i:i + 1 + j.start()] if j else _appsrc[i:]
+
+    _sysUI = _fnUI("function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {")
+    _selUI = _reui.search(r"const agentSel = (.*?)\n\s*const agentEntry", _sysUI, _reui.DOTALL)
+    _selUI = _ws(_selUI.group(1)) if _selUI else ""
+    _oldFallback = "intAgent || found[intKind]?.selected || agentList[0]?.id || ''"
+    check("intelligence ui: nanobot's model pick never falls back to the first listed model",
+          _selUI.startswith("intKind === 'nanobot' ? intAgent :"), _selUI[:160])
+    check("intelligence ui: hermes and openclaw keep their saved-then-first-listed fallback",
+          _selUI == f"intKind === 'nanobot' ? intAgent : {_oldFallback}", _selUI[:160])
+    _optUI = _reui.search(r'<select id="int-agent".*?</select>', _sysUI, _reui.DOTALL)
+    _optUI = _ws(_optUI.group(0)) if _optUI else ""
+    check("intelligence ui: nanobot always offers 'nanobot's own model' (value '') first; other kinds unchanged",
+          "intKind === 'nanobot' ? <option value=\"\">nanobot's own model</option> "
+          ": !agentSel && <option value=\"\">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}"
+          in _optUI, _optUI[:240])
+    check("intelligence ui: Save always sends nanobot's pick ('' clears it); other kinds send an agent only when one is set",
+          "if (agentSel || kind === 'nanobot') body.agent = agentSel" in _sysUI
+          and "if (agentSel) body.agent = agentSel" not in _sysUI)
+    _syncUI = _ws(_jsbody(_sysUI, "if (intelligence && !intSynced) {"))
+    check("intelligence ui: a saved nanobot model is what shows after reload (pick synced from the saved agents)",
+          _selUI.startswith("intKind === 'nanobot' ? intAgent :")
+          and "agentDrafts.current = { ...(intelligence.agents || {}) }" in _syncUI
+          and "setIntAgent(agentDrafts.current[kind] || '')" in _syncUI, _syncUI[:200])
+    _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {")
+    check("zones ui: 'nanobot's own model' lives only on the Intelligence card, never in the per-room agent picker",
+          "nanobot's own model" in _sysUI and bool(_rmUI) and "nanobot's own model" not in _rmUI
+          and "room_agents" in _rmUI)
+
+    _discUI = _jsbody(_sysUI, "const discover = async (kind, url) => {")
+    _dTry = _discUI[_discUI.find("try {"):_discUI.find("} catch")]
+    _dCatch = _discUI[_discUI.find("} catch"):]
+    _gUI = "if (seq !== discSeq.current[kind]) return"
+    check("intelligence ui: agent discovery numbers each request per kind",
+          "discSeq.current[kind] = seq" in _discUI
+          and _discUI.find("discSeq.current[kind] = seq") < _discUI.find("await api("), _discUI[:200])
+    check("intelligence ui: a superseded discovery reply (list or error) is dropped before it touches the card",
+          0 <= _dTry.find(_gUI) < _dTry.find("setFound(") and 0 <= _dCatch.find(_gUI) < _dCatch.find("setFound("),
+          _discUI[:300])
+    check("intelligence ui: the newest discovery still shows its result and clears its loading state",
+          "loading: true" in _discUI[:_discUI.find("await api(")]
+          and 0 <= _dTry.find(_gUI) < _dTry.find("{ ...r, loading: false }")
+          and 0 <= _dCatch.find(_gUI) < _dCatch.find("loading: false"), _discUI[:300])
+    _rmDisc = _jsbody(_rmUI, "discoverAgents.current = async () => {")
+    _rmSets = [ln for ln in _rmDisc.splitlines() if "setFound(" in ln]
+    check("zones ui: room agent discovery applies only the newest request's reply",
+          0 <= _rmDisc.find("++discSeq.current") < _rmDisc.find("await api(")
+          and len(_rmSets) == 2 and all("seq === discSeq.current" in ln for ln in _rmSets), _rmDisc[:300])
+    check("zones ui: the newest room agent discovery still shows its list or its error",
+          any("setFound(r)" in ln for ln in _rmSets)
+          and any("'Agent list failed: ' + e.message" in ln for ln in _rmSets), str(_rmSets))
+
+    _vsUI = _jsbody(_appsrc, "function VolSlider({ name, initial, onCommit }) {")
+    check("zones ui: a refused volume save puts the slider back to the saved value",
+          "const commit = async () => { if (!(await onCommit(name, val))) setVal(initial) }" in _vsUI
+          and _vsUI.count("onCommit(") == 1
+          and "onMouseUp={commit}" in _vsUI and "onTouchEnd={commit}" in _vsUI and "commit()" in _vsUI,
+          _vsUI[:300])
+    check("zones ui: a saved volume stays put; the slider resets only on a refused save or a new saved value",
+          "useEffect(() => { setVal(initial) }, [initial])" in _vsUI
+          and _vsUI.count("setVal(initial)") == 2, _vsUI[:200])
+    _zlUI = _fnUI("function ZoneList({ mapping, setMsg, reloadAll }) {")
+    for _whatUI, _headUI in (("zone", "const saveVolume = async (name, vol) => {"),
+                             ("built-in speaker", "const saveSpeakerVolume = async (room, vol) => {")):
+        _svUI = _ws(_jsbody(_zlUI, _headUI))
+        check(f"zones ui: {_whatUI} volume save reports success, and on failure still shows the error",
+              "reloadAll() return true" in _svUI
+              and "catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones'); return false }" in _svUI,
+              _svUI[:240])
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
