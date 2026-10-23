@@ -3904,7 +3904,11 @@ def main():
                       and _c12.get("agent") == "suite-a", str(_c12.get("agents")) + " agent=" + str(_c12.get("agent")))
                 _g12 = client.get("/api/dashboard/intelligence").json()
                 check("agent picker: GET agents per kind + first-4 key hints, never the key",
-                      _g12.get("agents") == {"hermes": "home-helper", "openclaw": "suite-a", "nanobot": None}
+                      # hermes/openclaw only: the suite's config is a copy of the live
+                      # one, which may carry any nanobot agent.
+                      {k: (_g12.get("agents") or {}).get(k) for k in ("hermes", "openclaw")}
+                      == {"hermes": "home-helper", "openclaw": "suite-a"}
+                      and "nanobot" in (_g12.get("agents") or {})
                       and (_g12.get("key_hints") or {}).get("openclaw") == "ocke" + _M12
                       and "abcdefghijkl" not in json.dumps(_g12), str(_g12)[:240])
 
@@ -6020,8 +6024,14 @@ def main():
             config_store.write_section("intelligence", {"kind": "openclaw", "urls": {"openclaw": "http://oc.test:18789/v1"}})
             _reqs.clear()
             _r = _kt("LVI_OPENCLAW_KEY")
-            check("keys test: OpenClaw with no agent picked -> a clear message, no outbound call",
-                  _r.json().get("status") == "unreachable" and "agent" in (_r.json().get("detail") or "") and not _reqs,
+            check("keys test: OpenClaw with no agent picked -> needs_setup with a clear message, no outbound call",
+                  _r.json().get("status") == "needs_setup" and "agent" in (_r.json().get("detail") or "") and not _reqs,
+                  _r.text[:160])
+            config_store.write_section("intelligence", {"kind": "hermes", "agents": {"openclaw": "main"}})
+            _reqs.clear()
+            _r = _kt("LVI_OPENCLAW_KEY")
+            check("keys test: OpenClaw with no saved URL -> needs_setup naming the URL, no outbound call",
+                  _r.json().get("status") == "needs_setup" and "URL" in (_r.json().get("detail") or "") and not _reqs,
                   _r.text[:160])
             config_store.write_section("intelligence", {"kind": "openclaw", "urls": {"openclaw": "http://oc.test:18789/v1"},
                                                         "agents": {"openclaw": "main"}})
@@ -6432,8 +6442,9 @@ def main():
         _nb_put_cfg(kind="hermes", url=_NB_HERMES, urls={"hermes": _NB_HERMES})
         _NB["models"].clear()
         _ktNB3 = client.post("/api/dashboard/keys/test", json={"var": "LVI_NANOBOT_KEY"})
-        check("nanobot: key Test with no saved Nanobot URL -> a clear message, no outbound call",
-              _ktNB3.json().get("ok") is False and "URL" in (_ktNB3.json().get("detail") or "")
+        check("nanobot: key Test with no saved Nanobot URL -> needs_setup with a clear message, no outbound call",
+              _ktNB3.json().get("ok") is False and _ktNB3.json().get("status") == "needs_setup"
+              and "URL" in (_ktNB3.json().get("detail") or "")
               and _NB["models"] == [], _ktNB3.text[:200])
         # A bare host:port (no /v1) is what a user types: turns, the Test
         # probe and the key Test all reach nanobot's /v1 routes anyway.
@@ -6924,6 +6935,22 @@ def main():
           and bool(_kadd) and 'value="" disabled' in _kadd.group(0), (_kadd.group(0)[:160] if _kadd else "no select"))
     check("dashboard ui: a picked service that a refresh removed clears the pasted key and blocks Add",
           "[stale])" in _kc and "addEpoch" in _kc and "disabled={busy || !pickValue || stale}" in _kc)
+    # Keys: a restart is offered only for a key the running setup uses.
+    _ksave = _jsbody(_kc, "const save = async (row, inputId, { offer = true } = {}) => {")
+    _krm = _jsbody(_kc, "const remove = async row => {")
+    _kaddf = _jsbody(_kc, "const add = async () => {")
+    check("dashboard ui: Keys save offers a restart only when the saved key is in use",
+          "const d = await load()" in _ksave and ".in_use" in _ksave
+          and _ksave.find("if (inUse)") < _ksave.find("offerRestart(") and "Not in use yet" in _ksave, _ksave[:200])
+    check("dashboard ui: Keys remove offers a restart only for a key in use",
+          "if (row.in_use)" in _krm and _krm.find("if (row.in_use)") < _krm.find("offerRestart("), _krm[:200])
+    check("dashboard ui: Keys Add offers a restart only when the added key is in use",
+          "if (r.in_use) offerRestart(" in _kaddf, _kaddf[-200:])
+    check("dashboard ui: a saved or removed key nothing uses gets a neutral chip, never 'restart to apply'",
+          "Not in use yet: switching to it offers the restart." in _appsrc
+          and "Nothing uses it, so no restart is needed." in _appsrc)
+    check("dashboard ui: a key Test whose setup isn't finished shows an info note, not a red failure",
+          "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'ⓘ '" in _kc)
 
     _sm = _jsbody(_appsrc, "const saveMapping = async room => {")
     check("dashboard ui: a mapping save keeps its draft until the saved map is reloaded (no flick back, no revert)",
