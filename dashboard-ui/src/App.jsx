@@ -1,11 +1,11 @@
-// LenoxVI dashboard — app. Wireframe-C structure:
-// single scrolling page, sticky header + section rail, no tabs.
+// LenoxVI dashboard — app. Wireframe-C structure, in tabs:
+// pinned header (tabs + Restart), status chips, then Rooms, Voice or System.
 // Brand: dark theme default, one lime element leads, sentence case,
 // no emoji. Live data via the same /api/dashboard/* routes the old
 // page.html used — routes are the contract, every shape verified
 // against the live rig.
 
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
@@ -128,7 +128,7 @@ function TokenDialog() {
 }
 
 /* ── restart lane ──────────────────────────────────────────── */
-// restartBot's one caller is Overview's button (saves never restart; they
+// restartBot's one caller is the header's Restart button (saves never restart; they
 // add to /status restart_pending), and the React `rebooting` state can lag
 // a second click — two concurrent restarts meant two transient restart
 // units and two 90s wait loops fighting over one message chip. A
@@ -393,7 +393,7 @@ function KeysCard({ setMsg }) {
       setTests(t => ({ ...t, [row.var]: undefined }))
       const d = await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
-      // Only a key the running setup uses needs a restart (Overview's
+      // Only a key the running setup uses needs a restart (the Restart
       // button counts it). A key for a provider not picked yet is read when
       // that provider is switched on, and that save marks the restart.
       const var_ = (r && r.var) || row.var
@@ -581,68 +581,222 @@ function KeysCard({ setMsg }) {
   )
 }
 
-/* ── rail ──────────────────────────────────────────────────── */
-const SECTIONS = [
-  { id: 'overview', label: 'Overview' },
+/* ── unsaved changes ───────────────────────────────────────── */
+// "Changed" means the draft differs from the saved value: numbers compare as
+// numbers, strings trimmed, unset as ''.
+const norm = v => (v == null ? '' : typeof v === 'string' ? v.trim() : v)
+const same = (a, b) => {
+  const x = norm(a), y = norm(b)
+  return x === y || (x !== '' && y !== '' && !isNaN(x) && !isNaN(y) && Number(x) === Number(y))
+}
+
+// A settings card's draft: only the fields that differ from `saved`.
+// Untouched fields follow the server on every poll and a changed one is never
+// overwritten; a revert, or a poll that brings the saved value level with it,
+// drops the draft. blank = what the card shows for an unset field (a slider's
+// default), so moving it back is no change. scope: drafts made under another
+// scope read as none (room agent picks belong to one system).
+function useDraft(saved, { scope = '', blank = {} } = {}) {
+  const [state, setState] = useState({ scope, d: {}, seen: '' })
+  const d = state.scope === scope ? state.d : {}
+  const eq = (k, v) => same(v ?? blank[k], saved[k] ?? blank[k])
+  const without = (src, gone) => Object.fromEntries(Object.entries(src).filter(([k, v]) => !gone(k, v)))
+  // New saved values: drop the drafts they now match (during render, so no
+  // frame shows a stale count).
+  const seen = JSON.stringify([saved, blank])
+  if (state.seen !== seen) {
+    setState({ ...state, seen, d: state.scope === scope ? without(state.d, (k, v) => k in saved && eq(k, v)) : state.d })
+  }
+  const edit = f => setState(s => ({ ...s, scope, d: f(s.scope === scope ? s.d : {}) }))
+  return {
+    draft: d,
+    val: k => (k in d ? d[k] : saved[k]),
+    changed: k => k in d && !eq(k, d[k]),
+    // { field: value }; undefined puts the field back to saved. A typed
+    // space is kept (it would vanish under the cursor), it just isn't a change.
+    set: patch => edit(cur => {
+      const n = { ...cur }
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined || (eq(k, v) && norm(v) === v)) delete n[k]
+        else n[k] = v
+      }
+      return n
+    }),
+    discard: () => edit(() => ({})),
+    // After a save (and its reload): drop the fields it sent, unless edited
+    // again meanwhile; a value the server stored differently can't linger.
+    snap: keys => Object.fromEntries(keys.filter(k => k in d).map(k => [k, d[k]])),
+    settle: sent => edit(cur => without(cur, (k, v) => k in sent && v === sent[k])),
+  }
+}
+
+// Settings cards register their unsaved changes; the bar at the page bottom
+// saves or discards them all. Actions (keys, volumes, node and zone buttons,
+// uploads) stay instant and never register.
+const UnsavedCtx = createContext(() => {})
+// The bar's order = page order, tab by tab. Keys are the cards' section ids,
+// so each label links to its card (and opens its tab).
+const UNSAVED_ORDER = ['rooms', 'voice', 'stt', 'tuning', 'wake-name-card', 'wake-model', 'intelligence']
+
+// card: { label, count, save, discard }. save(say) is the card's own save,
+// reporting through say (the bar sums them up) and returning true once saved.
+function useUnsaved(key, card) {
+  const put = useContext(UnsavedCtx)
+  useEffect(() => put(key, card))  // every render: save and discard see the current draft
+  useEffect(() => () => put(key, null), [key, put])
+}
+
+function UnsavedBar({ cards, units, setMsg }) {
+  const [saving, setSaving] = useState(false)
+  const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)
+  const total = keys.reduce((n, k) => n + units[k].count, 0)
+  if (!total) return null
+  const end = s => (/[.!?]$/.test(s) ? s : s + '.')
+  // One card after another; one summary at the end instead of each card's
+  // message flashing over the last. A failed card keeps its draft.
+  const saveAll = async () => {
+    setSaving(true)
+    let done = 0, restart = false
+    const failed = [], notes = []
+    for (const k of keys) {
+      const said = []
+      let ok = false
+      try { ok = !!(await cards.current[k]?.save(text => { said.push(text) })) }
+      catch (e) { said.push(e.message) }
+      const label = units[k].label
+      if (!ok) {
+        const why = (said[said.length - 1] || '').replace(/^[^:]*failed: /, '')
+        failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))
+        continue
+      }
+      done++
+      for (const text of said) {
+        // "Saved — …" folds into the summary; anything else is a next step
+        // the card asked for, kept in full.
+        if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))
+        else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true
+      }
+    }
+    setSaving(false)
+    const head = failed.length ? `Saved ${done} of ${keys.length}. ${failed.join(' ')}`
+      : `Saved.${restart ? ' Restart to apply.' : ''}`
+    setMsg([head, ...notes].join(' '), failed.length ? 'err' : 'ok')
+  }
+  const discard = () => {
+    if (!window.confirm(`Discard ${total} unsaved change${total === 1 ? '' : 's'}?`)) return
+    for (const k of keys) cards.current[k]?.discard()
+  }
+  return (
+    <div role="region" aria-label="Unsaved changes" className="border-t border-[var(--separator)] bg-[var(--background)]"
+      style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 10, paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="max-w-[1120px] mx-auto px-6 py-2 flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-[13.5px] m-0">
+          <span className="text-[var(--muted)]">{total} unsaved: </span>
+          {keys.map((k, i) => (
+            <Fragment key={k}>
+              {i > 0 && ' · '}
+              {/* Already at this hash: no hashchange fires, so scroll to the card here. */}
+              <a href={`#${k}`} className="text-[var(--foreground)] hover:underline"
+                onClick={() => { if (window.location.hash === `#${k}`) scrollToCard(k) }}>
+                {units[k].label}</a>
+            </Fragment>
+          ))}
+        </p>
+        <div className="flex gap-2">
+          <button className={BTN_DEFAULT} disabled={saving} onClick={discard}>Discard</button>
+          <button className={BTN_PRIMARY} disabled={saving} onClick={saveAll}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Scroll a card's section to just under the pinned header. The header wraps
+// taller on a phone than the sections' fixed scroll margin allows for.
+function scrollToCard(id) {
+  const el = document.getElementById(id)
+  const card = el?.closest('section') || el
+  if (!card) return
+  const head = document.querySelector('header')?.offsetHeight || 0
+  window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY - head - 12)
+}
+
+/* ── tabs ──────────────────────────────────────────────────── */
+const TABS = [
   { id: 'rooms', label: 'Rooms' },
   { id: 'voice', label: 'Voice' },
   { id: 'system', label: 'System' },
 ]
 
-function useActiveSection() {
-  const [active, setActive] = useState('overview')
+// The tab comes from the hash, so tabs are plain links (keyboard, middle-click,
+// back/forward). Any other id (#keys, #stt) opens the tab that holds it, then
+// scrolls to its card. The element decides first: some section ids are tab
+// names too (the TTS section is #voice), and it sits on that tab.
+function useHashTab() {
+  const [nav, setNav] = useState({ tab: 'rooms', id: '' })
   useEffect(() => {
-    const obs = new IntersectionObserver(
-      entries => {
-        for (const en of entries) if (en.isIntersecting) setActive(en.target.id)
-      },
-      { rootMargin: '-20% 0px -70% 0px' })
-    SECTIONS.forEach(s => {
-      const el = document.getElementById(s.id)
-      if (el) obs.observe(el)
-    })
-    return () => obs.disconnect()
+    const go = () => {
+      const id = window.location.hash.slice(1)
+      const el = id ? document.getElementById(id) : null
+      const tab = el?.closest('[data-tab]')?.dataset.tab || (TABS.some(t => t.id === id) ? id : 'rooms')
+      setNav({ tab, id })
+    }
+    go()
+    window.addEventListener('hashchange', go)
+    return () => window.removeEventListener('hashchange', go)
   }, [])
-  return active
+  // After the tab is shown (a card on a tab not shown can't be scrolled to).
+  // A tab opens at the page top, status chips in view; a card scrolls to its
+  // section, whose scroll margin clears the header.
+  useEffect(() => {
+    if (!nav.id) return
+    if (TABS.some(t => t.id === nav.id)) { window.scrollTo(0, 0); return }
+    scrollToCard(nav.id)
+  }, [nav])
+  return nav.tab
 }
 
 /* ── Overview ──────────────────────────────────────────────── */
-function Overview({ status, tts, intelligence, mapping, setMsg, setRebooting, rebooting }) {
+// In the header row on every tab, so it never scrolls away.
+function RestartButton({ status, setMsg, setRebooting, rebooting, unsaved }) {
   // Saved settings the running bot hasn't loaded yet. Saves never restart
   // (a restart reboots every node), so one restart applies them all.
+  // One lime per view: while the unsaved bar shows, its Save leads.
   const pending = status?.restart_pending || []
   return (
-    <Section id="overview" title="Overview"
-      note=""
-      action={
-        <button className={pending.length ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}
-          title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}
-          onClick={() => {
-            if (window.confirm('Restart the bot? Every node reboots and reconnects.')) {
-              restartBot(setMsg, setRebooting)
-            }
-          }}>
-          {pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}
-        </button>
-      }>
-      <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4">
-        <Stat label="Uptime">
-          <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
-        </Stat>
-        <Stat label="Intelligence"><StatChip stat="intelligence" {...intelligenceChip(status, intelligence)} /></Stat>
-        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms, mapping)} /></Stat>
-        <Stat label="Last wake">
-          <StatChip stat="last-wake" muted={!status?.last_wake}>
-            {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
-          </StatChip>
-        </Stat>
-        <Stat label="Version">
-          <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
-        </Stat>
-        <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
-        <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status, tts)} /></Stat>
-      </div>
-    </Section>
+    <button className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}
+      title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}
+      onClick={() => {
+        if (window.confirm('Restart the bot? Every node reboots and reconnects.')) {
+          restartBot(setMsg, setRebooting)
+        }
+      }}>
+      {pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}
+    </button>
+  )
+}
+
+// The status chips, under the header on every tab. Not pinned: a wrapped
+// chip row would fill a phone screen.
+function Overview({ status, tts, intelligence, mapping }) {
+  return (
+    <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4">
+      <Stat label="Uptime">
+        <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
+      </Stat>
+      <Stat label="Intelligence"><StatChip stat="intelligence" {...intelligenceChip(status, intelligence)} /></Stat>
+      <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms, mapping)} /></Stat>
+      <Stat label="Last wake">
+        <StatChip stat="last-wake" muted={!status?.last_wake}>
+          {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
+        </StatChip>
+      </Stat>
+      <Stat label="Version">
+        <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
+      </Stat>
+      <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
+      <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status, tts)} /></Stat>
+    </div>
   )
 }
 
@@ -1026,16 +1180,10 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll,
   return renderRow({ mute, actions })
 }
 function Rooms({ status, mapping, setMsg, reloadAll }) {
-  const [mapDraft, setMapDraft] = useState(null)
   // Per-room agent override. The Intelligence card's agent is the house
-  // default; a room only differs when picked here. agentDraft holds this
-  // system's unsaved picks ('' = back to Default).
+  // default; a room only differs when picked here ('' = back to Default).
   const [found, setFound] = useState(null)
   const agentKind = mapping?.agent_kind || ''
-  // Picks belong to one system: drafts made under another read as none.
-  const [draftState, setDraftState] = useState({ kind: '', picks: {} })
-  const agentDraft = draftState.kind === agentKind ? draftState.picks : {}
-  const setAgentDraft = picks => setDraftState({ kind: agentKind, picks })
   const defaultAgent = mapping?.default_agent || ''
   const savedAgents = mapping?.room_agents?.[agentKind] || {}
   const discoverAgents = useRef(null)
@@ -1060,16 +1208,8 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     window.addEventListener('lenoxvi:reload-all', h)
     return () => window.removeEventListener('lenoxvi:reload-all', h)
   }, [])
-  // Bug-class fix: the 5s poll refetches mapping and
-  // used to clobber unsaved select edits — dirty holds user drafts.
-  const [mapDirty, setMapDirty] = useState(false)
-  const draftEdits = useRef(0)  // bumped by every zone/agent pick (a save clears only its own)
   // Session-mode switches: optimistic pending until status confirms.
   const [pendingMode, setPendingMode] = useState({})
-
-  useEffect(() => {
-    if (mapping && !mapDirty) setMapDraft(mapping.room_zones || {})
-  }, [mapping, mapDirty])
 
   const toggleMode = async (room, sticky) => {
     setPendingMode(p => ({ ...p, [room]: sticky ? 'sticky' : 'fresh' }))
@@ -1109,18 +1249,23 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   // dropped from every Save (the server refuses an unknown zone, so one
   // dead entry failed every row's Save until a page reload).
   const liveZone = z => z === BUILTIN || zoneNames.includes(z)
-  const saveMapping = async room => {
-    const zone = mapDraft?.[room] ?? defaultZone(room)
-    if (!zone || !liveZone(zone)) { setMsg('Pick a zone first.', 'muted', 'Room → zone mapping'); return }
+  // Drafts hold only the picks that differ from the saved map (useDraft), so
+  // the 5 s poll never clobbers one and untouched rows keep following it.
+  const zones = useDraft(Object.fromEntries(roomRows.map(r => [r, mapping?.room_zones?.[r] ?? defaultZone(r) ?? ''])))
+  const agents = useDraft(Object.fromEntries(roomRows.map(r => [r, savedAgents[r] ?? ''])), { scope: agentKind })
+  const mapDraft = zones.draft
+  const agentDraft = agents.draft
+  const changedRooms = roomRows.filter(r => zones.changed(r) || agents.changed(r))
+  // One save for every changed row.
+  const saveMapping = async say => {
+    const picked = changedRooms.map(r => [r, zones.val(r)])
+    if (picked.some(([, z]) => !z || !liveZone(z))) { say('Pick a zone first.', 'muted', 'Room → zone mapping'); return false }
     // PUT /mapping takes the FULL room_zones dict WRAPPED in a
     // room_zones key (MappingPayload contract, routes.py) — a bare
     // merged dict 422s (or worse: pre-forbid, silently wiped the
     // mapping via Pydantic's default_factory). Never unwrapped.
-    // Spread the DRAFT map, not the server copy — the server
-    // copy dropped every OTHER row's unsaved pick the moment one row
-    // saved. The draft holds synced server values + all row edits, so
-    // one Save persists the whole visible map (and the full-dict
-    // wipe-guard contract stays honest).
+    // The server's map plus every row's draft, so one Save persists the
+    // whole map on screen (and the full-dict wipe-guard contract stays honest).
     // Rebased on the server's CURRENT map: a room renamed (or gone) while
     // this draft sat unsaved is dropped from the draft, not PUT back under
     // its old name — that undid the rename's carried mapping.
@@ -1128,33 +1273,35 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     const liveRooms = new Set([...Object.keys(liveMap), ...(status?.rooms || []).map(r => r.room)])
     const stillLive = draft => Object.fromEntries(Object.entries(draft || {}).filter(([r]) => liveRooms.has(r)))
     const liveZones = draft => Object.fromEntries(Object.entries(draft).filter(([, z]) => liveZone(z)))
-    const body = { room_zones: { ...liveMap, ...liveZones(stillLive(mapDraft)), [room]: zone } }
+    const body = { room_zones: { ...liveMap, ...liveZones(stillLive(mapDraft)), ...Object.fromEntries(picked) } }
     // Only this system's overrides, and only when one was edited — an
     // untouched page leaves room_agents alone server-side.
     const liveAgentDraft = stillLive(agentDraft)
     const changed = Object.entries(liveAgentDraft).filter(([r, a]) => a !== (savedAgents[r] ?? ''))
     const agentEdits = changed.length > 0
     if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...liveAgentDraft } }
-    const editsAtSave = draftEdits.current
+    const sentZones = { ...mapDraft }, sentAgents = { ...agentDraft }
     try {
       await api('/api/dashboard/mapping', { method: 'PUT', json: body })
-      // Keep the draft until the saved map is back: clearing it first resynced
-      // the rows from the OLD mapping (the row flicked back), and a second
-      // Save in that window PUT the old zone over this one. An edit made
-      // meanwhile keeps the draft too.
+      // Keep the draft until the saved map is back: clearing it first showed
+      // the OLD mapping (the row flicked back). An edit made meanwhile keeps
+      // its draft.
       await reloadAll()
-      if (draftEdits.current === editsAtSave) {
-        setMapDirty(false)
-        setAgentDraft({})
-      }
+      zones.settle(sentZones)
+      agents.settle(sentAgents)
       if (agentEdits) {
         const picks = changed.map(([r, a]) => `${r} → ${a || `Default (${defaultAgent})`}`).join(', ')
-        setMsg(`Saved — restart to apply (agent ${picks}).`, 'ok', 'Room → zone mapping')
+        say(`Saved — restart to apply (agent ${picks}).`, 'ok', 'Room → zone mapping')
       } else {
-        setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
+        say(`Saved — ${picked.map(([r, z]) => `${r} → ${zoneLabel(z)}`).join(', ')}: replies now route there (live, no restart).`, 'ok', 'Room → zone mapping')
       }
-    } catch (e) { setMsg('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping') }
+      return true
+    } catch (e) { say('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping'); return false }
   }
+  useUnsaved('rooms', {
+    label: 'room mapping', count: changedRooms.length, save: saveMapping,
+    discard: () => { zones.discard(); agents.discard() },
+  })
 
   return (
     <>
@@ -1166,7 +1313,6 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                 <th className="text-left px-4 py-2">Room (mic node)</th>
                 <th className="text-left px-4 py-2">Zone</th>
                 <th className="text-left px-4 py-2">Agent</th>
-                <th className="text-left px-4 py-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -1189,7 +1335,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         DISPLAYS the first zone while its value is '' — a
                         fake selection that Save would reject as "pick a zone". */}
                     <select value={zone}
-                      onChange={e => { draftEdits.current++; setMapDraft({ ...mapDraft, [room]: e.target.value }); setMapDirty(true) }}
+                      onChange={e => zones.set({ [room]: e.target.value })}
                       className={`${INPUT_CLS} w-[200px]`}>
                       {(zone === '' || (!zoneNames.includes(zone) && !(hasSpeaker && zone === BUILTIN))) &&
                         <option value="" disabled>{zoneNames.length ? 'pick a zone…' : 'add a zone below first'}</option>}
@@ -1201,7 +1347,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                   <td className="px-4 py-2">
                     <div className="grid gap-1">
                       <select value={agent} data-agent-room={room}
-                        onChange={e => { draftEdits.current++; setAgentDraft({ ...agentDraft, [room]: e.target.value }) }}
+                        onChange={e => agents.set({ [room]: e.target.value })}
                         className={`${INPUT_CLS} w-[200px]`}>
                         <option value="">{`Default (${defaultAgent || '—'})`}</option>
                         {agent && !known && <option value={agent}>
@@ -1213,14 +1359,11 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         <MissingKey label={`${KIND_LABEL[agentKind] || 'Hermes'} · ${effective.id}`} />}
                     </div>
                   </td>
-                  <td className="px-4 py-2 text-right">
-                    <button className={BTN_PRIMARY} onClick={() => saveMapping(room)}>Save</button>
-                  </td>
                 </tr>
                 )
               })}
               {/* Rows come from /mapping and /status: empty only once both have loaded. */}
-              <TableState cols={4} error={mapping?.loadError}
+              <TableState cols={3} error={mapping?.loadError}
                 loading={!roomRows.length && !(mapping?.room_zones && status)}
                 empty={!roomRows.length && 'No mic nodes yet. A flashed node appears here when it connects.'} />
             </tbody>
@@ -1662,7 +1805,6 @@ const ALIAS_RESERVED = new Set(['hey', 'ok', 'okay', 'hi', 'stop', 'yes', 'no', 
 function WakeNameCard({ setMsg }) {
   const [w, setW] = useState(null)
   const [loadErr, setLoadErr] = useState('')
-  const [draft, setDraft] = useState(null)   // local name draft once edited
   const [aliasDraft, setAliasDraft] = useState('')   // the "add a spelling" box
   const aliasRef = useRef(null)              // latest aliases: quick clicks never lose one
   // A poll that overlapped any save (started during one, or a save began/ended
@@ -1686,7 +1828,7 @@ function WakeNameCard({ setMsg }) {
     const t = setInterval(tick, 5000)
     return () => { alive = false; clearInterval(t) }
   }, [])
-  const save = async (body, note) => {
+  const save = async (body, note, say = setMsg) => {
     if (body.heard_as) aliasRef.current = body.heard_as
     saveGen.current += 1
     inflight.current += 1
@@ -1694,21 +1836,30 @@ function WakeNameCard({ setMsg }) {
       const r = await api('/api/dashboard/wake', { method: 'PUT', json: body })
       setW(prev => ({ ...prev, ...r }))
       aliasRef.current = r.heard_as || aliasRef.current
-      setMsg(note || 'Saved — live now.', 'ok', 'Wake name')
+      say(note || 'Saved — live now.', 'ok', 'Wake name')
       return true
     } catch (e) {
-      setMsg('Save failed: ' + e.message, 'err', 'Wake name')
+      say('Save failed: ' + e.message, 'err', 'Wake name')
       return false
     } finally {
       inflight.current -= 1
       saveGen.current += 1
     }
   }
+  // The name is a draft for the bar; the spellings below save at once.
+  const name = useDraft({ name: w?.name ?? '' })
+  const saveName = async say => {
+    const sent = name.snap(['name'])
+    const ok = await save({ name: (name.val('name') ?? '').trim() }, null, say)
+    if (ok) name.settle(sent)
+    return ok
+  }
+  useUnsaved('wake-name-card', { label: 'wake name', count: name.changed('name') ? 1 : 0, save: saveName, discard: name.discard })
   // Not loaded yet: the card keeps its place (rendering nothing made the
-  // page jump when it arrived).
+  // page jump when it arrived) and its id, so #wake-name-card finds its tab.
   if (!w) return (
     <Section title="Wake name">
-      <div className={`rounded-2xl bg-[var(--surface)] p-4 text-[13px] ${loadErr ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
+      <div id="wake-name-card" className={`rounded-2xl bg-[var(--surface)] p-4 text-[13px] ${loadErr ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
         {loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}
       </div>
     </Section>
@@ -1737,9 +1888,7 @@ function WakeNameCard({ setMsg }) {
           <div className="md:col-start-1 md:row-start-1">
             <Field label="Wake name">
               <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
-                value={draft ?? w.name ?? ''} onChange={e => setDraft(e.target.value)} />
-              <button className={`${BTN_DEFAULT} w-[136px]`}
-                onClick={async () => { if (await save({ name: (draft ?? w.name ?? '').trim() })) setDraft(null) }}>Save</button>
+                value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
             </Field>
           </div>
           <div className="md:col-start-2 md:row-start-1">
@@ -1789,23 +1938,23 @@ function OwwPanel({ setMsg, reloadAll }) {
   const [models, setModels] = useState([])
   const [loaded, setLoaded] = useState(false)  // [] before the first load is not "no models"
   const [loadErr, setLoadErr] = useState('')   // shown in the list, not as a toast
-  const [sel, setSel] = useState('')
   const [scanning, setScanning] = useState(false)
   const [newModel, setNewModel] = useState(null)
+  // The picked model is a draft for the bar (saved = the active one).
+  const pick = useDraft({ model: models.find(m => m.selected)?.path || '' })
+  const sel = pick.val('model')
 
   const load = async () => {
     try {
       const r = await api('/api/dashboard/oww/models')
       setModels(r.models || [])
-      const active = (r.models || []).find(m => m.selected)
-      setSel(active?.path || '')
       setLoaded(true)
       setLoadErr('')
     } catch (e) { setLoadErr(e.message) }
   }
   useEffect(() => { load() }, [])
 
-  const select = async () => {
+  const select = async say => {
     // The dropdown value is the row's full path — resolve the
     // ROW (basename + source) so a same-basename root/models/
     // collision activates the exact copy the picker named; a name-only
@@ -1814,15 +1963,19 @@ function OwwPanel({ setMsg, reloadAll }) {
     const name = row?.name || sel.split('/').pop()
     // Stock rows are pre-trained models bundled with openwakeword,
     // selected by KEY (no .onnx name).
-    if (!name || (row?.source !== 'stock' && !name.endsWith('.onnx'))) { setMsg('No model selected.', 'err', 'Wake word model'); return }
+    if (!name || (row?.source !== 'stock' && !name.endsWith('.onnx'))) { say('No model selected.', 'err', 'Wake word model'); return false }
     const body = { model: name, ...(row?.source ? { source: row.source } : {}) }
+    const sent = pick.snap(['model'])
     try {
       await api('/api/dashboard/oww/select', { method: 'PUT', json: body })
-      setMsg('Saved — restart to apply.', 'ok', 'Wake word model')
+      say('Saved — restart to apply.', 'ok', 'Wake word model')
       await load()
       reloadAll()
-    } catch (e) { setMsg('Select failed: ' + e.message, 'err', 'Wake word model') }
+      pick.settle(sent)
+      return true
+    } catch (e) { say('Select failed: ' + e.message, 'err', 'Wake word model'); return false }
   }
+  useUnsaved('wake-model', { label: 'wake model', count: pick.changed('model') ? 1 : 0, save: select, discard: pick.discard })
 
   const del = async (name, source) => {
     if (!window.confirm(`Delete model '${name}' (${source})?`)) return
@@ -1849,16 +2002,16 @@ function OwwPanel({ setMsg, reloadAll }) {
   }
 
   return (
-    <Section title="Wake word model"
+    <Section id="wake-model" title="Wake word model"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <Field label="Active model / upload" between>
           <div className="flex items-center gap-2 flex-wrap">
             <select className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
-              onChange={e => setSel(e.target.value)}>
+              onChange={e => pick.set({ model: e.target.value })}>
               {/* No listed model is active (e.g. the active one lives outside
                   the list): without this the browser SHOWS the first model
-                  while the value is '', and Set active refuses it. */}
+                  while the value is '', and Save refuses it. */}
               {models.length > 0 && !models.some(m => m.path === sel) &&
                 <option value="" disabled>pick a model…</option>}
               {models.map(m => (
@@ -1868,7 +2021,6 @@ function OwwPanel({ setMsg, reloadAll }) {
               ))}
               {models.length === 0 && <option value="">{loadErr ? "couldn't load" : loaded ? 'no models found' : 'loading…'}</option>}
             </select>
-            <button className={BTN_DEFAULT} onClick={select}>Set active</button>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <input type="file" accept=".onnx" className="text-[13px]"
@@ -1930,67 +2082,52 @@ const savedFor = (t, p) =>
   : p === 'pocket' ? t?.pocket_voice : t?.deepgram_flux_voice
 
 function Voice({ tts, tuning, status, setMsg, reloadAll }) {
-  const [provider, setProvider] = useState(null)
-  const [model, setModel] = useState(null)
-  // Bug-class fix: the 5s poll refetches tts state and
-  // resyncing from server would clobber the user's in-progress provider
-  // selection. The server is the source of truth for the FIRST sync
-  // only; after that, drafts are local until saved.
-  const [ttsSynced, setTtsSynced] = useState(false)
-  // Flux knobs are sliders (2026-10-07): controlled, synced from the
-  // server exactly ONCE (same draft law — the 5s poll must not clobber
-  // a drag in progress); committed on Save via the same DOM read.
-  const [fluxSpeed, setFluxSpeed] = useState(1.0)
-  const [fluxExpr, setFluxExpr] = useState(1)
-  // A Flux knob rides the save ONLY if the server had one set
-  // (editing it) or the user actually moved the slider. An untouched
-  // placeholder on an unset knob used to be written as an explicit
-  // config value — pinning Flux to numbers nobody chose.
-  const fluxTouched = useRef({ speed: false, expr: false })
-  // ElevenLabs flash-v2.5 knobs (2026-10-07): speed 0.7–1.2, stability
-  // 0.0–1.0. Same draft law — synced once, committed on Save.
-  const [elSpeed, setElSpeed] = useState(null)   // null = not set = ElevenLabs default
-  const [elStab, setElStab] = useState(null)
-  // ElevenLabs text normalization (auto | on | off). null = unset = their
-  // default (auto, which is OFF on Flash). Same draft law.
-  const [elNorm, setElNorm] = useState(null)
-  // Local hot standby (Pocket) behind a cloud provider. Same draft law.
-  const [fallback, setFallback] = useState('off')
-  // The fallback's voice (tts.pocket_voice — the same key Pocket-as-primary
-  // uses). Same draft law: synced once, committed on Save.
-  const [pocketVoice, setPocketVoice] = useState('alba')
-
-  useEffect(() => {
-    if (tts && !ttsSynced) {
-      setProvider(tts.provider || 'elevenlabs')
-      const prov = tts.provider || 'elevenlabs'
-      setModel(savedFor(tts, prov) || tts.catalog?.[prov]?.[0] || '')
-      setFluxSpeed(parseFloat(tts?.deepgram_flux_speed ?? 1.0))
-      setFluxExpr(parseInt(tts?.deepgram_flux_expressivity ?? 1, 10))
-      setElSpeed(tts?.elevenlabs_speed != null ? parseFloat(tts.elevenlabs_speed) : null)
-      setElStab(tts?.elevenlabs_stability != null ? parseFloat(tts.elevenlabs_stability) : null)
-      setElNorm(tts?.elevenlabs_text_normalization || null)
-      setFallback(tts?.fallback === 'pocket' ? 'pocket' : 'off')
-      setPocketVoice(tts?.pocket_voice || 'alba')
-      setTtsSynced(true)
-    }
-  }, [tts, ttsSynced])
+  const catalog = tts?.catalog || {}
+  const num = (v, parse) => (v != null ? parse(v) : null)
+  // Drafts against the saved TTS config (useDraft): the 5 s poll never
+  // clobbers a pick or a drag in progress, untouched fields follow it.
+  // Each provider keeps its own model (its saved one, else its first).
+  // Knobs stay null when unset, so Save leaves them alone (the route's
+  // None = leave-as-is); blank is what their sliders show meanwhile.
+  // ElevenLabs flash-v2.5: speed 0.7–1.2, stability 0.0–1.0, text
+  // normalization auto | on | off (auto is OFF on Flash). Fallback = a
+  // local hot standby (Pocket) behind a cloud provider; its voice is
+  // tts.pocket_voice, the same key Pocket-as-primary uses.
+  const t = useDraft({
+    provider: tts?.provider || 'elevenlabs',
+    ...Object.fromEntries(Object.keys(TTS_NAMES).map(p => [`model:${p}`, savedFor(tts, p) || catalog[p]?.[0] || ''])),
+    voice_id: tts?.voice_id || '',
+    el_speed: num(tts?.elevenlabs_speed, parseFloat),
+    el_stab: num(tts?.elevenlabs_stability, parseFloat),
+    el_norm: tts?.elevenlabs_text_normalization || null,
+    flux_speed: num(tts?.deepgram_flux_speed, parseFloat),
+    flux_expr: num(tts?.deepgram_flux_expressivity, v => parseInt(v, 10)),
+    fallback: tts?.fallback === 'pocket' ? 'pocket' : 'off',
+    pocket_voice: tts?.pocket_voice || 'alba',
+  }, { blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 } })
+  const provider = t.val('provider')
+  const model = t.val(`model:${provider}`)
+  const voiceId = t.val('voice_id')
+  const elSpeed = t.val('el_speed'), elStab = t.val('el_stab'), elNorm = t.val('el_norm')
+  const fluxSpeed = t.val('flux_speed') ?? 1.0, fluxExpr = t.val('flux_expr') ?? 1
+  const fallback = t.val('fallback'), pocketVoice = t.val('pocket_voice')
+  // What Save sends for this provider, so the count matches the save.
+  const ttsFields = ['provider', `model:${provider}`,
+    ...(provider === 'elevenlabs' ? ['voice_id', 'el_speed', 'el_stab', 'el_norm'] : []),
+    ...(provider === 'deepgram-flux' ? ['flux_speed', 'flux_expr'] : []),
+    ...(provider !== 'pocket' ? ['fallback', ...(fallback === 'pocket' ? ['pocket_voice'] : [])] : [])]
 
   // Switching provider resets the model menu to that
   // provider's own list — and lands on THAT provider's saved
   // value when it has one, not blindly on the first entry.
-  const catalog = tts?.catalog || {}
   const options = catalog[provider] || []
-  const onProviderChange = p => {
-    setProvider(p)
-    setModel(savedFor(tts, p) || catalog[p]?.[0] || '')
-  }
+  const onProviderChange = p => t.set({ provider: p, [`model:${p}`]: undefined })
 
-  const saveTTS = async () => {
-    const voice_id = document.getElementById('tts-voice')?.value.trim() || ''
+  const saveTTS = async say => {
+    const voice_id = (voiceId || '').trim()
     const body = { provider }
     if (provider === 'elevenlabs') {
-      if (!voice_id) { setMsg("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return }
+      if (!voice_id) { say("Voice ID can't be empty — TTS breaks with no voice.", 'err', 'TTS'); return false }
       body.model = model
       body.voice_id = voice_id
       // Flash-v2.5 knobs ride on save (null = leave as-is/defaults).
@@ -2004,9 +2141,9 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
       // Knobs ride ONLY when the server had one (an edit) or
       // the user moved the slider — an untouched placeholder on an
       // unset knob writes nothing (the route's None = leave-as-is).
-      if (fluxTouched.current.speed || tts?.deepgram_flux_speed != null)
+      if (t.changed('flux_speed') || tts?.deepgram_flux_speed != null)
         body.deepgram_flux_speed = parseFloat(fluxSpeed)
-      if (fluxTouched.current.expr || tts?.deepgram_flux_expressivity != null)
+      if (t.changed('flux_expr') || tts?.deepgram_flux_expressivity != null)
         body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
     } else if (provider === 'pocket') {
       body.pocket_voice = model
@@ -2015,12 +2152,16 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
     // when Pocket itself is the provider.
     if (provider !== 'pocket') body.fallback = fallback
     if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
+    const sent = t.snap(ttsFields)
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
-      setMsg('Saved — restart to apply.', 'ok', 'TTS')
-      reloadAll()
-    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'TTS') }
+      say('Saved — restart to apply.', 'ok', 'TTS')
+      await reloadAll()
+      t.settle(sent)
+      return true
+    } catch (e) { say('Save failed: ' + e.message, 'err', 'TTS'); return false }
   }
+  useUnsaved('voice', { label: 'tts', count: ttsFields.filter(t.changed).length, save: saveTTS, discard: t.discard })
 
   return (
     <>
@@ -2038,7 +2179,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
-              onChange={e => setModel(e.target.value)}>
+              onChange={e => t.set({ [`model:${provider}`]: e.target.value })}>
               {/* A saved value the catalog doesn't carry (hand-edited config)
                   shows honestly instead of faking the first entry. */}
               {model && !options.includes(model) &&
@@ -2047,18 +2188,18 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               {options.map(v => <option key={v} value={v}>{ttsLabel(v)}</option>)}
             </select>
             {provider === 'elevenlabs' &&
-              <input id="tts-voice" defaultValue={tts?.voice_id || ''} placeholder="Voice id (fq1S…)"
+              <input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
             {provider === 'deepgram-flux' && (
               <>
                 <span className="text-[12px] font-medium text-[var(--muted)]">Flux speed</span>
                 <input id="tts-flux-speed" type="range" min="0.5" max="1.5" step="0.05"
-                  value={fluxSpeed} onChange={e => { setFluxSpeed(parseFloat(e.target.value)); fluxTouched.current.speed = true }}
+                  value={fluxSpeed} onChange={e => t.set({ flux_speed: parseFloat(e.target.value) })}
                   className="w-[140px] accent-[var(--accent)]" aria-label="Flux speed" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{fluxSpeed.toFixed(2)}</span>
                 <span className="text-[12px] font-medium text-[var(--muted)]">expressivity</span>
                 <input id="tts-flux-expressivity" type="range" min="-2" max="2" step="1"
-                  value={fluxExpr} onChange={e => { setFluxExpr(parseInt(e.target.value, 10)); fluxTouched.current.expr = true }}
+                  value={fluxExpr} onChange={e => t.set({ flux_expr: parseInt(e.target.value, 10) })}
                   className="w-[140px] accent-[var(--accent)]" aria-label="Flux expressivity" />
                 <span className="font-mono text-[12px] w-[20px] text-right">{fluxExpr}</span>
               </>
@@ -2069,21 +2210,21 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               <span className="flex items-center gap-2">
                 <span className="text-[12px] font-medium text-[var(--muted)]">speed</span>
                 <input id="tts-el-speed" type="range" min="0.7" max="1.2" step="0.05"
-                  value={elSpeed ?? 1.0} onChange={e => setElSpeed(parseFloat(e.target.value))}
+                  value={elSpeed ?? 1.0} onChange={e => t.set({ el_speed: parseFloat(e.target.value) })}
                   className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs speed" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{(elSpeed ?? 1.0).toFixed(2)}</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="text-[12px] font-medium text-[var(--muted)]">stability</span>
                 <input id="tts-el-stability" type="range" min="0" max="1" step="0.05"
-                  value={elStab ?? 0.5} onChange={e => setElStab(parseFloat(e.target.value))}
+                  value={elStab ?? 0.5} onChange={e => t.set({ el_stab: parseFloat(e.target.value) })}
                   className="w-[140px] accent-[var(--accent)]" aria-label="ElevenLabs stability" />
                 <span className="font-mono text-[12px] w-[36px] text-right">{(elStab ?? 0.5).toFixed(2)}</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="text-[12px] font-medium text-[var(--muted)]">normalization</span>
                 <select id="tts-el-norm" className={`${INPUT_CLS} w-[110px]`} value={elNorm ?? 'auto'}
-                  onChange={e => setElNorm(e.target.value)} aria-label="ElevenLabs text normalization">
+                  onChange={e => t.set({ el_norm: e.target.value })} aria-label="ElevenLabs text normalization">
                   <option value="auto">Auto</option>
                   <option value="on">On</option>
                   <option value="off">Off</option>
@@ -2094,7 +2235,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
           {provider !== 'pocket' && (
             <Field label="Fallback">
               <select id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
-                onChange={e => setFallback(e.target.value)}
+                onChange={e => t.set({ fallback: e.target.value })}
                 // Stays usable while it holds 'pocket', so a fallback saved
                 // before Pocket went missing can always be turned off.
                 disabled={!tts?.pocket_installed && fallback !== 'pocket'}
@@ -2106,7 +2247,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               </select>
               {fallback === 'pocket' && (
                 <select id="tts-fallback-voice" className={`${INPUT_CLS} w-[200px]`} value={pocketVoice}
-                  onChange={e => setPocketVoice(e.target.value)}
+                  onChange={e => t.set({ pocket_voice: e.target.value })}
                   disabled={!tts?.pocket_installed}
                   aria-label="Fallback voice" title="The Pocket TTS voice used while the cloud provider is down.">
                   {(catalog.pocket || []).includes(pocketVoice) ? null :
@@ -2120,14 +2261,11 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
             !(provider === 'elevenlabs' ? tts.elevenlabs_key_hint : tts.deepgram_key_hint) && (
             <MissingKey label={provider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram'} />
           )}
-          <div className="flex items-center justify-end gap-4 flex-wrap">
-            <button className={BTN_PRIMARY} onClick={saveTTS}>Save</button>
-          </div>
         </div>
       </Section>
 
       <SttCard status={status} setMsg={setMsg} />
-      <Tuning tuning={tuning} setMsg={setMsg} />
+      <Tuning tuning={tuning} reloadAll={reloadAll} />
       <WakeNameCard setMsg={setMsg} />
       <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
     </>
@@ -2159,28 +2297,15 @@ function sttStateChip(st, dl) {
 
 function SttCard({ status, setMsg }) {
   const [data, setData] = useState(null)
-  const [model, setModel] = useState(null)
-  const [language, setLanguage] = useState(null)
-  const [provider, setProvider] = useState(null)
-  const [busy, setBusy] = useState(false)
   // setMsg is a new function on every parent render (the 5 s poll): keep it
   // in a ref so the effects below don't re-run on every poll.
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
 
-  // Draft law: the server seeds the selects once; after that they're
-  // local until saved (a refetch must not clobber a pick in progress).
-  const apply = d => {
-    setData(d)
-    setModel(m => m ?? d.current.model)
-    setLanguage(l => l ?? d.current.language)
-    setProvider(p => p ?? d.current.provider)
-    return d
-  }
+  const apply = d => { setData(d); return d }
   const load = () => api('/api/dashboard/stt').then(apply)
     .catch(e => { msgRef.current('STT load failed: ' + e.message, 'err', 'STT'); return null })
-  // A key saved on the Keys card (or a restart): refresh the data only —
-  // the selects keep any unsaved pick (draft law).
+  // A key saved on the Keys card (or a restart): refresh the data.
   useEffect(() => {
     const h = () => api('/api/dashboard/stt').then(d => setData(d)).catch(() => {})
     window.addEventListener('lenoxvi:reload-all', h)
@@ -2194,13 +2319,7 @@ function SttCard({ status, setMsg }) {
   useEffect(() => {
     let alive = true
     api('/api/dashboard/stt')
-      .then(d => {
-        if (!alive) return
-        setData(d)
-        setModel(m => m ?? d.current.model)
-        setLanguage(l => l ?? d.current.language)
-        setProvider(p => p ?? d.current.provider)
-      })
+      .then(d => { if (alive) setData(d) })
       .catch(e => { if (alive) msgRef.current('STT load failed: ' + e.message, 'err', 'STT') })
     return () => { alive = false }
   }, [runKey])
@@ -2212,6 +2331,20 @@ function SttCard({ status, setMsg }) {
   // cleanup stops polling when the state flips.
   const downloading = data?.download?.state === 'downloading'
   const pendingModel = downloading ? data.download.model : null   // already on its way
+  // Drafts against the saved selects (useDraft): a refetch never clobbers
+  // a pick in progress. A model already downloading shows as the saved one.
+  const s = useDraft({ model: pendingModel || data?.current?.model, language: data?.current?.language,
+    provider: data?.current?.provider })
+  const model = s.val('model'), language = s.val('language'), provider = s.val('provider')
+  // What Save sends: the picks that differ from the saved config.
+  const sttBody = () => {
+    const body = {}
+    if (!data) return body
+    if (model !== data.current.model && model !== pendingModel) body.model = model
+    if (language !== data.current.language) body.language = language
+    if (provider && provider !== data.current.provider) body.provider = provider
+    return body
+  }
   const [finished, setFinished] = useState(null)   // { model, bytes } during the 100% beat
   useEffect(() => {
     if (!downloading) return
@@ -2250,29 +2383,30 @@ function SttCard({ status, setMsg }) {
     finally { setDeleting(null) }
   }
 
-  const save = async () => {
-    if (!data) return
-    const body = {}
-    if (model !== data.current.model && model !== pendingModel) body.model = model
-    if (language !== data.current.language) body.language = language
-    if (provider && provider !== data.current.provider) body.provider = provider
-    if (!Object.keys(body).length) { setMsg('Nothing changed.', 'ok', 'STT'); return }
-    setBusy(true)
+  const save = async say => {
+    if (!data) return false
+    const body = sttBody()
+    if (!Object.keys(body).length) { say('Nothing changed.', 'ok', 'STT'); return true }
+    // One download at a time: a new model waits for the one on its way.
+    if (downloading && body.model) { say(`${pendingModel} is still downloading — save once it's done.`, 'err', 'STT'); return false }
+    const sent = s.snap(['model', 'language', 'provider'])
     try {
       const r = await api('/api/dashboard/stt', { method: 'PUT', json: body })
       await load()
+      s.settle(sent)
       if (r.download === 'started') {
-        setMsg(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
+        say(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
-        setMsg(r.key_needed ? 'Saved — add your Deepgram key below, then restart.'
+        say(r.key_needed ? 'Saved — add your Deepgram key below, then restart.'
           : 'Saved — restart to apply.', 'ok', 'STT')
         window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
       } else {
-        setMsg('Saved — applies to the next thing you say.', 'ok', 'STT')
+        say('Saved — applies to the next thing you say.', 'ok', 'STT')
       }
-    } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'STT') }
-    finally { setBusy(false) }
+      return true
+    } catch (e) { say('Save failed: ' + e.message, 'err', 'STT'); return false }
   }
+  useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })
 
   const st = status?.stt || data?.status
   const state = sttStateChip(st, data?.download)
@@ -2324,7 +2458,7 @@ function SttCard({ status, setMsg }) {
         <div className="flex flex-wrap items-end gap-4">
           <Field label="Provider">
             <select id="stt-provider" className={`${INPUT_CLS} w-auto`} value={provider || 'whisper'}
-              onChange={e => setProvider(e.target.value)} disabled={!data}>
+              onChange={e => s.set({ provider: e.target.value })} disabled={!data}>
               {(data?.providers || [{ name: 'whisper', label: 'Local — Whisper', available: true }]).map(p => (
                 <option key={p.name} value={p.name} disabled={!p.available} title={p.reason || ''}>
                   {p.label}{p.available ? '' : ' — not installed'}
@@ -2334,7 +2468,7 @@ function SttCard({ status, setMsg }) {
           </Field>
           <Field label={cloudPick ? 'Fallback model' : 'Model'}>
             <select id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
-              onChange={e => setModel(e.target.value)} disabled={!data}>
+              onChange={e => s.set({ model: e.target.value })} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
               {custom && <option value={data.current.model} disabled>{data.current.model} (set in config)</option>}
               {models.map(m => (
@@ -2346,7 +2480,7 @@ function SttCard({ status, setMsg }) {
           </Field>
           <Field label="Language">
             <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
-              onChange={e => setLanguage(e.target.value)} disabled={!data}>
+              onChange={e => s.set({ language: e.target.value })} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
               {customLang && <option value={data.current.language} disabled>{data.current.language} (set in config)</option>}
               {(data?.languages || []).map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
@@ -2377,10 +2511,6 @@ function SttCard({ status, setMsg }) {
             ))}
           </tbody>
         </table>
-        <div className="flex items-center justify-end gap-4 flex-wrap">
-          <button className={BTN_PRIMARY} onClick={save}
-            disabled={!data || busy || (downloading && model !== data.current.model && model !== pendingModel)}>Save</button>
-        </div>
       </div>
     </Section>
   )
@@ -2401,64 +2531,46 @@ const TUNING_FIELDS = [
     'How long she suppresses re-hearing the same words off her own speakers.'],
 ]
 
-function Tuning({ tuning, setMsg }) {
-  const [vals, setVals] = useState({})
-  // Dirty-set saves. Save used to send ALL six
-  // knobs from a sync-once draft — nudging one slider rewrote the other
-  // five with whatever this tab loaded, clobbering edits made elsewhere
-  // (another tab, another device). Now: Save sends only touched knobs, and
-  // UNTOUCHED sliders keep following the server on every poll. The dirty
-  // set lives in a ref too so the resync effect runs on `tuning` changes
-  // ONLY — keying it on dirty would snap sliders back to the stale
-  // pre-save values the moment a save clears the set.
-  const [dirty, setDirty] = useState({})
-  const dirtyRef = useRef({})
-  const markDirty = d => { dirtyRef.current = d; setDirty(d) }
-  useEffect(() => {
-    if (!tuning) return
-    setVals(prev => {
-      const next = { ...prev }
-      for (const [f] of TUNING_FIELDS) if (!dirtyRef.current[f]) next[f] = tuning[f]
-      return next
-    })
-  }, [tuning])
-
-  const dirtyFields = TUNING_FIELDS.map(([f]) => f).filter(f => dirty[f])
-  const save = async () => {
-    if (!dirtyFields.length) { setMsg('Nothing changed — no knobs touched.', 'muted', 'Voice tuning'); return }
+function Tuning({ tuning, reloadAll }) {
+  // Save sends only the knobs that differ from the saved value. Sending all
+  // six from a sync-once draft rewrote the other five with whatever this tab
+  // loaded, clobbering edits made elsewhere (another tab, another device).
+  // Untouched sliders keep following the server on every poll (useDraft),
+  // and a slider moved back to its saved value is no change.
+  const vals = useDraft(Object.fromEntries(TUNING_FIELDS.map(([f]) => [f, tuning?.[f]])))
+  const dirtyFields = TUNING_FIELDS.map(([f]) => f).filter(vals.changed)
+  const save = async say => {
+    if (!dirtyFields.length) { say('Nothing changed — no knobs touched.', 'muted', 'Voice tuning'); return true }
     const body = {}
-    for (const f of dirtyFields) body[f] = parseFloat(vals[f])
+    for (const f of dirtyFields) body[f] = parseFloat(vals.val(f))
+    const sent = vals.snap(dirtyFields)
     try {
       await api('/api/dashboard/voice-tuning', { method: 'PUT', json: body })
-      markDirty({})
-      window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // pull the saved truth back
-      setMsg('Saved — restart to apply.', 'ok', 'Voice tuning')
-    } catch (e) { setMsg('Tuning save failed: ' + e.message, 'err', 'Voice tuning') }
+      say('Saved — restart to apply.', 'ok', 'Voice tuning')
+      await reloadAll()  // pull the saved truth back
+      vals.settle(sent)
+      return true
+    } catch (e) { say('Tuning save failed: ' + e.message, 'err', 'Voice tuning'); return false }
   }
+  useUnsaved('tuning', { label: 'voice tuning', count: dirtyFields.length, save, discard: vals.discard })
 
   return (
-    <Section title="Voice tuning"
+    <Section id="tuning" title="Voice tuning"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
           {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
             <div key={f} className="grid gap-1">
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[13px] font-medium">{label}{dirty[f] ? ' •' : ''}</span>
-                <span className="font-mono text-[13px]">{vals[f] ?? '—'}</span>
+                <span className="text-[13px] font-medium">{label}{vals.changed(f) ? ' •' : ''}</span>
+                <span className="font-mono text-[13px]">{vals.val(f) ?? '—'}</span>
               </div>
-              <input type="range" min={min} max={max} step={step} value={vals[f] ?? min}
-                onChange={e => { setVals({ ...vals, [f]: e.target.value }); markDirty({ ...dirtyRef.current, [f]: true }) }}
+              <input type="range" min={min} max={max} step={step} value={vals.val(f) ?? min}
+                onChange={e => vals.set({ [f]: e.target.value })}
                 className="accent-[var(--accent)]" aria-label={label} />
               <span className="text-[12px] text-[var(--muted)]">{hint}</span>
             </div>
           ))}
-        </div>
-        <div className="flex justify-end">
-          <button className={BTN_PRIMARY} onClick={save} disabled={!dirtyFields.length}
-            title={dirtyFields.length ? `Saves only the ${dirtyFields.length} knob(s) you changed (•).` : 'Move a slider first.'}>
-            {dirtyFields.length ? `Save (${dirtyFields.length})` : 'Save'}
-          </button>
         </div>
       </div>
     </Section>
@@ -2467,25 +2579,31 @@ function Tuning({ tuning, setMsg }) {
 
 /* ── System: Intelligence ─────────────────────────────────── */
 function System({ intelligence, status, setMsg, reloadAll }) {
-  // Kind is UI state (2026-10-07): the agent input grays out for
-  // non-OpenClaw kinds, so the select must be controlled. Synced from
-  // the server exactly once (draft law); save still reads the DOM.
-  const [intKind, setIntKind] = useState('hermes')
-  const [intSynced, setIntSynced] = useState(false)
-  // Per-kind URL memory (2026-10-08): the two lanes live at
-  // different addresses. The field carries a PER-KIND DRAFT — switching
-  // kinds files the current text under the outgoing kind and loads the
-  // incoming kind's draft (or empty). The old urlTouched latch never
-  // reset, so one manual edit disabled swapping forever and a save
-  // filed the wrong URL under the kind.
-  const urlDrafts = useRef({})   // {hermes: url, openclaw: url}
   // Agents: per-kind selection (like URLs) + the provider's discovered
   // list. Discovery runs server-side (keys never reach the browser) on
-  // first sync, on provider switch, on URL change, and on the refresh
+  // first load, on provider switch, on URL change, and on the refresh
   // button. Each entry carries key status + the masked key hint.
-  const [intAgent, setIntAgent] = useState('')
-  const agentDrafts = useRef({})  // {hermes: 'default', openclaw: '<agent>'}
   const [found, setFound] = useState({})  // kind -> {agents, note, selected, loading}
+  // Drafts against the saved config (useDraft). Per-kind URL and agent
+  // (2026-10-08): the lanes live at different addresses, so each kind keeps
+  // its own drafts (url:<kind>, agent:<kind>) and switching kinds only
+  // changes which ones show. An agent left unpicked shows the saved one,
+  // else the first listed (not nanobot: '' is its own model), so picking
+  // that one back is no change.
+  const savedKind = intelligence?.kind || 'hermes'
+  const savedUrls = { ...(intelligence?.urls || {}), ...(intelligence?.url ? { [savedKind]: intelligence.url } : {}) }
+  const firstAgent = k => (k === 'nanobot' ? '' : found[k]?.selected || found[k]?.agents?.[0]?.id || '')
+  const kinds = Object.keys(KIND_LABEL)
+  const d = useDraft({
+    kind: savedKind,
+    ...Object.fromEntries(kinds.map(k => [`url:${k}`, savedUrls[k] || ''])),
+    ...Object.fromEntries(kinds.map(k => [`agent:${k}`, intelligence?.agents?.[k] || null])),
+  }, { blank: Object.fromEntries(kinds.map(k => [`agent:${k}`, firstAgent(k)])) })
+  const intKind = d.val('kind')
+  const intUrl = d.val(`url:${intKind}`)
+  const intAgent = d.val(`agent:${intKind}`) || ''
+  const setIntAgent = a => d.set({ [`agent:${intKind}`]: a })
+  const intFields = ['kind', `url:${intKind}`, `agent:${intKind}`]
   const lastDiscoverUrl = useRef({})
   const discSeq = useRef({})  // kind -> newest request; only its reply counts
   const discover = async (kind, url) => {
@@ -2513,29 +2631,18 @@ function System({ intelligence, status, setMsg, reloadAll }) {
     window.addEventListener('lenoxvi:reload-all', h)
     return () => window.removeEventListener('lenoxvi:reload-all', h)
   }, [])
+  // First load: list the saved kind's agents.
+  const intSynced = useRef(false)
   useEffect(() => {
-    if (intelligence && !intSynced) {
+    if (intelligence && !intSynced.current) {
+      intSynced.current = true
       const kind = intelligence.kind || 'hermes'
-      setIntKind(kind)
-      const d = { ...(intelligence.urls || {}) }
-      if (intelligence.url) d[kind] = intelligence.url
-      urlDrafts.current = d
-      agentDrafts.current = { ...(intelligence.agents || {}) }
-      setIntAgent(agentDrafts.current[kind] || '')
-      setIntSynced(true)
-      discover(kind, d[kind])
+      discover(kind, intelligence.url || intelligence.urls?.[kind])
     }
-  }, [intelligence, intSynced])
-  const switchKind = (kind) => {
-    const urlEl = document.getElementById('int-url')
-    if (urlEl) {
-      urlDrafts.current[intKind] = urlEl.value.trim()  // file the outgoing kind's draft
-      urlEl.value = urlDrafts.current[kind] || ''      // always swap — per-kind context
-    }
-    agentDrafts.current[intKind] = agentSel
-    setIntAgent(agentDrafts.current[kind] || '')
-    setIntKind(kind)
-    discover(kind, urlDrafts.current[kind])
+  }, [intelligence])
+  const switchKind = kind => {
+    d.set({ kind })
+    discover(kind, (d.val(`url:${kind}`) || '').trim())
   }
   const agentList = found[intKind]?.agents || []
   // Nothing picked for this kind yet: the saved one, else the first listed.
@@ -2545,6 +2652,40 @@ function System({ intelligence, status, setMsg, reloadAll }) {
     : intAgent || found[intKind]?.selected || agentList[0]?.id || ''
   const agentEntry = agentList.find(a => a.id === agentSel)
   const agentNote = found[intKind]?.note
+  const save = async say => {
+    const kind = intKind
+    const url = (intUrl || '').trim()
+    const label = KIND_LABEL[kind] || 'Hermes'
+    // Only the URL on screen is saved, under the kind on screen.
+    // The other kind's draft stays here: the stored key goes to a
+    // kind's saved URL, so it must be saved while looking at it.
+    if (!url) { say(`Enter the ${label} URL first.`, 'err', 'Intelligence'); return false }
+    const body = { kind, url }
+    // Nanobot always sends its pick: '' clears a saved model.
+    if (agentSel || kind === 'nanobot') body.agent = agentSel
+    const sent = d.snap(intFields), sentUrl = d.snap([`url:${kind}`])
+    try {
+      const r = await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
+      if (r?.url_only) {
+        // New OpenClaw setup: the URL is saved, so discovery can
+        // now use the stored key. Nothing live changed yet (the kind
+        // stays a draft).
+        say(`${label} URL saved — pick an agent, then Save again to switch to ${label}.`, 'ok', 'Intelligence')
+        await reloadAll()
+        d.settle(sentUrl)
+        discover(kind, url)
+        return true
+      }
+      say('Saved — restart to apply.', 'ok', 'Intelligence')
+      await reloadAll()
+      d.settle(sent)
+      // Nanobot can save with no model picked; its URL is saved now, so
+      // discovery can use the stored key and list its model.
+      if (kind === 'nanobot') discover(kind, url)
+      return true
+    } catch (e) { say('Save failed: ' + e.message, 'err', 'Intelligence'); return false }
+  }
+  useUnsaved('intelligence', { label: 'intelligence', count: intFields.filter(d.changed).length, save, discard: d.discard })
   return (
     <>
     <KeysCard setMsg={setMsg} />
@@ -2583,7 +2724,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
             {found[intKind]?.loading ? '…' : '⟳'}
           </button>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
-          <input id="int-url" defaultValue={intelligence?.url || ''}
+          <input id="int-url" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}
             placeholder={intKind === 'nanobot' ? 'http://<nanobot-host>:8900/v1' : 'http://<intelligence-host>:8642/v1'}
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             onBlur={e => {
@@ -2597,7 +2738,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
           <MissingKey label={intKind !== 'hermes' ? KIND_LABEL[intKind]
             : `Hermes${agentSel && agentSel !== 'default' ? ` · ${agentSel}` : ''}`} />
         )}
-        {/* Footer: secondary action bottom-left, green commit bottom-right */}
+        {/* Footer: the test reads the saved config; edits save from the bar at the page bottom */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
             <button id="btn-int-test" className={BTN_DEFAULT}
               onClick={async ev => {
@@ -2616,34 +2757,6 @@ function System({ intelligence, status, setMsg, reloadAll }) {
                   btn.disabled = false; btn.textContent = 'Test saved config'
                 }
               }} title="Tests the SAVED config on disk (config.yaml) — Save first if you edited kind, URL, or agent above.">Test saved config</button>
-            <button className={BTN_PRIMARY} onClick={async () => {
-              const kind = document.getElementById('int-kind').value
-              const url = document.getElementById('int-url').value.trim()
-              const label = KIND_LABEL[kind] || 'Hermes'
-              // Only the URL on screen is saved, under the kind on screen.
-              // The other kind's draft stays here: the stored key goes to a
-              // kind's saved URL, so it must be saved while looking at it.
-              if (!url) { setMsg(`Enter the ${label} URL first.`, 'err', 'Intelligence'); return }
-              const body = { kind, url }
-              // Nanobot always sends its pick: '' clears a saved model.
-              if (agentSel || kind === 'nanobot') body.agent = agentSel
-              try {
-                const r = await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
-                if (r?.url_only) {
-                  // New OpenClaw setup: the URL is saved, so discovery can
-                  // now use the stored key. Nothing live changed yet.
-                  setMsg(`${label} URL saved — pick an agent, then Save again to switch to ${label}.`, 'ok', 'Intelligence')
-                  reloadAll()
-                  discover(kind, url)
-                  return
-                }
-                setMsg('Saved — restart to apply.', 'ok', 'Intelligence')
-                reloadAll()
-                // Nanobot can save with no model picked; its URL is saved now, so
-                // discovery can use the stored key and list its model.
-                if (kind === 'nanobot') discover(kind, url)
-              } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
-            }}>Save</button>
         </div>
       </div>
     </Section>
@@ -2661,7 +2774,25 @@ export default function App() {
   const [intelligence, setIntelligence] = useState(null)
   const [msg, setMsg] = useMsg()
   const [rebooting, setRebooting] = useState(false)
-  const active = useActiveSection()
+  const tab = useHashTab()
+
+  // Unsaved changes (useUnsaved): each card's save and discard, current
+  // every render, and its label and count for the bar.
+  const cards = useRef({})
+  const [units, setUnits] = useState({})
+  const putUnsaved = useCallback((key, card) => {
+    if (card) cards.current[key] = card
+    else delete cards.current[key]
+    const label = card?.label || '', count = card?.count || 0
+    setUnits(u => (u[key]?.label === label && u[key]?.count === count ? u : { ...u, [key]: { label, count } }))
+  }, [])
+  const unsaved = UNSAVED_ORDER.reduce((n, k) => n + (units[k]?.count || 0), 0)
+  useEffect(() => {
+    if (!unsaved) return
+    const warn = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unsaved])
 
   // Poll hygiene. One refresh cycle at a time —
   // a call that lands mid-cycle doesn't stack a second wave of 5 GETs
@@ -2715,33 +2846,48 @@ export default function App() {
   }, [])
 
   return (
+    <UnsavedCtx.Provider value={putUnsaved}>
     <div className="bg-[var(--background)] text-[var(--foreground)] min-h-screen font-sans">
-      <div className="max-w-[1120px] mx-auto px-6 pt-5 pb-12 grid grid-cols-1 gap-10">
+      {/* Room under the last card for the unsaved bar (it wraps on a phone). */}
+      <div className="max-w-[1120px] mx-auto px-6 pt-5 pb-12 grid grid-cols-1 gap-10"
+        style={unsaved ? { paddingBottom: 'calc(10rem + env(safe-area-inset-bottom))' } : undefined}>
         <header className="sticky top-0 z-10 -mx-6 px-6 pt-2 pb-3 bg-[var(--background)]">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <Wordmark />
-            <nav className="flex gap-2" aria-label="Sections">
-              {SECTIONS.map(s => (
-                <a key={s.id} href={`#${s.id}`}
-                  className={`rounded-lg px-2.5 py-1.5 text-[13px] no-underline
-                    ${active === s.id
-                      ? 'text-[var(--accent)] font-semibold'
-                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
-                  {s.label}
-                </a>
-              ))}
-            </nav>
+            <div className="flex items-center gap-4 flex-wrap">
+              <nav className="flex gap-2" aria-label="Tabs">
+                {TABS.map(t => (
+                  <a key={t.id} href={`#${t.id}`} aria-current={tab === t.id ? 'page' : undefined}
+                    className={`rounded-lg px-2.5 py-1.5 text-[13px] no-underline
+                      ${tab === t.id
+                        ? 'text-[var(--accent)] font-semibold'
+                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+                    {t.label}
+                  </a>
+                ))}
+              </nav>
+              <RestartButton status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} unsaved={unsaved > 0} />
+            </div>
           </div>
           <AppMsg msg={msg} />
         </header>
 
-        <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping}
-          setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
-        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
-        <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
-        <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+        <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
+        {/* Every tab stays mounted, only the active one is shown: a card's
+            unsaved edits and its own loading survive a tab switch. */}
+        <div data-tab="rooms" hidden={tab !== 'rooms'} className="grid grid-cols-1 gap-10">
+          <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+        </div>
+        <div data-tab="voice" hidden={tab !== 'voice'} className="grid grid-cols-1 gap-10">
+          <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+        </div>
+        <div data-tab="system" hidden={tab !== 'system'} className="grid grid-cols-1 gap-10">
+          <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+        </div>
       </div>
+      <UnsavedBar cards={cards} units={units} setMsg={setMsg} />
       <TokenDialog />
     </div>
+    </UnsavedCtx.Provider>
   )
 }

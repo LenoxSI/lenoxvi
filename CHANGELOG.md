@@ -17,6 +17,15 @@ The two version streams are independent.
   no one on the LAN can record a room or download a recording.
 
 ### Changed
+- Dashboard: one unsaved-changes bar at the bottom of the page replaces the Save buttons on the TTS, STT, Voice
+  tuning, Wake name, Wake word model ("Set active"), Intelligence and room mapping cards. It lists the cards with
+  edits (each name links to its card), saves them all in one go with one summary message, and Discard puts
+  them back. A field counts as changed only while it differs from the saved value: moving a slider and back
+  is no change, and fields you haven't touched keep following the server. The browser warns before you leave
+  with unsaved changes. Keys, volumes, node, zone and model actions still apply at once.
+- Dashboard: Rooms, Voice and System are tabs instead of one long page. Each tab is a link (`#rooms`, `#voice`,
+  `#system`), and a link to a card (`#keys`, `#stt`) opens its tab. Restart sits in the header and the status
+  chips show above every tab; a tab switch keeps unsaved edits.
 - Dashboard: a node's Mute button sits next to its status, so it's reachable on a phone without scrolling the table.
 - Dashboard: sentence-case table headers, Restart is no longer red, a muted node's Mute button is amber instead
   of lime, "Wake sensitivity" is now "Wake threshold", the Nodes column reads "Since", and the wake name
