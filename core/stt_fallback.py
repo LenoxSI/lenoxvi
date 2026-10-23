@@ -1,15 +1,20 @@
-"""Cloud STT (Deepgram Nova-3) with local Whisper as the hot standby.
+"""Cloud STT (Deepgram Nova-3 or ElevenLabs Scribe v2) with local Whisper as
+the hot standby.
 
 pipecat's DeepgramSTTService already marks itself permanently unusable when
 it can't connect — a 4xx handshake (bad key) at once, a dead network after
 three quick failures — so ServiceSwitcherStrategyFailover moves the session
 to Whisper by itself (unlike the TTS websocket, which needed an escalation
-hook). What's ours:
+hook). pipecat 1.13's ElevenLabsRealtimeSTTService gets the same from its
+websocket base: three failed reconnects, or three connections that die at
+once, report a permanent error — from the first audio on, since ours only
+connects while a room is awake (stt_elevenlabs). What's ours:
 
-1. Switching BACK. While Whisper listens, Deepgram gets no audio and has
-   given up. recover_stt() probes api.deepgram.com:443 (cheap TCP, quiet
-   while the network is down), reconnects the service, marks it usable and
-   queues the switch frame — the TTS fallback's loop with an STT revive.
+1. Switching BACK. While Whisper listens, the cloud service gets no audio
+   and has given up. recover_stt() probes the provider's host on :443
+   (cheap TCP, quiet while the network is down), reconnects the service,
+   marks it usable and queues the switch frame — the TTS fallback's loop
+   with an STT revive.
 2. Status for the dashboard: per-room active service (+ the reason the last
    failover happened), aggregated: any room on Whisper shows the fallback.
 3. SttTimer: end of speech (VAD stop) -> final transcript, the cloud
@@ -40,8 +45,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from tts_fallback import _tcp_reachable
 
 DEEPGRAM_ENDPOINT = ("api.deepgram.com", 443)
+ELEVENLABS_ENDPOINT = ("api.elevenlabs.io", 443)
+_NAMES = {"deepgram": "Deepgram", "elevenlabs": "ElevenLabs"}
 _DEFAULT = object()
 _MIN_COOLDOWN = 1.0
+_SETTLE_SECS = 1.0
 
 # Process-wide view for the dashboard (one entry per live session/room).
 _STATE: dict = {"provider": "whisper", "rooms": {}, "unavailable": None}
@@ -80,8 +88,8 @@ def redact(text) -> str:
     """Error text for logs/status/tooltips: never the key. By value first
     (whatever the format), then any 'Token x' / 'Bearer x' left over."""
     s = str(text)
-    key = os.environ.get("DEEPGRAM_API_KEY")
-    if key:
+    # Longest first: one key inside another never leaves a piece behind.
+    for key in sorted(filter(None, map(os.environ.get, stt_catalog.KEY_VARS.values())), key=len, reverse=True):
         s = s.replace(key, "***")
     s = _TOKEN_RE.sub(lambda m: m.group(1) + " ***", s)
     return s.split(": headers:")[0][:160]
@@ -91,17 +99,29 @@ def status() -> dict:
     provider = _STATE["provider"]
     if provider == "whisper":
         return {"provider": "whisper"}
-    out = {"provider": provider, "cloud_model": stt_catalog.DEEPGRAM_MODEL}
+    out = {"provider": provider, "cloud_model": stt_catalog.cloud_model(provider)}
     if _STATE["unavailable"]:
         out.update(active="whisper", fallback_reason=_STATE["unavailable"], fallback_rooms=[])
         return out
     fallback = {room: why for room, (active, why, _owner) in _STATE["rooms"].items() if active == "whisper"}
     if fallback:
-        out.update(active="whisper", fallback_reason=next(iter(fallback.values())) or "Deepgram unreachable",
+        out.update(active="whisper",
+                   fallback_reason=next(iter(fallback.values())) or f"{cloud_name(provider)} unreachable",
                    fallback_rooms=sorted(fallback))
     else:
-        out["active"] = "deepgram"
+        out["active"] = provider
     return out
+
+
+def cloud_name(provider) -> str:
+    return _NAMES.get(provider, str(provider))
+
+
+def make_cloud(provider, language):
+    """The picked cloud provider's service: (service, None) or (None, reason)."""
+    if provider == "elevenlabs":
+        return make_elevenlabs(language)
+    return make_deepgram(language)
 
 
 def make_deepgram(language):
@@ -125,13 +145,59 @@ def make_deepgram(language):
     return svc, None
 
 
+def make_elevenlabs(language):
+    """(OnDemandElevenLabsSTTService, None) or (None, reason) — the TTS
+    ElevenLabs key, no extra package. Never raises. Connected only while a
+    room sends audio (stt_elevenlabs): Scribe bills a held socket's silence."""
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        return None, "ELEVENLABS_API_KEY is not set"
+    try:
+        from pipecat.services.elevenlabs.stt import CommitStrategy
+        from stt_elevenlabs import OnDemandElevenLabsSTTService
+    except Exception as e:  # noqa: BLE001 — Whisper, not a dead pipeline
+        return None, f"ElevenLabs STT is not available in this pipecat ({e})"
+    try:
+        svc = OnDemandElevenLabsSTTService(
+            api_key=key,
+            # Our VAD ends the turn (the commit), exactly as with Deepgram.
+            commit_strategy=CommitStrategy.MANUAL,
+            # Never ask ElevenLabs to log transcripts. (pipecat 1.13 sends the
+            # flag only when True, so the account's retention setting applies.)
+            enable_logging=False,
+            settings=OnDemandElevenLabsSTTService.Settings(model=stt_catalog.ELEVENLABS_MODEL,
+                                                           language=stt_catalog.elevenlabs_language(language)))
+    except Exception as e:  # noqa: BLE001 — Whisper, not a dead pipeline
+        return None, f"ElevenLabs STT could not be built ({type(e).__name__}: {redact(e)})"
+    return svc, None
+
+
 def _probe_deepgram():
     return _tcp_reachable(DEEPGRAM_ENDPOINT)
 
 
+def _probe_elevenlabs():
+    return _tcp_reachable(ELEVENLABS_ENDPOINT)
+
+
+def _probe_for(provider):
+    # Looked up at call time, so a test can stand in for the network.
+    return _probe_elevenlabs if provider == "elevenlabs" else _probe_deepgram
+
+
+def _socket_died(svc) -> bool:
+    """A websocket service (ElevenLabs) with no open socket. Deepgram has no
+    _websocket: never 'died' here; its _do_reconnect raises instead."""
+    ws = getattr(svc, "_websocket", _DEFAULT)
+    if ws is _DEFAULT:
+        return False
+    return ws is None or getattr(getattr(ws, "state", None), "name", None) != "OPEN"
+
+
 async def recover_stt(dg, request_switch: Callable, cooldown: float, sleep=asyncio.sleep, *,
-                      reachable=_DEFAULT, is_active=None, closed=None, confirm_secs: float = 5.0) -> bool:
-    """Probe Deepgram until it answers, reconnect it, switch back.
+                      reachable=_DEFAULT, is_active=None, closed=None, confirm_secs: float = 5.0,
+                      settle_secs: float = _SETTLE_SECS, name: str = "Deepgram") -> bool:
+    """Probe the cloud provider until it answers, reconnect it, switch back.
 
     True once the switch is confirmed (or requested, with no is_active);
     False when the session closed first."""
@@ -151,10 +217,19 @@ async def recover_stt(dg, request_switch: Callable, cooldown: float, sleep=async
                 # connection came up (bad key, dead network, rejected setting).
                 await dg._do_reconnect()
             except Exception as e:  # noqa: BLE001 — not back yet; try next round
-                logger.debug(f"stt fallback: Deepgram reconnect failed: {redact(e)}")
+                logger.debug(f"stt fallback: {name} reconnect failed: {redact(e)}")
                 continue
             if getattr(dg, "_connection", True) is None:
                 continue                  # belt and braces: never switch to no socket
+            if _socket_died(dg):
+                continue                  # ElevenLabs' connect fails quietly: no socket
+            if getattr(dg, "_websocket", None) is not None:
+                # A websocket can open and then be hung up on at once (a
+                # rejected key gets an error message, then a close): wait a
+                # moment, so a dead socket never takes the audio from Whisper.
+                await sleep(settle_secs)
+                if _socket_died(dg):
+                    continue
             await dg.set_usable(True)
             await request_switch(dg)
             if is_active is None:
@@ -189,32 +264,36 @@ def close_stt_fallback(switcher) -> None:
 async def _on_switched(switcher, service) -> None:
     dg = switcher._lenoxvi_primary
     room = switcher._lenoxvi_room
+    provider = switcher._lenoxvi_provider
+    name = cloud_name(provider)
     _cancel_recovery(switcher)
     if getattr(switcher, "_lenoxvi_closed", False):
         return                            # teardown noise: the session is gone
     if service is dg:
-        note_active(room, "deepgram", owner=switcher)
-        logger.warning("stt fallback: Deepgram is back — switching off local Whisper")
+        note_active(room, provider, owner=switcher)
+        logger.warning(f"stt fallback: {name} is back — switching off local Whisper")
         return
-    reason = getattr(switcher, "_lenoxvi_last_error", None) or "Deepgram unreachable"
+    reason = getattr(switcher, "_lenoxvi_last_error", None) or f"{name} unreachable"
     note_active(room, "whisper", reason, owner=switcher)
-    logger.warning(f"stt fallback: Deepgram is down ({reason}) — local Whisper is listening")
+    logger.warning(f"stt fallback: {name} is down ({reason}) — local Whisper is listening")
 
     async def _request(svc):
         await switcher._lenoxvi_queue(ManuallySwitchServiceFrame(service=svc))
 
     strategy = switcher.strategy
     switcher._lenoxvi_recovery = asyncio.create_task(recover_stt(
-        dg, _request, switcher._lenoxvi_cooldown, is_active=lambda: strategy.active_service is dg,
-        closed=lambda: getattr(switcher, "_lenoxvi_closed", False)))
+        dg, _request, switcher._lenoxvi_cooldown, reachable=_probe_for(provider),
+        is_active=lambda: strategy.active_service is dg,
+        closed=lambda: getattr(switcher, "_lenoxvi_closed", False), name=name))
 
 
 def wrap_stt_with_fallback(dg, whisper, *, room, queue_frame: Callable[..., Awaitable[None]],
-                           cooldown: float) -> ServiceSwitcher:
-    """ServiceSwitcher([deepgram, whisper], Failover) + reason capture +
+                           cooldown: float, provider: str = "deepgram") -> ServiceSwitcher:
+    """ServiceSwitcher([cloud, whisper], Failover) + reason capture +
     the switch-back loop + status."""
     switcher = ServiceSwitcher(services=[dg, whisper], strategy_type=ServiceSwitcherStrategyFailover)
     switcher._lenoxvi_primary = dg
+    switcher._lenoxvi_provider = provider
     switcher._lenoxvi_room = room
     switcher._lenoxvi_queue = queue_frame
     try:
@@ -225,7 +304,7 @@ def wrap_stt_with_fallback(dg, whisper, *, room, queue_frame: Callable[..., Awai
     switcher._lenoxvi_closed = False
     switcher._lenoxvi_last_error = None
 
-    # Remember WHY Deepgram gave up (shown on the card's fallback chip).
+    # Remember WHY the cloud service gave up (shown on the card's fallback chip).
     orig_push_error = dg.push_error
 
     async def _push_error(*args, **kwargs):
@@ -236,7 +315,7 @@ def wrap_stt_with_fallback(dg, whisper, *, room, queue_frame: Callable[..., Awai
         return await orig_push_error(*args, **kwargs)
     dg.push_error = _push_error
 
-    note_active(room, "deepgram", owner=switcher)
+    note_active(room, provider, owner=switcher)
 
     @switcher.strategy.event_handler("on_service_switched")
     async def _h(strategy, service):

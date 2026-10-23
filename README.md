@@ -108,9 +108,11 @@ read-merge-write; most apply on the next bot restart, which the page offers):
 - **Bot control** — restart the bot (with restart countdown popup)
 - **TTS** — provider (ElevenLabs / Deepgram / Deepgram Flux), model
   (flash v2.5 / v4 turbo), voice
-- **STT** — provider (Local — Whisper, or Deepgram Nova-3 in the cloud
-  with local Whisper as its automatic fallback), Whisper model (download
-  with progress, delete unused), language, live status and latency
+- **STT** — provider (Local — Whisper, or Deepgram Nova-3 or ElevenLabs
+  Scribe v2 in the cloud, each with local Whisper as its automatic
+  fallback; Scribe uses the same `ELEVENLABS_API_KEY` as the ElevenLabs
+  voice), Whisper model (download with progress, delete unused), language,
+  live status and latency
 - **Intelligence** — provider picker (Hermes / OpenClaw / Nanobot), an agent
   dropdown filled from the provider (OpenClaw and Nanobot: their
   `/v1/models`; Hermes:

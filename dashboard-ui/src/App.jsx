@@ -918,20 +918,28 @@ function ttsChip(status, tts) {
   return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }
 }
 
-// STT: Whisper <model>, or Deepgram <model> with Whisper as its fallback.
+// Cloud STT providers (Whisper is the local one): the name in messages, the
+// GET /stt flag saying its key is saved, and its chip words.
+const STT_CLOUD = {
+  deepgram: { name: 'Deepgram', key: 'deepgram_key_set', chip: st => `deepgram ${st.cloud_model || ''}`.trim() },
+  elevenlabs: { name: 'ElevenLabs', key: 'elevenlabs_key_set', chip: () => 'elevenlabs scribe' },
+}
+
+// STT: Whisper <model>, or a cloud provider with Whisper as its fallback.
 // model falls back to the configured one (status.stt_model) before the
 // first load reports it.
 function sttChip(st, configuredModel) {
   if (!st) return { text: '—', muted: true }
   const whisper = `Whisper ${st.model || configuredModel || ''}`.trim()
-  const onWhisper = st.provider !== 'deepgram' || st.active === 'whisper'
+  const cloud = STT_CLOUD[st.provider]
+  const onWhisper = !cloud || st.active === 'whisper'
   if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'whisper failed', title: st.error || 'Whisper failed to load' }
-  if (st.provider === 'deepgram' && st.active === 'whisper') {
+  if (cloud && st.active === 'whisper') {
     const rooms = (st.fallback_rooms || []).map(esc)
     return { tone: 'warning', text: 'whisper fallback',
-      title: `${st.fallback_reason || 'Deepgram unreachable'}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
+      title: `${st.fallback_reason || `${cloud.name} unreachable`}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
   }
-  if (st.provider === 'deepgram') return { text: `deepgram ${st.cloud_model || ''}`.trim() }
+  if (cloud) return { text: cloud.chip(st) }
   if (st.state === 'loading') return { text: 'loading', muted: true, title: `${whisper} is loading` }
   return { text: whisper.toLowerCase() }
 }
@@ -2397,7 +2405,7 @@ function SttCard({ status, setMsg }) {
       if (r.download === 'started') {
         say(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
-        say(r.key_needed ? 'Saved — add your Deepgram key below, then restart.'
+        say(r.key_needed ? `Saved — add your ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key below, then restart.`
           : 'Saved — restart to apply.', 'ok', 'STT')
         window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
       } else {
@@ -2410,9 +2418,10 @@ function SttCard({ status, setMsg }) {
 
   const st = status?.stt || data?.status
   const state = sttStateChip(st, data?.download)
-  const onCloud = st?.provider === 'deepgram' && st?.active === 'deepgram'
-  const onFallback = st?.provider === 'deepgram' && st?.active === 'whisper'
-  const cloudPick = provider === 'deepgram'
+  const cloud = STT_CLOUD[st?.provider]
+  const onCloud = !!cloud && st.active === st.provider
+  const onFallback = !!cloud && st.active === 'whisper'
+  const cloudPick = STT_CLOUD[provider]
   const ms = st?.latency_ms_median
   const models = data?.models || []
   const custom = data?.current?.custom_model
@@ -2426,7 +2435,7 @@ function SttCard({ status, setMsg }) {
             : <span className={state.cls} title={state.title}>{state.text}</span>}
           {onCloud ? (
             <>
-              <span className={CHIP_CLS}>deepgram {st.cloud_model}</span>
+              <span className={CHIP_CLS}>{cloud.chip(st)}</span>
               <span className={CHIP_CLS}>cloud</span>
             </>
           ) : (
@@ -2487,7 +2496,7 @@ function SttCard({ status, setMsg }) {
             </select>
           </Field>
         </div>
-        {cloudPick && data && !data.deepgram_key_set && <MissingKey label="Deepgram" />}
+        {cloudPick && data && !data[cloudPick.key] && <MissingKey label={cloudPick.name} />}
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] text-[var(--muted)]">

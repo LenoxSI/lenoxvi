@@ -37,6 +37,10 @@ vad:
 
 # ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
 stt:
+  # provider: whisper    # whisper (local, default) | deepgram (Nova-3) |
+  #                      # elevenlabs (Scribe v2, uses ELEVENLABS_API_KEY);
+  #                      # a cloud provider keeps the Whisper model below
+  #                      # as its automatic fallback
   model: large-v3-turbo
   device: cuda
   compute_type: float16

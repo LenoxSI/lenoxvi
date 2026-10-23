@@ -245,9 +245,9 @@ def _restart_pending() -> list:
     if differs("wake", ("model",)):
         out.append("wake model")
     stt_keys = ["provider", "model", "device", "compute_type"]
-    # Whisper reads the language live; Deepgram fixes it when the session is built.
-    if "deepgram" in {str(pick(c, "stt").get("provider") or os.getenv("LVI_STT_PROVIDER") or "").lower()
-                      for c in (boot, saved)}:
+    # Whisper reads the language live; a cloud provider fixes it when the session is built.
+    if any(stt_catalog.is_cloud(str(pick(c, "stt").get("provider") or os.getenv("LVI_STT_PROVIDER") or "").lower())
+           for c in (boot, saved)):
         stt_keys.append("language")
     if differs("stt", stt_keys):
         out.append("stt")
@@ -2190,10 +2190,11 @@ def _stt_deepgram_sdk() -> bool:
     return importlib.util.find_spec("deepgram") is not None
 
 
-def _stt_deepgram_key_set() -> bool:
-    # Live process env OR saved .env (a key saved from the TTS card counts
+def _stt_key_set(provider: str) -> bool:
+    # Live process env OR saved .env (a key saved on the Keys card counts
     # before the restart that loads it). Presence only — never the value.
-    return bool(os.getenv("DEEPGRAM_API_KEY") or _saved_env().get("DEEPGRAM_API_KEY"))
+    var = stt_catalog.KEY_VARS.get(provider)
+    return bool(var and (os.getenv(var) or _saved_env().get(var)))
 
 
 def _stt_providers() -> list:
@@ -2306,7 +2307,8 @@ async def get_stt():
                    for m, c in zip(stt_catalog.MODELS, cached)],
         "languages": stt_catalog.LANGUAGES,
         "providers": _stt_providers(),
-        "deepgram_key_set": _stt_deepgram_key_set(),
+        "deepgram_key_set": _stt_key_set("deepgram"),
+        "elevenlabs_key_set": _stt_key_set("elevenlabs"),
         "gpu": gpu,
         "status": _stt_status(),
         "download": dl,
@@ -2390,10 +2392,10 @@ async def put_stt(payload: SttPayload):
             write_model = False
             if payload.model is not None:
                 restart_needed, download, write_model = await _stt_switch_model(payload.model, has_gpu)
-            # Whisper reads the language live; Deepgram's is fixed when the
-            # session is built, so on (or headed to) Deepgram it's a restart.
+            # Whisper reads the language live; a cloud provider's is fixed when
+            # the session is built, so on (or headed to) one it's a restart.
             if (payload.language is not None and payload.language != before["language"]
-                    and "deepgram" in (before["provider"], running_provider, payload.provider)):
+                    and any(map(stt_catalog.is_cloud, (before["provider"], running_provider, payload.provider)))):
                 restart_needed = True
             provider = None
             if payload.provider is not None and payload.provider != before["provider"]:
@@ -2412,7 +2414,7 @@ async def put_stt(payload: SttPayload):
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     cur = _stt_current()
-    key_needed = cur["provider"] == "deepgram" and not _stt_deepgram_key_set()
+    key_needed = stt_catalog.is_cloud(cur["provider"]) and not _stt_key_set(cur["provider"])
     return {"ok": True, "restart_needed": restart_needed, "download": download, "key_needed": key_needed,
             "current": cur}
 

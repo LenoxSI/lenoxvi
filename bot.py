@@ -502,10 +502,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                                  queue_frame=_queue, cooldown=_cool)
         logger.info(f"tts fallback: pocket armed behind {tts_provider}")
 
-    # Cloud STT: ServiceSwitcher([deepgram, whisper], Failover). Deepgram
-    # marks itself down on a bad key / dead network and the session moves to
-    # local Whisper; stt_fallback switches back when it answers again. A
-    # missing key or SDK = Whisper with a warning, never a dead pipeline.
+    # Cloud STT: ServiceSwitcher([cloud, whisper], Failover). Deepgram or
+    # ElevenLabs Scribe marks itself down on a bad key / dead network and the
+    # session moves to local Whisper; stt_fallback switches back when it
+    # answers again. A missing key or SDK = Whisper with a warning, never a
+    # dead pipeline.
     import stt_catalog
     import stt_fallback
     import stt_local
@@ -514,13 +515,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         stt_provider = "whisper"
     stt_fallback.set_provider(stt_provider)
     stt_timer = None
-    if stt_provider == "deepgram":
+    if stt_catalog.is_cloud(stt_provider):
         stt_local.set_latency_mode("e2e")
         stt_timer = stt_fallback.SttTimer()
-        _dg, _dg_why = stt_fallback.make_deepgram(cfg_env("stt", "language", "LVI_STT_LANGUAGE"))
-        stt_fallback.note_unavailable(_dg_why)
-        if _dg is None:
-            logger.warning(f"stt: provider deepgram unavailable ({_dg_why}) — local Whisper is listening")
+        _cloud, _cloud_why = stt_fallback.make_cloud(stt_provider, cfg_env("stt", "language", "LVI_STT_LANGUAGE"))
+        stt_fallback.note_unavailable(_cloud_why)
+        if _cloud is None:
+            logger.warning(f"stt: provider {stt_provider} unavailable ({_cloud_why}) — local Whisper is listening")
         else:
             try:
                 _stt_cool = float(cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30) or 30)
@@ -531,12 +532,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 await _task_ref["task"].queue_frame(frame)
 
             try:
-                stt = stt_fallback.wrap_stt_with_fallback(_dg, stt, room=_room, queue_frame=_stt_queue,
-                                                          cooldown=_stt_cool)
-                logger.info("stt: deepgram nova-3 (local Whisper standby)")
+                stt = stt_fallback.wrap_stt_with_fallback(_cloud, stt, room=_room, queue_frame=_stt_queue,
+                                                          cooldown=_stt_cool, provider=stt_provider)
+                logger.info(f"stt: {stt_provider} {stt_catalog.cloud_model(stt_provider)} (local Whisper standby)")
             except Exception as e:  # noqa: BLE001 — Whisper, not a dead pipeline
-                stt_fallback.note_unavailable(f"Deepgram STT could not be wired ({type(e).__name__})")
-                logger.warning(f"stt: deepgram wiring failed ({type(e).__name__}) — local Whisper is listening")
+                stt_fallback.note_unavailable(
+                    f"{stt_fallback.cloud_name(stt_provider)} STT could not be wired ({type(e).__name__})")
+                logger.warning(f"stt: {stt_provider} wiring failed ({type(e).__name__}) — local Whisper is listening")
     else:
         stt_local.set_latency_mode("compute")
 

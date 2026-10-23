@@ -10,7 +10,8 @@ import re
 
 import intelligence_target
 
-# Static rows, in card order. used_by = features that read the key.
+# Static rows, in card order. used_by = features that read the key
+# (ElevenLabs adds STT while Scribe is the STT provider: _used_by).
 STATIC = [
     {"var": "ELEVENLABS_API_KEY", "label": "ElevenLabs", "used_by": ["TTS"], "kind": "elevenlabs"},
     {"var": "DEEPGRAM_API_KEY", "label": "Deepgram", "used_by": ["TTS", "STT"], "kind": "deepgram"},
@@ -88,16 +89,25 @@ def known_agents(cfg: dict) -> list:
     return out
 
 
+def _stt_provider(cfg: dict) -> str:
+    return str((cfg.get("stt") or {}).get("provider") or "whisper").strip().lower()
+
+
+def _used_by(row: dict, cfg: dict) -> list:
+    # The ElevenLabs key serves STT only while Scribe is the STT provider.
+    if row["var"] == "ELEVENLABS_API_KEY" and _stt_provider(cfg) == "elevenlabs":
+        return [*row["used_by"], "STT"]
+    return row["used_by"]
+
+
 def _in_use(row: dict, cfg: dict) -> bool:
     tts = cfg.get("tts") or {}
-    stt = cfg.get("stt") or {}
     icfg = cfg.get("intelligence") or {}
     tts_provider = str(tts.get("provider") or "elevenlabs").strip().lower()
     if row["var"] == "ELEVENLABS_API_KEY":
-        return tts_provider == "elevenlabs"
+        return tts_provider == "elevenlabs" or _stt_provider(cfg) == "elevenlabs"
     if row["var"] == "DEEPGRAM_API_KEY":
-        return tts_provider in ("deepgram", "deepgram-flux") or \
-            str(stt.get("provider") or "whisper").strip().lower() == "deepgram"
+        return tts_provider in ("deepgram", "deepgram-flux") or _stt_provider(cfg) == "deepgram"
     kind = str(icfg.get("kind") or "hermes").strip().lower()
     if row["kind"] != kind:
         return False
@@ -135,6 +145,7 @@ def rows(saved_env: dict, live_env: dict, cfg: dict, file_env=None) -> list[dict
         live = live_env.get(row["var"]) or ""
         out.append({
             **row,
+            "used_by": _used_by(row, cfg),
             "set": bool(saved),
             "hint": intelligence_target.key_hint(saved),
             # .env differs from what the running bot loaded (saved, replaced

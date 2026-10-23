@@ -1,0 +1,207 @@
+"""ElevenLabs Scribe that holds a socket only while a room is talking.
+
+pipecat 1.13 connects ElevenLabsRealtimeSTTService at setup and, after 10 s
+without audio, sends 100 ms of silence every 5 s to keep it open — and Scribe
+bills that silence as audio. The wake gate only lets audio reach STT while a
+room is AWAKE, so "open on the first audio, close after a quiet spell" is
+connect-on-wake without STT knowing about the wake word:
+
+- no socket at setup, no keepalive (no silence is ever sent);
+- the first audio starts ONE connect and is held (bounded) until Scribe says
+  session_started, then sent in order, then audio streams live; a VAD stop
+  that arrives meanwhile is held in its place, after the audio it ends;
+- IDLE_CLOSE_SECS without audio closes the socket; the next audio reopens it.
+
+Failure stays pipecat's: a connect that fails (bad key, dead network,
+timeout) leaves its receive loop retrying, and three failures report the
+permanent error that moves the room to Whisper (stt_fallback).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from collections import deque
+
+from loguru import logger
+from pipecat.frames.frames import VADUserStoppedSpeakingFrame
+from pipecat.services.elevenlabs.stt import (
+    ElevenLabsRealtimeSTTService,
+    audio_format_from_sample_rate,
+)
+from websockets.protocol import State
+
+# Longer than a pause between turns inside one awake window (the bot thinking
+# and answering); a longer gap only costs one reconnect (~175 ms, held audio).
+IDLE_CLOSE_SECS = 20.0
+# Audio held while the socket opens; overflow drops the oldest.
+HOLD_SECS = 10.0
+# Handshake + session_started; well inside HOLD_SECS, so a connect can't overflow it.
+CONNECT_TIMEOUT_SECS = 5.0
+
+_COMMIT = object()                        # a held VAD stop, in its place among the audio
+
+
+class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
+    """ElevenLabsRealtimeSTTService that connects on the first audio and
+    closes after IDLE_CLOSE_SECS without it."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # pipecat hardcodes a 10 s keepalive for Scribe: billed silence. Off.
+        self._keepalive_timeout = None
+        self._held: deque = deque()
+        self._held_bytes = 0
+        self._held_dropped = 0
+        self._opening = False
+        self._open_task = None
+        self._idle_task = None
+        self._opened_at = 0.0
+        self._session_started = False
+        self._session_event = asyncio.Event()
+
+    async def setup(self, setup):
+        # The parent's setup connects; skip it and keep the rest.
+        await super(ElevenLabsRealtimeSTTService, self).setup(setup)
+        self._audio_format = audio_format_from_sample_rate(self.sample_rate)
+
+    async def _websocket_connect(self, uri, **kwargs):
+        kwargs.setdefault("open_timeout", CONNECT_TIMEOUT_SECS)
+        return await super()._websocket_connect(uri, **kwargs)
+
+    def _socket_open(self) -> bool:
+        return self._websocket is not None and self._websocket.state is State.OPEN
+
+    def _ms(self, nbytes) -> int:
+        return round(nbytes * 1000 / (max(self.sample_rate, 1) * 2))
+
+    def _hold(self, item) -> None:
+        self._held.append(item)
+        if item is _COMMIT:
+            return
+        self._held_bytes += len(item)
+        cap = HOLD_SECS * max(self.sample_rate, 1) * 2
+        while self._held_bytes > cap:
+            old = self._held.popleft()
+            if old is not _COMMIT:
+                self._held_bytes -= len(old)
+                if not self._held_dropped:
+                    logger.warning(f"stt: elevenlabs still connecting after {HOLD_SECS:g} s of audio "
+                                   f"— dropping the oldest")
+                self._held_dropped += len(old)
+
+    def _drop_held(self) -> int:
+        dropped = self._held_bytes
+        self._held.clear()
+        self._held_bytes = 0
+        return dropped
+
+    async def run_stt(self, audio):
+        if self._opening:
+            self._hold(audio)
+        elif self._receive_task is None or self._receive_task.done():
+            # No socket (never opened, closed idle, or the server let it go): open one.
+            self._hold(audio)
+            self._opening = True
+            self._open_task = self.create_task(self._open(), name="elevenlabs_open")
+        else:
+            # Open: stream. (While pipecat's receive loop reconnects a dropped
+            # socket, its run_stt drops the audio, as it always has.)
+            async for frame in super().run_stt(audio):
+                yield frame
+            return
+        yield None
+
+    async def _open(self):
+        t0 = time.monotonic()
+        try:
+            self._session_started = False
+            self._session_event.clear()
+            self._held_dropped = 0
+            if self._receive_task is not None and self._receive_task.done():
+                self._receive_task = None     # the old loop ended: _connect starts a new one
+            await self._connect()
+            try:
+                await asyncio.wait_for(self._session_event.wait(),
+                                       max(CONNECT_TIMEOUT_SECS - (time.monotonic() - t0), 0.01))
+            except TimeoutError:
+                pass
+            ms = round((time.monotonic() - t0) * 1000)
+            if not self._session_started:
+                # Rejected key, dead network or no answer: pipecat's receive
+                # loop retries and, if it can't, reports the permanent error
+                # that moves the room to Whisper. This turn's held audio is lost.
+                logger.warning(f"stt: elevenlabs no session after {ms} ms "
+                               f"({self._ms(self._drop_held())} ms of audio dropped)")
+                return
+            logger.info(f"stt: elevenlabs connected in {ms} ms ({self._ms(self._held_bytes)} ms of audio buffered)")
+            # Audio (and a VAD stop) arriving during the sends below is held
+            # behind them, so the loop drains it in order.
+            while self._held:
+                item = self._held.popleft()
+                if item is _COMMIT:
+                    await self._send_commit()
+                else:
+                    self._held_bytes -= len(item)
+                    await self.process_generator(super().run_stt(item))
+        finally:
+            self._drop_held()                 # empty unless the open broke off: never stream stale audio later
+            self._opening = False
+            self._open_task = None
+
+    async def _send_commit(self):
+        # pipecat's manual commit (ElevenLabsRealtimeSTTService.process_frame).
+        try:
+            await self._websocket.send(json.dumps({"message_type": "input_audio_chunk", "audio_base_64": "",
+                                                   "commit": True, "sample_rate": self.sample_rate}))
+        except Exception as e:  # noqa: BLE001 — the receive loop handles a dead socket
+            logger.warning(f"stt: elevenlabs commit not sent: {e}")
+
+    async def process_frame(self, frame, direction):
+        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._opening:
+            # Held before any await, so it can't slip past the audio still held;
+            # skips the parent, which would commit at once if the socket is open.
+            self._hold(_COMMIT)
+            await super(ElevenLabsRealtimeSTTService, self).process_frame(frame, direction)
+            return
+        await super().process_frame(frame, direction)
+
+    async def _process_response(self, data):
+        if data.get("message_type") == "session_started":
+            self._session_started = True
+            self._session_event.set()
+        await super()._process_response(data)
+
+    async def _receive_messages(self):
+        try:
+            await super()._receive_messages()
+        finally:
+            self._session_event.set()         # socket gone: stop waiting for session_started
+
+    async def _connect(self):
+        await super()._connect()
+        self._opened_at = time.monotonic()
+        if self._idle_task is None:
+            self._idle_task = self.create_task(self._close_when_idle(), name="elevenlabs_idle")
+
+    async def _close_when_idle(self):
+        while True:
+            idle = time.monotonic() - max(self._last_audio_time, self._opened_at)
+            # Never while a connect or pipecat's reconnect is running: a key or
+            # network that keeps failing must reach the permanent error (Whisper).
+            if idle >= IDLE_CLOSE_SECS and not (self._opening or self._reconnect_in_progress):
+                break
+            await asyncio.sleep(max(IDLE_CLOSE_SECS - idle, 0.25))
+        self._idle_task = None                # this task is the one closing: _disconnect leaves it be
+        if self._socket_open():
+            logger.info(f"stt: elevenlabs idle {idle:.0f} s — closed until the next audio")
+        await self._disconnect()
+
+    async def _disconnect(self):
+        for task in (self._open_task, self._idle_task):
+            if task is not None:
+                await self.cancel_task(task)
+        self._open_task = self._idle_task = None
+        self._opening = False
+        self._drop_held()
+        await super()._disconnect()

@@ -55,9 +55,13 @@ LANGUAGE_CODES = [lang["code"] for lang in LANGUAGES]
 PROVIDERS = [
     {"name": "whisper", "label": "Local — Whisper", "cloud": False},
     {"name": "deepgram", "label": "Deepgram Nova-3 (cloud)", "cloud": True},
+    {"name": "elevenlabs", "label": "ElevenLabs Scribe v2 (cloud)", "cloud": True},
 ]
 PROVIDER_NAMES = [p["name"] for p in PROVIDERS]
 DEEPGRAM_MODEL = "nova-3"
+ELEVENLABS_MODEL = "scribe_v2_realtime"
+# The .env key each cloud provider reads — shared with that vendor's TTS.
+KEY_VARS = {"deepgram": "DEEPGRAM_API_KEY", "elevenlabs": "ELEVENLABS_API_KEY"}
 
 
 def validate_provider(provider):
@@ -66,10 +70,24 @@ def validate_provider(provider):
     return None
 
 
+def is_cloud(provider) -> bool:
+    return any(p["name"] == provider and p["cloud"] for p in PROVIDERS)
+
+
+def cloud_model(provider):
+    return {"deepgram": DEEPGRAM_MODEL, "elevenlabs": ELEVENLABS_MODEL}.get(provider)
+
+
 def deepgram_language(code):
     """Nova-3 language option: Auto -> 'multi' (code-switching); every card
     language is a Nova-3 monolingual code, so a code passes straight through."""
     return "multi" if not code or code == "auto" else code
+
+
+def elevenlabs_language(code):
+    """Scribe language option: Auto -> None (Scribe detects it); a code goes
+    to pipecat, whose ElevenLabs table maps it (en -> eng) at build."""
+    return language_value(code)
 
 
 def runtime_for(has_gpu: bool) -> tuple[str, str]:
