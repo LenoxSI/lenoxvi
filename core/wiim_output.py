@@ -51,6 +51,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from node_speaker import BUILTIN
+from zone_config import LiveZoneConfig
 
 # Shared SSL context: the WiiM serves a self-signed cert on 443.
 _SSL_CTX = ssl._create_unverified_context()
@@ -115,7 +116,9 @@ def _vol_lock(ip: str) -> asyncio.Lock:
     return held[1]
 
 
-class WiiMOutput(FrameProcessor):
+class WiiMOutput(LiveZoneConfig, FrameProcessor):
+    _section_name = "wiim"
+
     """Captures TTS audio and plays it on the zone's WiiM via play + vol snap/restore."""
 
     def __init__(self, config_path: str | None = None, echo_gate=None,
@@ -131,14 +134,13 @@ class WiiMOutput(FrameProcessor):
         # Optional sync callable returning the reply zone NAME (same
         # contract as SonosOutput's zone_selector — bot.py's _reply_zone).
         self._zone_selector = zone_selector
-        from config import cfg, DEFAULT_CLIP_VOLUME
+        from config import cfg
         wiim = cfg("wiim") or {}
-        self._enabled = bool(wiim.get("enabled"))
+        # enabled / zones / zone_volumes / clip_volume are read at reply time
+        # (zone_config.LiveZoneConfig): adding the first WiiM zone on the
+        # dashboard (which also enables the backend) reaches sessions that
+        # are already running. The clip server binds on first use.
         self._zone = wiim.get("default_zone")  # read for old configs; never a reply fallback
-        self._volume = int(wiim.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
-        self._zone_volumes = {k: int(v) for k, v in (wiim.get("zone_volumes") or {}).items()
-                              if isinstance(v, (int, float))}
-        self._zones = dict(wiim.get("zones") or {})
         # Clip server: process-wide singleton in sonos_output — bound in
         # setup() via shared_clip_server().
         self._clip_server = None

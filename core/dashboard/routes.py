@@ -43,7 +43,7 @@ import wake_word  # module-level import is light (pipecat frames only;
                   # the OWW/torch load happens at filter construction)
 
 from . import config_store, node_command, registry
-from .guard import mutation_guard
+from .guard import mutation_guard, recording_guard
 
 class _DashboardRoute(APIRoute):
     """Dashboard routes answer their OWN validation errors (2026-10-13).
@@ -82,6 +82,8 @@ router = APIRouter(prefix="/api/dashboard", route_class=_DashboardRoute)
 # Every mutating route gets the Origin/Host guard (+optional
 # LVI_DASHBOARD_TOKEN check) — see guard.py.
 GUARD = [Depends(mutation_guard)]
+# The recorder routes also need a token to be configured at all.
+RECORDER_GUARD = [*GUARD, Depends(recording_guard)]
 
 
 # ── models ───────────────────────────────────────────────────────────
@@ -974,7 +976,7 @@ class RecordPayload(BaseModel):
     seconds: int = Field(ge=1, le=room_recorder.MAX_SECONDS)
 
 
-@router.post("/nodes/{room}/record", dependencies=GUARD)
+@router.post("/nodes/{room}/record", dependencies=RECORDER_GUARD)
 async def start_recording(room: str, payload: RecordPayload):
     """Record this room's raw mic audio for `seconds` (max 10 min) to a
     WAV on the appliance. Only an online room; one recording per room."""
@@ -985,20 +987,24 @@ async def start_recording(room: str, payload: RecordPayload):
         raise HTTPException(status_code=409, detail=str(e)) from None
 
 
-@router.post("/nodes/{room}/record/stop", dependencies=GUARD)
+@router.post("/nodes/{room}/record/stop", dependencies=RECORDER_GUARD)
 async def stop_recording(room: str):
-    done = await room_recorder.stop(room)
+    try:
+        done = await room_recorder.stop(room)
+    except OSError:
+        # The recorder logged why; the answer carries no path or error text.
+        raise HTTPException(status_code=500, detail="the recording could not be saved") from None
     if done is None:
         raise HTTPException(status_code=404, detail=f"'{room}' is not recording")
     return {"ok": True, **done}
 
 
-@router.get("/recordings", dependencies=GUARD)
+@router.get("/recordings", dependencies=RECORDER_GUARD)
 async def list_recordings():
     return room_recorder.listing()
 
 
-@router.get("/recordings/{name}", dependencies=GUARD)
+@router.get("/recordings/{name}", dependencies=RECORDER_GUARD)
 async def get_recording(name: str):
     p = room_recorder.path_for(name)
     if p is None:
@@ -1006,7 +1012,7 @@ async def get_recording(name: str):
     return FileResponse(p, media_type="audio/wav", filename=p.name)
 
 
-@router.delete("/recordings/{name}", dependencies=GUARD)
+@router.delete("/recordings/{name}", dependencies=RECORDER_GUARD)
 async def delete_recording(name: str):
     p = room_recorder.path_for(name)
     if p is None:
@@ -1620,8 +1626,10 @@ class IntelligencePayload(BaseModel):
     url: str | None = Field(default=None, max_length=200, pattern=_INTELLIGENCE_URL_RE)
     # The agent for THIS kind: an OpenClaw agent id, or a Hermes profile
     # ("default" = the main agent). Filed under intelligence.agents[kind].
-    agent: str | None = Field(default=None, min_length=1, max_length=64,
-                              pattern=r"^[A-Za-z0-9_.-]+$")
+    # "" (nanobot only) removes the saved one: nanobot then answers with its
+    # own model, so a model change on the server can't 400 every turn.
+    agent: str | None = Field(default=None, max_length=64,
+                              pattern=r"^[A-Za-z0-9_.-]*$")
 
     @model_validator(mode="after")
     def _url_port(self):
@@ -1696,6 +1704,9 @@ async def put_intelligence(payload: IntelligencePayload):
     """Write kind (+ url/agent when provided) to config.yaml (intelligence
     section) — read-merge-write, so fillers/max_tokens/lull always
     survive. Applies on the next bot restart."""
+    if payload.agent == "" and payload.kind != "nanobot":
+        raise HTTPException(status_code=422,
+                            detail=f"{payload.kind} needs an agent; only nanobot can run without one")
     current = dict(config_store.read_section("intelligence") or {})
     saved_kind = current.get("kind") or "hermes"
     urls = dict(current.get("urls") or {})
@@ -1731,7 +1742,10 @@ async def put_intelligence(payload: IntelligencePayload):
         raise HTTPException(status_code=422, detail=f"set a URL for {payload.kind} first")
     if payload.agent is not None:
         agents = dict(current.get("agents") or {})
-        agents[payload.kind] = payload.agent
+        if payload.agent:
+            agents[payload.kind] = payload.agent
+        else:
+            agents.pop(payload.kind, None)  # nanobot: back to its own model
         current["agents"] = agents
         if payload.kind == "openclaw":
             current["agent"] = payload.agent  # legacy key, read by older builds

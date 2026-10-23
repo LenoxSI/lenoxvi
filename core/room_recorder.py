@@ -28,7 +28,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 MAX_SECONDS = 600
 RETENTION_DAYS = 7
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.wav$")
+# The recorder's own name shape, <slug>-YYYYmmdd-HHMMSS[-N].wav: only these
+# are listed, served, deleted or pruned, whatever else is in the folder.
+NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?-\d{8}-\d{6}(?:-\d+)?\.wav$")
 
 
 @dataclass
@@ -47,6 +49,7 @@ class _Recording:
 
 
 _active: dict[str, _Recording] = {}
+_saving: set[str] = set()  # closed, file not written yet: the name is still taken
 
 
 def captures_dir() -> Path:
@@ -58,9 +61,13 @@ def _slug(room: str) -> str:
     return re.sub(r"[^A-Za-z0-9-]+", "-", room).strip("-") or "room"
 
 
+def _files(d: Path) -> list[Path]:
+    return sorted(p for p in d.glob("*.wav") if NAME_RE.match(p.name))
+
+
 def _prune(d: Path) -> None:
     cutoff = time.time() - RETENTION_DAYS * 86400
-    for p in d.glob("*.wav"):
+    for p in _files(d):
         try:
             if p.stat().st_mtime < cutoff:
                 p.unlink()
@@ -83,7 +90,14 @@ def start(room: str, seconds: int) -> dict:
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
     _prune(d)
-    name = f"{_slug(room)}-{time.strftime('%Y%m%d-%H%M%S')}.wav"
+    # Names go down to the second; a stop and restart in the same second
+    # (or two rooms with one slug) get -2, -3... instead of overwriting.
+    base = f"{_slug(room)}-{time.strftime('%Y%m%d-%H%M%S')}"
+    taken = {r.name for r in _active.values()} | _saving
+    name, n = f"{base}.wav", 1
+    while name in taken or (d / name).exists():
+        n += 1
+        name = f"{base}-{n}.wav"
     rec = _Recording(room=room, name=name, seconds=seconds,
                      deadline=time.monotonic() + seconds, started=time.time())
     _active[room] = rec
@@ -115,13 +129,13 @@ def feed(room: str | None, audio: bytes, sample_rate: int, channels: int) -> Non
 
 async def stop(room: str) -> dict | None:
     """End `room`'s recording early and wait for the file to be written.
-    None if it wasn't recording."""
+    None if it wasn't recording; OSError if the file could not be saved."""
     rec = _active.get(room)
     if rec is None:
         return None
     fut = _finish(rec)
-    if fut is not None:
-        await fut
+    if fut is not None and not await fut:
+        raise OSError(f"recorder: {rec.name} was not saved")
     return {"room": room, "file": rec.name}
 
 
@@ -134,6 +148,7 @@ def _finish(rec: _Recording):
         rec.timer.cancel()
     if _active.get(rec.room) is rec:
         del _active[rec.room]
+    _saving.add(rec.name)
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -142,7 +157,9 @@ def _finish(rec: _Recording):
     return loop.run_in_executor(None, _write, rec)
 
 
-def _write(rec: _Recording) -> None:
+def _write(rec: _Recording) -> bool:
+    """Write the WAV; False (logged) if it could not be saved. A timer or
+    time-box close has no caller to tell, so only stop() reports it."""
     d = captures_dir()
     final = d / rec.name
     tmp = d / f".{rec.name}.part"
@@ -156,21 +173,24 @@ def _write(rec: _Recording) -> None:
         os.replace(tmp, final)
         secs = rec.nbytes / (2 * (rec.channels or 1) * (rec.sample_rate or 16000))
         logger.info(f"recorder: {rec.room} saved {rec.name} ({secs:.1f}s of audio)")
+        return True
     except OSError as e:
         logger.warning(f"recorder: {rec.room} could not save {rec.name} ({type(e).__name__})")
         try:
             tmp.unlink()
         except OSError:
             pass
+        return False
     finally:
         rec.chunks = []
+        _saving.discard(rec.name)
 
 
 def listing() -> dict:
     d = captures_dir()
     files = []
     if d.is_dir():
-        for p in sorted(d.glob("*.wav")):
+        for p in _files(d):
             st = p.stat()
             files.append({"name": p.name, "bytes": st.st_size, "mtime": int(st.st_mtime)})
     now = time.monotonic()
@@ -180,8 +200,9 @@ def listing() -> dict:
 
 
 def path_for(name: str) -> Path | None:
-    """The file for a listed recording name, or None. Names are checked
-    against a strict pattern, so no path ever leaves the folder."""
+    """The file for a listed recording name, or None. Names must have the
+    recorder's own shape, so no path ever leaves the folder and no other
+    file in it is ever served or deleted."""
     if not NAME_RE.match(name or ""):
         return None
     p = captures_dir() / name

@@ -159,6 +159,10 @@ Off unless asked; up to 10 minutes per recording; one recording per room;
 files land in `captures/` (owner-only, never committed) and are deleted
 after 7 days.
 
+Recording needs `LVI_DASHBOARD_TOKEN` set in `.env`: without it every route
+below answers 403, so nobody on the LAN can listen in. Each request sends
+the token in the `X-Dashboard-Token` header.
+
 ```
 POST   /api/dashboard/nodes/<room>/record      {"seconds": 120}
 POST   /api/dashboard/nodes/<room>/record/stop

@@ -996,12 +996,19 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
   const defaultAgent = mapping?.default_agent || ''
   const savedAgents = mapping?.room_agents?.[agentKind] || {}
   const discoverAgents = useRef(null)
+  // found holds one kind's list, so one counter: a late reply for an older
+  // request (or the kind before a switch) never replaces the newest one.
+  const discSeq = useRef(0)
   useEffect(() => {
     discoverAgents.current = async () => {
+      const seq = ++discSeq.current
       if (!agentKind) return
       try {
-        setFound(await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: agentKind } }))
-      } catch (e) { setFound({ agents: [], note: 'Agent list failed: ' + e.message }) }
+        const r = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: agentKind } })
+        if (seq === discSeq.current) setFound(r)
+      } catch (e) {
+        if (seq === discSeq.current) setFound({ agents: [], note: 'Agent list failed: ' + e.message })
+      }
     }
   })
   useEffect(() => { discoverAgents.current?.() }, [agentKind])
@@ -1270,7 +1277,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
         method: 'PUT', json: { volume: vol } })
       setMsg(`${name}: voice volume ${r.volume} — applies to the next clip, no restart.`, 'ok', 'Zones')
       reloadAll()
-    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones') }
+      return true
+    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones'); return false }
   }
 
   const discover = async () => {
@@ -1301,7 +1309,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
       const r = await api('/api/dashboard/node-speaker/volume', { method: 'PUT', json: { room, volume: vol } })
       setMsg(`${room} built-in speaker: volume ${r.volume} — live, no restart.`, 'ok', 'Zones')
       reloadAll()
-    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones') }
+      return true
+    } catch (e) { setMsg('Volume save failed: ' + e.message, 'err', 'Zones'); return false }
   }
   const testSpeaker = async room => {
     try {
@@ -1432,6 +1441,9 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
 function VolSlider({ name, initial, onCommit }) {
   const [val, setVal] = useState(initial)
   useEffect(() => { setVal(initial) }, [initial])
+  // A refused save leaves `initial` unchanged, so the effect above never
+  // re-runs: put the slider back to the saved value ourselves.
+  const commit = async () => { if (!(await onCommit(name, val))) setVal(initial) }
   // No server number yet (older bot / first paint): show — and lock the
   // slider rather than invent a default that may not be what plays.
   if (val == null) {
@@ -1447,15 +1459,15 @@ function VolSlider({ name, initial, onCommit }) {
     <div className="flex items-center gap-2">
       <input type="range" min="0" max="100" value={val}
         onChange={e => setVal(+e.target.value)}
-        onMouseUp={() => onCommit(name, val)}
-        onTouchEnd={() => onCommit(name, val)}
+        onMouseUp={commit}
+        onTouchEnd={commit}
         onKeyUp={e => {
           // Only VALUE-MOVING keys commit — the old bare
           // onKeyUp fired on Tab too, so walking the form with the
           // keyboard PUTed an unchanged volume into config.
           if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
                'Home', 'End', 'PageUp', 'PageDown'].includes(e.key))
-            onCommit(name, val)
+            commit()
         }}
         className="w-[140px] accent-[var(--accent)]"
         aria-label={`${name} volume`} />
@@ -2411,15 +2423,20 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   const agentDrafts = useRef({})  // {hermes: 'default', openclaw: '<agent>'}
   const [found, setFound] = useState({})  // kind -> {agents, note, selected, loading}
   const lastDiscoverUrl = useRef({})
+  const discSeq = useRef({})  // kind -> newest request; only its reply counts
   const discover = async (kind, url) => {
     lastDiscoverUrl.current[kind] = url || ''
+    const seq = (discSeq.current[kind] || 0) + 1
+    discSeq.current[kind] = seq
     setFound(f => ({ ...f, [kind]: { ...(f[kind] || {}), loading: true } }))
     const body = { kind }
     if (/^https?:\/\//.test(url || '')) body.url = url
     try {
       const r = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: body })
+      if (seq !== discSeq.current[kind]) return
       setFound(f => ({ ...f, [kind]: { ...r, loading: false } }))
     } catch (e) {
+      if (seq !== discSeq.current[kind]) return
       setFound(f => ({ ...f, [kind]: { agents: [], note: 'Agent list failed: ' + e.message, loading: false } }))
     }
   }
@@ -2458,7 +2475,10 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   }
   const agentList = found[intKind]?.agents || []
   // Nothing picked for this kind yet: the saved one, else the first listed.
-  const agentSel = intAgent || found[intKind]?.selected || agentList[0]?.id || ''
+  // Nanobot never falls back: '' is a real choice (its own model), and a
+  // fallback would pin whatever model it lists today on the next Save.
+  const agentSel = intKind === 'nanobot' ? intAgent
+    : intAgent || found[intKind]?.selected || agentList[0]?.id || ''
   const agentEntry = agentList.find(a => a.id === agentSel)
   const agentNote = found[intKind]?.note
   return (
@@ -2481,7 +2501,9 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
               ? 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.'
               : 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.'}
             className={`${INPUT_CLS} w-[220px] font-mono`}>
-            {!agentSel && <option value="">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}
+            {intKind === 'nanobot'
+              ? <option value="">nanobot's own model</option>
+              : !agentSel && <option value="">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}
             {agentList.map(a => (
               <option key={a.id} value={a.id}>
                 {a.id}{intKind === 'hermes' && !a.key_set ? ' — no key' : ''}
@@ -2539,7 +2561,8 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
               // kind's saved URL, so it must be saved while looking at it.
               if (!url) { setMsg(`Enter the ${label} URL first.`, 'err', 'Intelligence'); return }
               const body = { kind, url }
-              if (agentSel) body.agent = agentSel
+              // Nanobot always sends its pick: '' clears a saved model.
+              if (agentSel || kind === 'nanobot') body.agent = agentSel
               try {
                 const r = await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
                 if (r?.url_only) {
@@ -2552,7 +2575,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
                 }
                 setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
                 reloadAll()
-                // Nanobot saves without an agent; its URL is saved now, so
+                // Nanobot can save with no model picked; its URL is saved now, so
                 // discovery can use the stored key and list its model.
                 if (kind === 'nanobot') discover(kind, url)
                 offerRestart(setMsg, setRebooting)

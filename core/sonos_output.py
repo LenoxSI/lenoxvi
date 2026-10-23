@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from node_speaker import BUILTIN
+from zone_config import LiveZoneConfig
 
 
 class ClipServer:
@@ -217,7 +218,9 @@ def _extract_clip_id(resp) -> str | None:
         return None
 
 
-class SonosOutput(FrameProcessor):
+class SonosOutput(LiveZoneConfig, FrameProcessor):
+    _section_name = "sonos"
+
     """Captures TTS audio and plays it on the zone's Sonos as an audioClip."""
 
     _prune_task_started = False  # ONE hourly prune loop per process
@@ -281,23 +284,19 @@ class SonosOutput(FrameProcessor):
         # Read through core/config's cached cfg() (LVI_CONFIG applies, and no
         # file read on the event loop for every session). An explicit
         # config_path (suite fixtures only) is still read directly.
-        from config import DEFAULT_CLIP_VOLUME, cfg
+        from config import cfg
 
         if config_path:
             sonos = (yaml.safe_load(Path(config_path).read_text()) or {}).get("sonos") or {}
+            self._static_section = sonos
         else:
             sonos = cfg("sonos") or {}
-        self._enabled = bool(sonos.get("enabled"))
+        # enabled / zones / zone_volumes / clip_volume are read at reply time
+        # (zone_config.LiveZoneConfig): a zone added or a volume reset on the
+        # dashboard reaches sessions that are already running. Per-zone
+        # volume: config `sonos.zone_volumes` is the durable copy; the live
+        # layer (zone_volume_overrides below) is the slider's instant one.
         self._zone = sonos.get("default_zone")  # read for old configs; never a reply fallback
-        self._volume = int(sonos.get("clip_volume", DEFAULT_CLIP_VOLUME))  # one default
-        # Per-zone volume overrides (2026-10-04, dashboard slider): config
-        # `sonos.zone_volumes: {<zone>: int}` is the durable copy; the live
-        # layer (zone_volume_overrides below) lets the dashboard change a
-        # zone's clip volume for the NEXT clip without a bot restart —
-        # tuning by ear needs instant feedback, not the restart contract.
-        self._zone_volumes = {k: int(v) for k, v in (sonos.get("zone_volumes") or {}).items()
-                              if isinstance(v, (int, float))}
-        self._zones = sonos.get("zones", {})
         self._duck_while_awake = bool(sonos.get("duck_while_awake", True))
         # Opportunistic clip pruning (2026-09-20): once per pipeline at
         # setup() (in a thread: the glob/stat/unlink pass grows with clips/)

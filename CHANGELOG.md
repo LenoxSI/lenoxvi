@@ -12,7 +12,25 @@ The two version streams are independent.
 - Room recorder: save one room's raw mic audio to a WAV on the appliance
   (up to 10 minutes, one recording per room, owner-only files in
   `captures/`, deleted after 7 days) through the dashboard API — see
-  "Recording a room" in the README. Off unless asked for.
+  "Recording a room" in the README. Off unless asked for, and only with
+  `LVI_DASHBOARD_TOKEN` set: without a token the recorder routes refuse, so
+  no one on the LAN can record a room or download a recording.
+
+### Fixed
+- Speakers: a Sonos or WiiM zone added (or a room mapped to it) after a node
+  connected now gets that room's replies right away, as the dashboard says;
+  before, replies stayed silent until the node reconnected.
+- Speakers: moving a zone's volume slider back to the global volume now plays
+  at the global volume instead of the zone's old one.
+- Intelligence card: saving Nanobot settings no longer pins nanobot's
+  current model; "nanobot's own model" is a choice you can pick, and saving
+  it clears a previously saved model (`agent: ""`), so a model change on the
+  nanobot server can't make every turn fail.
+- Intelligence card and room agent picker: when the agent list is refreshed
+  twice in quick succession (for example after correcting a mistyped URL), a
+  late reply to the older request no longer replaces the newer list.
+- Zones card: a volume slider whose save fails moves back to the saved
+  volume instead of showing the unsaved one.
 
 ## [0.6.8] — 2026-10-22 — Nanobot intelligence, friendlier key setup
 
