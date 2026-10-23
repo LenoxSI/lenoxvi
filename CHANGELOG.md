@@ -16,7 +16,7 @@ The two version streams are independent.
 
 ## [0.6.8] — 2026-10-22 — Nanobot intelligence, friendlier key setup
 
-A third agentic brain behind the same rooms and speakers: nanobot, set up
+A third agentic intelligence behind the same rooms and speakers: nanobot, set up
 entirely from the dashboard, plus a Keys card that no longer asks for
 needless restarts or calls an unfinished setup a failure.
 
@@ -712,7 +712,7 @@ type.
   the dashboard write clears the config cache in-process; the
   "applies on next bot restart" message was stale copy. UI now says
   the truth.
-- Kind-aware brain key resolution: the hermes lane auths with
+- Kind-aware intelligence key resolution: the hermes lane auths with
   `LVI_HERMES_KEY`, the openclaw lane with `LVI_BRAIN_KEY` — a kind
   flip can no longer cross tokens (suite checks pin both lanes). Same fix in the intelligence probe.
 - Intelligence test button renders the body's `ok` field, never the
@@ -720,7 +720,7 @@ type.
   caught live when the strip said "✓ ok" while the backend logged
   401).
 - Supersede ack rate-limited: one "Hold on — switching." per wake
-  window (`brain.supersede_ack_gap`, default 45s, re-armed on fresh
+  window (`intelligence.supersede_ack_gap`, default 45s, re-armed on fresh
   turns) — a two-person math session triple-fired it in 10s.
 - TTS provider switch sent a stale elevenlabs model string under
   deepgram (the Pydantic pattern correctly 422'd it) — provider-
@@ -751,7 +751,7 @@ Three feature arcs: a second intelligence provider, turn-taking, and
 hardening.
 
 ### Added — Intelligence lane
-- `brain.kind: openclaw` — voice turns answered by an OpenClaw Gateway
+- `intelligence.kind: openclaw` — voice turns answered by an OpenClaw Gateway
   agent (`model: openclaw/<agent>`, sticky rooms via
   `x-openclaw-session-key`, Hermes-only `conversation` field omitted).
   Requires `gateway.http.endpoints.chatCompletions.enabled: true` on the
@@ -776,7 +776,7 @@ hardening.
   backends `stop_current_clip()` + `_speech_epoch` bump.
 - Load-anchored timers: speech/duck timers anchor at clip-load
   with epoch guard + generation-time fallback — the ring LED no longer
-  desyncs from the speaker on long brain calls.
+  desyncs from the speaker on long intelligence calls.
 - Echo-gate relax: confirmed wake or barge-in relaxes the duration gate
   to a ~0.5s tail; text containment stays armed.
 
@@ -816,7 +816,7 @@ and a save→apply flow that never forces a tab hop.
 - **Voice Tuning panel** — the six ear-tuning knobs as sliders: wake
   sensitivity (0.30–0.60), awake timeout (5–60s), VAD confidence
   (0.30–0.90), VAD min volume (0.10–0.90), turn-end lull (0.2–2.0s),
-  echo dedup window (2–30s). Writes MERGE per section — brain.fillers,
+  echo dedup window (2–30s). Writes MERGE per section — intelligence.fillers,
   max_tokens, wake.enabled can never be clobbered by a tuning save
 - **Restart bot button** — POST /api/dashboard/restart via a detached
   systemd transient unit (survives the bot's own death); UI polls
@@ -831,7 +831,7 @@ and a save→apply flow that never forces a tab hop.
   default chains the consumers use (moves with the host, never static)
 - **Live version in statusbar** — git describe at boot, updates every
   commit
-- **brain.max_tokens: 300** — guardrail against runaway brain replies
+- **intelligence.max_tokens: 300** — guardrail against runaway intelligence replies
   (config-gated, default 300)
 
 ### Fixed
@@ -860,7 +860,7 @@ that makes every voice conversation auditable in the Hermes dashboard.
   replies play via `setPlayerCmd:play` as main media. Music stops when
   the assistant speaks, nothing restores (client-owned sources are
   unresumable).
-  `X-Hermes-Session-Key` rides every brain call: sticky rooms merge into
+  `X-Hermes-Session-Key` rides every intelligence call: sticky rooms merge into
   ONE long-lived dashboard session per room, fresh pipelines get one
   session per connection — both visible and auditable in the Hermes
   admin dash (previously voice sessions were unkeyed and invisible there)
@@ -909,7 +909,7 @@ config-file number.
   honor it — replies, duck-holder, and the test tone, so the tone IS the
   tuning instrument. New guarded `PUT /zones/{name}/volume`; mapping GET
   carries `zone_volumes` + `clip_volume`
-- **`brain.zone` documented as the conversation label prefix** — fresh-mode
+- **`intelligence.zone` documented as the conversation label prefix** — fresh-mode
   pipelines mint `voice-<zone>-<id>` from it; with native-name zone keys the
   labels read sensibly in Hermes conversation history
 
@@ -924,7 +924,7 @@ config-file number.
 
 ### Changed
 - **Zone keys = native Sonos player names** across config (zones,
-  default_zone, room_zones, `brain.zone` label prefix, zone_volumes
+  default_zone, room_zones, `intelligence.zone` label prefix, zone_volumes
   overrides). The
   dashboard already displayed native names; now the keys match them, so a
   user reading Sonos's app and the dashboard sees one name per player.
@@ -952,11 +952,11 @@ conversation features shipped and verified the same day.
   Spec: **sticky = stash + server-side continuity**. Verified: a
   "what's the last thing I asked you" test across a node restart AND a bot
   restart answered correctly from restored history (`6aec78e`)
-- **Tiered fillers** — one spoken line per latency tier so a slow brain turn
+- **Tiered fillers** — one spoken line per latency tier so a slow intelligence turn
   no longer goes silent after the first ack: tier 1 acks at 3s (the classic
   pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then the
-  assistant waits quietly. Config `brain.fillers` is a tiered list; a flat string list
-  still parses as a single ack tier at `brain.filler_after_secs` (legacy
+  assistant waits quietly. Config `intelligence.fillers` is a tiered list; a flat string list
+  still parses as a single ack tier at `intelligence.filler_after_secs` (legacy
   configs unchanged). All lines <2s spoken; tier 2/3 lines meet the ≥3-word
   echo-containment contract. Verified: all three tiers fire in sequence on
   a long turn, and rotation never repeats a line within a session
@@ -1003,10 +1003,10 @@ unchanged on a single-node setup.
   logged before it can eat a reply mid-conversation (`fb2e585`)
 
 ### Fixed
-- **Brain failure after the filler no longer goes silent**: the post-filler
-  brain await has its own try/except (a sibling except clause cannot catch
+- **Intelligence failure after the filler no longer goes silent**: the post-filler
+  intelligence await has its own try/except (a sibling except clause cannot catch
   an exception raised in another handler's body) — the user hears
-  "Sorry — I can't reach my brain right now" instead of dead air, and the
+  "Sorry — I can't reach my intelligence right now" instead of dead air, and the
   outage reply never enters the server-side history as a fake memory
   (`897de5d`)
 - **Duck-holder hardening**: every Sonos call is timeout-bounded; a dead
@@ -1021,7 +1021,7 @@ unchanged on a single-node setup.
 - **Event loop unblocked**: MP3 encodes (reply clips, duck clip, dashboard
   test tones) and soco calls (name lookups, UPnP discovery) run in
   threads; dashboard node commands (restart/scan/rename/Wi-Fi) ride the
-  direct data-channel wire via the output transport — a 40s brain call
+  direct data-channel wire via the output transport — a 40s intelligence call
   can no longer stall a command into a 504 (`7ae9ecb`)
 - **Multi-node architecture**: room identity is per-pipeline — replies,
   wake records, and ducks resolve through THIS connection's pc_id instead
@@ -1051,11 +1051,11 @@ state).
   stay tied to SPEECH-only duration (`9b4000d`, `3d28fa7`, `20d5d25`)
 - **LED direct wire** (`core/led_state.py`): LED state messages ride
   the WebRTC data channel directly (output transport `send_message`),
-  bypassing the pipeline — a blocked brain call stalls pipeline frames
+  bypassing the pipeline — a blocked intelligence call stalls pipeline frames
   3-40s in both directions, which left the ring holding stale purple
   through the whole "On it." → answer gap. Speaking
   state now fires from SonosOutput's real-time TTS frames downstream
-  of the brain; end-of-speaking is duration-timed to actual playback
+  of the intelligence; end-of-speaking is duration-timed to actual playback
   (`d02075a`, `69d9c5f`)
 - Dashboard: firmware push reads the version from the uploaded image's
   embedded app descriptor (magic-checked; manual version entry removed);
@@ -1123,7 +1123,7 @@ management, and test clips, all served by the bot process itself.
   prompt and code comments no longer name the user; the OWW model test
   docstring defers its positive case to a live test instead of a person
 - Removed the "never address the user as boss" rule comment — how the
-  brain addresses its user is brain-side (Hermes) config, not repo policy
+  intelligence addresses its user is Hermes-side config, not repo policy
 - Comment accuracy + formatting sweep:
   wake_word docstring now matches the 2026-09-19 OWW-always-fed behavior
   and the permanent echo gate; sonos_output says MP3 not WAV; _is_own_echo
@@ -1143,7 +1143,7 @@ Model caching and cleanups.
   every node reconnect used to reload large-v3-turbo onto the GPU (seconds
   of deaf STT + VRAM churn); OWW shared model resets its rolling buffers
   per pipeline (`reset()`)
-- continuity_test reads brain.url via the config surface (was env-only,
+- continuity_test reads intelligence.url via the config surface (was env-only,
   KeyError against a secrets-only .env)
 - SonosOutput reads config via core/config's CONFIG_PATH (LVI_CONFIG split-brain)
 - stt_local: dead `settings.language` branch → the real `self._language`
@@ -1165,10 +1165,10 @@ new tuning knobs.
   the 24/7 hot path; now 2560 bytes (`443b8e2`)
 - containment_test Case 3 had `or True` — an assertion structurally
   unable to fail; now asserts real output (`766bd4d`)
-- brain outage now speaks a fallback line instead of filler-then-silence
+- intelligence outage now speaks a fallback line instead of filler-then-silence
 
 ### Added
-- `wake.model`, `brain.lull_secs`, `brain.dedup_window` config knobs
+- `wake.model`, `intelligence.lull_secs`, `intelligence.dedup_window` config knobs
   (were documented-but-ignored or buried in constructor defaults)
 - README fresh-clone section (deps → config → .env → wake model → cert → run)
 
@@ -1182,11 +1182,11 @@ new tuning knobs.
 ## [0.2.0] — 2026-09-20
 
 First tagged snapshot. Full pipeline live (wake gate → VAD → local
-whisper STT → Hermes brain → ElevenLabs TTS → Sonos audioClip overlay),
+whisper STT → Hermes intelligence → ElevenLabs TTS → Sonos audioClip overlay),
 running as a systemd service.
 
 ### Added
-- Initial bot: local whisper ears, stub brain, ElevenLabs mouth (`8a8e8a8`)
+- Initial bot: local whisper ears, stub intelligence, ElevenLabs mouth (`8a8e8a8`)
 - sonos_output: Sonos audioClip overlay — clip volume ~70, ~200ms load,
   opportunistic clip pruning at startup (`20c2a72`)
 - config.yaml as the single tuning surface (yaml > `LVI_*` env > code default) (`96ce51b`)
