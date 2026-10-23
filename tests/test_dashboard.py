@@ -6928,26 +6928,28 @@ def main():
     check("dashboard ui: a refused restart request is reported at once, not after the 90 s wait",
           0 <= _pe < _wl and "return" in _rb[_pe:_wl], f"postErr@{_pe} loop@{_wl}")
 
-    _kc = _jsbody(_appsrc, "function KeysCard({ setMsg, setRebooting }) {")
+    _kc = _jsbody(_appsrc, "function KeysCard({ setMsg }) {")
     _kadd = _reui.search(r'<select id="key-add".*?</select>', _kc, _reui.DOTALL)
     check("dashboard ui: Add key saves only under an explicitly picked service (no implicit first pick)",
           bool(_kc) and "firstPick" not in _kc and "addPick ||" not in _kc
           and bool(_kadd) and 'value="" disabled' in _kadd.group(0), (_kadd.group(0)[:160] if _kadd else "no select"))
     check("dashboard ui: a picked service that a refresh removed clears the pasted key and blocks Add",
           "[stale])" in _kc and "addEpoch" in _kc and "disabled={busy || !pickValue || stale}" in _kc)
-    # Keys: a restart is offered only for a key the running setup uses.
-    _ksave = _jsbody(_kc, "const save = async (row, inputId, { offer = true } = {}) => {")
+    # Keys: "restart to apply" only for a key the running setup uses.
+    _ksave = _jsbody(_kc, "const save = async (row, inputId) => {")
     _krm = _jsbody(_kc, "const remove = async row => {")
     _kaddf = _jsbody(_kc, "const add = async () => {")
-    check("dashboard ui: Keys save offers a restart only when the saved key is in use",
+    check("dashboard ui: Keys save says 'restart to apply' only when the saved key is in use",
           "const d = await load()" in _ksave and ".in_use" in _ksave
-          and _ksave.find("if (inUse)") < _ksave.find("offerRestart(") and "Not in use yet" in _ksave, _ksave[:200])
-    check("dashboard ui: Keys remove offers a restart only for a key in use",
-          "if (row.in_use)" in _krm and _krm.find("if (row.in_use)") < _krm.find("offerRestart("), _krm[:200])
-    check("dashboard ui: Keys Add offers a restart only when the added key is in use",
-          "if (r.in_use) offerRestart(" in _kaddf, _kaddf[-200:])
+          and 0 <= _ksave.find("if (inUse)") < _ksave.find("'Saved — restart to apply.'")
+          and "Not in use yet" in _ksave, _ksave[:200])
+    check("dashboard ui: Keys remove says 'restart to apply' only for a key in use",
+          "if (row.in_use)" in _krm
+          and 0 <= _krm.find("if (row.in_use)") < _krm.find("'Removed — restart to apply.'"), _krm[:200])
+    check("dashboard ui: Keys Add tests the saved key and never restarts the bot itself",
+          "await test({ var: v })" in _kaddf and "restartBot(" not in _kaddf, _kaddf[-200:])
     check("dashboard ui: a saved or removed key nothing uses gets a neutral chip, never 'restart to apply'",
-          "Not in use yet: switching to it offers the restart." in _appsrc
+          "Not in use yet: switching to it marks a restart pending." in _appsrc
           and "Nothing uses it, so no restart is needed." in _appsrc)
     check("dashboard ui: a key Test whose setup isn't finished shows an info note, not a red failure",
           "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'ⓘ '" in _kc)
@@ -6963,7 +6965,7 @@ def main():
           "promptForToken" in _apib
           and _reui.search(r"nodes/\$\{encodeURIComponent\(room\)\}/info`, \{ promptForToken: true \}", _appsrc) is not None)
 
-    _na = _jsbody(_appsrc, "function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll }) {")
+    _na = _jsbody(_appsrc, "function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll, children: renderRow }) {")
     _wf = _jsbody(_na, "const applyWifi = async () => {")
     _rn = _jsbody(_na, "const rename = async () => {")
     check("dashboard ui: Wi-Fi Apply and Save name ignore a second click while the first is in flight",
@@ -6971,7 +6973,7 @@ def main():
           and _reui.search(r"<button[^>]*disabled=\{sending\}[^>]*onClick=\{applyWifi\}", _na) is not None
           and _reui.search(r"<button[^>]*disabled=\{sending\}[^>]*onClick=\{rename\}", _na) is not None)
 
-    _ow = _jsbody(_appsrc, "function OwwPanel({ setMsg, setRebooting, reloadAll }) {")
+    _ow = _jsbody(_appsrc, "function OwwPanel({ setMsg, reloadAll }) {")
     check("dashboard ui: the wake-model picker shows a placeholder when no listed model is active",
           '<option value="" disabled>pick a model' in _ow)
 
@@ -7467,7 +7469,7 @@ def main():
         j = _reui.search(r"\n(export default )?function ", _appsrc[i + 1:]) if i >= 0 else None
         return "" if i < 0 else _appsrc[i:i + 1 + j.start()] if j else _appsrc[i:]
 
-    _sysUI = _fnUI("function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {")
+    _sysUI = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
     _selUI = _reui.search(r"const agentSel = (.*?)\n\s*const agentEntry", _sysUI, _reui.DOTALL)
     _selUI = _ws(_selUI.group(1)) if _selUI else ""
     _oldFallback = "intAgent || found[intKind]?.selected || agentList[0]?.id || ''"
@@ -7489,7 +7491,7 @@ def main():
           _selUI.startswith("intKind === 'nanobot' ? intAgent :")
           and "agentDrafts.current = { ...(intelligence.agents || {}) }" in _syncUI
           and "setIntAgent(agentDrafts.current[kind] || '')" in _syncUI, _syncUI[:200])
-    _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {")
+    _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
     check("zones ui: 'nanobot's own model' lives only on the Intelligence card, never in the per-room agent picker",
           "nanobot's own model" in _sysUI and bool(_rmUI) and "nanobot's own model" not in _rmUI
           and "room_agents" in _rmUI)
@@ -7542,7 +7544,7 @@ def main():
           and '<tr className="text-[12px] text-[var(--muted)]">' in _appsrc,
           f"uppercase x{_appsrc.count('uppercase')}, tracking-wide x{_appsrc.count('tracking-wide')}")
     check("dashboard ui: the Overview Restart button is the default style, not danger (danger stays on Remove/Delete)",
-          'className={BTN_DEFAULT} disabled={rebooting}' in _appsrc
+          'className={pending.length ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}' in _appsrc
           and 'className={BTN_DANGER} disabled={rebooting}' not in _appsrc
           and 'const BTN_DANGER' in _appsrc,
           f"BTN_DANGER buttons: {_appsrc.count('className={BTN_DANGER}')}")
@@ -7565,6 +7567,314 @@ def main():
           'Set wake word' not in _appsrc
           and "setDraft(null) }}>Save</button>" in _appsrc,
           f"Set wake word: {'Set wake word' in _appsrc}")
+
+    # ── restart pending: one Overview state instead of per-save restart
+    # prompts. /status lists the saved settings the running bot hasn't
+    # loaded yet; a restart (a new boot snapshot) clears the list. ────────
+    import config as _cfgRP
+    from dashboard import routes as _rRP
+    from wiim_output import wiim_volume_overrides as _wvoRP
+
+    _RP_SECS = ("tts", "stt", "intelligence", "wake", "vad", "room_agents", "room_zones", "wiim", "session_modes")
+    _rp_before = {s: copy.deepcopy(dict(config_store.read_section(s) or {})) for s in _RP_SECS}
+    _RP_VARS = tuple(sorted({"LVI_ENV_FILE", "LVI_INTELLIGENCE_KIND", "LVI_STT_PROVIDER", "ELEVENLABS_API_KEY",
+                             "DEEPGRAM_API_KEY", *_rRP.INTELLIGENCE_KEY_VARS.values(),
+                             *(k for k in os.environ if k.startswith("LVI_HERMES_KEY_"))}))
+    _rp_env = {k: os.environ.get(k) for k in _RP_VARS}
+    _rp_boot = copy.deepcopy(getattr(_cfgRP, "_BOOT", None))
+    _rp_boot_fn = getattr(_cfgRP, "boot_config", dict)
+    _rp_envfile = SCRATCH / "restart-pending.env"
+    _RP_SECRETS = ("el-boot-SECRET-0001", "el-new-SECRET-0002", "nb-unused-SECRET-0003")
+    _RP_ALL = ["intelligence", "tts", "voice tuning", "room agents", "wake model", "stt"]
+
+    def _rp_status():
+        r = client.get("/api/dashboard/status")
+        return r, (r.json().get("restart_pending") if r.status_code == 200 else None)
+
+    def _rp_reboot():
+        """What a real restart does: a new process loads config afresh."""
+        _cfgRP._BOOT = None
+        _cfgRP._load.cache_clear()
+        _cfgRP._load()
+
+    try:
+        for _k in _RP_VARS:
+            os.environ.pop(_k, None)
+        _rp_envfile.write_text("ELEVENLABS_API_KEY=el-boot-SECRET-0001\n")
+        os.environ.update({"LVI_ENV_FILE": str(_rp_envfile), "ELEVENLABS_API_KEY": "el-boot-SECRET-0001"})
+        # A zone and room of our own; the config's other entries are left alone.
+        _wiRP = _rp_before["wiim"]
+        config_store.write_section("wiim", {**_wiRP, "zones": {**(_wiRP.get("zones") or {}),
+                                                               "suite-rp-zone": {"ip": "192.0.2.70"}}})
+        _rzRP = {**_rp_before["room_zones"], "suite-rp-room": "suite-rp-zone"}
+        config_store.write_section("room_zones", _rzRP)
+        config_store.write_section("intelligence", {**_rp_before["intelligence"], "kind": "hermes"})
+        _rp_reboot()
+
+        _r0, _p0 = _rp_status()
+        check("restart pending: /status lists nothing right after a boot",
+              _r0.status_code == 200 and _p0 == [], f"status={_r0.status_code} pending={_p0}")
+        _RP_FIELDS = ("uptime_secs", "version", "wake_model", "stt_model", "stt", "tts_provider",
+                      "intelligence", "active_room", "last_wake", "rooms", "session_modes", "note")
+        check("restart pending: /status keeps every field it had and adds restart_pending",
+              _r0.status_code == 200 and all(k in _r0.json() for k in _RP_FIELDS)
+              and "restart_pending" in _r0.json(), _r0.text[:300])
+
+        # Live saves.
+        _rv = client.put("/api/dashboard/zones/suite-rp-zone/volume", json={"volume": 41})
+        _rm = client.put("/api/dashboard/mapping", json={"room_zones": _rzRP})
+        _rw = client.put("/api/dashboard/wake", json={"name": "Suitebot"})
+        _rs = client.post("/api/dashboard/nodes/suite-rp-room/session-mode", json={"mode": "sticky"})
+        _r1, _p1 = _rp_status()
+        check("restart pending: live saves (zone volume, mapping zone, wake name, session mode) never mark pending",
+              all(r.status_code == 200 for r in (_rv, _rm, _rw, _rs)) and _p1 == [],
+              f"{[(r.status_code, r.text[:80]) for r in (_rv, _rm, _rw, _rs)]} pending={_p1}")
+        _icRP = dict(config_store.read_section("intelligence") or {})
+        config_store.write_section("intelligence", {**_icRP, "urls": {**(_icRP.get("urls") or {}),
+                                                                      "openclaw": "http://192.0.2.72:18789/v1"}})
+        _r1b, _p1b = _rp_status()
+        check("restart pending: a URL filed for a kind the bot isn't running never marks pending",
+              _p1b == [], f"pending={_p1b}")
+
+        # Restart-only saves, through their routes where the route runs offline.
+        _btRP = _cfgRP._load()
+        _thrRP = 0.31 if (_btRP.get("wake") or {}).get("threshold") != 0.31 else 0.32
+        _rt = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "suitevoice0002",
+                                                     "model": "eleven_flash_v2_5"})
+        _rtu = client.put("/api/dashboard/voice-tuning", json={"wake_threshold": _thrRP})
+        _raRP = dict((config_store.read_section("room_agents") or {}).get("hermes") or {})
+        _rma = client.put("/api/dashboard/mapping", json={
+            "room_zones": _rzRP, "room_agents": {"hermes": {**_raRP, "suite-rp-room": "suite-agent"}}})
+        config_store.write_section("intelligence", {**config_store.read_section("intelligence"),
+                                                    "url": "http://192.0.2.71:8642/v1"})
+        config_store.write_section("wake", {**config_store.read_section("wake"), "model": "suite-rp-model.onnx"})
+        _stRP = dict(config_store.read_section("stt") or {})
+        config_store.write_section("stt", {**_stRP, "compute_type":
+                                           "int8" if _stRP.get("compute_type") != "int8" else "float32"})
+        _r2, _p2 = _rp_status()
+        check("restart pending: each restart-only save is listed once, in a stable order",
+              all(r.status_code == 200 for r in (_rt, _rtu, _rma)) and _p2 == _RP_ALL,
+              f"{[(r.status_code, r.text[:80]) for r in (_rt, _rtu, _rma)]} pending={_p2}")
+        check("restart pending: dashboard writes never refresh the boot snapshot",
+              _cfgRP.cfg("wake", "model") == "suite-rp-model.onnx"
+              and (_rp_boot_fn().get("wake") or {}).get("model") not in (None, "suite-rp-model.onnx"),
+              f"boot wake={(_rp_boot_fn().get('wake') or {}).get('model')}")
+
+        # Keys: an in-use key saved since boot is pending; one nothing uses is not.
+        _rp_envfile.write_text("ELEVENLABS_API_KEY=el-new-SECRET-0002\nLVI_NANOBOT_KEY=nb-unused-SECRET-0003\n")
+        _r3, _p3 = _rp_status()
+        check("restart pending: an in-use key saved since boot is listed after the settings",
+              _p3 == [*_RP_ALL, "elevenlabs key"], f"pending={_p3}")
+        check("restart pending: a saved key nothing uses never marks pending",
+              isinstance(_p3, list) and not any("nanobot" in x for x in _p3), f"pending={_p3}")
+        check("restart pending: /status carries labels only, never a key value",
+              isinstance(_p3, list) and all(isinstance(x, str) for x in _p3)
+              and not any(x in _r3.text for x in _RP_SECRETS), _r3.text[:200])
+
+        # Back to what the bot runs = no longer pending.
+        _rp_envfile.write_text("ELEVENLABS_API_KEY=el-boot-SECRET-0001\n")
+        _r4, _p4 = _rp_status()
+        check("restart pending: a key saved back to the running value clears its entry",
+              _p4 == _RP_ALL, f"pending={_p4}")
+        config_store.write_section("tts", copy.deepcopy(dict(_rp_boot_fn().get("tts") or {})))
+        _r5, _p5 = _rp_status()
+        check("restart pending: a setting saved back to the running value clears its entry",
+              _p5 == [x for x in _RP_ALL if x != "tts"], f"pending={_p5}")
+
+        # A real restart: the new process loads the saved config and .env.
+        _rp_envfile.write_text("ELEVENLABS_API_KEY=el-new-SECRET-0002\n")
+        os.environ["ELEVENLABS_API_KEY"] = "el-new-SECRET-0002"
+        _rp_reboot()
+        _r6, _p6 = _rp_status()
+        check("restart pending: after a restart the list is empty (the snapshot is the new boot)",
+              _p6 == [], f"pending={_p6}")
+    finally:
+        for _k, _v in _rp_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _s, _v in _rp_before.items():
+            config_store.write_section(_s, _v)
+        _wvoRP({})
+        _cfgRP._BOOT = _rp_boot
+
+    # UI: no save offers a restart; Overview's button carries the pending state.
+    _ovRP = _fnUI("function Overview(")
+    check("restart pending: no save asks to restart (offerRestart and its confirm are gone)",
+          "offerRestart" not in _appsrc and "Restart the bot now to apply?" not in _appsrc)
+    check("restart pending: with nothing pending the Overview button is 'Restart bot' in the default style",
+          "const pending = status?.restart_pending || []" in _ovRP
+          and "className={pending.length ? BTN_PRIMARY : BTN_DEFAULT}" in _ovRP and "'Restart bot'" in _ovRP, _ovRP[:300])
+    check("restart pending: with items pending it reads 'Restart to apply (N)' and lists them on hover",
+          "`Restart to apply (${pending.length})`" in _ovRP and "`Pending: ${pending.join(', ')}`" in _ovRP, _ovRP[:300])
+    check("restart pending: the button keeps its one confirm and restarts through restartBot",
+          _ovRP.count("window.confirm(") == 1 and "restartBot(setMsg, setRebooting)" in _ovRP
+          and 0 <= _ovRP.find("window.confirm(") < _ovRP.find("restartBot("), _ovRP[:300])
+    check("restart pending: restartBot keeps its double-fire latch and 90 s wait loop",
+          "if (_botRestarting) return false" in _rb and "_botRestarting = true" in _rb
+          and _rb.count("_botRestarting = false") == 2 and "i < 45" in _rb, _rb[:200])
+    for _whatRP, _fnRP, _pinRP in (
+            ("tts", "function Voice(", ("await api('/api/dashboard/tts', { method: 'PUT', json: body }) "
+                                       "setMsg('Saved — restart to apply.', 'ok', 'TTS') reloadAll()")),
+            ("voice tuning", "function Tuning(", ("window.dispatchEvent(new CustomEvent('lenoxvi:reload-all')) "
+                                                 "// pull the saved truth back setMsg('Saved — restart to apply.', 'ok', 'Voice tuning')")),
+            ("intelligence", "function System(", "setMsg('Saved — restart to apply.', 'ok', 'Intelligence') reloadAll()"),
+            ("wake model", "function OwwPanel(", ("setMsg('Saved — restart to apply.', 'ok', 'Wake word model') "
+                                                 "await load() reloadAll()")),
+            ("stt", "function SttCard(", (": 'Saved — restart to apply.', 'ok', 'STT') "
+                                         "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
+            ("stt download", "function SttCard(", ("msgRef.current(`Downloaded ${dl.model} — restart to apply.`, 'ok', 'STT') "
+                                                  "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
+            ("room agents", "function Rooms(", "setMsg(`Saved — restart to apply (agent ${picks}).`")):
+        check(f"restart pending: the {_whatRP} save says 'restart to apply' and refreshes status",
+              _pinRP in _ws(_fnUI(_fnRP)), _pinRP[:80])
+    check("restart pending: live saves keep their own messages",
+          "replies now route to this zone (live, no restart)." in _fnUI("function Rooms(")
+          and "'Saved — applies to the next thing you say.'" in _fnUI("function SttCard("))
+    # ── dashboard ui (App.jsx): honest Overview chips, honest table states ──
+    def _retsHO(body):
+        """Every `return { ... }` object literal in a helper body."""
+        out, i = [], body.find("return {")
+        while i >= 0:
+            out.append(_jsbody(body[i:], "return {"))
+            i = body.find("return {", i + 1)
+        return out
+
+    _ttsHO = _jsbody(_appsrc, "function ttsChip(status, tts) {")
+    _intHO = _jsbody(_appsrc, "function intelligenceChip(status, intel) {")
+    _nodHO = _jsbody(_appsrc, "function nodesChip(rooms, mapping) {")
+    _chipHO = _jsbody(_appsrc, "function StatChip({ stat, tone = 'neutral', text, title, muted, href, className, style, children }) {")
+    _ovHO = _fnUI("function Overview({ status, tts, intelligence, mapping, setMsg, setRebooting, rebooting }) {")
+    check("overview: the chips get the TTS, intelligence and mapping data App already loads",
+          "<Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping}" in _appsrc
+          and "{...ttsChip(status, tts)}" in _ovHO and "{...intelligenceChip(status, intelligence)}" in _ovHO
+          and "{...nodesChip(status?.rooms, mapping)}" in _ovHO, _ovHO[:200])
+    _hintHO = _reui.search(r"const TTS_KEY_HINT = \{(.*?)\}", _appsrc)
+    _hintHO = dict(_reui.findall(r"'?([\w-]+)'?: '(\w+)'", _hintHO.group(1))) if _hintHO else {}
+    _ttsGet = client.get("/api/dashboard/tts").json()
+    check("overview: the TTS chip warns 'no key' (a link to Keys) when the configured cloud voice has no saved key",
+          bool(_ttsHO) and "const hint = TTS_KEY_HINT[tts?.provider]" in _ttsHO
+          and "if (hint && !tts[hint])" in _ttsHO
+          and "tone: 'warning', text: 'no key', href: '#keys'" in _ws(_ttsHO), _ttsHO[:200])
+    check("overview: the TTS chip reads key hints GET /tts really returns, for every cloud provider; pocket needs none",
+          set(_hintHO) == {"elevenlabs", "deepgram", "deepgram-flux"}
+          and all(v in _ttsGet for v in _hintHO.values()), f"{_hintHO} vs {sorted(_ttsGet)[:12]}")
+    _intGet = client.get("/api/dashboard/intelligence").json()
+    check("overview: the intelligence chip warns 'no url' (link to Intelligence), else 'no key' (link to Keys)",
+          0 <= _intHO.find("text: 'no url', href: '#intelligence'") < _intHO.find("text: 'no key', href: '#keys'")
+          and "if (!intel.url)" in _intHO and "!intel.key_set" in _intHO
+          and {"kind", "url", "key_set", "agents"} <= set(_intGet), _intHO[:200])
+    check("overview: a Hermes profile (its own key, not reported by /intelligence) never gets a false 'no key'",
+          "intel.agents.hermes !== 'default'" in _intHO and "if (!profile && !intel.key_set)" in _intHO)
+    check("overview: the nodes chip warns 'N unmapped' (link to Rooms) for online rooms with no zone, once /mapping loaded",
+          bool(_nodHO) and "text: `${silent.length} unmapped`, href: '#rooms'" in _ws(_nodHO)
+          and "mapping?.room_zones ? rooms.filter(r => r.online && !heard(r.room))" in _nodHO, _nodHO[:300])
+    check("overview: a room counts as mapped with any zone entry (builtin too) or when its own speaker plays it",
+          "mapping.room_zones[room] || mapping.speakers?.[room]?.zone === BUILTIN" in _nodHO)
+    _allRetsHO = _retsHO(_ttsHO) + _retsHO(_intHO) + _retsHO(_nodHO)
+    _warnHO = [r for r in _allRetsHO if "href:" in r]
+    check("overview: setup warnings (no key, no url, unmapped) are links in the warning tone; healthy chips are not links",
+          len(_warnHO) == 4 and all("tone: 'warning'" in r for r in _warnHO)
+          and "const Tag = href ? 'a' : 'span'" in _chipHO and "${STAT_TONE[tone]}" in _chipHO,
+          f"{len(_warnHO)} link returns: {[r[:60] for r in _warnHO]}")
+    # MUST STILL HOLD: healthy chips unchanged, placeholders while loading
+    check("overview: loading data shows today's placeholder, never a warning",
+          _ttsHO.lstrip("{ \n").startswith("if (!status) return { text: '—', muted: true }")
+          and _nodHO.find("if (!rooms) return { text: '—', muted: true }") < _nodHO.find("heard")
+          and "if (intel) {" in _intHO and "(esc(status?.intelligence) || '—')" in _intHO, _ttsHO[:120])
+    check("overview: healthy TTS and nodes chips look as before",
+          "return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }" in _ttsHO
+          and "if (!down.length) return { tone: 'success', text, title: 'All nodes online' }" in _nodHO
+          and "if (down.length === rooms.length) return { tone: 'danger', text, title: 'All nodes offline' }" in _nodHO
+          and "return { tone: 'warning', text, title: `${down.join(', ')} offline` }" in _nodHO)
+    check("overview: the intelligence chip keeps its brand colours when healthy",
+          "{ backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }" in _intHO
+          and "{ backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }" in _intHO
+          and "return { tone: s ? 'brand' : 'neutral', muted: !s && brand !== 'Nanobot', style: s, text: brand.toLowerCase() }"
+          in _intHO)
+
+    # Tables: every listed table ends in one state row spanning its columns.
+    _tsHO = _jsbody(_appsrc, "function TableState({ cols, loading, error, empty }) {")
+    check("tables ui: one state row: error 'Couldn't load: …' in the danger colour, else 'Loading…', else the empty text",
+          "const text = error ? `Couldn't load: ${error}` : loading ? 'Loading…' : empty" in _tsHO
+          and "error ? 'text-[var(--danger)]' : 'text-[var(--muted)]'" in _tsHO and "colSpan={cols}" in _tsHO, _tsHO[:200])
+    _tablesHO = _reui.findall(r"<table.*?</table>", _appsrc, _reui.DOTALL)
+    _withHO = [(t.count("<th "), int(_reui.search(r"<TableState cols=\{(\d+)\}", t).group(1)))
+               for t in _tablesHO if "<TableState cols=" in t]
+    check("tables ui: rooms, nodes, zones and wake models each have a state row spanning every column",
+          len(_withHO) == 4 and all(n == c for n, c in _withHO), str(_withHO))
+    _rmHO = _ws(_rmUI)
+    check("rooms ui: the mapping table says loading, a failed /mapping, or the new empty copy",
+          "<TableState cols={4} error={mapping?.loadError}" in _rmHO
+          and "loading={!roomRows.length && !(mapping?.room_zones && status)}" in _rmHO
+          and "'No mic nodes yet. A flashed node appears here when it connects.'" in _rmHO
+          and "power one on" not in _appsrc and 'colSpan="3"' not in _appsrc)
+    check("rooms ui: a failed /mapping is kept for the tables (last good data stays), not swallowed",
+          "api('/api/dashboard/mapping').then(setMapping).catch(() => {})" not in _appsrc
+          and "if (!e.network) setMapping(m => ({ ...m, loadError: e.message }))" in _appsrc)
+    check("nodes ui: the nodes table says loading until /status arrives, then 'No nodes yet.' when empty",
+          "<TableState cols={6} loading={!status} empty={!status?.rooms?.length && 'No nodes yet.'} />" in _rmHO)
+    check("zones ui: the zones table says loading, a failed /mapping, or 'No speaker zones yet.'",
+          "<TableState cols={4} error={mapping?.loadError} loading={!mapping?.zones}" in _ws(_zlUI)
+          and "'No speaker zones yet.'" in _zlUI and "!Object.keys(speakers).length" in _zlUI)
+    _wkHO = _jsbody(_appsrc, "function WakeNameCard({ setMsg }) {")
+    _wkHO = _wkHO[_wkHO.find("if (!w) return"):_wkHO.find("const aliases")]
+    check("wake ui: the wake name card shows 'Loading…' in its place instead of rendering nothing",
+          "'Loading…'" in _wkHO and ": null" not in _wkHO and '<Section title="Wake name">' in _wkHO
+          and "`Couldn't load: ${loadErr}`" in _wkHO, _wkHO[:200])
+    _owHO = _ws(_jsbody(_appsrc, "function OwwPanel({ setMsg, reloadAll }) {"))
+    _owLoad = _ws(_jsbody(_appsrc[_appsrc.find("function OwwPanel("):], "const load = async () => {"))
+    check("wake ui: the model list says loading, then the load error, and 'No models yet' only when really empty",
+          "<TableState cols={4} error={loadErr} loading={!loaded} empty={models.length === 0 && 'No models yet — upload one.'} />"
+          in _owHO and "setLoaded(true)" in _owLoad and "catch (e) { setLoadErr(e.message) }" in _owLoad
+          and "{loadErr ? \"couldn't load\" : loaded ? 'no models found' : 'loading…'}" in _owHO, _owLoad[:200])
+    check("wake ui: a list that loaded once keeps 'loaded' through a later failed reload (no 'Loading…' flash)",
+          _owLoad.find("setLoaded(true)") > _owLoad.find("setModels(") and "setLoaded(false)" not in _owHO)
+    # ── nodes ui (App.jsx): the Mute button lives in the Status cell ───
+    # On a phone the Nodes table scrolls sideways and Mute sat in the
+    # far-right Actions cell — muting a room needed that scroll. The
+    # button now renders right after the status chip; NodeActions keeps
+    # owning the one mute state and hands both cells' parts to the row.
+    _rmMut = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _chipThenMute = _reui.search(
+        r'\{/\* Brand Chip rule.*?className="flex items-center gap-2 flex-wrap">.*?'
+        r'data-role="node-state".*?\{mute\}', _rmMut, _reui.DOTALL)
+    check("nodes ui: the Mute button sits in the Status cell right after the online chip (reachable without the table's sideways scroll)",
+          bool(_chipThenMute)
+          and 0 < _rmMut.find('{mute}') < _rmMut.find('fmtAgo(r.last_seen)') < _rmMut.find('{actions}')
+          and '<td className="px-4 py-2">{actions}</td>' in _rmMut,
+          "chip-then-mute block: " + (_chipThenMute.group(0)[:160] if _chipThenMute else "not found"))
+
+    _naMut = _jsbody(_appsrc, "function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll, children: renderRow }) {")
+    _muteBtn = _reui.search(r"const mute = \(.*?</button>", _naMut, _reui.DOTALL)
+    _mb = _muteBtn.group(0) if _muteBtn else ""
+    check("nodes ui: the Mute button keeps its exact style, disabled, click, title and label",
+          bool(_mb)
+          and "className={muted ? BTN_WARNING : BTN_DEFAULT}" in _mb
+          and "disabled={!online || busy || muteBusy}" in _mb
+          and "onClick={toggleMute}" in _mb
+          and "title={muteUnknown" in _mb
+          and "physical mute button (red LED)" in _mb
+          and "{muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}" in _mb,
+          _mb[:240] or "no 'const mute = (' in NodeActions")
+
+    _aiMut = _naMut.find("const actions = (")
+    _actsMut = _naMut[_aiMut:] if _aiMut >= 0 else ""
+    check("nodes ui: Restart, Rename and Wi-Fi stay in the Actions cell, with Mute no longer among them",
+          bool(_actsMut)
+          and "onClick={restart}" in _actsMut and "'Restarting…' : 'Restart'" in _actsMut
+          and "onClick={scanForWifi}" in _actsMut and "'Scanning…' : 'Wi-Fi…'" in _actsMut
+          and "disabled={sending} onClick={applyWifi}" in _actsMut and "onClick={rename}" in _actsMut
+          and "toggleMute" not in _actsMut and "BTN_WARNING" not in _actsMut,
+          _actsMut[:200] or "no 'const actions = (' in NodeActions")
+
+    check("nodes ui: one NodeActions state feeds both cells through the row's render function (no duplicated mute state)",
+          "children: renderRow })" in _appsrc and "return renderRow({ mute, actions })" in _naMut
+          and _appsrc.count("const [muted, setMuted] = useState(false)") == 1
+          and _appsrc.count("const toggleMute = async () => {") == 1,
+          f"renderRow x{_naMut.count('renderRow')}, "
+          f"muted useState x{_appsrc.count('const [muted, setMuted] = useState(false)')}")
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
