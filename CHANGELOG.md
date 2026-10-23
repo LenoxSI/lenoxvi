@@ -40,13 +40,13 @@ needless restarts or calls an unfinished setup a failure.
   no OpenClaw agent picked) shows what to do next as a note instead of a
   red "unreachable" failure.
 
-## [0.6.7] — 2026-10-22 — Two bug hunts, pipecat 1.13, silent unmapped rooms
+## [0.6.7] — 2026-10-22 — Stability, pipecat 1.13, silent unmapped rooms
 
-A stability release: every finding from two full read-only bug hunts is
-fixed (turn taking, threads and the event loop, speaker volume, renames,
-config writes, key routing, the dashboard), pipecat moves to 1.13, ElevenLabs
-speaks clock times cleanly, and a room with no speaker mapping now stays
-silent instead of borrowing another room's speaker.
+A stability release: fixes across turn taking, threads and the event loop,
+speaker volume, renames, config writes, key routing and the dashboard;
+pipecat moves to 1.13, ElevenLabs speaks clock times cleanly, and a room
+with no speaker mapping now stays silent instead of borrowing another
+room's speaker.
 
 - Companion firmware (separate version stream): `array-v1.2.37` /
   `flex-v1.2.37` / `waveshare-v1.2.37` — nodes echo each command's request id
@@ -329,8 +329,8 @@ reads at a glance.
   Local Whisper behaves exactly as before.
 - Config writes are serialised behind one lock, so a write from a worker
   thread can't garble `config.yaml` or lose a section.
-- The Keys card shows a **Missing** row for an agent in use (the house default
-  or a room's override) whose key isn't in `.env`; before, that case only
+- The Keys card shows a **Missing** row for an agent in use (the configured
+  default or a room's override) whose key isn't in `.env`; before, that case only
   showed up as a "No key" link elsewhere.
 - The dashboard no longer allowlists two root files the build stopped
   shipping.
@@ -371,7 +371,7 @@ down, and a wake name that comes from config instead of the code.
   switch to Pocket and switch back once it recovers. The dashboard offers the
   provider, its voice list, the fallback and its voice, and shows a fallback
   chip while it is in use. Install with `requirements-pocket.txt`.
-- **Wake name card.** The name the house answers to (`wake.name`) and the
+- **Wake name card.** The name the bot answers to (`wake.name`) and the
   other spellings speech-to-text writes for it (`wake.heard_as`) are set
   from the dashboard and apply live. The last two transcripts heard after a
   wake are listed with one-click "add as spelling"; filler words (stop, yes,
@@ -391,7 +391,7 @@ down, and a wake name that comes from config instead of the code.
 
 ### Changed
 - The wake name comes only from `wake.name` — never from the model file
-  name — and nothing in the code names the house. Unset means no name: the
+  name — and nothing in the code hardcodes a name. Unset means no name: the
   wake-phrase-only drop filter then works from `wake.heard_as` alone.
 - `deploy_firmware.sh` refuses to publish an image built with a bench-only
   debug option (mic-level log, data-channel logging).
@@ -561,10 +561,9 @@ types after each change.
   Multi-turn conversation is deliberate and stays uncapped; the planned fix
   is on the TV side (auto-mute/duck on wake).
 
-## [0.6.2] — 2026-10-13 — Dashboard hardening + the naming law
+## [0.6.2] — 2026-10-13 — Dashboard hardening + one provider, one variable
 
-A full dashboard code review closed end to end — every high and medium
-finding — along with two previously unreported bugs, the "one provider,
+Dashboard hardening: two previously unreported bugs, the "one provider,
 one variable" naming rule, and a batch of small fixes. Every fix ships with
 suite checks that fail against the pre-fix code; suite 162 → 188 checks.
 
@@ -917,7 +916,7 @@ config-file number.
 ### Fixed
 - **Test tone silent on zone keys containing spaces** — the tone's filename
   embedded the raw zone key, and Sonos's audioClip fetcher fails silently
-  on unencoded spaces: the tone never sounded on a zone like 'Living Room'
+  on unencoded spaces: the tone never sounded on zone keys containing spaces
   while space-free keys worked, and replies dodged it by generating
   space-free names. Slugify the filename at the route and
   percent-encode the path in `url_for` — no future zone name can break a
@@ -993,13 +992,10 @@ conversation features shipped and verified the same day.
   once on a bot process that started while a node was mid-restart; a
   fresh process held a clean session. Not reproduced; forensics in place
 
-## [0.3.2] — 2026-10-01
+## [0.3.2] — 2026-10-01 — Multi-node foundation + resilience
 
-The code-review release. A full-repo review (7 high / 15 medium findings)
-drove four fix batches — 13 findings — ending the review's core verdict
-that "the design still assumes one node." Behavior is unchanged on a
-single-node setup; the fixes are correctness,
-resilience, and the multi-node foundation.
+Correctness, resilience and the multi-node foundation. Behavior is
+unchanged on a single-node setup.
 
 ### Added
 - **Zone capability audit at startup**: every configured zone is checked
@@ -1069,7 +1065,7 @@ state).
 ### Changed
 - Firmware binary renamed to the generic `node_esp32.bin` across
   the OTA chain (served name, manifest, deploy script, upload dest,
-  firmware CMake project name) — generic naming for the public repo;
+  firmware CMake project name) — generic naming;
   version untouched, node unaffected (equal-version skip) (`c73832c`)
 - Zone keys are now the player's native Sonos name (a player's
   native name IS its name) — dashboard displays live Sonos names
@@ -1123,12 +1119,12 @@ management, and test clips, all served by the bot process itself.
   clip)
 
 ### Changed
-- Comment de-personalization pass (public-repo prep): the voice system
+- Comment de-personalization pass: the voice system
   prompt and code comments no longer name the user; the OWW model test
   docstring defers its positive case to a live test instead of a person
 - Removed the "never address the user as boss" rule comment — how the
   brain addresses its user is brain-side (Hermes) config, not repo policy
-- Comment accuracy + formatting sweep (from a code review):
+- Comment accuracy + formatting sweep:
   wake_word docstring now matches the 2026-09-19 OWW-always-fed behavior
   and the permanent echo gate; sonos_output says MP3 not WAV; _is_own_echo
   describes the >=60%/3-word overlap it actually does; deploy_firmware
@@ -1136,9 +1132,9 @@ management, and test clips, all served by the bot process itself.
   aligned with the code default (15.0); README glob/journald fixes;
   unused imports removed; import order tightened; no logic changes
 
-## [0.2.2] — 2026-09-20
+## [0.2.2] — 2026-09-20 — Model caching + cleanups
 
-Review minors + efficiency pass (final findings from a code review).
+Model caching and cleanups.
 
 ### Changed
 - PipelineTask → PipelineWorker (deprecated alias, removed in pipecat 2.0);
@@ -1154,9 +1150,10 @@ Review minors + efficiency pass (final findings from a code review).
 - .env.example: real voice ID replaced with placeholder (account data)
 - Version comments drifted to pipecat 1.11 (were 1.10)
 
-## [0.2.1] — 2026-09-20
+## [0.2.1] — 2026-09-20 — Fresh-clone fixes + tuning knobs
 
-Cleanup/efficiency pass from a full code review (all 14 findings).
+Cleanup and efficiency pass — fresh-clone fixes, wake-gate efficiency,
+new tuning knobs.
 
 ### Fixed
 - requirements.txt: fresh-clone booby traps — missing `lameenc`,
