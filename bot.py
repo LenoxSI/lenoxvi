@@ -403,7 +403,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # primary's chip); it reports only if it dies while speaking.
         tts_pocket_standby._tts_room = _room
 
-    # Intelligence dispatch: hermes AND openclaw both ride
+    # Intelligence dispatch: hermes, openclaw and nanobot all ride
     # IntelligenceAgent — the kind branch lives inside _ask_intelligence (envelope
     # only). A past bug: this ternary only
     # matched == "hermes", so kind: openclaw fell to the echo stub and
@@ -420,7 +420,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, room_resolver=_pipeline_room,
                                 session_mode=_session_mode,
                                 tts_is_usable=tts_usable_probe)
-             if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw")
+             if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") in ("hermes", "openclaw", "nanobot")
              else StubIntelligence(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes

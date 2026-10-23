@@ -16,6 +16,7 @@ STATIC = [
     {"var": "DEEPGRAM_API_KEY", "label": "Deepgram", "used_by": ["TTS", "STT"], "kind": "deepgram"},
     {"var": "LVI_HERMES_KEY", "label": "Hermes", "used_by": ["Intelligence"], "kind": "hermes", "agent": "default"},
     {"var": "LVI_OPENCLAW_KEY", "label": "OpenClaw", "used_by": ["Intelligence"], "kind": "openclaw"},
+    {"var": "LVI_NANOBOT_KEY", "label": "Nanobot", "used_by": ["Intelligence"], "kind": "nanobot"},
 ]
 _AGENT_VAR = re.compile(r"^LVI_HERMES_KEY_([A-Z0-9_]+)$")
 

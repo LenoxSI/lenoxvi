@@ -302,6 +302,9 @@ const readKey = (id) => {
   return el && el.dataset.dirty === '1' ? el.value.trim() : ''
 }
 
+// Display names of the intelligence systems (kind -> label).
+const KIND_LABEL = { hermes: 'Hermes', openclaw: 'OpenClaw', nanobot: 'Nanobot' }
+
 // A picked provider/agent with no key: point at the Keys card (keys are
 // entered there only).
 function MissingKey({ label }) {
@@ -318,7 +321,7 @@ function MissingKey({ label }) {
 function keyRoute(row) {
   if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
   if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
-  if (row.kind !== 'hermes' && row.kind !== 'openclaw') return null
+  if (row.kind !== 'hermes' && row.kind !== 'openclaw' && row.kind !== 'nanobot') return null
   const named = row.kind === 'hermes' && row.agent && row.agent !== 'default'
   return ['/api/dashboard/intelligence/key', { kind: row.kind, ...(named ? { agent: row.agent } : {}) }]
 }
@@ -624,7 +627,8 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
               : brand === 'Hermes'
               ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
               : null
-            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s} style={s}>{brand.toLowerCase()}</StatChip>
+            // Nanobot has no brand colors here: a plain chip, not the muted placeholder.
+            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s && brand !== 'Nanobot'} style={s}>{brand.toLowerCase()}</StatChip>
           })()}
         </Stat>
         <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms)} /></Stat>
@@ -1138,7 +1142,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                           {(a.id === 'default' && agentKind === 'hermes' ? 'default (pinned)' : a.id) + (a.key_set ? '' : ' — no key')}</option>)}
                       </select>
                       {effective && !effective.key_set &&
-                        <MissingKey label={`${agentKind === 'openclaw' ? 'OpenClaw' : 'Hermes'} · ${effective.id}`} />}
+                        <MissingKey label={`${KIND_LABEL[agentKind] || 'Hermes'} · ${effective.id}`} />}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-right">
@@ -2449,10 +2453,13 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             className={`${INPUT_CLS} w-[160px]`}>
             <option value="hermes">Hermes</option>
             <option value="openclaw">OpenClaw</option>
+            <option value="nanobot">Nanobot</option>
           </select>
           <select id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
             title={intKind === 'openclaw'
               ? 'Agents on this OpenClaw Gateway (its /v1/models).'
+              : intKind === 'nanobot'
+              ? 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.'
               : 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.'}
             className={`${INPUT_CLS} w-[220px] font-mono`}>
             {!agentSel && <option value="">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}
@@ -2471,7 +2478,8 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             {found[intKind]?.loading ? '…' : '⟳'}
           </button>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
-          <input id="int-url" defaultValue={intelligence?.url || ''} placeholder="http://<intelligence-host>:8642/v1"
+          <input id="int-url" defaultValue={intelligence?.url || ''}
+            placeholder={intKind === 'nanobot' ? 'http://<nanobot-host>:8900/v1' : 'http://<intelligence-host>:8642/v1'}
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             onBlur={e => {
               const u = e.target.value.trim()
@@ -2481,7 +2489,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
         </Field>
         {agentNote ? <div className="text-[12px] text-[var(--muted)] -mt-2">{agentNote}</div> : null}
         {intelligence && !(agentEntry ? agentEntry.key_set : intelligence.keys_set?.[intKind]) && (
-          <MissingKey label={intKind === 'openclaw' ? 'OpenClaw'
+          <MissingKey label={intKind !== 'hermes' ? KIND_LABEL[intKind]
             : `Hermes${agentSel && agentSel !== 'default' ? ` · ${agentSel}` : ''}`} />
         )}
         {/* Footer: secondary action bottom-left, green commit bottom-right */}
@@ -2506,7 +2514,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
             <button className={BTN_PRIMARY} onClick={async () => {
               const kind = document.getElementById('int-kind').value
               const url = document.getElementById('int-url').value.trim()
-              const label = kind === 'openclaw' ? 'OpenClaw' : 'Hermes'
+              const label = KIND_LABEL[kind] || 'Hermes'
               // Only the URL on screen is saved, under the kind on screen.
               // The other kind's draft stays here: the stored key goes to a
               // kind's saved URL, so it must be saved while looking at it.
@@ -2525,6 +2533,9 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
                 }
                 setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
                 reloadAll()
+                // Nanobot saves without an agent; its URL is saved now, so
+                // discovery can use the stored key and list its model.
+                if (kind === 'nanobot') discover(kind, url)
                 offerRestart(setMsg, setRebooting)
               } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
             }}>Save</button>

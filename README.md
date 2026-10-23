@@ -4,7 +4,7 @@
 house-wide voice assistant with any intelligence you want:
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
-    intelligence lane (Hermes / OpenClaw / …) → ElevenLabs TTS →
+    intelligence lane (Hermes / OpenClaw / Nanobot / …) → ElevenLabs TTS →
     speaker reply in the room's zone (Sonos / WiiM / the node's own speaker)
 
 ## What it does
@@ -30,11 +30,15 @@ harness — the dashboard's job is operating the rig, not talking to it.
     `hermes` (Hermes API over LAN, bearer key) — **production runs
     this**; `openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`,
     sticky rooms via `x-openclaw-session-key`) — the second intelligence;
-    `stub` — deterministic echo intelligence for bench/dev runs (the code
+    `nanobot` (nanobot's OpenAI-compatible API: one user message per turn
+    plus a `session_id`, nanobot keeps the history — see
+    [Nanobot](#nanobot)); `stub` — deterministic echo intelligence for
+    bench/dev runs (the code
     default when `intelligence.kind` is unset — a misconfigured deploy
     answers with canned lines). Keys are strict per-kind:
     `hermes` reads `LVI_HERMES_KEY`, `openclaw` reads
-    `LVI_OPENCLAW_KEY` — no cross-kind fallback; a missing key fails the
+    `LVI_OPENCLAW_KEY`, `nanobot` reads `LVI_NANOBOT_KEY` — no cross-kind
+    fallback; a missing key fails the
     turn with a clear message instead of bricking construction.
   - `intelligence_stub.py` — the stub intelligence's implementation (canned lines)
   - `stt_local.py` — faster-whisper large-v3-turbo on the GPU
@@ -106,14 +110,15 @@ read-merge-write; most apply on the next bot restart, which the page offers):
 - **STT** — provider (Local — Whisper, or Deepgram Nova-3 in the cloud
   with local Whisper as its automatic fallback), Whisper model (download
   with progress, delete unused), language, live status and latency
-- **Intelligence** — provider picker (Hermes / OpenClaw), an agent
-  dropdown filled from the provider (OpenClaw: its `/v1/models`; Hermes:
+- **Intelligence** — provider picker (Hermes / OpenClaw / Nanobot), an agent
+  dropdown filled from the provider (OpenClaw and Nanobot: their
+  `/v1/models`; Hermes:
   the profiles on a multiplexing gateway, read from the Hermes
   dashboard's status page — falls back to the default agent), API URL
   (provider-agnostic: a stranger's Hermes lives at their URL), Test
   connection (health + one minimal completion, latency)
 - **Keys** — every API key in one place (ElevenLabs, Deepgram, Hermes,
-  OpenClaw, each Hermes agent): what uses it, set / missing / waiting for
+  OpenClaw, Nanobot, each Hermes agent): what uses it, set / missing / waiting for
   a restart (first 4 characters only), Replace, Remove (with a backup),
   Test, and one Add picker; other panels link here when a key is missing
 - **Voice Tuning** — filler/pause tunables
@@ -129,7 +134,8 @@ The suite (`tests/test_dashboard.py`) exercises every panel through
 its TestClient: config round-trips (comment preservation), guard rails,
 422 shapes, lane dispatch (openclaw → `openclaw/<agent>` +
 session-key header; hermes round-trip restores conversation + Hermes
-header), key precedence + no-KeyError, key POST hygiene (never echoes
+header; nanobot against a local fake server that enforces nanobot's
+contract), key precedence + no-KeyError, key POST hygiene (never echoes
 material), test-probe ok/error paths.
 
 Developing the dashboard: the prebuilt `dashboard-ui/dist/` is committed,
@@ -153,8 +159,8 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
    host IP)
 3. `.env` from `.env.example` — the secrets:
    `ELEVENLABS_API_KEY`, `LVI_TTS_VOICE_ID`, `LVI_HERMES_KEY` (or
-   `LVI_OPENCLAW_KEY` for the OpenClaw lane), `DEEPGRAM_API_KEY` (optional
-   alternative provider)
+   `LVI_OPENCLAW_KEY` for the OpenClaw lane, `LVI_NANOBOT_KEY` for the
+   Nanobot lane), `DEEPGRAM_API_KEY` (optional alternative provider)
 4. Wake word: works out of the box with **"Hey Jarvis"**, a stock model
    that ships inside the openwakeword package (see [Wake word](#wake-word)).
 5. `bash scripts/make-cert.sh <bot-host-LAN-IP>` (mic access needs HTTPS)
@@ -162,6 +168,38 @@ LENOXVI_DEV_BOT_URL=https://<bot-host>:7860 npx vite --port 5179
    (run from the repo root — config and clips paths are relative)
 
 [openWakeWord]: https://github.com/dscripka/openWakeWord
+
+## Nanobot
+
+LenoxVI can talk to a [nanobot](https://github.com/HKUDS/nanobot) agent
+through nanobot's OpenAI-compatible API server. Set it up from the dashboard:
+
+1. **System · Intelligence** — pick **Nanobot**, enter the API server's URL
+   (for example `http://<nanobot-host>:8900`; `/v1` at the end is optional),
+   and press **Save**. No agent is needed to save.
+2. **System · Keys** — add the **Nanobot** key (`LVI_NANOBOT_KEY`, the key
+   your nanobot API server expects). **Test** checks it against the saved
+   URL's `/models`; a wrong key reads "rejected".
+3. Back on the Intelligence card, the agent dropdown now lists the model
+   your nanobot server runs (its `/v1/models`). Picking it is optional: with
+   one picked, every turn names it; with none, nanobot uses its own. Save.
+4. Restart the bot when the page offers it, then **Test saved config**.
+
+How the lane talks to nanobot:
+
+- Each turn sends only what was just said, as one user message. nanobot
+  keeps the conversation itself, per `session_id`: a sticky room uses
+  `voice-<room>` (one long-lived conversation per room), a fresh room gets a
+  new conversation each time its node connects. The Test button uses its own
+  throwaway session, so a test never lands in a room's conversation.
+- **Spoken style is up to the nanobot agent.** nanobot accepts no system
+  message, so LenoxVI's voice instructions (short, plain spoken sentences,
+  no markdown, no lists, no links) do not reach it. Put them in the nanobot
+  agent's own instructions, or replies may be read out with formatting.
+- If you change the model on the nanobot server, pick the agent again on the
+  Intelligence card: nanobot refuses a turn that names a model it does not
+  run (the bot log shows nanobot's own message).
+- Per-room agent overrides (Rooms → Agent) work as for the other systems.
 
 ## Wake word
 

@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
+import uuid
 from pathlib import Path
 from typing import Literal
 from os import getenv as _getenv
@@ -95,7 +96,7 @@ class MappingPayload(BaseModel):
     # Per-room agent overrides, per intelligence system. Omitted = leave
     # them alone (an older page); a system sent = that system's map
     # replaced; "" = back to the house default.
-    room_agents: dict[Literal["hermes", "openclaw"], dict[str, str]] | None = None
+    room_agents: dict[Literal["hermes", "openclaw", "nanobot"], dict[str, str]] | None = None
 
 
 class SessionModePayload(BaseModel):
@@ -141,6 +142,9 @@ def _intelligence_label() -> str:
         agent = intelligence_target.agent_for(intelligence_cfg, "openclaw") \
             or str(_getenv("LVI_INTELLIGENCE_AGENT") or "")
         return f"OpenClaw · {agent}" if agent else "OpenClaw"
+    if kind == "nanobot":
+        agent = intelligence_target.agent_for(intelligence_cfg, "nanobot")
+        return f"Nanobot · {agent}" if agent else "Nanobot"
     agent = intelligence_target.agent_for(intelligence_cfg, "hermes")
     return f"Hermes · {agent}" if agent else "Hermes"
 
@@ -1434,6 +1438,28 @@ def _key_test_inner(row: dict, key: str) -> dict:
         if "HTTP 404" in err and not url.rstrip("/").endswith("/v1"):
             err += " — the saved URL may need /v1 at the end (Intelligence card)"
         return {"ok": False, "status": status, "detail": err}
+    if row["kind"] == "nanobot":
+        # GET <saved url>/models answers 401 to a wrong key. The key only
+        # goes to nanobot's SAVED URL, never a typed one.
+        icfg = dict(config_store.read_section("intelligence") or {})
+        url = ((icfg.get("urls") or {}).get("nanobot") or
+               (icfg.get("url") if (icfg.get("kind") or "hermes") == "nanobot" else None) or "").rstrip("/")
+        url = intelligence_target.request_url("nanobot", url) if url else url
+        if not url:
+            return {"ok": False, "status": "unreachable",
+                    "detail": "save the Nanobot URL on the Intelligence card first"}
+        try:
+            code, _body = _keys_http("GET", url + "/models", {"Authorization": f"Bearer {key}"})
+        except OSError as e:
+            return {"ok": False, "status": "unreachable", "detail": scrub(e)}
+        if 200 <= code < 300:
+            return {"ok": True, "status": "ok", "detail": "Nanobot accepted the key"}
+        if code in (401, 403):
+            return {"ok": False, "status": "rejected", "detail": f"Nanobot rejected the key (HTTP {code})"}
+        detail = f"Nanobot answered HTTP {code}"
+        if code == 404 and not url.endswith("/v1"):
+            detail += " — the saved URL may need /v1 at the end (Intelligence card)"
+        return {"ok": False, "status": "unreachable", "detail": detail}
     if row["kind"] == "deepgram":
         req = ("GET", "https://api.deepgram.com/v1/projects", {"Authorization": f"Token {key}"})
     else:
@@ -1531,9 +1557,10 @@ def _check_intelligence_url_port(url) -> None:
 class IntelligencePayload(BaseModel):
     # hermes = today's api_server contract; openclaw = OpenClaw Gateway
     # (model "openclaw/<agent>", x-openclaw-session-key sticky, no
-    # conversation field). Any other kind 422s.
+    # conversation field); nanobot = one user message + session_id, agent
+    # optional. Any other kind 422s.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
-    kind: str = Field(pattern="^(hermes|openclaw)$")
+    kind: str = Field(pattern="^(hermes|openclaw|nanobot)$")
     # The URL on screen, filed under `kind` only (intelligence.urls[kind]
     # is the per-kind recall map). There is deliberately no way to save the
     # OTHER kind's URL from here: the stored key goes to a kind's saved URL,
@@ -1553,7 +1580,8 @@ class IntelligencePayload(BaseModel):
 # One lane, one variable, named for its intelligence (naming law
 # 2026-10-08). Single source for the dashboard routes — GET status, key
 # save, and the Test probe all read this map.
-INTELLIGENCE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
+INTELLIGENCE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY",
+                         "nanobot": "LVI_NANOBOT_KEY"}
 
 
 class IntelligenceKeyPayload(BaseModel):
@@ -1565,10 +1593,11 @@ class IntelligenceKeyPayload(BaseModel):
     # by the UI. kind is REQUIRED (no default = no silent guess) and
     # extra="forbid" so a misspelled field 422s instead of no-opping.
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["hermes", "openclaw"]
+    kind: Literal["hermes", "openclaw", "nanobot"]
     # Hermes profiles each have their own key (LVI_HERMES_KEY_<AGENT>);
     # omitted or "default" = the kind's base variable. OpenClaw agents share
-    # one Gateway token, so agent is ignored there.
+    # one Gateway token and nanobot has one server key, so agent is ignored
+    # there.
     agent: str | None = Field(default=None, min_length=1, max_length=64,
                               pattern=r"^[A-Za-z0-9_.-]+$")
     # Same character-class law as TTSKeyPayload: no newlines/quotes/backslashes — a `\n` in a key PUT
@@ -1585,9 +1614,10 @@ async def get_intelligence():
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or "hermes"
     # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
-    # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
-    # fallback anywhere (a fallback turned a missing key into a silent
-    # wrong-token outage once). key_kind names the variable.
+    # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY; nanobot:
+    # LVI_NANOBOT_KEY. No cross-kind fallback anywhere (a fallback turned a
+    # missing key into a silent wrong-token outage once). key_kind names
+    # the variable.
     # keys_set: status for EVERY kind, so the UI chip shows
     # the key of the kind on screen, not the kind in config.
     _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
@@ -1666,7 +1696,8 @@ async def put_intelligence(payload: IntelligencePayload):
 @router.put("/intelligence/key", dependencies=GUARD)
 async def put_intelligence_key(payload: IntelligenceKeyPayload):
     """Intelligence API key → .env, kind-aware (naming law: each intelligence's key names what it is):
-    hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY — the ONE variable
+    hermes → LVI_HERMES_KEY, openclaw → LVI_OPENCLAW_KEY, nanobot →
+    LVI_NANOBOT_KEY — the ONE variable
     that lane reads (strict law: no fallbacks, no cross-kind). The kind
     comes from the PAYLOAD — the kind the user is saving a
     key for — never from saved config. Never echoed; the response names
@@ -1703,10 +1734,12 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     if not key:
         return {"ok": False, "error": "no key set (save the key first)"}
     t0 = time.monotonic()
+    # nanobot's /health lives at the server root, beside /v1.
+    health = (url[:-3] if kind == "nanobot" and url.endswith("/v1") else url) + "/health"
     try:
         # health: no-auth liveness (OpenClaw /health; hermes api_server
         # has none — a plain GET on the base URL 404s but proves reach)
-        _rq.urlopen(_rq.Request(url + "/health", method="GET"), timeout=5).read()
+        _rq.urlopen(_rq.Request(health, method="GET"), timeout=5).read()
     except _ue.HTTPError:
         pass  # 404/401 on health still proves the endpoint is listening
     except Exception as e:
@@ -1715,6 +1748,16 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         model = "openclaw/" + agent
         body = {"model": model, "stream": False, "max_tokens": 16,
                 "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
+    elif kind == "nanobot":
+        # A throwaway session: nanobot stores every turn under session_id,
+        # so a test must never land in a room's voice session (or in the
+        # shared default session an omitted id falls into).
+        model = agent or "nanobot"
+        body = {"stream": False, "max_tokens": 16,
+                "session_id": f"lenoxvi-test-{uuid.uuid4().hex[:12]}",
+                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
+        if agent:
+            body["model"] = agent
     else:
         model = intelligence_cfg.get("model") or "hermes-agent"
         body = {"model": model, "stream": False, "max_tokens": 16,
@@ -1732,6 +1775,9 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         return {"ok": True, "latency_ms": latency, "model": model,
                 "reply": (content or "")[:80]}
     except _ue.HTTPError as e:
+        if kind == "nanobot":
+            return {"ok": False, "error": f"gateway error: HTTP {e.code}: "
+                                          f"{intelligence_target.http_error_message(e, key)}"}
         return {"ok": False, "error": f"gateway error: HTTP {e.code}"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}"}
@@ -1739,7 +1785,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
 
 class IntelligenceAgentsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["hermes", "openclaw"]
+    kind: Literal["hermes", "openclaw", "nanobot"]
     # The URL on screen (may be unsaved); omitted = that kind's saved URL.
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
@@ -1753,13 +1799,14 @@ class IntelligenceAgentsPayload(BaseModel):
 @router.post("/intelligence/agents", dependencies=GUARD)
 async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
     """List the agents the provider offers, each with key status + hint.
-    OpenClaw: its /v1/models. Hermes: the profiles on its gateway (the
-    Hermes dashboard's public status route; falls back to the default
-    agent). Never returns a key. POST + GUARD: it makes outbound requests.
+    OpenClaw: its /v1/models. Nanobot: its /v1/models (its one configured
+    model). Hermes: the profiles on its gateway (the Hermes dashboard's
+    public status route; falls back to the default agent). Never returns a
+    key. POST + GUARD: it makes outbound requests.
     The stored key is attached ONLY when the probe targets this kind's
     SAVED URL (an omitted url means the saved URL); any other URL — typed,
     not yet saved — is probed unauthenticated, so a mistyped or third-party
-    host can never receive the OpenClaw token."""
+    host can never receive the OpenClaw or Nanobot key."""
     icfg = dict(config_store.read_section("intelligence") or {})
     saved_url = (icfg.get("urls") or {}).get(payload.kind) \
         or (icfg.get("url") if (icfg.get("kind") or "hermes") == payload.kind else None) or ""

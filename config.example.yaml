@@ -73,15 +73,23 @@ tts:
 
 # ── Intelligence (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 intelligence:
-  kind: hermes          # hermes | openclaw | stub (stub = canned echo, bench only).
+  kind: hermes          # hermes | openclaw | nanobot | stub (stub = canned echo, bench only).
                         # openclaw = OpenClaw Gateway: model "openclaw/<agent>",
                         # x-openclaw-session-key for sticky rooms, no Hermes-only
                         # conversation field. Enable the endpoint first:
                         # openclaw config set gateway.http.endpoints.chatCompletions.enabled true
+                        # nanobot = nanobot's OpenAI-compatible API: one user
+                        # message per turn + session_id (nanobot keeps the
+                        # history), key LVI_NANOBOT_KEY. No system prompt reaches
+                        # it: give the nanobot agent its own spoken-style rules.
   # kind: openclaw
   #   url: http://<openclaw-host>:18789/v1   # the Gateway (with /v1)
+  # kind: nanobot
+  #   url: http://<nanobot-host>:8900/v1     # the nanobot API server (with /v1)
   # agents:               # the agent per kind (the dashboard's agent dropdown)
   #   openclaw: <your-agent-id>   # model becomes openclaw/<agent>
+  #   nanobot: <model-id>         # optional: the server's configured model (its
+  #                               # /v1/models); omitted = nanobot uses its own
   #   hermes: default             # or a profile name on a multiplexing Hermes
   #                               # gateway: turns go to <base>/p/<profile>/v1
   #                               # with that profile's own key (see .env.example)

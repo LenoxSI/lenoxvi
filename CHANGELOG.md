@@ -8,6 +8,13 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- Nanobot as a third intelligence: pick Nanobot on the Intelligence card,
+  enter its URL, add its key on the Keys card (`LVI_NANOBOT_KEY`), optionally
+  pick its model, Save and restart. Each room keeps its own conversation on
+  the nanobot server, and per-room agent overrides work as for the other
+  systems.
+
 ## [0.6.7] — 2026-10-22 — Two bug hunts, pipecat 1.13, silent unmapped rooms
 
 A stability release: every finding from two full read-only bug hunts is

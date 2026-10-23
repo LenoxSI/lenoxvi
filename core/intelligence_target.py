@@ -12,8 +12,11 @@ hermes   agent "" or "default" -> the configured URL, LVI_HERMES_KEY.
          that profile's API_SERVER_KEY; the default key gets 401 there.
 openclaw One Gateway token for every agent (LVI_OPENCLAW_KEY); the agent
          rides in the model field ("openclaw/<agent>"), URL unchanged.
+nanobot  One server key (LVI_NANOBOT_KEY), URL unchanged. Its "agent" is the
+         one model the server is configured for (its /v1/models), sent as
+         the model field; no agent = the field is omitted.
 
-Agents are remembered per kind (intelligence.agents: {hermes, openclaw}),
+Agents are remembered per kind (intelligence.agents: {hermes, openclaw, nanobot}),
 like intelligence.urls. Hermes reads ONLY agents.hermes — the legacy
 top-level `agent` key was always OpenClaw's (the Hermes lane never read
 it), so honouring it for Hermes would reroute an existing install to a
@@ -27,7 +30,8 @@ import urllib.parse
 import urllib.request
 
 AGENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-BASE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY"}
+BASE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY",
+                 "nanobot": "LVI_NANOBOT_KEY"}
 # The Hermes web dashboard's public status route lists the gateway's
 # profiles (the API server itself has no list endpoint).
 HERMES_STATUS_PORT = 9119
@@ -66,6 +70,12 @@ def request_url(kind: str, url: str, agent: str = "") -> str:
         root = url[:-3] if url.endswith("/v1") else url
         root = re.sub(r"/p/[^/]+$", "", root)  # a saved profile URL, normalised
         return f"{root}/p/{agent}/v1"
+    if kind == "nanobot" and urllib.parse.urlsplit(url).path in ("", "/"):
+        # A bare http://host:8900 is what users type; nanobot's API lives
+        # under /v1. Discovery already tolerated both forms, so turns, the
+        # Test probe and the key Test must too (a model listed, then every
+        # turn a 404, is the worst way to find out).
+        return url + "/v1"
     return url
 
 
@@ -78,6 +88,29 @@ def key_hint(value):
     if len(value) < 12:
         return "\u2022" * 8
     return value[:4] + "\u2022" * 8
+
+
+def http_error_message(err, key=None) -> str:
+    """The server's own error text from an HTTPError (OpenAI shape:
+    {"error": {"message"}}), short, with the key scrubbed should a server
+    ever echo it."""
+    try:
+        raw = err.read(2000).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — no body is still an answer
+        raw = ""
+    msg = raw
+    try:
+        body = json.loads(raw)
+        inner = body.get("error") if isinstance(body, dict) else None
+        if isinstance(inner, dict) and inner.get("message"):
+            msg = str(inner["message"])
+        elif isinstance(inner, str):
+            msg = inner
+    except (ValueError, TypeError):
+        pass
+    if key:
+        msg = msg.replace(key, "***")
+    return " ".join(msg.split())[:200] or str(getattr(err, "reason", "") or "no detail")
 
 
 def _get_json(url: str, headers: dict, timeout: float):
@@ -150,6 +183,35 @@ def discover_agents(kind: str, url: str, env, timeout: float = 4.0,
                     ids.append(name)
         return {"agents": [_entry(kind, a, env) for a in ids], "source": "openclaw-models",
                 "note": None if ids else "OpenClaw listed no agents"}
+
+    if kind == "nanobot":
+        # nanobot serves exactly one model (its configured one); the picker
+        # lists it. Same key rule as OpenClaw: only the saved URL gets it.
+        if not url:
+            return {"agents": [], "source": "none", "note": "set the Nanobot URL first"}
+        token = env.get("LVI_NANOBOT_KEY")
+        if attach_key and not token:
+            return {"agents": [], "source": "none",
+                    "note": "save the Nanobot key to list its agent"}
+        models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
+        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
+        try:
+            data = _get_json(models_url, headers, timeout)
+        except urllib.error.HTTPError as e:
+            note = f"Nanobot answered HTTP {e.code}"
+            if e.code == 401 and not attach_key:
+                note += " — this URL is not saved yet; save it and the stored key will be used"
+            return {"agents": [], "source": "none", "note": note}
+        except Exception as e:  # noqa: BLE001 — any failure is a discovery note, never a 500
+            return {"agents": [], "source": "none", "note": f"Nanobot unreachable ({type(e).__name__})"}
+        ids = []
+        models = data.get("data") if isinstance(data, dict) else None
+        for m in (models if isinstance(models, list) else []):
+            mid = str(m.get("id") or "") if isinstance(m, dict) else ""
+            if AGENT_RE.match(mid) and mid not in ids:
+                ids.append(mid)
+        return {"agents": [_entry(kind, a, env) for a in ids], "source": "nanobot-models",
+                "note": None if ids else "Nanobot listed no model"}
 
     if kind == "hermes":
         fallback = {"agents": [_entry(kind, "default", env)], "source": "fallback"}

@@ -4,16 +4,19 @@ The real counterpart of intelligence_stub.py, same turn shape: buffers user
 speech, waits for the end-of-turn lull, plays fillers while it waits, filters
 echo/dedup/wake-phrase-only turns, keeps per-room history, and asks the
 configured intelligence over its OpenAI-compatible chat API (bearer auth).
-`intelligence.kind` picks the request shape — `hermes` (Hermes API server) or
-`openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`); everything else
-here is shared. The agent behind the API keeps its own tools + memory; our
-system prompt layers voice-appropriate instructions on top (short,
-spoken-word replies).
+`intelligence.kind` picks the request shape — `hermes` (Hermes API server),
+`openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`) or `nanobot`
+(nanobot's API: one user message + `session_id`, history server-side);
+everything else here is shared. The agent behind the API keeps its own
+tools + memory; our system prompt layers voice-appropriate instructions on
+top (short, spoken-word replies) — except on nanobot, which accepts no
+system message: its agent's own instructions set the spoken style.
 
 Config (config.yaml `intelligence:` section; .env holds the key only):
     intelligence.kind / url / agent / model / zone / lull_secs /
     dedup_window / fillers — see config.example.yaml
-    Key: LVI_HERMES_KEY (kind hermes) or LVI_OPENCLAW_KEY (kind openclaw)
+    Key: LVI_HERMES_KEY (kind hermes), LVI_OPENCLAW_KEY (kind openclaw) or
+    LVI_NANOBOT_KEY (kind nanobot)
 """
 
 import asyncio
@@ -235,7 +238,8 @@ class IntelligenceAgent(FrameProcessor):
         self._kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").lower()
         # Agent per kind (intelligence_target.agent_for): openclaw addresses
         # it in the model field; hermes routes a named profile to
-        # <base>/p/<agent>/v1 with that profile's own key.
+        # <base>/p/<agent>/v1 with that profile's own key; nanobot sends it
+        # as the model field (its one configured model), or nothing.
         import intelligence_target as _it
         _icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
                  "agents": cfg("intelligence", "agents") or {}}
@@ -476,8 +480,9 @@ class IntelligenceAgent(FrameProcessor):
         model "openclaw/<agent>" addresses the agent, x-openclaw-session-key
         carries sticky continuity, and the Hermes-only `conversation` field
         is omitted. kind=hermes keeps today's contract (conversation +
-        X-Hermes-Session-Key). The messages array, output caps, client-side
-        history and fillers are shared — the lanes differ only in envelope.
+        X-Hermes-Session-Key). kind=nanobot sends only the user's message
+        plus session_id (nanobot holds the history). Output caps and fillers
+        are shared — the lanes differ only in envelope.
         """
         self._ensure_route()
         if not self._key:
@@ -504,6 +509,23 @@ class IntelligenceAgent(FrameProcessor):
             # (documented boundary, README row).
             if self._sticky and self._room:
                 headers["x-openclaw-session-key"] = self._conversation
+        elif self._kind == "nanobot":
+            # nanobot's contract (measured against v0.3.5): exactly ONE
+            # user message — a system message or prior turns get HTTP 400 —
+            # because it keeps the history itself, per session_id. So no
+            # VOICE_SYSTEM_PROMPT and no local history here. session_id is
+            # ALWAYS sent: without it every client shares one default
+            # session. Sticky -> voice-<room>, fresh -> this connection's id.
+            # model must equal the server's configured model, so it is sent
+            # only when an agent is picked.
+            payload = {
+                "stream": False,
+                "max_tokens": self._max_tokens,
+                "messages": [{"role": "user", "content": text}],
+                "session_id": self._conversation,
+            }
+            if self._agent:
+                payload["model"] = self._agent
         else:
             payload = {
                 "model": self._model,
@@ -531,8 +553,18 @@ class IntelligenceAgent(FrameProcessor):
             data=json.dumps(payload).encode(),
             headers=headers,
         )
-        with urllib.request.urlopen(req, timeout=120) as r:
-            data = json.loads(r.read())
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if self._kind != "nanobot":
+                raise
+            # nanobot explains a refusal in its body ("Only a single user
+            # message is supported", "Only configured model ... is
+            # available"); put that in the failure log, never the key.
+            import intelligence_target as _it
+            raise RuntimeError(f"nanobot answered HTTP {e.code}: "
+                               f"{_it.http_error_message(e, self._key)}") from None
         reply = data["choices"][0]["message"]["content"].strip()
         if not reply:
             # e.g. a run that ended on a tool call with no closing text. A
