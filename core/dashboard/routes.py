@@ -187,8 +187,75 @@ async def status():
         # these as the per-node checkbox; sticky rooms keep conversation
         # memory across reconnects/restarts.
         "session_modes": dict(config_store.read_section("session_modes") or {}),
+        # Saved settings the running bot hasn't loaded yet (labels only).
+        # Off the loop: the key half reads .env.
+        "restart_pending": await asyncio.to_thread(_restart_pending),
         "note": "config edits apply on the next bot restart",
     }
+
+
+def _plain(v):
+    """A config value with unset parts dropped ({}, [], "" and None all
+    mean "not set"), so a save that writes an empty map isn't a change."""
+    if isinstance(v, dict):
+        v = {k: _plain(x) for k, x in v.items()}
+        return {k: x for k, x in v.items() if x not in (None, "", {}, [])}
+    if isinstance(v, list):
+        return [_plain(x) for x in v]
+    return v
+
+
+def _restart_pending() -> list:
+    """Labels of the saved settings the running bot isn't using yet: the
+    boot snapshot vs the saved config, for the settings bot.py reads only
+    when it starts (each such save logs "applies on next restart"), plus
+    in-use keys whose .env value differs from the running process. Live
+    settings (zones, volumes, room_zones, wake name, session modes) never
+    appear. Sync: reads .env, so callers run it off the event loop."""
+    import config as _config
+    import keys_catalog
+
+    boot, saved = _config.boot_config(), _config._load()
+
+    def pick(conf, section, keys=None):
+        sec = conf.get(section) or {}
+        if keys is not None and isinstance(sec, dict):
+            sec = {k: sec.get(k) for k in keys}
+        return _plain(sec)
+
+    def differs(section, keys=None):
+        return pick(boot, section, keys) != pick(saved, section, keys)
+
+    out = []
+    # urls is the per-kind recall map: saving another kind's URL changes nothing live.
+    if differs("intelligence", ("kind", "url", "agent", "agents", "model")):
+        out.append("intelligence")
+    if differs("tts"):
+        out.append("tts")
+    tuning = {}
+    for section, key in _TUNING_TARGETS.values():
+        tuning.setdefault(section, []).append(key)
+    if any(differs(s, keys) for s, keys in tuning.items()):
+        out.append("voice tuning")
+    # A room override is read for the running kind only.
+    kinds = {str(pick(c, "intelligence").get("kind") or os.getenv("LVI_INTELLIGENCE_KIND") or "hermes").lower()
+             for c in (boot, saved)}
+    if differs("room_agents", sorted(kinds)):
+        out.append("room agents")
+    if differs("wake", ("model",)):
+        out.append("wake model")
+    stt_keys = ["provider", "model", "device", "compute_type"]
+    # Whisper reads the language live; Deepgram fixes it when the session is built.
+    if "deepgram" in {str(pick(c, "stt").get("provider") or os.getenv("LVI_STT_PROVIDER") or "").lower()
+                      for c in (boot, saved)}:
+        stt_keys.append("language")
+    if differs("stt", stt_keys):
+        out.append("stt")
+    # A key nothing uses yet needs no restart.
+    for row in keys_catalog.rows(_saved_env(), dict(os.environ), _keys_cfg(), file_env=_file_env()):
+        if row["in_use"] and row["pending_restart"]:
+            out.append(f"{row['label'].lower()} key")
+    return out
 
 
 # ── mapping ───────────────────────────────────────────────────────────

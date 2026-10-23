@@ -15,6 +15,7 @@ nothing around — modules import `cfg()` and read their section, so a
 restart picks up edits.
 """
 
+import copy
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -38,17 +39,34 @@ CONFIG_PATH = os.getenv("LVI_CONFIG", str(_REPO_ROOT / "config.yaml"))
 # (70 was the obsolete through-the-Triad-matrix value).
 DEFAULT_CLIP_VOLUME = 35
 
+# The config this process loaded first. Dashboard writes clear _load's cache
+# so the API serves saved values, but settings read only at startup keep
+# running the boot values until a restart; the dashboard diffs the two to
+# show what a restart would apply.
+_BOOT = None
+
 
 @lru_cache(maxsize=1)
 def _load() -> dict:
+    global _BOOT
     p = Path(CONFIG_PATH)
     if not p.is_file():
-        return {}
-    try:
-        return yaml.safe_load(p.read_text()) or {}
-    except yaml.YAMLError as e:
-        # A broken config must be loud at boot, not a silent empty dict.
-        raise RuntimeError(f"config.yaml parse error: {e}") from e
+        data = {}
+    else:
+        try:
+            data = yaml.safe_load(p.read_text()) or {}
+        except yaml.YAMLError as e:
+            # A broken config must be loud at boot, not a silent empty dict.
+            raise RuntimeError(f"config.yaml parse error: {e}") from e
+    if _BOOT is None:
+        _BOOT = copy.deepcopy(data)
+    return data
+
+
+def boot_config() -> dict:
+    """The config as this process first loaded it (never refreshed)."""
+    _load()
+    return _BOOT
 
 
 def cfg(section: str, key: str = None, default=None):

@@ -128,10 +128,10 @@ function TokenDialog() {
 }
 
 /* ── restart lane ──────────────────────────────────────────── */
-// restartBot has three call sites (Overview's button + offerRestart
-// from the OWW and Voice save lanes) and the React `rebooting` state can
-// race the second caller — two concurrent restarts meant two transient
-// restart units and two 90s wait loops fighting over one message chip. A
+// restartBot's one caller is Overview's button (saves never restart; they
+// add to /status restart_pending), and the React `rebooting` state can lag
+// a second click — two concurrent restarts meant two transient restart
+// units and two 90s wait loops fighting over one message chip. A
 // module-level latch is the only airtight double-fire guard.
 let _botRestarting = false
 async function restartBot(setMsg, setRebooting) {
@@ -186,11 +186,6 @@ async function restartBot(setMsg, setRebooting) {
   setRebooting(false)
   _botRestarting = false
   return !!up
-}
-
-function offerRestart(setMsg, setRebooting) {
-  if (!window.confirm('Saved. Restart the bot now to apply?')) return Promise.resolve(null)
-  return restartBot(setMsg, setRebooting)
 }
 
 /* ── shared bits ───────────────────────────────────────────── */
@@ -337,11 +332,11 @@ function keyState(row) {
   if (!row.set) return row.in_use ? { text: 'missing', cls: WARN_CHIP_CLS } : { text: 'not set', cls: CHIP_CLS }
   if (row.pending_restart) return row.in_use
     ? { text: `saved · ${row.hint || ''}`, cls: WARN_CHIP_CLS, title: 'Saved. Restart the bot to apply.' }
-    : { text: `saved · ${row.hint || ''}`, cls: CHIP_CLS, title: 'Saved. Not in use yet: switching to it offers the restart.' }
+    : { text: `saved · ${row.hint || ''}`, cls: CHIP_CLS, title: 'Saved. Not in use yet: switching to it marks a restart pending.' }
   return { text: `set · ${row.hint || ''}`, cls: CHIP_CLS }
 }
 
-function KeysCard({ setMsg, setRebooting }) {
+function KeysCard({ setMsg }) {
   const [keys, setKeys] = useState(null)
   const [open, setOpen] = useState(null)        // var being replaced
   const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
@@ -386,7 +381,7 @@ function KeysCard({ setMsg, setRebooting }) {
     return () => window.removeEventListener('lenoxvi:reload-all', get)
   }, [])
 
-  const save = async (row, inputId, { offer = true } = {}) => {
+  const save = async (row, inputId) => {
     const key = readKey(inputId)
     if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return null }
     const target = keyRoute(row)
@@ -398,16 +393,15 @@ function KeysCard({ setMsg, setRebooting }) {
       setTests(t => ({ ...t, [row.var]: undefined }))
       const d = await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // other cards drop their "No key" links
-      // Only a key the running setup uses needs a restart. A key for a
-      // provider not picked yet is read when that provider is switched on,
-      // and that save offers the restart itself.
+      // Only a key the running setup uses needs a restart (Overview's
+      // button counts it). A key for a provider not picked yet is read when
+      // that provider is switched on, and that save marks the restart.
       const var_ = (r && r.var) || row.var
       const inUse = !!(d?.keys || []).find(k => k.var === var_)?.in_use
       if (inUse) {
-        setMsg(`${row.label} key saved — applies on bot restart.`, 'ok', 'Keys')
-        if (offer) offerRestart(setMsg, setRebooting)
+        setMsg('Saved — restart to apply.', 'ok', 'Keys')
       } else {
-        setMsg(`${row.label} key saved. Not in use yet — switching to ${row.label} offers the restart.`, 'ok', 'Keys')
+        setMsg(`${row.label} key saved. Not in use yet, so no restart is needed.`, 'ok', 'Keys')
       }
       return { ...(r || {}), in_use: inUse }
     } catch (e) { setMsg('Key save failed: ' + e.message, 'err', 'Keys'); return null }
@@ -425,8 +419,7 @@ function KeysCard({ setMsg, setRebooting }) {
       await load()
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
       if (row.in_use) {
-        setMsg(`${row.label} key removed — applies on bot restart.`, 'ok', 'Keys')
-        offerRestart(setMsg, setRebooting)
+        setMsg('Removed — restart to apply.', 'ok', 'Keys')
       } else {
         setMsg(`${row.label} key removed. Nothing used it, so no restart is needed.`, 'ok', 'Keys')
       }
@@ -469,12 +462,11 @@ function KeysCard({ setMsg, setRebooting }) {
       : services.find(r => r.var === pickValue)
     setBusy(true)
     try {
-      const r = await save(row, 'keyin-add', { offer: false })
+      const r = await save(row, 'keyin-add')
       const v = r && (r.var || row.var)
       if (!v) return
       setAddPick('')
       await test({ var: v })  // the saved key, checked BEFORE any restart
-      if (r.in_use) offerRestart(setMsg, setRebooting)  // a key nothing uses yet needs none
     } finally { setBusy(false) }
   }
   const shownRows = (keys || []).filter(shown)
@@ -615,43 +607,30 @@ function useActiveSection() {
 }
 
 /* ── Overview ──────────────────────────────────────────────── */
-function Overview({ status, setMsg, setRebooting, rebooting }) {
+function Overview({ status, tts, intelligence, mapping, setMsg, setRebooting, rebooting }) {
+  // Saved settings the running bot hasn't loaded yet. Saves never restart
+  // (a restart reboots every node), so one restart applies them all.
+  const pending = status?.restart_pending || []
   return (
     <Section id="overview" title="Overview"
       note=""
       action={
-        <button className={BTN_DEFAULT} disabled={rebooting}
+        <button className={pending.length ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}
+          title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}
           onClick={() => {
-            if (window.confirm('Restart the bot? Config changes apply on restart.')) {
+            if (window.confirm('Restart the bot? Every node reboots and reconnects.')) {
               restartBot(setMsg, setRebooting)
             }
           }}>
-          Restart bot
+          {pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}
         </button>
       }>
       <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4">
         <Stat label="Uptime">
           <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
         </Stat>
-        <Stat label="Intelligence">
-          {(() => {
-            // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
-            // Inline styles — these are foreign brands, they don't earn design tokens.
-            // Chip shows the brand only — the agent id lives in the Intelligence
-            // section: strip " · <agent>" from the label.
-            const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
-            // Only a real brand wears brand colors — the loading
-            // placeholder ('—') used to render in Hermes white/blue.
-            const s = brand === 'OpenClaw'
-              ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
-              : brand === 'Hermes'
-              ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
-              : null
-            // Nanobot has no brand colors here: a plain chip, not the muted placeholder.
-            return <StatChip stat="intelligence" tone={s ? 'brand' : 'neutral'} muted={!s && brand !== 'Nanobot'} style={s}>{brand.toLowerCase()}</StatChip>
-          })()}
-        </Stat>
-        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms)} /></Stat>
+        <Stat label="Intelligence"><StatChip stat="intelligence" {...intelligenceChip(status, intelligence)} /></Stat>
+        <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms, mapping)} /></Stat>
         <Stat label="Last wake">
           <StatChip stat="last-wake" muted={!status?.last_wake}>
             {status?.last_wake ? `${esc(status.last_wake.room)}, ${fmtAgo(status.last_wake.time)}` : 'none since boot'}
@@ -661,7 +640,7 @@ function Overview({ status, setMsg, setRebooting, rebooting }) {
           <StatChip stat="version" muted={!status?.version} className="font-mono">{esc(status?.version) || '…'}</StatChip>
         </Stat>
         <Stat label="STT"><StatChip stat="stt" {...sttChip(status?.stt, status?.stt_model)} /></Stat>
-        <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status)} /></Stat>
+        <Stat label="TTS"><StatChip stat="tts" {...ttsChip(status, tts)} /></Stat>
       </div>
     </Section>
   )
@@ -681,6 +660,8 @@ function Stat({ label, children }) {
 // Neutral otherwise: colour only shows up when it means something.
 // Chip words are lowercase, one or two words (brand README: status chips
 // are lowercase, even brand names — "sonos"); hover text is a sentence.
+// A setup gap (no key, no URL, an unmapped room) is a warning chip that links
+// to the card that fixes it; healthy chips are not links.
 const STAT_TONE = {
   success: 'bg-[var(--success-soft)] text-[var(--success-soft-foreground)]',
   warning: 'bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]',
@@ -689,21 +670,59 @@ const STAT_TONE = {
   brand: '',  // a foreign brand's own colours, set inline
 }
 
-function StatChip({ stat, tone = 'neutral', text, title, muted, className, style, children }) {
+function StatChip({ stat, tone = 'neutral', text, title, muted, href, className, style, children }) {
+  const Tag = href ? 'a' : 'span'
   return (
-    <span data-stat={stat} data-tone={tone} title={title || undefined} style={style || undefined}
-      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium${STAT_TONE[tone] ? ` ${STAT_TONE[tone]}` : ''}${muted ? ' text-[var(--muted)]' : ''}${className ? ` ${className}` : ''}`}>
+    <Tag data-stat={stat} data-tone={tone} href={href} title={title || undefined} style={style || undefined}
+      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium${STAT_TONE[tone] ? ` ${STAT_TONE[tone]}` : ''}${muted ? ' text-[var(--muted)]' : ''}${href ? ' hover:underline' : ''}${className ? ` ${className}` : ''}`}>
       {children ?? text}
-    </span>
+    </Tag>
   )
 }
 
+// Intelligence: the brand the bot runs, unless the configured kind has no
+// URL or no key saved (the next restart can't reach it).
+function intelligenceChip(status, intel) {
+  if (intel) {
+    const label = KIND_LABEL[intel.kind] || 'Hermes'
+    if (!intel.url)
+      return { tone: 'warning', text: 'no url', href: '#intelligence', title: `No ${label} URL saved. Set it on the Intelligence card.` }
+    // A Hermes profile reads its own key (LVI_HERMES_KEY_<AGENT>), which
+    // /intelligence doesn't report: only the kind's base key is judged here.
+    const profile = intel.kind === 'hermes' && intel.agents?.hermes && intel.agents.hermes !== 'default'
+    if (!profile && !intel.key_set)
+      return { tone: 'warning', text: 'no key', href: '#keys', title: `No ${label} key saved. Add it on the Keys card.` }
+  }
+  // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
+  // Inline styles — these are foreign brands, they don't earn design tokens.
+  // Chip shows the brand only — the agent id lives in the Intelligence
+  // section: strip " · <agent>" from the label.
+  const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
+  // Only a real brand wears brand colors — the loading
+  // placeholder ('—') used to render in Hermes white/blue.
+  const s = brand === 'OpenClaw'
+    ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
+    : brand === 'Hermes'
+    ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
+    : null
+  // Nanobot has no brand colors here: a plain chip, not the muted placeholder.
+  return { tone: s ? 'brand' : 'neutral', muted: !s && brand !== 'Nanobot', style: s, text: brand.toLowerCase() }
+}
+
 // Nodes online: green = every node up, yellow = some down, red = all down.
-function nodesChip(rooms) {
+// An online room with no zone is a warning too: unmapped rooms are silent
+// by design (a speaker node's unmapped room plays on its own speaker).
+// Judged only once /mapping has loaded.
+function nodesChip(rooms, mapping) {
   if (!rooms) return { text: '—', muted: true }
   if (!rooms.length) return { text: 'no nodes', muted: true }
   const down = rooms.filter(r => !r.online).map(r => esc(r.room))
   const text = `${rooms.length - down.length}/${rooms.length}`
+  const heard = room => mapping.room_zones[room] || mapping.speakers?.[room]?.zone === BUILTIN
+  const silent = mapping?.room_zones ? rooms.filter(r => r.online && !heard(r.room)).map(r => esc(r.room)) : []
+  if (silent.length)
+    return { tone: 'warning', text: `${silent.length} unmapped`, href: '#rooms',
+      title: `No speaker zone for ${silent.join(', ')}: replies there play nowhere. ${down.length ? `${down.join(', ')} offline.` : 'All nodes online.'}` }
   if (!down.length) return { tone: 'success', text, title: 'All nodes online' }
   if (down.length === rooms.length) return { tone: 'danger', text, title: 'All nodes offline' }
   return { tone: 'warning', text, title: `${down.join(', ')} offline` }
@@ -715,14 +734,20 @@ const ttsName = p => TTS_NAMES[p] || p
 // TTS: the voice service the rooms are actually using (each online room
 // reports its live provider); the configured one only until a room has
 // reported — config edits apply on the next restart. Offline rooms don't
-// count: their last report is stale.
-function ttsChip(status) {
+// count: their last report is stale. A configured cloud voice with no saved
+// key (GET /tts) is a warning: it can't speak after the next restart.
+const TTS_KEY_HINT = { elevenlabs: 'elevenlabs_key_hint', deepgram: 'deepgram_key_hint', 'deepgram-flux': 'deepgram_key_hint' }
+function ttsChip(status, tts) {
   if (!status) return { text: '—', muted: true }
   const live = (status.rooms || []).filter(r => r.online)
   const down = live.filter(r => r.tts_usable === false).map(r => esc(r.room))
   if (down.length)
     return { tone: 'danger', text: 'tts down',
       title: `${down.join(', ')} can't speak. Reboot the node (or the bot) to rebuild its session.` }
+  const hint = TTS_KEY_HINT[tts?.provider]
+  if (hint && !tts[hint])
+    return { tone: 'warning', text: 'no key', href: '#keys',
+      title: `No ${ttsName(tts.provider)} key saved. Add it on the Keys card.` }
   const isFb = r => String(r.tts_provider || '').endsWith('(fallback)')
   // Rooms report Deepgram Flux as plain "deepgram": when the room's service
   // is the configured one's family, the configured name is the more
@@ -757,8 +782,17 @@ function sttChip(st, configuredModel) {
   return { text: whisper.toLowerCase() }
 }
 
+// A list's state row: one row across every column, so loading, a failed
+// load and a truly empty list never look alike. Error beats loading beats
+// empty; nothing to say = no row.
+function TableState({ cols, loading, error, empty }) {
+  const text = error ? `Couldn't load: ${error}` : loading ? 'Loading…' : empty
+  if (!text) return null
+  return <tr><td className={`px-4 py-2 ${error ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`} colSpan={cols}>{text}</td></tr>
+}
+
 /* ── node row actions ─────────────────────────────────────── */
-function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll }) {
+function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll, children: renderRow }) {
   const [busy, setBusy] = useState(null)  // 'restart' | 'rename' | 'wifi' | 'mute'
   const [renameVal, setRenameVal] = useState('')
   const [wifiStage, setWifiStage] = useState(null)  // {nets} | {ssid}
@@ -924,18 +958,25 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
     finally { setSending(false) }
   }
 
-  return (
+  // The Mute button renders in the row's STATUS cell, right after the
+  // online/offline chip — on a phone the list scrolls sideways and the
+  // far-right Actions cell was off-screen, so muting a room needed that
+  // scroll. The row is this component's only caller and hands us a render
+  // function as JSX children, so the ONE mute state here feeds both cells.
+  const mute = (
+    <button className={muted ? BTN_WARNING : BTN_DEFAULT} disabled={!online || busy || muteBusy}
+      onClick={toggleMute}
+      title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
+        : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
+      {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}
+    </button>
+  )
+  const actions = (
     <div className="grid gap-2 justify-items-end">
       <div className="flex gap-2 flex-wrap justify-end">
         <button className={BTN_DEFAULT} disabled={!online || busy}
           onClick={restart} title="Reboot the node (~15s reconnect).">
           {busy === 'restart' ? 'Restarting…' : 'Restart'}
-        </button>
-        <button className={muted ? BTN_WARNING : BTN_DEFAULT} disabled={!online || busy || muteBusy}
-          onClick={toggleMute}
-          title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
-            : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
-          {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}
         </button>
         {online && (
           <>
@@ -982,8 +1023,9 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll 
       )}
     </div>
   )
+  return renderRow({ mute, actions })
 }
-function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
+function Rooms({ status, mapping, setMsg, reloadAll }) {
   const [mapDraft, setMapDraft] = useState(null)
   // Per-room agent override. The Intelligence card's agent is the house
   // default; a room only differs when picked here. agentDraft holds this
@@ -1107,8 +1149,7 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
       }
       if (agentEdits) {
         const picks = changed.map(([r, a]) => `${r} → ${a || `Default (${defaultAgent})`}`).join(', ')
-        setMsg(`${room} → ${zoneLabel(zone)} saved. Agent ${picks} applies after a bot restart.`, 'ok', 'Room → zone mapping')
-        offerRestart(setMsg, setRebooting)
+        setMsg(`Saved — restart to apply (agent ${picks}).`, 'ok', 'Room → zone mapping')
       } else {
         setMsg(`${room} → ${zoneLabel(zone)} saved — replies now route to this zone (live, no restart).`, 'ok', 'Room → zone mapping')
       }
@@ -1178,8 +1219,10 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
                 </tr>
                 )
               })}
-              {roomRows.length === 0 &&
-                <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="3">No mic nodes yet — power one on and it will appear here.</td></tr>}
+              {/* Rows come from /mapping and /status: empty only once both have loaded. */}
+              <TableState cols={4} error={mapping?.loadError}
+                loading={!roomRows.length && !(mapping?.room_zones && status)}
+                empty={!roomRows.length && 'No mic nodes yet. A flashed node appears here when it connects.'} />
             </tbody>
           </table>
         </div>
@@ -1201,56 +1244,67 @@ function Rooms({ status, mapping, setMsg, reloadAll, setRebooting }) {
             </thead>
             <tbody>
               {(status?.rooms || []).map(r => (
-                <tr key={r.room} className="border-t border-[var(--separator)]">
-                  <td className="px-4 py-2 font-mono text-[13px]">{esc(r.room)}</td>
-                  <td className="px-4 py-2">
-                    {/* Brand Chip rule: soft success "online", soft danger "offline". */}
-                    <span data-role="node-state"
-                      className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE[r.online ? 'success' : 'danger']}`}>
-                      {r.online ? 'online' : 'offline'}
-                    </span>
-                    {r.online && r.tts_usable === false && (
-                      <span
-                        title={`TTS (${r.tts_provider || 'provider unknown'}) is down — this node hears you but can't speak. Reboot the node (or the bot) to rebuild its session.`}
-                        className={`inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium ${STAT_TONE.danger}`}>
-                        tts down
-                      </span>
-                    )}
-                    {r.online && r.tts_usable !== false && String(r.tts_provider || '').endsWith('(fallback)') && (
-                      <span
-                        title="The cloud TTS is down — this room is speaking with local Pocket TTS until it comes back."
-                        className={`inline-block rounded-full px-2.5 py-0.5 ml-2 text-[12px] font-medium ${STAT_TONE.warning}`}>
-                        tts fallback
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
-                  <td className="px-4 py-2 font-mono text-[13px]">
-                    {esc(r.fw) || '—'}
-                    {LINE_TITLE[r.line] && (
-                      <span
-                        title={LINE_TITLE[r.line]}
-                        className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
-                        {r.line}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={pendingMode[r.room] === 'sticky' || (!pendingMode[r.room] && (status?.session_modes?.[r.room] === 'sticky'))}
-                        onChange={sticky => toggleMode(r.room, sticky)}
-                        title="Sticky keeps conversation memory across reconnects and bot restarts; fresh clears it (privacy default)." />
-                      <span className="text-[13px] text-[var(--muted)]">
-                        {pendingMode[r.room] || status?.session_modes?.[r.room] || 'fresh'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2">
-                    <NodeActions room={r.room} online={r.online} lastSeen={r.last_seen} reportedMuted={r.muted} setMsg={setMsg} reloadAll={reloadAll} />
-                  </td>
-                </tr>
+                <NodeActions key={r.room} room={r.room} online={r.online} lastSeen={r.last_seen}
+                  reportedMuted={r.muted} setMsg={setMsg} reloadAll={reloadAll}>
+                  {({ mute, actions }) => (
+                    <tr className="border-t border-[var(--separator)]">
+                      <td className="px-4 py-2 font-mono text-[13px]">{esc(r.room)}</td>
+                      <td className="px-4 py-2">
+                        {/* Brand Chip rule: soft success "online", soft danger "offline".
+                            The Mute button rides with the chip (flex-wrap keeps them on
+                            one line until the screen is too narrow) — in the far-right
+                            Actions cell a phone had to scroll the list sideways to mute. */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span data-role="node-state"
+                            className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE[r.online ? 'success' : 'danger']}`}>
+                            {r.online ? 'online' : 'offline'}
+                          </span>
+                          {mute}
+                          {r.online && r.tts_usable === false && (
+                            <span
+                              title={`TTS (${r.tts_provider || 'provider unknown'}) is down — this node hears you but can't speak. Reboot the node (or the bot) to rebuild its session.`}
+                              className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.danger}`}>
+                              tts down
+                            </span>
+                          )}
+                          {r.online && r.tts_usable !== false && String(r.tts_provider || '').endsWith('(fallback)') && (
+                            <span
+                              title="The cloud TTS is down — this room is speaking with local Pocket TTS until it comes back."
+                              className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>
+                              tts fallback
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">{fmtAgo(r.last_seen)}</td>
+                      <td className="px-4 py-2 font-mono text-[13px]">
+                        {esc(r.fw) || '—'}
+                        {LINE_TITLE[r.line] && (
+                          <span
+                            title={LINE_TITLE[r.line]}
+                            className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-sans font-medium text-[var(--muted)] border border-[var(--separator)]">
+                            {r.line}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={pendingMode[r.room] === 'sticky' || (!pendingMode[r.room] && (status?.session_modes?.[r.room] === 'sticky'))}
+                            onChange={sticky => toggleMode(r.room, sticky)}
+                            title="Sticky keeps conversation memory across reconnects and bot restarts; fresh clears it (privacy default)." />
+                          <span className="text-[13px] text-[var(--muted)]">
+                            {pendingMode[r.room] || status?.session_modes?.[r.room] || 'fresh'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">{actions}</td>
+                    </tr>
+                  )}
+                </NodeActions>
               ))}
+              {/* A failed /status shows in the message strip above. */}
+              <TableState cols={6} loading={!status} empty={!status?.rooms?.length && 'No nodes yet.'} />
             </tbody>
           </table>
         </div>
@@ -1298,7 +1352,7 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
       const body = { name: newZone.name, backend: newZone.backend, ip: newZone.ip }
       if (newZone.backend === 'sonos') body.player_uid = newZone.player_uid
       await api('/api/dashboard/zones', { method: 'POST', json: body })
-      setMsg(`Zone ${newZone.name} added — applies on next bot restart.`, 'ok', 'Zones')
+      setMsg(`Zone ${newZone.name} added.`, 'ok', 'Zones')
       setNewZone({ name: '', backend: 'sonos', ip: '', player_uid: '' })
       reloadAll()
     } catch (e) { setMsg('Zone add failed: ' + e.message, 'err', 'Zones') }
@@ -1389,6 +1443,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
               </tr>
               )
             })}
+            <TableState cols={4} error={mapping?.loadError} loading={!mapping?.zones}
+              empty={!Object.keys(mapping?.zones || {}).length && !Object.keys(speakers).length && 'No speaker zones yet.'} />
           </tbody>
         </table>
       </div>
@@ -1648,9 +1704,15 @@ function WakeNameCard({ setMsg }) {
       saveGen.current += 1
     }
   }
-  if (!w) return loadErr
-    ? <Section title="Wake name"><div className="text-[13px] text-[var(--muted)]">Couldn't load wake settings: {esc(loadErr)}</div></Section>
-    : null
+  // Not loaded yet: the card keeps its place (rendering nothing made the
+  // page jump when it arrived).
+  if (!w) return (
+    <Section title="Wake name">
+      <div className={`rounded-2xl bg-[var(--surface)] p-4 text-[13px] ${loadErr ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
+        {loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}
+      </div>
+    </Section>
+  )
   const aliases = w.heard_as || []
   // Validates and saves a typed spelling; true only when saved.
   const addAlias = async word => {
@@ -1723,8 +1785,10 @@ function WakeNameCard({ setMsg }) {
   )
 }
 
-function OwwPanel({ setMsg, setRebooting, reloadAll }) {
+function OwwPanel({ setMsg, reloadAll }) {
   const [models, setModels] = useState([])
+  const [loaded, setLoaded] = useState(false)  // [] before the first load is not "no models"
+  const [loadErr, setLoadErr] = useState('')   // shown in the list, not as a toast
   const [sel, setSel] = useState('')
   const [scanning, setScanning] = useState(false)
   const [newModel, setNewModel] = useState(null)
@@ -1735,7 +1799,9 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
       setModels(r.models || [])
       const active = (r.models || []).find(m => m.selected)
       setSel(active?.path || '')
-    } catch (e) { setMsg('Model list load failed: ' + e.message, 'err', 'Wake word model') }
+      setLoaded(true)
+      setLoadErr('')
+    } catch (e) { setLoadErr(e.message) }
   }
   useEffect(() => { load() }, [])
 
@@ -1752,9 +1818,9 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
     const body = { model: name, ...(row?.source ? { source: row.source } : {}) }
     try {
       await api('/api/dashboard/oww/select', { method: 'PUT', json: body })
-      setMsg(`Active model set to '${name}' — applies on next bot restart.`, 'ok', 'Wake word model')
+      setMsg('Saved — restart to apply.', 'ok', 'Wake word model')
       await load()
-      offerRestart(setMsg, setRebooting)
+      reloadAll()
     } catch (e) { setMsg('Select failed: ' + e.message, 'err', 'Wake word model') }
   }
 
@@ -1800,7 +1866,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
                   {esc(m.name)}{m.source === 'root' ? ' (root)' : m.source === 'stock' ? ' (stock)' : ''}
                 </option>
               ))}
-              {models.length === 0 && <option value="">no models found</option>}
+              {models.length === 0 && <option value="">{loadErr ? "couldn't load" : loaded ? 'no models found' : 'loading…'}</option>}
             </select>
             <button className={BTN_DEFAULT} onClick={select}>Set active</button>
           </div>
@@ -1838,8 +1904,7 @@ function OwwPanel({ setMsg, setRebooting, reloadAll }) {
                   </td>
                 </tr>
               ))}
-              {models.length === 0 &&
-                <tr><td className="px-4 py-2 text-[var(--muted)]" colSpan="4">No models yet — upload one.</td></tr>}
+              <TableState cols={4} error={loadErr} loading={!loaded} empty={models.length === 0 && 'No models yet — upload one.'} />
             </tbody>
           </table>
         </div>
@@ -1864,7 +1929,7 @@ const savedFor = (t, p) =>
   p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice
   : p === 'pocket' ? t?.pocket_voice : t?.deepgram_flux_voice
 
-function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
+function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const [provider, setProvider] = useState(null)
   const [model, setModel] = useState(null)
   // Bug-class fix: the 5s poll refetches tts state and
@@ -1952,9 +2017,8 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
     if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
     try {
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
-      setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'TTS')
+      setMsg('Saved — restart to apply.', 'ok', 'TTS')
       reloadAll()
-      offerRestart(setMsg, setRebooting)
     } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'TTS') }
   }
 
@@ -2062,10 +2126,10 @@ function Voice({ tts, tuning, status, setMsg, setRebooting, reloadAll }) {
         </div>
       </Section>
 
-      <SttCard status={status} setMsg={setMsg} setRebooting={setRebooting} />
-      <Tuning tuning={tuning} setMsg={setMsg} setRebooting={setRebooting} />
+      <SttCard status={status} setMsg={setMsg} />
+      <Tuning tuning={tuning} setMsg={setMsg} />
       <WakeNameCard setMsg={setMsg} />
-      <OwwPanel setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
+      <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
     </>
   )
 }
@@ -2093,7 +2157,7 @@ function sttStateChip(st, dl) {
   return { text: 'not loaded', cls: `${CHIP_CLS} text-[var(--muted)]` }
 }
 
-function SttCard({ status, setMsg, setRebooting }) {
+function SttCard({ status, setMsg }) {
   const [data, setData] = useState(null)
   const [model, setModel] = useState(null)
   const [language, setLanguage] = useState(null)
@@ -2143,7 +2207,7 @@ function SttCard({ status, setMsg, setRebooting }) {
 
   // While a download runs — started by Save, or already in progress when the
   // page loaded — poll every 0.5 s. When it lands, the bar fills to 100%
-  // "Downloaded ✓" and holds a beat before the restart prompt, so even a
+  // "Downloaded ✓" and holds a beat before "restart to apply", so even a
   // 4-second download visibly finishes. A failed poll just tries again; the
   // cleanup stops polling when the state flips.
   const downloading = data?.download?.state === 'downloading'
@@ -2161,8 +2225,8 @@ function SttCard({ status, setMsg, setRebooting }) {
           setFinished({ model: dl.model, bytes: m?.disk_bytes || 0 })
           setTimeout(() => {
             setFinished(null)
-            msgRef.current(`Downloaded ${dl.model} — saved; restart to load it.`, 'ok', 'STT')
-            offerRestart(msgRef.current, setRebooting)
+            msgRef.current(`Downloaded ${dl.model} — restart to apply.`, 'ok', 'STT')
+            window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // the switch is saved now
           }, 1000)
         } else if (dl.state === 'error') {
           msgRef.current(`Download failed (${dl.error}) — config unchanged.`, 'err', 'STT')
@@ -2171,7 +2235,7 @@ function SttCard({ status, setMsg, setRebooting }) {
       }).catch(() => {})
     }, 500)
     return () => { alive = false; clearInterval(t) }
-  }, [downloading, setRebooting])
+  }, [downloading])
 
   const [deleting, setDeleting] = useState(null)
   const del = async m => {
@@ -2198,11 +2262,11 @@ function SttCard({ status, setMsg, setRebooting }) {
       const r = await api('/api/dashboard/stt', { method: 'PUT', json: body })
       await load()
       if (r.download === 'started') {
-        setMsg(`Downloading ${model} — restart offered when it's on disk.`, 'ok', 'STT')
+        setMsg(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
         setMsg(r.key_needed ? 'Saved — add your Deepgram key below, then restart.'
-          : 'Saved to config.yaml — applies on bot restart.', 'ok', 'STT')
-        if (!r.key_needed) offerRestart(setMsg, setRebooting)
+          : 'Saved — restart to apply.', 'ok', 'STT')
+        window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
       } else {
         setMsg('Saved — applies to the next thing you say.', 'ok', 'STT')
       }
@@ -2337,7 +2401,7 @@ const TUNING_FIELDS = [
     'How long she suppresses re-hearing the same words off her own speakers.'],
 ]
 
-function Tuning({ tuning, setMsg, setRebooting }) {
+function Tuning({ tuning, setMsg }) {
   const [vals, setVals] = useState({})
   // Dirty-set saves. Save used to send ALL six
   // knobs from a sync-once draft — nudging one slider rewrote the other
@@ -2368,8 +2432,7 @@ function Tuning({ tuning, setMsg, setRebooting }) {
       await api('/api/dashboard/voice-tuning', { method: 'PUT', json: body })
       markDirty({})
       window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))  // pull the saved truth back
-      setMsg(`Tuning saved (${dirtyFields.length} knob${dirtyFields.length > 1 ? 's' : ''}) — applies on next bot restart.`, 'ok', 'Voice tuning')
-      offerRestart(setMsg, setRebooting)
+      setMsg('Saved — restart to apply.', 'ok', 'Voice tuning')
     } catch (e) { setMsg('Tuning save failed: ' + e.message, 'err', 'Voice tuning') }
   }
 
@@ -2403,7 +2466,7 @@ function Tuning({ tuning, setMsg, setRebooting }) {
 }
 
 /* ── System: Intelligence ─────────────────────────────────── */
-function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
+function System({ intelligence, status, setMsg, reloadAll }) {
   // Kind is UI state (2026-10-07): the agent input grays out for
   // non-OpenClaw kinds, so the select must be controlled. Synced from
   // the server exactly once (draft law); save still reads the DOM.
@@ -2484,7 +2547,7 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
   const agentNote = found[intKind]?.note
   return (
     <>
-    <KeysCard setMsg={setMsg} setRebooting={setRebooting} />
+    <KeysCard setMsg={setMsg} />
     <Section id="intelligence" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
@@ -2574,12 +2637,11 @@ function System({ intelligence, status, setMsg, setRebooting, reloadAll }) {
                   discover(kind, url)
                   return
                 }
-                setMsg('Saved to config.yaml — applies on next bot restart.', 'ok', 'Intelligence')
+                setMsg('Saved — restart to apply.', 'ok', 'Intelligence')
                 reloadAll()
                 // Nanobot can save with no model picked; its URL is saved now, so
                 // discovery can use the stored key and list its model.
                 if (kind === 'nanobot') discover(kind, url)
-                offerRestart(setMsg, setRebooting)
               } catch (e) { setMsg('Save failed: ' + e.message, 'err', 'Intelligence') }
             }}>Save</button>
         </div>
@@ -2623,7 +2685,14 @@ export default function App() {
       api('/api/dashboard/status').then(setStatus).catch(e => {
         if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status')
       }),
-      api('/api/dashboard/mapping').then(setMapping).catch(() => {}),
+      // A failed /mapping rides on the mapping state (the last good data
+      // stays) so the Rooms and Zones tables can show it; it used to be
+      // swallowed and the empty list read "No mic nodes yet". The next good
+      // load replaces it. Network errors (bot restarting) stay quiet, as for
+      // /status.
+      api('/api/dashboard/mapping').then(setMapping).catch(e => {
+        if (!e.network) setMapping(m => ({ ...m, loadError: e.message }))
+      }),
       api('/api/dashboard/tts').then(setTts).catch(() => {}),
       api('/api/dashboard/voice-tuning').then(setTuning).catch(() => {}),
       api('/api/dashboard/intelligence').then(setIntelligence).catch(() => {}),
@@ -2666,10 +2735,11 @@ export default function App() {
           <AppMsg msg={msg} />
         </header>
 
-        <Overview status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
-        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} setRebooting={setRebooting} />
-        <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
-        <System intelligence={intelligence} status={status} setMsg={setMsg} setRebooting={setRebooting} reloadAll={reloadAll} />
+        <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping}
+          setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} />
+        <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+        <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+        <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
       </div>
       <TokenDialog />
     </div>

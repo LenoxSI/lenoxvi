@@ -17,11 +17,21 @@ The two version streams are independent.
   no one on the LAN can record a room or download a recording.
 
 ### Changed
+- Dashboard: a node's Mute button sits next to its status, so it's reachable on a phone without scrolling the table.
 - Dashboard: sentence-case table headers, Restart is no longer red, a muted node's Mute button is amber instead
   of lime, "Wake sensitivity" is now "Wake threshold", the Nodes column reads "Since", and the wake name
   button reads "Save".
+- Dashboard: saves no longer ask to restart the bot. A setting that needs a restart says "Saved — restart to
+  apply." and the Overview button turns into "Restart to apply (N)", listing what is waiting; one restart
+  applies them all.
+- Dashboard Overview: the TTS and Intelligence chips warn "no key" (or "no url") when the configured service
+  can't be reached after a restart, and the nodes chip warns "N unmapped" when an online room has no speaker;
+  each warning links to the card that fixes it.
+- Dashboard: the empty Rooms table reads "No mic nodes yet. A flashed node appears here when it connects."
 
 ### Fixed
+- Dashboard: the Rooms, Nodes, Zones and wake model tables and the wake name card say "Loading…" while
+  loading and show a failed load as "Couldn't load: …", instead of claiming there is nothing there.
 - Speakers: a Sonos or WiiM zone added (or a room mapped to it) after a node
   connected now gets that room's replies right away, as the dashboard says;
   before, replies stayed silent until the node reconnected.
