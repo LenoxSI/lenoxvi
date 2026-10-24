@@ -8,11 +8,12 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.6.9] — 2026-10-24 — Kokoro, ElevenLabs Scribe, a tabbed dashboard
+
 ### Added
 - Room recorder: save one room's raw mic audio to a WAV on the appliance
   (up to 10 minutes, one recording per room, owner-only files in
-  `captures/`, deleted after 7 days) through the dashboard API — see
-  "Recording a room" in the README. Off unless asked for, and only with
+  `captures/`, deleted after 7 days) through the dashboard API. Off unless asked for, and only with
   `LVI_DASHBOARD_TOKEN` set: without a token the recorder routes refuse, so
   no one on the LAN can record a room or download a recording.
 - STT: ElevenLabs Scribe v2 (realtime) is a third provider on the STT card (`stt.provider: elevenlabs`), next to
@@ -33,11 +34,9 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
-- Every importer uses `intelligence.agent` / `intelligence.stub` / `intelligence.target`; the old `intelligence_*` module names are gone.
-- The test fixture config is actually in the repo now (the blanket `config.yaml` ignore rule had kept it out), so the suites run from a fresh clone. The wake-model upload checks use openwakeword's stock `hey_mycroft` model instead of skipping when a private model is absent.
-- `intelligence_agent`, `intelligence_stub` and `intelligence_target` moved into the `core/intelligence/` package (`agent.py`, `stub.py`, `target.py`). The old module names still work as aliases.
+- `intelligence_agent`, `intelligence_stub` and `intelligence_target` moved into the `core/intelligence/` package (`agent.py`, `stub.py`, `target.py`).
 - Runtime files (reply clips, wake models, uploaded firmware, sticky sessions) resolve from one anchor, `core/paths.py`: the repo, or `LVI_STATE_DIR`. They no longer depend on the working directory, and a dashboard firmware upload and the OTA server always agree on the folder. Wake models are still stored in config as short relative paths.
-- Tests run from a fresh clone: the suites read a tracked fixture (`tests/fixtures/config.yaml`, override with `LVI_TEST_CONFIG`) instead of copying the private `config.yaml`. Steps that touch real hardware (a test clip out loud, LAN speaker discovery) are opt-in with `LVI_TEST_LIVE=1`. Example names in tests and `config.example.yaml` are neutral.
+- Tests run from a fresh clone: the suites read a tracked fixture (`tests/fixtures/config.yaml`, override with `LVI_TEST_CONFIG`) instead of copying the private `config.yaml`. Steps that touch real hardware (a test clip out loud, LAN speaker discovery) are opt-in with `LVI_TEST_LIVE=1`. The wake-model upload checks use openwakeword's stock `hey_mycroft` model. Example names in tests and `config.example.yaml` are neutral.
 - Dashboard polish: text boxes and dropdowns sit one shade lighter than the card so they read as fields, and
   dropdowns draw their own chevron, inset to mirror the text and sized like a text box; both file pickers are
   styled buttons that show the chosen file; the active wake model says "in use" instead of offering Delete; a
