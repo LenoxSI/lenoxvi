@@ -613,12 +613,19 @@ try:
         EL["conns"] += 1
         EL["paths"].append(_path(ws))
         await ws.send(json.dumps({"message_type": "session_started"}))
+        unc = 0
         async for msg in ws:
             d = json.loads(msg)
             if d.get("commit"):
+                if unc < 9600:                # real Scribe: under 0.3 s -> refused, socket dropped
+                    EL["refused"] = EL.get("refused", 0) + 1
+                    await ws.close()
+                    return
                 EL["commits"] += 1
+                unc = 0
             elif d.get("audio_base_64"):
                 EL["audio"] += 1
+                unc += len(d["audio_base_64"]) * 3 // 4   # base64 -> bytes
 
     async def _el_stays(switcher, whisper, task, until):
         await asyncio.sleep(1.0)
@@ -654,9 +661,9 @@ try:
             await asyncio.sleep(0.5)
             r["status_after"] = sf.status()
             before_w, before_el = whisper.audio_chunks, EL["audio"]
-            for _ in range(5):
+            for _ in range(20):               # 0.4 s: a real utterance (Scribe refuses < 0.3 s)
                 await task.queue_frame(_audio())
-            await until(lambda: EL["audio"] >= before_el + 5, 5)
+            await until(lambda: EL["audio"] >= before_el + 20, 5)
             await task.queue_frame(VADUserStoppedSpeakingFrame())
             await until(lambda: EL["commits"] >= 1, 5)
             await asyncio.sleep(0.3)
@@ -736,11 +743,18 @@ try:
                     pcm = base64.b64decode(d.get("audio_base_64") or "")
                     SEQ["events"].append((conn, "commit" if d.get("commit") else
                                           struct.unpack("<H", pcm[:2])[0] if pcm.strip(b"\0") else "silence"))
+            unc = 0                           # audio bytes since the last commit
             async for msg in ws:
                 d = json.loads(msg)
                 pcm = base64.b64decode(d.get("audio_base_64") or "")
+                unc += len(pcm)
                 if d.get("commit"):
+                    if unc < 9600:            # real Scribe: under 0.3 s -> refused, socket dropped
+                        SEQ["events"].append((conn, "commit-refused"))
+                        await ws.close()
+                        return
                     SEQ["events"].append((conn, "commit"))
+                    unc = 0
                 elif pcm.strip(b"\0"):
                     SEQ["events"].append((conn, struct.unpack("<H", pcm[:2])[0]))
                 else:
@@ -765,12 +779,12 @@ try:
             await asyncio.sleep(1.0)
             r["conns_idle"] = SEQ["conns"]
             r["on_el_idle"] = switcher.strategy.active_service is el and sf.status().get("active") == "elevenlabs"
-            for n in range(1, 11):
+            for n in range(1, 21):            # 0.4 s: a real utterance (Scribe refuses < 0.3 s)
                 await task.queue_frame(_seq(n))
             await task.queue_frame(VADUserStoppedSpeakingFrame())
-            for n in range(11, 14):           # the next turn's first audio
+            for n in range(21, 24):           # the next turn's first audio
                 await task.queue_frame(_seq(n))
-            await until(lambda: len(SEQ["events"]) >= 14, 5)
+            await until(lambda: len(SEQ["events"]) >= 24, 5)
             await asyncio.sleep(0.3)
             r["conns"] = SEQ["conns"]
             r["events"] = list(SEQ["events"])
@@ -785,11 +799,11 @@ try:
         check("on-demand: the first audio opens exactly one connection",
               r.get("conns_idle") == 0 and r.get("conns") == 1, str(r))
         check("on-demand: audio sent while the session starts arrives complete and in order",
-              r.get("conns_idle") == 0 and _audio_in == list(range(1, 14))
+              r.get("conns_idle") == 0 and _audio_in == list(range(1, 24))
               and all(c == 1 for c, _e in r.get("events", [])), str(r))
         check("on-demand: a VAD stop during the connect is sent after the audio it ends, before the next turn's",
               r.get("conns_idle") == 0
-              and r.get("events") == [(1, n) for n in range(1, 11)] + [(1, "commit")] + [(1, n) for n in range(11, 14)],
+              and r.get("events") == [(1, n) for n in range(1, 21)] + [(1, "commit")] + [(1, n) for n in range(21, 24)],
               str(r))
         check("on-demand: one INFO line per connect with the held audio: 'connected in N ms (M ms of audio buffered)'",
               len(_conn_log) == 1 and _held_ms is not None and int(_held_ms.group(1)) >= 200, str(_conn_log))
@@ -985,6 +999,54 @@ try:
             _tune(**_sel_saved)
         check("hardening: a wake that gets no session fails over to Whisper within the connect timeout",
               r.get("landed") and r.get("took", 99) < 3, str(r))
+
+        # Scribe refuses a commit under ~0.3 s and drops the socket (live: a
+        # noise blip right after the wake word). Short turns aren't committed;
+        # their audio rides along with the next words' commit.
+        async def _el_blip(switcher, whisper, task, until):
+            el = switcher._lenoxvi_primary
+            for n in range(1, 21):            # a real turn: 0.4 s
+                await task.queue_frame(_seq(n))
+            await task.queue_frame(VADUserStoppedSpeakingFrame())
+            await until(lambda: (1, "commit") in SEQ["events"], 5)
+            for n in range(21, 26):           # a 0.1 s blip
+                await task.queue_frame(_seq(n))
+            await task.queue_frame(VADUserStoppedSpeakingFrame())
+            await asyncio.sleep(0.5)
+            r = {"conns_blip": SEQ["conns"]}
+            for n in range(26, 41):           # the next words
+                await task.queue_frame(_seq(n))
+            await task.queue_frame(VADUserStoppedSpeakingFrame())
+            await until(lambda: sum(e == "commit" for _c, e in SEQ["events"]) >= 2, 5)
+            await asyncio.sleep(0.3)
+            r["events"] = list(SEQ["events"])
+            r["conns"] = SEQ["conns"]
+            r["on_el"] = switcher.strategy.active_service is el
+            return r
+
+        r = _seq_run(_el_blip)
+        check("hardening: a blip under Scribe's minimum is not committed; the socket stays up (no refusal, no reconnect)",
+              r.get("conns_blip") == 1 and r.get("conns") == 1 and r.get("on_el")
+              and not any(e == "commit-refused" for _c, e in r.get("events", [])), str(r)[:300])
+        check("hardening: the blip's audio rides with the next words' commit, in order",
+              r.get("events") == [(1, n) for n in range(1, 21)] + [(1, "commit")]
+              + [(1, n) for n in range(21, 41)] + [(1, "commit")], str(r.get("events"))[:300])
+
+        async def _el_blip_held(switcher, whisper, task, until):
+            for n in range(1, 6):             # a 0.1 s blip while the session starts
+                await task.queue_frame(_seq(n))
+            await task.queue_frame(VADUserStoppedSpeakingFrame())
+            for n in range(6, 26):
+                await task.queue_frame(_seq(n))
+            await task.queue_frame(VADUserStoppedSpeakingFrame())
+            await until(lambda: any(e in ("commit", "commit-refused") for _c, e in SEQ["events"]), 5)
+            await asyncio.sleep(0.5)
+            return {"events": list(SEQ["events"]), "conns": SEQ["conns"]}
+
+        r = _seq_run(_el_blip_held, delay=0.3)
+        check("hardening: a blip held during the connect is not committed either; one commit after the real words",
+              r.get("conns") == 1 and r.get("events") == [(1, n) for n in range(1, 26)] + [(1, "commit")],
+              str(r)[:300])
     finally:
         _logger.remove(_sink)
 finally:

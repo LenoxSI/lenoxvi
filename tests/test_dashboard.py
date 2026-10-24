@@ -4964,7 +4964,27 @@ def main():
         _KK["calls"].clear()
         asyncio.run(_kkSpeak(_kk1, _kkPlain))
         check("kokoro: number pass: digit-free text reaches the engine unchanged",
-              len(_KK["calls"]) == 1 and _KK["calls"][0][0] is _kkPlain, f"{_KK['calls']}")
+              len(_KK["calls"]) == 1 and _KK["calls"][0][0] == _kkPlain, f"{_KK['calls']}")
+        # Sentence by sentence: a long reply's first audio comes fast, and no
+        # chunk waits past pipecat's no-audio timer (live: a 4-sentence reply
+        # took ~6 s in one go and logged "completed with no audio").
+        _KK["calls"].clear()
+        asyncio.run(_kkSpeak(_kk1, "Tomorrow looks decent. Partly cloudy all day! Want the weekend too? Sure."))
+        check("kokoro: a reply is spoken one sentence at a time, in order (a tiny tail joins its neighbour)",
+              [c[0] for c in _KK["calls"]] == ["Tomorrow looks decent.", "Partly cloudy all day!",
+                                               "Want the weekend too? Sure."]
+              and all(c[1:] == ("af_heart", "en-us", 1.0) for c in _KK["calls"]), f"{_KK['calls']}")
+        check("kokoro: sentences(): abbreviations and short openers stay with their sentence; blanks vanish",
+              _tk.sentences("Ask Mr. Smith about it.") == ["Ask Mr. Smith about it."]
+              and _tk.sentences("Sure. Turning the lights off now.") == ["Sure. Turning the lights off now."]
+              and _tk.sentences("No end mark") == ["No end mark"] and _tk.sentences("  ") == []
+              and _tk.sentences("Wait... what? Really.") == ["Wait... what? Really."]
+              and _tk.sentences("It rained all morning. It cleared up later on.") == ["It rained all morning.",
+                                                                                       "It cleared up later on."],
+              str([_tk.sentences("Ask Mr. Smith about it."), _tk.sentences("Wait... what? Really.")]))
+        check("kokoro: a slow sentence is tolerated 10 s before pipecat calls the reply finished (default 3 s)",
+              getattr(_kk1, "_stop_frame_timeout_s", None) == _tk.STOP_FRAME_TIMEOUT_S == 10.0,
+              str(getattr(_kk1, "_stop_frame_timeout_s", None)))
 
         # Two rooms speaking at once queue on the one model.
         async def _kkLockProbe():
