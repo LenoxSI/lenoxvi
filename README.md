@@ -129,8 +129,6 @@ The wake-word models that install with openWakeWord are CC BY-NC-SA 4.0 — non-
 
 Bugs and questions: [open an issue](https://github.com/LenoxSI/lenoxvi/issues).
 
-Maintained by the LenoxVI organization.
-
 ## Layout
 
 - `bot.py` — pipecat pipeline: transport, wake gate, VAD, STT, intelligence, TTS, speaker out
