@@ -34,7 +34,7 @@ check("wake name: no derivation helpers left", not hasattr(wn, "derive_name") an
 
 # whole-utterance drop, the name only (no spellings list)
 CFG["wake"] = {"name": "Willow"}
-for t in ["Hey Yellow.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay junipur.", "hi willow",
+for t in ["Hey Yellow.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay wilow.", "hi willow",
           "Hey, Willow."]:
     check(f"wake name drop: {t!r}", wn.is_wake_phrase_only(t))
 for t in ["Hey Willow turn on the lights", "what's the weather", "hey willow, kill the kitchen lights",
@@ -98,13 +98,13 @@ check("wake name: accented names are valid; digits/punctuation still rejected",
       and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
 check("wake name: filler words are reserved (never dropped as a name)",
       all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
-      and not wn.reserved_term("yellow") and not wn.reserved_term("junipur"))
+      and not wn.reserved_term("yellow") and not wn.reserved_term("wilow"))
 CFG["wake"] = {"name": "Willow"}
 check("wake name: a leading comma with no prefix still drops (', Willow.')",
       wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Yellow."))
 CFG["wake"] = {"name": "Willow", "heard_as": ["computer"]}
 check("wake name: a heard_as left in config.yaml is ignored",
-      not wn.is_wake_phrase_only("hey computer") and wn.is_wake_phrase_only("hey junipur"))
+      not wn.is_wake_phrase_only("hey computer") and wn.is_wake_phrase_only("hey wilow"))
 CFG["wake"] = {"name": "Hey Jarvis"}
 check("wake name: a name saved with its 'hey' still drops the bare wake ('Hey Jarvis.', 'Jarvis.', 'Hey, Jervis!')",
       wn.is_wake_phrase_only("Hey Jarvis.") and wn.is_wake_phrase_only("Jarvis.")

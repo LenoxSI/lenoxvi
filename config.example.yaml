@@ -157,11 +157,11 @@ sonos:
   # layer applies to the NEXT clip, no restart (durable copy below).
   zone_volumes: {}
   zones: {}
-  #     Dining Room:
-  #       ip: 192.0.2.222
+  #     Kitchen:
+  #       ip: 192.0.2.21
   #       player_uid: RINCON_xxxxxxxxxxxx1400
-  #     Living Room:
-  #       ip: 192.0.2.70
+  #     Hall:
+  #       ip: 192.0.2.22
   #       player_uid: RINCON_xxxxxxxxxxxx1400
 
 # ── WiiM output (interrupt-no-restore; 2026-10-04 arrival verify) ──────
@@ -175,8 +175,8 @@ wiim:
   clip_volume: 35
   zone_volumes: {}
   zones: {}
-  #     Master Bedroom:
-  #       ip: 192.0.2.50
+  #     Loft:
+  #       ip: 192.0.2.31
 
 # How the Sonos players fetch TTS clips: the appliance serves them over
 # LAN HTTP. host_ip must be the LAN IP the Sonos players can reach.

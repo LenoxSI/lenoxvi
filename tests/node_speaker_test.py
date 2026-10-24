@@ -27,8 +27,8 @@ check("speaker: reserved value is 'builtin'", ns.BUILTIN == "builtin")
 check("speaker: speaker lines = waveshare only", ns.SPEAKER_LINES == ("waveshare",))
 check("speaker: default volume 40", ns.DEFAULT_VOLUME == 40)
 
-rz = {"den": "Dining Room", "bench": "builtin"}
-check("speaker resolve: mapped zone wins", ns.resolve_zone("den", rz, has_speaker=True) == "Dining Room")
+rz = {"den": "Kitchen", "bench": "builtin"}
+check("speaker resolve: mapped zone wins", ns.resolve_zone("den", rz, has_speaker=True) == "Kitchen")
 check("speaker resolve: mapped builtin", ns.resolve_zone("bench", rz, has_speaker=True) == "builtin")
 check("speaker resolve: unmapped speaker node -> builtin (default, no config write)",
       ns.resolve_zone("new", rz, has_speaker=True) == "builtin")
@@ -44,7 +44,7 @@ check("speaker resolve: tolerates a missing room_zones section",
 
 for n in ("builtin", " Builtin ", "BUILTIN"):
     check(f"speaker: reserved zone name {n!r}", ns.is_reserved_zone_name(n))
-for n in ("Dining Room", "built in", "builtins"):
+for n in ("Kitchen", "built in", "builtins"):
     check(f"speaker: not reserved {n!r}", not ns.is_reserved_zone_name(n))
 
 check("speaker volume: default when unset", ns.volume_for("x", {}) == 40)
@@ -53,7 +53,7 @@ check("speaker volume: clamped high/low", ns.volume_for("x", {"x": 150}) == 100 
 check("speaker volume: junk -> default", ns.volume_for("x", {"x": "loud"}) == 40 and ns.volume_for("x", None) == 40)
 
 # ── payload + sync (patchable hooks, no config files) ───────────────
-STATE = {"room_zones": {"bench": "builtin", "den": "Dining Room"}, "volumes": {"bench": 30}}
+STATE = {"room_zones": {"bench": "builtin", "den": "Kitchen"}, "volumes": {"bench": 30}}
 ns._room_zones = lambda: STATE["room_zones"]
 ns._volumes = lambda: STATE["volumes"]
 SPK = {"bench", "den", "fresh"}
@@ -239,7 +239,7 @@ def _run_slow_reply(zone, gen_s):
 g = _run_slow_reply("builtin", 0.4)
 check("speaker: echo gate anchored at the FIRST audio frame (playback start), not generation end",
       len(g.blocks) == 1 and abs(g.blocks[0] - 2.1) < 0.08, str(g.blocks))
-gate, pushed = _run_reply("Dining Room")
+gate, pushed = _run_reply("Kitchen")
 check("speaker: shared-zone reply: stage leaves the gate to the Sonos/WiiM backend", gate.blocks == [] and len(pushed) == 3)
 gate, _ = _run_reply(None)
 check("speaker: no zone (unmapped room): stage stays out of it", gate.blocks == [])

@@ -44,9 +44,11 @@ def check(name, cond, detail=""):
 def main():
     sys.path.insert(0, str(REPO_CORE))
 
-    # ── throwaway config: copy the repo's real config, then point the
-    # package at it via LVI_CONFIG (the documented env override).
-    cfg_src = REPO_CORE.parent / "config.yaml"
+    # ── throwaway config: copy the tracked fixture (tests/fixtures; a fresh
+    # clone has no config.yaml, and a live one leaked house routing into the
+    # checks), then point the package at it via LVI_CONFIG. LVI_TEST_CONFIG
+    # runs the suite against another file.
+    cfg_src = Path(os.environ.get("LVI_TEST_CONFIG") or REPO_CORE.parent / "tests" / "fixtures" / "config.yaml")
     cfg_test = SCRATCH / "config.yaml"
     shutil.copy2(cfg_src, cfg_test)
     # The LIVE bot owns :8765 — this rig runs out-of-process, so serve
@@ -225,7 +227,7 @@ def main():
 
     # 5. config write round-trip on throwaway file
     before_text = cfg_test.read_text()
-    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Dining Room"}})
+    r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Kitchen"}})
     check("mapping PUT ok", r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
     after_text = cfg_test.read_text()
     check("config write changed the file", after_text != before_text)
@@ -233,7 +235,7 @@ def main():
           "# LenoxVI config" in after_text or "THE tuning surface" in after_text,
           )
     m = client.get("/api/dashboard/mapping").json()
-    check("mapping read-back after write", m["room_zones"] == {"bedroom": "Dining Room"},
+    check("mapping read-back after write", m["room_zones"] == {"bedroom": "Kitchen"},
           f"m={m['room_zones']}")
     check("backup file created", (SCRATCH / "config.backup.yaml").is_file())
 
@@ -261,20 +263,22 @@ def main():
     # merged dict — no room_zones wrapper — and Pydantic's default_factory
     # silently turned it into {} and the route wiped all mappings; three
     # real wipes hit production config before these guards existed).
-    r = client.put("/api/dashboard/mapping", json={"bedroom": "Dining Room"})
+    r = client.put("/api/dashboard/mapping", json={"bedroom": "Kitchen"})
     check("unwrapped mapping PUT 422s (extra=forbid)",
           r.status_code == 422, f"status={r.status_code} body={r.text[:200]}")
     r = client.put("/api/dashboard/mapping", json={"room_zones": {}})
     check("empty mapping PUT refused (wipe guard)",
           r.status_code == 400, f"status={r.status_code} body={r.text[:200]}")
     m = client.get("/api/dashboard/mapping").json()
-    check("mapping survived the two rejected PUTs", m["room_zones"] == {"bedroom": "Dining Room"},
+    check("mapping survived the two rejected PUTs", m["room_zones"] == {"bedroom": "Kitchen"},
           f"room_zones={m['room_zones']}")
 
-    # 8. REAL Sonos test clip on the REAL zone
+    # 8. REAL Sonos test clip — opt-in (LVI_TEST_LIVE=1): it plays out loud on
+    # a real speaker, so it never runs by default.
     real_zones = m["zones"]
-    # use the REAL configured zone (from the live config), not test_zone
-    real = [z for z in ("Dining Room", "Living Room") if z in real_zones]
+    real = list(real_zones)[:1] if os.environ.get("LVI_TEST_LIVE") == "1" else []
+    if not real:
+        print("[SKIP] REAL test clip (set LVI_TEST_LIVE=1 to play one out loud)")
     if real:
         r = client.post(f"/api/dashboard/zones/{real[0]}/test")
         ok = r.status_code == 200
@@ -1375,20 +1379,20 @@ def main():
           "intelligence_agent:" in _ia_src and "hermes_agent:" not in _ia_src
           and "def _ask_intelligence(" in _ia_src, "")
     # The skip mechanism, both directions, against the throwaway config
-    # (sonos zones: Dining Room/Living Room; wiim zone: Master Bedroom).
+    # (sonos zones: Kitchen/Hall; wiim zone: Loft).
     from loguru import logger as _lg
     _cap = []
     _sink = _lg.add(lambda m: _cap.append(str(m)), level="DEBUG")
     try:
         _so_skip = SonosOutput(echo_gate=None,
-                               zone_selector=lambda: "Master Bedroom", led=None)
+                               zone_selector=lambda: "Loft", led=None)
         _wo_skip = WiiMOutput(echo_gate=None,
-                              zone_selector=lambda: "Dining Room", led=None)
+                              zone_selector=lambda: "Kitchen", led=None)
         _asyncio.run(_so_skip._speak_to_sonos(b"\x00" * 48000))
         _asyncio.run(_wo_skip._speak_to_wiim(b"\x00" * 48000))
         _joined = "\n".join(_cap)
         check("sonos_output skips a WiiM-owned zone at reply time (no play)",
-              "zone 'Master Bedroom' not in config zones" in _joined
+              "zone 'Loft' not in config zones" in _joined
               and "sonos_output: playing clip" not in _joined,
               f"skip-warning-seen={'not in config zones' in _joined}")
         check("wiim_output skips a Sonos-owned zone at reply time (no play)",
@@ -2093,8 +2097,10 @@ def main():
     brain_after = config_store.read_section("intelligence") or {}
     check("tuning write preserves intelligence.max_tokens (merge, not replace)",
           brain_after.get("max_tokens") == 300, f"intelligence keys={sorted(brain_after)}")
+    import yaml as _yaml_fl  # the fixture's own fillers: no live-config count
+    _fillers_in = (_yaml_fl.safe_load(cfg_src.read_text()).get("intelligence") or {}).get("fillers")
     check("tuning write preserves intelligence.fillers (merge, not replace)",
-          isinstance(brain_after.get("fillers"), list) and len(brain_after["fillers"]) == 2,
+          isinstance(brain_after.get("fillers"), list) and brain_after["fillers"] == _fillers_in,
           f"fillers={str(brain_after.get('fillers'))[:80]}")
     wake_after = config_store.read_section("wake") or {}
     check("tuning write preserves wake.enabled (merge, not replace)",
@@ -2726,8 +2732,10 @@ def main():
         # restore the section we touched (throwaway config anyway)
         pass
 
-    # 10. REAL soco discovery on the LAN (best effort — players may nap)
-    r = client.post("/api/dashboard/zones/discover")
+    # 10. REAL soco discovery on the LAN — opt-in (LVI_TEST_LIVE=1), like the
+    # live clip: a default run never touches the network.
+    r = (client.post("/api/dashboard/zones/discover") if os.environ.get("LVI_TEST_LIVE") == "1"
+         else type("_Skip", (), {"status_code": 0, "text": "skipped (LVI_TEST_LIVE unset)"})())
     if r.status_code == 200:
         found = r.json()["found"]
         check("soco discovery ran", True, f"found {len(found)} player(s): "
@@ -2737,11 +2745,11 @@ def main():
 
     # 12. Guard: cross-origin mutation rejected, non-browser passes
     r = client.put("/api/dashboard/mapping",
-                   json={"room_zones": {"bedroom": "Dining Room"}},
+                   json={"room_zones": {"bedroom": "Kitchen"}},
                    headers={"Origin": "https://evil.example"})
     check("guard: cross-origin mutation 403", r.status_code == 403, f"status={r.status_code}")
     r = client.put("/api/dashboard/mapping",
-                   json={"room_zones": {"bedroom": "Dining Room"}})
+                   json={"room_zones": {"bedroom": "Kitchen"}})
     check("guard: no-Origin (curl) mutation passes", r.status_code == 200, f"status={r.status_code}")
     r = client.get("/api/dashboard/status", headers={"Origin": "https://evil.example"})
     check("guard: cross-origin READ stays open", r.status_code == 200, f"status={r.status_code}")
@@ -2750,10 +2758,10 @@ def main():
     os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
     try:
         r = client.put("/api/dashboard/mapping",
-                       json={"room_zones": {"bedroom": "Dining Room"}})
+                       json={"room_zones": {"bedroom": "Kitchen"}})
         check("guard: token mode, bare mutation 401", r.status_code == 401, f"status={r.status_code}")
         r = client.put("/api/dashboard/mapping",
-                       json={"room_zones": {"bedroom": "Dining Room"}},
+                       json={"room_zones": {"bedroom": "Kitchen"}},
                        headers={"X-Dashboard-Token": "rig-secret"})
         check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
     finally:
@@ -5328,10 +5336,16 @@ def main():
     _rootwn = REPO_CORE.parent
     _sweptwn = [_rootwn / "bot.py", _rootwn / "README.md", _rootwn / "config.example.yaml"]
     _sweptwn += list(REPO_CORE.rglob("*.py")) + list((_rootwn / "dashboard-ui" / "src").rglob("*.jsx"))
-    _hitswn = sorted({str(p.relative_to(_rootwn)) for p in _sweptwn
-                       if p.is_file() and "willow" in p.read_text(errors="ignore").lower()})
-    check("wake name sweep: no wake-name literal in core/, bot.py, dashboard src, README, config.example",
-          not _hitswn, f"hits={_hitswn}")
+    # The words come from LVI_PRIVATE_WORDS (comma-separated, kept out of the
+    # repo): a public test must not name the private word it guards.
+    _privwn = [w.strip().lower() for w in os.environ.get("LVI_PRIVATE_WORDS", "").split(",") if w.strip()]
+    if _privwn:
+        _hitswn = sorted({str(p.relative_to(_rootwn)) for p in _sweptwn
+                           if p.is_file() and any(w in p.read_text(errors="ignore").lower() for w in _privwn)})
+        check("wake name sweep: no private word in core/, bot.py, dashboard src, README, config.example",
+              not _hitswn, f"hits={_hitswn}")
+    else:
+        print("[SKIP] private-word sweep (set LVI_PRIVATE_WORDS to run it)")
     # Dashboard dist-root allowlist names only files the build actually ships
     import dashboard as _dashdr
     _distdr = REPO_CORE.parent / "dashboard-ui" / "dist"

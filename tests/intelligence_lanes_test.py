@@ -136,7 +136,7 @@ LOGS = []
 
 def main():
     sys.path.insert(0, str(REPO_CORE))
-    cfg_src = REPO_CORE.parent / "config.yaml"
+    cfg_src = Path(os.environ.get("LVI_TEST_CONFIG") or REPO_CORE.parent / "tests" / "fixtures" / "config.yaml")  # tracked fixture; LVI_TEST_CONFIG overrides
     cfg_test = SCRATCH / "config.yaml"
     shutil.copy2(cfg_src, cfg_test)
     cfg_test.write_text(cfg_test.read_text().replace("port: 8765", "port: 8766"))

@@ -64,7 +64,7 @@ def _fake_urlopen(req, timeout=None):
 def main():
     sys.path.insert(0, str(REPO_CORE))
     cfg_test = SCRATCH / "config.yaml"
-    shutil.copy2(REPO_CORE.parent / "config.yaml", cfg_test)
+    shutil.copy2(Path(os.environ.get("LVI_TEST_CONFIG") or REPO_CORE.parent / "tests" / "fixtures" / "config.yaml"), cfg_test)  # tracked fixture; LVI_TEST_CONFIG overrides
     cfg_test.write_text(cfg_test.read_text().replace("port: 8765", "port: 8766"))
     os.environ["LVI_CONFIG"] = str(cfg_test)
     env_file = SCRATCH / ".env"
