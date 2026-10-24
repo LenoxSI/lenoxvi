@@ -7,7 +7,7 @@ sys.path.insert(0, "core")
 
 import wake_name  # noqa: E402
 
-wake_name._wake = lambda: {"name": "Willow", "heard_as": ["yellow", "junipur"]}
+wake_name._wake = lambda: {"name": "Willow"}   # spellings matched by sound, no list
 
 from intelligence_agent import _is_wake_phrase_only  # noqa: E402
 

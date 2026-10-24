@@ -4706,34 +4706,17 @@ def main():
         _ctR.CDLL = _orig_cdll
     check("RSS _trim_heap never raises (non-glibc host)", _trim_ok)
 
-    # Heard-after-wake buffer (registry): first transcript after a wake only
+    # The heard-after-wake list is gone (sound-alike matching needs no
+    # spellings to collect); the wake itself is still recorded.
     from dashboard import registry as _regwn
-    _regwn._RECENT_HEARD.clear()
-    _regwn._WAKE_PENDING.clear()
-    _regwn.note_heard("kitchen", "no wake before this", False)
-    check("wake name: a transcript without a wake is not recorded", _regwn.recent_heard() == [])
+    check("wake name: no heard-after-wake list left in the registry",
+          not any(hasattr(_regwn, x) for x in ("note_heard", "recent_heard", "_RECENT_HEARD", "_WAKE_PENDING",
+                                               "HEARD_WINDOW_S")))
     _regwn.note_wake("kitchen")
-    _regwn.note_heard("kitchen", "Hey Yellow.", True)
-    _regwn.note_heard("kitchen", "second transcript", False)
-    _rhwn = _regwn.recent_heard()
-    check("wake name: only the FIRST transcript after a wake is recorded, with room + dropped flag",
-          len(_rhwn) == 1 and _rhwn[0]["text"] == "Hey Yellow." and _rhwn[0]["dropped"] is True
-          and _rhwn[0]["room"] == "kitchen", str(_rhwn))
-    _regwn.note_wake("kitchen")
-    _regwn._WAKE_PENDING["kitchen"] -= 600
-    _regwn.note_heard("kitchen", "ten minutes later", False)
-    check("wake name: a transcript outside the 30 s window is not recorded", len(_regwn.recent_heard()) == 1)
-    _regwn.note_wake("den")
-    _regwn.note_heard("kitchen", "other room", False)
-    check("wake name: a wake in one room doesn't capture another room's transcript",
-          len(_regwn.recent_heard()) == 1)
-    for _iwn in range(15):
-        _regwn.note_wake("den")
-        _regwn.note_heard("den", f"t{_iwn}", False)
-    check("wake name: recent list capped at 2, newest first",
-          [r["text"] for r in _regwn.recent_heard()] == ["t14", "t13"], str(_regwn.recent_heard()))
+    check("wake name: note_wake still records the last wake (room + time)",
+          _regwn._last_wake.get("room") == "kitchen" and _regwn._last_wake.get("time"), str(_regwn._last_wake))
 
-    # /wake API — name + aliases apply live (no restart)
+    # /wake API — the name applies live (no restart); no spellings list
     import wake_name as _wnwnb
     _secswn = config_store.read_sections(["wake", "stt"])
     _wake_bakwn = dict(_secswn.get("wake") or {})
@@ -4742,30 +4725,24 @@ def main():
         r = client.get("/api/dashboard/wake")
         _wwn = r.json() if r.status_code == 200 else {}
         check("wake name: GET /wake shape",
-              r.status_code == 200 and {"name", "heard_as", "recent", "model"} <= set(_wwn)
-              and "name_source" not in _wwn and "bias_wake_name" not in _wwn
-              and _wwn["recent"] and _wwn["recent"][0]["text"] == "t14", str(_wwn)[:200])
-        r = client.put("/api/dashboard/wake",
-                       json={"name": "Computer", "heard_as": ["Komputer", "komputer", "compute  her"]})
-        check("wake name: PUT /wake applies live: name + normalised, de-duplicated aliases",
-              r.status_code == 200 and _wnwnb.name() == "Computer"
-              and _wnwnb.aliases() == ["komputer", "compute her"]
-              and _wnwnb.is_wake_phrase_only("hey komputer."), f"{r.status_code} {r.text[:160]}")
+              r.status_code == 200 and set(_wwn) == {"name", "model"}, str(_wwn)[:200])
+        r = client.put("/api/dashboard/wake", json={"name": "Computer"})
+        check("wake name: PUT /wake applies live: the name, and its sound-alike spellings with no list",
+              r.status_code == 200 and _wnwnb.name() == "Computer" and set(r.json()) == {"ok", "name"}
+              and _wnwnb.is_wake_phrase_only("hey komputer.") and _wnwnb.is_wake_phrase_only("Hey computer!")
+              and not _wnwnb.is_wake_phrase_only("hey computer, lights off"), f"{r.status_code} {r.text[:160]}")
         _stt_midwn = dict(config_store.read_section("stt") or {})
         check("wake name: PUT /wake never touches the stt section", _stt_midwn == _stt_bakwn)
-        for _badwn in [{"name": "R2 D2"}, {"name": "x" * 31}, {"heard_as": ["ok."]},
-                        {"heard_as": ["a"] * 21}, {"bogus": 1}, {"heard_as": "yellow"},
-                        {"heard_as": ["x" * 31]}]:
+        for _badwn in [{"name": "Robo 9"}, {"name": "x" * 31}, {"bogus": 1}, {"heard_as": ["yellow"]},
+                        {"heard_as": []}]:
             r = client.put("/api/dashboard/wake", json=_badwn)
             _kwn = list(_badwn)[0]
             check(f"wake name: PUT /wake rejects bad {_kwn} ({str(_badwn[_kwn])[:14]}) with 422",
                   r.status_code == 422, f"{r.status_code}")
-        check("wake name: rejected PUTs changed nothing", _wnwnb.name() == "Computer")
-        for _badwn in [["okay"], ["Stop"], ["yellow", "hey"]]:
-            r = client.put("/api/dashboard/wake", json={"heard_as": _badwn})
-            check(f"wake name: PUT /wake rejects filler-word alias {_badwn} (422)",
-                  r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/wake", json={"name": "Zoë", "heard_as": ["zoey"]})
+        check("wake name: rejected PUTs changed nothing (the removed heard_as is never written)",
+              _wnwnb.name() == "Computer"
+              and (config_store.read_section("wake") or {}).get("heard_as") == _wake_bakwn.get("heard_as"))
+        r = client.put("/api/dashboard/wake", json={"name": "Zoë"})
         check("wake name: accented name accepted", r.status_code == 200
               and _wnwnb.name() == "Zoë", f"{r.status_code} {r.text[:120]}")
         r = client.put("/api/dashboard/wake", json={"name": "   "})
@@ -4807,7 +4784,7 @@ def main():
     _svcwn.ensure_model = _noopwn
     _orig_wakewn = _wnwn._wake
     try:
-        _wnwn._wake = lambda: {"name": "Computer", "heard_as": ["komputer"]}
+        _wnwn._wake = lambda: {"name": "Computer"}
         _aiown.run(_svcwn._transcribe(b"RIFF"))
     finally:
         _wnwn._wake = _orig_wakewn
@@ -4834,15 +4811,11 @@ def main():
     check("wake name: intelligence drop-filter delegates to wake_name",
           "wake_name" in _inspwn.getsource(_iawn._is_wake_phrase_only))
     _ia_srcwn = _inspwn.getsource(_iawn)
-    check("wake name: intelligence records the first transcript after a wake, fail-open",
-          "note_heard(self._room, text, dropped)" in _ia_srcwn
-          and "heard-after-wake note failed" in _ia_srcwn)
-    check("wake name: the wake is keyed by the SAME room the intelligence records under",
-          "note_wake(_pipeline_room(), heard_key=_room)" in _main_src, "bot.py _on_wake")
-    _regwn.note_wake("den", heard_key="unknown")
-    _regwn.note_heard("unknown", "keyed by build-time room", False)
-    check("wake name: registry pairs wake and transcript via heard_key",
-          _regwn.recent_heard()[0]["text"] == "keyed by build-time room")
+    check("wake name: intelligence no longer records transcripts for a heard list; it still drops bare wake phrases",
+          "note_heard" not in _ia_srcwn and "if _is_wake_phrase_only(text):" in _ia_srcwn
+          and "dropped wake-phrase-only" in _ia_srcwn)
+    check("wake name: bot.py records the wake for its own room only",
+          "note_wake(_pipeline_room())" in _main_src and "heard_key" not in _main_src, "bot.py _on_wake")
     _exwn = (_rootwn / "config.example.yaml").read_text()
     check("wake name: config.example sets the public default name explicitly (Jarvis)",
           "\n  name: Jarvis" in _exwn)
@@ -7825,10 +7798,15 @@ def main():
           "<TableState cols={4} error={mapping?.loadError} loading={!mapping?.zones}" in _ws(_zlUI)
           and "'No speaker zones yet.'" in _zlUI and "!Object.keys(speakers).length" in _zlUI)
     _wkHO = _jsbody(_appsrc, "function WakeNameCard({ setMsg }) {")
-    _wkHO = _wkHO[_wkHO.find("if (!w) return"):_wkHO.find("const aliases")]
+    _wkHO = _wkHO[_wkHO.find("if (!w) return"):]
     check("wake ui: the wake name card shows 'Loading…' in its place instead of rendering nothing",
           "'Loading…'" in _wkHO and ": null" not in _wkHO and '<Section title="Wake name">' in _wkHO
           and "`Couldn't load: ${loadErr}`" in _wkHO, _wkHO[:200])
+    _wkAll = _jsbody(_appsrc, "function WakeNameCard({ setMsg }) {")
+    check("wake ui: the wake name card is just the name: no spellings box or chips, no heard list, no polling",
+          'id="wake-name"' in _wkAll and not any(x in _wkAll for x in (
+              "heard_as", "Also heard as", "Add a spelling", "Heard right after a wake", "data-heard",
+              "data-alias", "setInterval(")) and "aliasFrom" not in _appsrc and "ALIAS_RESERVED" not in _appsrc)
     _owHO = _ws(_jsbody(_appsrc, "function OwwPanel({ setMsg, reloadAll }) {"))
     _owLoad = _ws(_jsbody(_appsrc[_appsrc.find("function OwwPanel("):], "const load = async () => {"))
     check("wake ui: the model list says loading, then the load error, and 'No models yet' only when really empty",
@@ -8092,13 +8070,11 @@ def main():
           and "const save = async (body, note, say = setMsg) => {" in _wkUS
           and "await save({ name: (name.val('name') ?? '').trim() }, null, say)" in _saveUS["wake name"],
           str([n for n, b in _saveUS.items() if not b or "setMsg(" in b]))
-    check("unsaved: instant actions never register: keys, zones, volumes, nodes, firmware, alias chips, uploads",
+    check("unsaved: instant actions never register: keys, zones, volumes, nodes, firmware, uploads",
           all("useUnsaved(" not in _fnUI(h) for h in ("function KeysCard(", "function ZoneList(", "function VolSlider(",
                                                        "function NodeActions(", "function FirmwarePanel("))
           and _wkUS.count("useUnsaved(") == 1 and _owUS.count("useUnsaved(") == 1
-          and "return save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)" in _wkUS
-          and "onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}"
-          in _wkUS and "onClick={upload}" in _owUS and "onClick={() => del(m.name, m.source)}" in _owUS
+          and "onClick={upload}" in _owUS and "onClick={() => del(m.name, m.source)}" in _owUS
           and "onChange={sticky => toggleMode(r.room, sticky)}" in _roUS and "onClick={() => del(m)}" in _stUS)
     check("unsaved: the bar renders once in App, pinned to the bottom, full width, header background, safe area",
           _appTB.count("<UnsavedBar cards={cards} units={units} setMsg={setMsg} />") == 1

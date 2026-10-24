@@ -32,9 +32,8 @@ CFG["wake"] = {"model": "models/Hey_Willow_1-0.onnx", "name": "  Bill  "}
 check("wake name name: wake.name used, whitespace tidied", wn.name() == "Bill", repr(wn.name()))
 check("wake name: no derivation helpers left", not hasattr(wn, "derive_name") and not hasattr(wn, "effective_name"))
 
-# regex — identical behaviour for this rig's shape of config
-CFG["wake"] = {"name": "Willow", "heard_as": ["Yellow", "junipur", "yellow"]}
-check("wake name: aliases normalised + de-duplicated", wn.aliases() == ["yellow", "junipur"], str(wn.aliases()))
+# whole-utterance drop, the name only (no spellings list)
+CFG["wake"] = {"name": "Willow"}
 for t in ["Hey Yellow.", "hey willow", "Willow.", "ok willow!", "Hey Willow?", "okay junipur.", "hi willow",
           "Hey, Willow."]:
     check(f"wake name drop: {t!r}", wn.is_wake_phrase_only(t))
@@ -42,13 +41,27 @@ for t in ["Hey Willow turn on the lights", "what's the weather", "hey willow, ki
           "Willow is my assistant", "show me Yellow tonight", ""]:
     check(f"wake name keep: {t!r}", not wn.is_wake_phrase_only(t))
 
-# Review Focus 1/2: metacharacters escaped; a common-word alias stays harmless
-CFG["wake"] = {"name": "Ms Smith", "heard_as": ["the", "a.b"]}
+# sound-alike spellings speech-to-text writes for a rare name, matched with no list
+CFG["wake"] = {"name": "Maple"}
+for t in ["Hey Maple.", "Hey Mable.", "Hey Mapple!", "Hey, Mapel.", "ok maypl", "Mable."]:
+    check(f"wake name sound-alike drop: {t!r}", wn.is_wake_phrase_only(t))
+for t in ["Bake a maple pie for dinner.", "Hey Mable turn on the lights", "Stop.", "Next.", "Louder.",
+          "Lights off.", "Hey Siri.", "Hey Alexa.", "Hey.", "Okay.", "Hey Maple Maple Maple Maple"]:
+    check(f"wake name sound-alike keep: {t!r}", not wn.is_wake_phrase_only(t))
+check("wake name: sounds_like allows 2 edits at 5+ letters, not 3",
+      wn.sounds_like("Mapel", "Maple") and not wn.sounds_like("Mabel", "Maple")
+      and not wn.sounds_like("Mapleton", "Maple"))
+check("wake name: 4-letter names allow 1 edit, 3-letter names none",
+      wn.sounds_like("Noba", "Nova") and not wn.sounds_like("Novel", "Nova")
+      and wn.sounds_like("Max", "Max") and not wn.sounds_like("Mix", "Max"))
+check("wake name: a filler word never matches, even as the name's neighbour",
+      not wn.sounds_like("okay", "Okey") and not wn.sounds_like("stop", "Stoop"))
+
+# multi-word names and literal matching (no regex built from config any more)
+CFG["wake"] = {"name": "Ms Smith"}
 check("wake name: multi-word name drops", wn.is_wake_phrase_only("hey ms  smith."))
-check("wake name: metachar alias is literal (a.b != axb)",
-      wn.is_wake_phrase_only("a.b") and not wn.is_wake_phrase_only("axb"))
-check("wake name: common-word alias drops only a bare utterance",
-      wn.is_wake_phrase_only("hey the") and not wn.is_wake_phrase_only("turn off the lights"))
+check("wake name: punctuation in the utterance is not a pattern (a.b never matches)",
+      not wn.is_wake_phrase_only("a.b") and not wn.is_wake_phrase_only("ms.smith"))
 check("wake name: valid_term charset",
       wn.valid_term("Ms Smith") and wn.valid_term("o'neil") and not wn.valid_term("R2 D2")
       and not wn.valid_term("Mr. X") and not wn.valid_term("") and not wn.valid_term("x" * 31))
@@ -71,25 +84,27 @@ check("wake name: absent model -> hey_jarvis bundled", wn.resolve_model().endswi
 check("wake name: no spelling-hint helpers left",
       not any(hasattr(wn, x) for x in ("hotwords", "bias_enabled", "_stt_bias", "BIAS_DEFAULT")))
 CFG["wake"] = {"heard_as": ["yellow"]}
-check("wake name: no name -> aliases still drop, nothing else does",
-      wn.is_wake_phrase_only("hey yellow") and not wn.is_wake_phrase_only("hey")
+check("wake name: no name -> the filter never drops (an old heard_as is ignored)",
+      not wn.is_wake_phrase_only("hey yellow") and not wn.is_wake_phrase_only("hey")
       and not wn.is_wake_phrase_only(""))
 CFG["wake"] = {}
-check("wake name: no name and no aliases -> the filter never drops",
+check("wake name: no name -> the filter never drops",
       not wn.is_wake_phrase_only("hey") and not wn.is_wake_phrase_only("Hey Jarvis."))
+check("wake name: no spellings-list helpers left",
+      not any(hasattr(wn, x) for x in ("aliases", "normalise_aliases", "_pattern")))
 # --- review fixes ---
 check("wake name: accented names are valid; digits/punctuation still rejected",
       wn.valid_term("José") and wn.valid_term("Zoë") and wn.valid_term("Chloé")
       and not wn.valid_term("R2 D2") and not wn.valid_term("Mr. X") and not wn.valid_term("Zoë!"))
-check("wake name: filler words are reserved (never aliases)",
+check("wake name: filler words are reserved (never dropped as a name)",
       all(wn.reserved_term(t) for t in ["hey", "OK", "okay", "hi", "stop", "yes", "no", "cancel"])
       and not wn.reserved_term("yellow") and not wn.reserved_term("junipur"))
-CFG["wake"] = {"name": "Willow", "heard_as": ["yellow"]}
+CFG["wake"] = {"name": "Willow"}
 check("wake name: a leading comma with no prefix still drops (', Willow.')",
       wn.is_wake_phrase_only(", Willow.") and wn.is_wake_phrase_only("Hey, Yellow."))
-CFG["wake"] = {"name": "Willow", "heard_as": ["okay", "yellow"]}
-check("wake name: a reserved word hand-edited into heard_as is ignored by the filter",
-      not wn.is_wake_phrase_only("Okay.") and wn.is_wake_phrase_only("hey yellow"))
+CFG["wake"] = {"name": "Willow", "heard_as": ["computer"]}
+check("wake name: a heard_as left in config.yaml is ignored",
+      not wn.is_wake_phrase_only("hey computer") and wn.is_wake_phrase_only("hey junipur"))
 
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
