@@ -18,10 +18,11 @@ The two version streams are independent.
 - STT: ElevenLabs Scribe v2 (realtime) is a third provider on the STT card (`stt.provider: elevenlabs`), next to
   local Whisper and Deepgram Nova-3. It uses the ElevenLabs key the voice already uses (the Keys card shows it
   used by TTS and STT), connects only while a room is awake (on the first audio after the wake word, holding
-  that audio until the session is up; it closes after 20 s without audio and never sends keepalive silence,
-  which ElevenLabs would bill), ends each turn on LenoxVI's own voice detection, and keeps local Whisper on
-  standby: a bad key or a dead network moves the room to Whisper, and it switches back
-  once ElevenLabs answers again. The language is fixed when a session starts, so changing it needs a restart.
+  that audio until the session is up; it closes after 10 s without audio, stays closed when ElevenLabs hangs up
+  a quiet socket, and never sends keepalive silence, which ElevenLabs would bill), ends each turn on
+  LenoxVI's own voice detection, and keeps local Whisper on standby: a bad key, a dead network or an
+  account refusal (out of credits, terms not accepted) moves the room to Whisper at once, and it switches back
+  once ElevenLabs answers with a working session again. The language is fixed when a session starts, so changing it needs a restart.
 
 ### Changed
 - Dashboard: one unsaved-changes bar at the bottom of the page replaces the Save buttons on the TTS, STT, Voice

@@ -230,6 +230,12 @@ async def recover_stt(dg, request_switch: Callable, cooldown: float, sleep=async
                 await sleep(settle_secs)
                 if _socket_died(dg):
                     continue
+            ready = getattr(dg, "session_ready", None)
+            if ready is not None and not ready():
+                # Scribe: an open socket isn't a working one. Only a session
+                # that started, with no account error (quota, auth), takes
+                # the room back. (Deepgram has no such hook: unchanged.)
+                continue
             await dg.set_usable(True)
             await request_switch(dg)
             if is_active is None:
