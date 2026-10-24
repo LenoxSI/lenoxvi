@@ -136,9 +136,11 @@ Bugs and questions: [open an issue](https://github.com/LenoxSI/lenoxvi/issues).
 
 ## Repository
 
-- `bot.py`, `core/` — the pipeline and its pieces
+- `bot.py`, `core/` — the pipeline and its pieces; `core/intelligence/` has one module per intelligence system
 - `dashboard-ui/` — the web dashboard; the built `dist/` is committed, so running it needs no node toolchain
 - `config.example.yaml`, `.env.example` — settings and keys
 - `deploy/` — example systemd unit
 - `scripts/` — ops tools
-- `tests/` — automated checks
+- `tests/` — automated checks; they run from a fresh clone against `tests/fixtures/config.yaml`. Steps that play audio on a real speaker or scan the LAN only run with `LVI_TEST_LIVE=1`
+
+Reply clips, uploaded wake models and firmware, and session history are written under the repo folder. Set `LVI_STATE_DIR` to keep them somewhere else.
