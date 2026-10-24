@@ -1373,9 +1373,9 @@ def main():
           "IntelligenceAgent" in _live_cls, f"constructs={sorted(_live_cls)}")
     check("core/hermes_agent.py is gone (no stale module behind the rename)",
           not (REPO_CORE / "hermes_agent.py").exists()
-          and (REPO_CORE / "intelligence_agent.py").exists(), "")
-    _ia_src = (REPO_CORE / "intelligence_agent.py").read_text() \
-        if (REPO_CORE / "intelligence_agent.py").exists() else ""
+          and (REPO_CORE / "intelligence" / "agent.py").exists(), "")
+    _ia_src = (REPO_CORE / "intelligence" / "agent.py").read_text() \
+        if (REPO_CORE / "intelligence" / "agent.py").exists() else ""
     check("intelligence_agent logs under its own module name",
           "intelligence_agent:" in _ia_src and "hermes_agent:" not in _ia_src
           and "def _ask_intelligence(" in _ia_src, "")
@@ -4241,8 +4241,8 @@ def main():
                         return _FakeResp9(b"{}")
                     return _fake_open9(req, timeout)
                 _os.environ["LVI_HERMES_KEY_HOME_HELPER"] = "helper-key-not-real-123"
-                if "intelligence_agent" in sys.modules:
-                    del sys.modules["intelligence_agent"]
+                for _m12 in ("intelligence_agent", "intelligence.agent"):
+                    sys.modules.pop(_m12, None)
                 import intelligence_agent as _ia12
                 _urq9.urlopen = _fake_open12
                 _a12 = _ia12.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
@@ -4252,8 +4252,8 @@ def main():
                       and _urls12[-1][1].get("authorization") == "Bearer helper-key-not-real-123",
                       f"{_urls12[-1][0]} {_urls12[-1][1].get('authorization')}")
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "default"})
-                if "intelligence_agent" in sys.modules:
-                    del sys.modules["intelligence_agent"]
+                for _m12 in ("intelligence_agent", "intelligence.agent"):
+                    sys.modules.pop(_m12, None)
                 import intelligence_agent as _ia12b
                 _a12b = _ia12b.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
                 _a12b._ask_intelligence("hi")
