@@ -33,7 +33,8 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
-- Dashboard polish: text boxes and dropdowns get a hairline border so they read as fields; both file pickers are
+- Dashboard polish: text boxes and dropdowns sit one shade lighter than the card so they read as fields, and
+  dropdowns draw their own chevron, inset to mirror the text and sized like a text box; both file pickers are
   styled buttons that show the chosen file; the active wake model says "in use" instead of offering Delete; a
   muted node shows a "muted" chip and an Unmute button; on a phone the Keys table folds into the key name instead
   of scrolling sideways. Copy: uptime reads 4m / 3h 12m / 2d 4h, "Default agent", a Voice label on the voice id,

@@ -51,10 +51,21 @@
 @import "@heroui/styles";
 @import "./lenoxvi-theme.css";
 
-/* Fields: a hairline in the brand's ink, so text boxes and dropdowns read
-   as fields on a card (the theme fills them with the card's own colour). */
-:root {
-  --field-border: var(--lenoxvi-ink);
+/* Fields sit one shade lighter than the card, so text boxes and dropdowns
+   read as fields (the theme fills them with the card's own colour). */
+:root, .dark, [data-theme="dark"] {
+  --field-background: var(--surface-secondary);
+}
+
+/* Dropdowns draw their own chevron, 12px in from the right edge to mirror
+   the 12px the value sits from the left, and size like a text box. */
+select {
+  appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%2397a290' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.75rem;
 }
 
 @theme {

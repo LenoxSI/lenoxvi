@@ -217,7 +217,7 @@ const esc = s => String(s ?? '')
 const byRoom = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
 const defaultAgentLabel = a => (!a || a === 'default' ? 'Default agent' : `Default agent (${a})`)
 
-const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] border border-[var(--field-border)] text-[14px] px-3 py-2'
+const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
 // Line badge per node: the hardware behind each firmware line (fw_push `line`).
 // A node's own speaker as a reply zone (server: node_speaker.BUILTIN).
 const BUILTIN = 'builtin'
