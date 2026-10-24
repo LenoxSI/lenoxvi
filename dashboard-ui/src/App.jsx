@@ -1825,10 +1825,11 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
     </Section>
   )
 }
-// Wake name card: what the house is called. A bare "Hey <name>." (the wake word
-// said again while the room listens) is dropped, mis-spellings included —
-// matched by sound, so there's no list to keep. Applies live (no restart).
-function WakeNameCard({ setMsg }) {
+// Wake name (top of the Wake word card): what the house is called. A bare
+// "Hey <name>." (the wake word said again while the room listens) is dropped,
+// mis-spellings included — matched by sound, so there's no list to keep.
+// Applies live (no restart), unlike the model below it.
+function WakeNameField({ setMsg }) {
   const [w, setW] = useState(null)
   const [loadErr, setLoadErr] = useState('')
   useEffect(() => {
@@ -1857,24 +1858,20 @@ function WakeNameCard({ setMsg }) {
     return ok
   }
   useUnsaved('wake-name-card', { label: 'wake name', count: name.changed('name') ? 1 : 0, save: saveName, discard: name.discard })
-  // Not loaded yet: the card keeps its place (rendering nothing made the
-  // page jump when it arrived) and its id, so #wake-name-card finds its tab.
+  // Not loaded yet: the field keeps its place (rendering nothing made the
+  // card jump when it arrived) and its id, so #wake-name-card finds its tab.
   if (!w) return (
-    <Section title="Wake name">
-      <div id="wake-name-card" className={`rounded-2xl bg-[var(--surface)] p-4 text-[13px] ${loadErr ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
-        {loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}
-      </div>
-    </Section>
+    <div id="wake-name-card" className={`text-[13px] ${loadErr ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
+      {loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}
+    </div>
   )
   return (
-    <Section title="Wake name">
-      <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4">
-        <Field label="Wake name">
-          <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
-            value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
-        </Field>
-      </div>
-    </Section>
+    <div id="wake-name-card">
+      <Field label="Wake name">
+        <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
+          value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
+      </Field>
+    </div>
   )
 }
 
@@ -1946,9 +1943,10 @@ function OwwPanel({ setMsg, reloadAll }) {
   }
 
   return (
-    <Section id="wake-model" title="Wake word model"
+    <Section id="wake-model" title="Wake word"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <WakeNameField setMsg={setMsg} />
         <Field label="Active model / upload" between>
           <div className="flex items-center gap-2 flex-wrap">
             <select className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
@@ -2237,7 +2235,6 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
 
       <SttCard status={status} setMsg={setMsg} />
       <Tuning tuning={tuning} reloadAll={reloadAll} />
-      <WakeNameCard setMsg={setMsg} />
       <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
     </>
   )

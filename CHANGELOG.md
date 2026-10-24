@@ -33,6 +33,8 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Voice tab: the wake name and the wake word model share one Wake word card (name on top, then the model picker,
+  upload and list). The name still applies live and a model change still needs a restart.
 - Intelligence card: the URL needs only `host:port` for any lane. The bot fills in `http://` and `/v1` (a full URL
   with https or another path is kept as typed), the saved config still holds the full URL, and a saved
   `http://host:port/v1` shows as `host:port`.
