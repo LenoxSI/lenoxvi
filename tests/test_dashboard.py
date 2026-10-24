@@ -7877,11 +7877,44 @@ def main():
           and 'className={BTN_DANGER} disabled={rebooting}' not in _appsrc
           and 'const BTN_DANGER' in _appsrc,
           f"BTN_DANGER buttons: {_appsrc.count('className={BTN_DANGER}')}")
-    check("dashboard ui: a muted node's Mute button is the amber warning style; unmuted stays default",
-          'muted ? BTN_WARNING : BTN_DEFAULT' in _appsrc
-          and 'muted ? BTN_PRIMARY' not in _appsrc
-          and 'const BTN_WARNING = `${BTN} bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]`' in _appsrc,
-          f"mute button uses BTN_PRIMARY: {'muted ? BTN_PRIMARY' in _appsrc}")
+    check("dashboard ui: a muted node shows an amber 'muted' chip and an 'Unmute' button in the default style",
+          "{muted && !muteUnknown &&\n        <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>muted</span>}" in _appsrc
+          and "muted ? 'Unmute' : 'Mute'" in _appsrc
+          and 'muted ? BTN_WARNING' not in _appsrc and 'muted ? BTN_PRIMARY' not in _appsrc,
+          f"mute button uses BTN_WARNING: {'muted ? BTN_WARNING' in _appsrc}")
+    # UX round 3 (2026-10-24).
+    _cssUX = (REPO_CORE.parent / "dashboard-ui" / "src" / "index.css").read_text()
+    check("ux3: every text box and dropdown has a hairline border in the brand's ink",
+          "const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] border border-[var(--field-border)] text-[14px] px-3 py-2'" in _appsrc
+          and "--field-border: var(--lenoxvi-ink);" in _cssUX)
+    _fpUX = _jsbody(_appsrc, "function FilePick({ accept, file, onPick }) {")
+    check("ux3: both file pickers are the styled FilePick (a button plus the chosen file's name), no raw file input",
+          _appsrc.count('type="file"') == 1 and 'type="file"' in _fpUX and 'className="hidden"' in _fpUX
+          and "{file ? file.name : `no ${accept} file chosen`}" in _fpUX and "ref.current?.click()" in _fpUX
+          and '<FilePick accept=".bin" file={fwFile} onPick={setFwFile} />' in _appsrc
+          and '<FilePick accept=".onnx" file={newModel} onPick={setNewModel} />' in _appsrc, _fpUX[:200])
+    check("ux3: the active wake model says 'in use' instead of offering Delete; sizes use fmtBytes (KB/MB)",
+          "{m.selected\n                      ? <span className=\"text-[12px] text-[var(--muted)]\">in use</span>" in _appsrc
+          and "{fmtBytes(m.size || 0)}</td>" in _appsrc and "/ 1024).toFixed(0)} KB" not in _appsrc
+          and ": b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`" in _appsrc)
+    check("ux3: uptime reads 4m / 3h 12m / 2d 4h",
+          "return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`" in _appsrc and "slice(11, 16) + 'h'" not in _appsrc)
+    check("ux3: the room agent picker's empty option is 'Default agent' (named when it isn't the main agent)",
+          "const defaultAgentLabel = a => (!a || a === 'default' ? 'Default agent' : `Default agent (${a})`)" in _appsrc
+          and '<option value="">{defaultAgentLabel(defaultAgent)}</option>' in _appsrc and "`Default (${" not in _appsrc)
+    check("ux3: the ElevenLabs voice id has its own 'Voice' label; no '— s / command' before the first command",
+          "{provider === 'elevenlabs' && <span className=\"text-[12px] font-medium text-[var(--muted)]\">Voice</span>}" in _appsrc
+          and "'— s / command'" not in _appsrc and "{ms != null && <span" in _appsrc)
+    check("ux3: Keys says 'For'; on a phone For / In use / Status fold under the key name and long var names wrap",
+          '<th className="hidden sm:table-cell text-left px-4 py-2">For</th>' in _appsrc and ">Used by</th>" not in _appsrc
+          and _appsrc.count('hidden sm:table-cell') == 6
+          and '<div className="sm:hidden flex flex-wrap items-center gap-2 mt-1">' in _appsrc
+          and 'font-mono text-[var(--muted)] break-all">{row.var}</div>' in _appsrc
+          and '<div className="flex flex-wrap items-center justify-end gap-2">' in _appsrc)
+    check("ux3: the mapping and Nodes tables both list rooms by name",
+          "const roomRows = [...mappedRooms, ...unmappedRooms].sort(byRoom)" in _appsrc
+          and "[...(status?.rooms || [])].sort((a, b) => byRoom(a.room, b.room)).map(r => (" in _appsrc
+          and "localeCompare(String(b), undefined, { sensitivity: 'base' })" in _appsrc)
     check("dashboard ui: the wake slider is labelled 'Wake threshold' with a wake-word-score hint",
           "'Wake threshold'" in _appsrc and "'Wake sensitivity'" not in _appsrc
           and 'Wake-word score needed to wake' in _appsrc and 'OWW score' not in _appsrc,
@@ -8198,12 +8231,12 @@ def main():
     _mb = _muteBtn.group(0) if _muteBtn else ""
     check("nodes ui: the Mute button keeps its exact style, disabled, click, title and label",
           bool(_mb)
-          and "className={muted ? BTN_WARNING : BTN_DEFAULT}" in _mb
+          and "className={BTN_DEFAULT}" in _mb
           and "disabled={!online || busy || muteBusy}" in _mb
           and "onClick={toggleMute}" in _mb
           and "title={muteUnknown" in _mb
           and "physical mute button (red LED)" in _mb
-          and "{muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}" in _mb,
+          and "{muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Unmute' : 'Mute'}" in _mb,
           _mb[:240] or "no 'const mute = (' in NodeActions")
 
     _aiMut = _naMut.find("const actions = (")
