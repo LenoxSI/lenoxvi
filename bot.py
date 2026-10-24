@@ -610,6 +610,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # session at exactly 5 min). None = never idle-cancel; the node's STUN
         # keepalive + on_client_disconnected handle real disconnects.
         idle_timeout_secs=None,
+        # No pipecat RTVI layer: nothing here or on the nodes speaks it (node
+        # replies arrive via the transport's on_app_message, LED and command
+        # sends go out through send_message). Left on by default, it pushed its
+        # own speaking/TTS/transcript messages down every node's data channel,
+        # where the speaking ones drove the LED ring outside led_state's gate.
+        enable_rtvi=False,
     )
     _task_ref["task"] = task
 
