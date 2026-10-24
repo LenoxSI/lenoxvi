@@ -24,9 +24,9 @@ wake:
                          # OR a path to your own trained .onnx (see README)
   name: Jarvis           # what the house is called — set it to match your
                          # wake word (also editable in the dashboard's Wake
-                         # name card); never guessed from the model file
-  heard_as: []           # other spellings speech-to-text writes for the name;
-                         # a bare "Hey <one of these>." is dropped, not answered
+                         # name card); never guessed from the model file.
+                         # A bare "Hey <name>." is dropped, not answered —
+                         # sound-alike mis-spellings included
 
 # ── Voice activity detection (Silero, via bot.py) ───────────────────────
 vad:

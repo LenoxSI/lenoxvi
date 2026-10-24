@@ -1800,61 +1800,30 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
     </Section>
   )
 }
-// Wake name card: what the house is called, the spellings speech-to-text
-// writes for it, and what it heard right after recent wakes (read-only; a
-// new spelling is typed into the box). Everything here applies live (no restart).
-// Trim edge punctuation only; anything else outside letters/'/- means the
-// word can't be an alias as-is (R2D2 must not silently become "rd").
-const aliasFrom = word => word.toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
-  .replace(/[\u2018\u2019]/g, "'")
-const ALIAS_OK = /^\p{L}[\p{L}' -]{0,29}$/u
-const ALIAS_RESERVED = new Set(['hey', 'ok', 'okay', 'hi', 'stop', 'yes', 'no', 'cancel'])
-
+// Wake name card: what the house is called. A bare "Hey <name>." (the wake word
+// said again while the room listens) is dropped, mis-spellings included —
+// matched by sound, so there's no list to keep. Applies live (no restart).
 function WakeNameCard({ setMsg }) {
   const [w, setW] = useState(null)
   const [loadErr, setLoadErr] = useState('')
-  const [aliasDraft, setAliasDraft] = useState('')   // the "add a spelling" box
-  const aliasRef = useRef(null)              // latest aliases: quick clicks never lose one
-  // A poll that overlapped any save (started during one, or a save began/ended
-  // while it was out) carries stale data and is dropped.
-  const saveGen = useRef(0)                  // bumps on every save start and end
-  const inflight = useRef(0)                 // saves currently in flight
   useEffect(() => {
-    // Poll for the heard-after-wake list; state is set only from the
-    // async result, and a load error shows inline (no toast every 5 s).
     let alive = true
-    const tick = () => {
-      const gen = saveGen.current
-      return api('/api/dashboard/wake')
-        .then(j => {
-          if (!alive || gen !== saveGen.current || inflight.current > 0) return
-          setW(j); setLoadErr(''); aliasRef.current = j.heard_as || []
-        })
-        .catch(e => { if (alive) setLoadErr(e.message) })
-    }
-    tick()
-    const t = setInterval(tick, 5000)
-    return () => { alive = false; clearInterval(t) }
+    api('/api/dashboard/wake')
+      .then(j => { if (alive) { setW(j); setLoadErr('') } })
+      .catch(e => { if (alive) setLoadErr(e.message) })
+    return () => { alive = false }
   }, [])
   const save = async (body, note, say = setMsg) => {
-    if (body.heard_as) aliasRef.current = body.heard_as
-    saveGen.current += 1
-    inflight.current += 1
     try {
       const r = await api('/api/dashboard/wake', { method: 'PUT', json: body })
       setW(prev => ({ ...prev, ...r }))
-      aliasRef.current = r.heard_as || aliasRef.current
       say(note || 'Saved — live now.', 'ok', 'Wake name')
       return true
     } catch (e) {
       say('Save failed: ' + e.message, 'err', 'Wake name')
       return false
-    } finally {
-      inflight.current -= 1
-      saveGen.current += 1
     }
   }
-  // The name is a draft for the bar; the spellings below save at once.
   const name = useDraft({ name: w?.name ?? '' })
   const saveName = async say => {
     const sent = name.snap(['name'])
@@ -1872,71 +1841,13 @@ function WakeNameCard({ setMsg }) {
       </div>
     </Section>
   )
-  const aliases = w.heard_as || []
-  // Validates and saves a typed spelling; true only when saved.
-  const addAlias = async word => {
-    const a = aliasFrom(word)
-    const current = aliasRef.current ?? aliases
-    if (!a) return false
-    if (a === (w.name || '').toLowerCase()) { setMsg(`'${a}' is the wake name itself.`, 'err', 'Wake name'); return false }
-    if (current.includes(a)) { setMsg(`'${a}' is already there.`, 'err', 'Wake name'); return false }
-    if (!ALIAS_OK.test(a)) { setMsg(`'${word}' can't be an alias — letters, spaces, ' or - only.`, 'err', 'Wake name'); return false }
-    if (ALIAS_RESERVED.has(a)) { setMsg(`'${a}' is a filler word — as an alias it would swallow real commands.`, 'err', 'Wake name'); return false }
-    return save({ heard_as: [...current, a] }, `Added '${a}' — live now.`)
-  }
-  const addTyped = async () => { if (await addAlias(aliasDraft)) setAliasDraft('') }
-  const hhmm = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return (
     <Section title="Wake name">
-      <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
-        {/* Wide screens: the name and the spelling box share the top row; the
-            spelling chips sit below the box, in its column.
-            Phones stack: name, spelling box, label, chips. */}
-        <div className="grid md:grid-cols-[auto_1fr] gap-x-8 gap-y-2">
-          <div className="md:col-start-1 md:row-start-1">
-            <Field label="Wake name">
-              <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
-                value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
-            </Field>
-          </div>
-          <div className="md:col-start-2 md:row-start-1">
-            <Field label="Add a spelling">
-              <input id="wake-alias" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="how it's misheard"
-                value={aliasDraft} onChange={e => setAliasDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyped() } }} />
-              <button className={`${BTN_DEFAULT} w-[136px]`} disabled={!aliasDraft.trim()} onClick={addTyped}>Add</button>
-            </Field>
-          </div>
-          <div className="grid gap-1 mt-2 md:mt-0 md:col-start-2 md:row-start-2">
-            <span className="text-[12px] font-medium text-[var(--muted)]">Also heard as</span>
-            <div className="flex items-center gap-2 flex-wrap">
-              {aliases.map(a => (
-                <span key={a} data-alias={a}
-                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[14px] font-medium bg-[var(--default)] text-[var(--default-foreground)]">
-                  {esc(a)}
-                  <button type="button" aria-label={`Remove ${a}`} className="text-[var(--muted)] cursor-pointer"
-                    onClick={() => save({ heard_as: (aliasRef.current ?? aliases).filter(x => x !== a) }, `Removed '${a}' — live now.`)}>×</button>
-                </span>
-              ))}
-              {aliases.length === 0 && <span className="text-[13px] text-[var(--muted)]">none yet</span>}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-1">
-          <div className="text-[12px] text-[var(--muted)]">Heard right after a wake</div>
-          {(w.recent || []).length === 0 &&
-            <div className="text-[13px] text-[var(--muted)]">Nothing yet — say the wake word. Kept in memory only.</div>}
-          {(w.recent || []).map((r, i) => (
-            <div key={`${r.time}-${i}`} data-heard="" className="flex flex-wrap items-center gap-1 text-[14px] py-1 border-t border-[var(--separator)]">
-              <span className="text-[12px] text-[var(--muted)] w-[44px]">{hhmm(r.time)}</span>
-              <span className="font-mono text-[12px] text-[var(--muted)] mr-2">{esc(r.room || '?')}</span>
-              <span>{esc(r.text || '')}</span>
-              {r.dropped &&
-                <span className="ml-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--muted)] border border-[var(--separator)]">dropped</span>}
-            </div>
-          ))}
-        </div>
+      <div id="wake-name-card" className="rounded-2xl bg-[var(--surface)] p-4">
+        <Field label="Wake name">
+          <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
+            value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
+        </Field>
       </div>
     </Section>
   )

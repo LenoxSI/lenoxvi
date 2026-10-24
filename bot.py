@@ -386,7 +386,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                                          node_speaker._has_speaker(room))
 
     def _on_wake():
-        dash_registry.note_wake(_pipeline_room(), heard_key=_room)
+        dash_registry.note_wake(_pipeline_room())
 
     # Session mode for THIS pipeline's room (fresh default; sticky rooms
     # keep conversation memory across reconnects/restarts — config

@@ -136,8 +136,8 @@ def _pick_filler(pool: list[str]) -> str:
 # Standalone wake-phrase transcriptions (the wake word repeated after the
 # gate opened — observed live: a bare, mis-spelled "Hey <name>." went to the
 # intelligence). If the utterance is just the wake phrase, it's not a command:
-# drop it. The name, its heard-as spellings and the whole-utterance match live
-# in wake_name (config-driven, applies live).
+# drop it. The name, its sound-alike spellings and the whole-utterance match
+# live in wake_name (config-driven, applies live).
 def _is_wake_phrase_only(text: str) -> bool:
     import wake_name
     return wake_name.is_wake_phrase_only(text)
@@ -658,13 +658,7 @@ class IntelligenceAgent(FrameProcessor):
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             if text:
-                dropped = _is_wake_phrase_only(text)
-                try:
-                    from dashboard import registry as _reg
-                    _reg.note_heard(self._room, text, dropped)
-                except Exception:
-                    logger.opt(exception=True).debug("heard-after-wake note failed")
-                if dropped:
+                if _is_wake_phrase_only(text):
                     logger.info(f"intelligence_agent: dropped wake-phrase-only [{text}]")
                 else:
                     now = time.monotonic()

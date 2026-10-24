@@ -2665,33 +2665,23 @@ async def oww_select_model(payload: OWWModelPayload):
 class WakePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     name: str | None = Field(default=None, max_length=30)   # "" = clear (no name)
-    heard_as: list[str] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _check_terms(self):
         if self.name and self.name.strip() and not wake_name.valid_term(self.name.strip()):
             raise ValueError("name: a letter, then letters, spaces, ' or - (max 30)")
-        if self.heard_as is not None:
-            if not all(wake_name.valid_term(a) for a in self.heard_as):
-                raise ValueError("heard_as: each a letter, then letters, spaces, ' or - (max 30)")
-            bad = [a for a in self.heard_as if wake_name.reserved_term(a)]
-            if bad:
-                raise ValueError(f"heard_as: '{bad[0]}' is a filler word — it would swallow real commands")
         return self
 
 
 @router.get("/wake")
 async def get_wake():
-    """The wake name card: the name (wake.name, "" if unset), the heard-as
-    aliases, and what speech-to-text heard right after recent wakes."""
-    return {"name": wake_name.name(), "heard_as": wake_name.aliases(),
-            "recent": registry.recent_heard(),
-            "model": wake_name.model_value()}
+    """The wake name card: the name (wake.name, "" if unset) and the model."""
+    return {"name": wake_name.name(), "model": wake_name.model_value()}
 
 
 @router.put("/wake", dependencies=GUARD)
 async def put_wake(payload: WakePayload):
-    """Save the name / aliases. Applies LIVE — the drop-filter and log name
+    """Save the name. Applies LIVE — the drop-filter and log name
     read config per call (the write refreshes the cache). Edits the wake
     section in place (comments survive)."""
     wake = config_store.read_section("wake") or {}
@@ -2702,16 +2692,13 @@ async def put_wake(payload: WakePayload):
         else:
             wake.pop("name", None)
         touched["wake"] = wake
-    if payload.heard_as is not None:
-        wake["heard_as"] = wake_name.normalise_aliases(payload.heard_as)
-        touched["wake"] = wake
     if touched:
         try:
             config_store.write_sections(touched)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
         logger.info(f"dashboard: wake {'/'.join(sorted(touched))} saved — live, no restart")
-    return {"ok": True, "name": wake_name.name(), "heard_as": wake_name.aliases()}
+    return {"ok": True, "name": wake_name.name()}
 
 
 @router.delete("/oww/models/{name}", dependencies=GUARD)

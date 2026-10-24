@@ -25,6 +25,10 @@ The two version streams are independent.
   once ElevenLabs answers with a working session again. The language is fixed when a session starts, so changing it needs a restart.
 
 ### Changed
+- Wake name: a bare "Hey <name>." is matched by sound-alike spelling, so the
+  spellings list (`wake.heard_as`, "Also heard as" / "Add a spelling") and the
+  "Heard right after a wake" list are gone from the Wake name card and the
+  `/wake` API; an old `heard_as` in config.yaml is ignored.
 - Dashboard: one unsaved-changes bar at the bottom of the page replaces the Save buttons on the TTS, STT, Voice
   tuning, Wake name, Wake word model ("Set active"), Intelligence and room mapping cards. It lists the cards with
   edits (each name links to its card), saves them all in one go with one summary message, and Discard puts

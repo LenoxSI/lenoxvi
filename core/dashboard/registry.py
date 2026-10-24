@@ -23,7 +23,6 @@ Persistence split:
 """
 
 import time
-from collections import deque
 from pathlib import Path
 
 from loguru import logger
@@ -318,7 +317,7 @@ def mark_disconnected(pc_id):
         rec["last_seen"] = time.time()
 
 
-def note_wake(room: str | None = None, heard_key: str | None = None):
+def note_wake(room: str | None = None):
     """Called by the wake gate on IDLE -> AWAKE (sync, cheap). Room is
     THIS pipeline's room (passed by bot.py from room_for_pc — the
     old global-active-room read routed replies to the last-connected
@@ -326,31 +325,6 @@ def note_wake(room: str | None = None, heard_key: str | None = None):
     the wake record but marks the room unknown."""
     global _last_wake
     _last_wake = {"time": time.time(), "room": room}
-    # heard_key: the room key the pipeline's intelligence records transcripts
-    # under (captured at build time) — so wake and transcript always pair.
-    _WAKE_PENDING[(heard_key if heard_key is not None else room) or "unknown"] = time.time()
-
-
-# Heard-after-wake: the FIRST final transcript within HEARD_WINDOW_S of a wake
-# in the same room — what speech-to-text made of the wake phrase. Shown on the
-# dashboard's Wake name card so a new mis-spelling becomes a one-click alias.
-# In memory only (never written to disk), last 2, cleared on restart.
-HEARD_WINDOW_S = 30.0
-_RECENT_HEARD: deque = deque(maxlen=2)
-_WAKE_PENDING: dict = {}
-
-
-def note_heard(room: str | None, text: str, dropped: bool) -> None:
-    """Record `text` if it's the first transcript since this room's wake."""
-    t = _WAKE_PENDING.pop(room or "unknown", None)
-    if t is None or time.time() - t > HEARD_WINDOW_S:
-        return
-    _RECENT_HEARD.appendleft({"time": time.time(), "room": room,
-                              "text": str(text)[:200], "dropped": bool(dropped)})
-
-
-def recent_heard() -> list:
-    return list(_RECENT_HEARD)
 
 
 def sender_for_room(room: str):

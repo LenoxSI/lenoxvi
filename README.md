@@ -244,9 +244,11 @@ model collections exist too — check each model's license before using it.
 **The name:** `wake.name` is what the house is called — set it in the
 dashboard's Wake name card (or in config.yaml) to match your wake word. It is
 never guessed from the model file, so change it when you change models.
-Speech-to-text sometimes mis-spells a rare name; add those spellings to
-`wake.heard_as` (or click them in the card) so a bare "Hey <name>." is
-dropped instead of answered.
+Saying the wake word again while a room is already listening gives a bare
+"Hey <name>." transcript; it is dropped instead of answered, including the
+spellings speech-to-text invents for a rare name ("Jarvas", "Jervis" for
+"Jarvis" — anything within two letters of a name of five or more letters).
+Only the whole utterance is matched, never a word inside a real sentence.
 
 ## Local TTS (optional): Pocket TTS
 
