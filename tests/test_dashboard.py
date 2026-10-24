@@ -7884,9 +7884,12 @@ def main():
           f"mute button uses BTN_WARNING: {'muted ? BTN_WARNING' in _appsrc}")
     # UX round 3 (2026-10-24).
     _cssUX = (REPO_CORE.parent / "dashboard-ui" / "src" / "index.css").read_text()
-    check("ux3: every text box and dropdown has a hairline border in the brand's ink",
-          "const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] border border-[var(--field-border)] text-[14px] px-3 py-2'" in _appsrc
-          and "--field-border: var(--lenoxvi-ink);" in _cssUX)
+    check("ux3: fields are one shade lighter than the card with no border; dropdowns draw a chevron 12px in and size like a text box",
+          "const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'" in _appsrc
+          and "--field-border" not in _appsrc and "--field-border" not in _cssUX
+          and ':root, .dark, [data-theme="dark"] {\n  --field-background: var(--surface-secondary);\n}' in _cssUX
+          and "appearance: none;" in _cssUX and "padding-right: 2.25rem;" in _cssUX
+          and "background-position: right 0.75rem center;" in _cssUX and "stroke='%2397a290'" in _cssUX)
     _fpUX = _jsbody(_appsrc, "function FilePick({ accept, file, onPick }) {")
     check("ux3: both file pickers are the styled FilePick (a button plus the chosen file's name), no raw file input",
           _appsrc.count('type="file"') == 1 and 'type="file"' in _fpUX and 'className="hidden"' in _fpUX
