@@ -1,0 +1,4778 @@
+{
+ "turn/hermes-default/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-profile/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "kids-agent",
+   "url": "http://hm.test:8642/p/kids-agent/v1",
+   "key_var": "LVI_HERMES_KEY_KIDS_AGENT",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-profile/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "kids-agent",
+   "url": "http://hm.test:8642/p/kids-agent/v1",
+   "key_var": "LVI_HERMES_KEY_KIDS_AGENT",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default-named/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default-named/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-openclaw-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-legacy/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "legacy-main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/legacy-main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-legacy/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "legacy-main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-openclaw-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/legacy-main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-none/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-none/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-openclaw-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-agent/fresh": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "glm-5",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\", \"model\": \"glm-5\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-agent/sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "glm-5",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\", \"model\": \"glm-5\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/no-history": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/no-room-sticky": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/room-override/hermes": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "kids-agent",
+   "url": "http://hm.test:8642/p/kids-agent/v1",
+   "key_var": "LVI_HERMES_KEY_KIDS_AGENT",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/room-override/openclaw": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "kidbot",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-openclaw-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/kidbot\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/room-override/nanobot": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "glm-kids",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\", \"model\": \"glm-kids\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/room-override/other-system-ignored": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/room-override/invalid-name": {
+  "result": {
+   "reply": "ok reply",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-room"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-room"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/http-400": {
+  "result": {
+   "raised": "HTTPError: HTTP Error 400: err"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/http-401": {
+  "result": {
+   "raised": "HTTPError: HTTP Error 401: err"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/empty-reply": {
+  "result": {
+   "raised": "RuntimeError: the intelligence returned an empty reply"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/hermes-default/char-cap": {
+  "result": {
+   "reply": "This reply is far too long for a ten.",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 10, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": [
+   "intelligence_agent: reply 76 chars exceeded cap 40 (max_tokens=10) \u2014 truncated"
+  ]
+ },
+ "turn/hermes-default/preamble": {
+  "result": {
+   "reply": "The user is asking about the time. It is noon.",
+   "agent": "",
+   "url": "http://hm.test:8642/v1",
+   "key_var": "LVI_HERMES_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "x-hermes-session-key",
+      "voice-golden-fresh"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/http-400": {
+  "result": {
+   "raised": "HTTPError: HTTP Error 400: err"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/http-401": {
+  "result": {
+   "raised": "HTTPError: HTTP Error 401: err"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/empty-reply": {
+  "result": {
+   "raised": "RuntimeError: the intelligence returned an empty reply"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/openclaw-agent/char-cap": {
+  "result": {
+   "reply": "This reply is far too long for a ten.",
+   "agent": "main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 10, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": [
+   "intelligence_agent: reply 76 chars exceeded cap 40 (max_tokens=10) \u2014 truncated"
+  ]
+ },
+ "turn/openclaw-agent/preamble": {
+  "result": {
+   "reply": "The user is asking about the time. It is noon.",
+   "agent": "main",
+   "url": "http://oc.test:18789/v1",
+   "key_var": "LVI_OPENCLAW_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
+    "timeout": 120
+   }
+  ],
+  "logs": [
+   "intelligence_agent: openclaw reasoning preamble leaked into content (1 this process) \u2014 reply[:80]='The user is asking about the time. It is noon.'"
+  ]
+ },
+ "turn/nanobot-none/http-400": {
+  "result": {
+   "raised": "RuntimeError: nanobot answered HTTP 400: Only a single user message is supported ***"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/http-401": {
+  "result": {
+   "raised": "RuntimeError: nanobot answered HTTP 401: nope"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/empty-reply": {
+  "result": {
+   "raised": "RuntimeError: the intelligence returned an empty reply"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/char-cap": {
+  "result": {
+   "reply": "This reply is far too long for a ten.",
+   "agent": "",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 10, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": [
+   "intelligence_agent: reply 76 chars exceeded cap 40 (max_tokens=10) \u2014 truncated"
+  ]
+ },
+ "turn/nanobot-none/preamble": {
+  "result": {
+   "reply": "The user is asking about the time. It is noon.",
+   "agent": "",
+   "url": "http://nb.test:8900/v1",
+   "key_var": "LVI_NANOBOT_KEY",
+   "conversation": "voice-golden-fresh"
+  },
+  "calls": [
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
+    "timeout": 120
+   }
+  ],
+  "logs": []
+ },
+ "turn/nanobot-none/no-key": {
+  "result": {
+   "raised": "RuntimeError: no intelligence key set (LVI_NANOBOT_KEY) \u2014 set it in .env (a lane's key names its intelligence; no cross-kind fallback)"
+  },
+  "calls": [],
+  "logs": [
+   "intelligence_agent: no intelligence key set (LVI_NANOBOT_KEY) \u2014 kind=nanobot; turns will fail until it is set"
+  ]
+ },
+ "turn/unknown-kind": {
+  "result": {
+   "raised": "RuntimeError: no intelligence key set (None) \u2014 set it in .env (a lane's key names its intelligence; no cross-kind fallback)"
+  },
+  "calls": [],
+  "logs": [
+   "intelligence_agent: no intelligence key set (None) \u2014 kind=bogus; turns will fail until it is set"
+  ]
+ },
+ "target/agent_for": {
+  "result": [
+   [
+    "hermes",
+    0,
+    ""
+   ],
+   [
+    "hermes",
+    1,
+    ""
+   ],
+   [
+    "hermes",
+    2,
+    ""
+   ],
+   [
+    "hermes",
+    3,
+    "kids-agent"
+   ],
+   [
+    "hermes",
+    4,
+    ""
+   ],
+   [
+    "openclaw",
+    0,
+    ""
+   ],
+   [
+    "openclaw",
+    1,
+    "legacy"
+   ],
+   [
+    "openclaw",
+    2,
+    "oc"
+   ],
+   [
+    "openclaw",
+    3,
+    "x"
+   ],
+   [
+    "openclaw",
+    4,
+    ""
+   ],
+   [
+    "nanobot",
+    0,
+    ""
+   ],
+   [
+    "nanobot",
+    1,
+    ""
+   ],
+   [
+    "nanobot",
+    2,
+    "nb"
+   ],
+   [
+    "nanobot",
+    3,
+    ""
+   ],
+   [
+    "nanobot",
+    4,
+    ""
+   ],
+   [
+    "stub",
+    0,
+    ""
+   ],
+   [
+    "stub",
+    1,
+    ""
+   ],
+   [
+    "stub",
+    2,
+    ""
+   ],
+   [
+    "stub",
+    3,
+    ""
+   ],
+   [
+    "stub",
+    4,
+    ""
+   ],
+   [
+    "bogus",
+    0,
+    ""
+   ],
+   [
+    "bogus",
+    1,
+    ""
+   ],
+   [
+    "bogus",
+    2,
+    ""
+   ],
+   [
+    "bogus",
+    3,
+    ""
+   ],
+   [
+    "bogus",
+    4,
+    ""
+   ],
+   [
+    "",
+    0,
+    ""
+   ],
+   [
+    "",
+    1,
+    ""
+   ],
+   [
+    "",
+    2,
+    ""
+   ],
+   [
+    "",
+    3,
+    ""
+   ],
+   [
+    "",
+    4,
+    ""
+   ]
+  ],
+  "calls": [],
+  "logs": []
+ },
+ "target/key_var": {
+  "result": [
+   [
+    "hermes",
+    "",
+    "LVI_HERMES_KEY"
+   ],
+   [
+    "hermes",
+    "default",
+    "LVI_HERMES_KEY"
+   ],
+   [
+    "hermes",
+    "kids-agent",
+    "LVI_HERMES_KEY_KIDS_AGENT"
+   ],
+   [
+    "hermes",
+    "ha.butler_2",
+    "LVI_HERMES_KEY_HA_BUTLER_2"
+   ],
+   [
+    "openclaw",
+    "",
+    "LVI_OPENCLAW_KEY"
+   ],
+   [
+    "openclaw",
+    "default",
+    "LVI_OPENCLAW_KEY"
+   ],
+   [
+    "openclaw",
+    "kids-agent",
+    "LVI_OPENCLAW_KEY"
+   ],
+   [
+    "openclaw",
+    "ha.butler_2",
+    "LVI_OPENCLAW_KEY"
+   ],
+   [
+    "nanobot",
+    "",
+    "LVI_NANOBOT_KEY"
+   ],
+   [
+    "nanobot",
+    "default",
+    "LVI_NANOBOT_KEY"
+   ],
+   [
+    "nanobot",
+    "kids-agent",
+    "LVI_NANOBOT_KEY"
+   ],
+   [
+    "nanobot",
+    "ha.butler_2",
+    "LVI_NANOBOT_KEY"
+   ],
+   [
+    "stub",
+    "",
+    null
+   ],
+   [
+    "stub",
+    "default",
+    null
+   ],
+   [
+    "stub",
+    "kids-agent",
+    null
+   ],
+   [
+    "stub",
+    "ha.butler_2",
+    null
+   ],
+   [
+    "bogus",
+    "",
+    null
+   ],
+   [
+    "bogus",
+    "default",
+    null
+   ],
+   [
+    "bogus",
+    "kids-agent",
+    null
+   ],
+   [
+    "bogus",
+    "ha.butler_2",
+    null
+   ],
+   [
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    "default",
+    null
+   ],
+   [
+    "",
+    "kids-agent",
+    null
+   ],
+   [
+    "",
+    "ha.butler_2",
+    null
+   ]
+  ],
+  "calls": [],
+  "logs": []
+ },
+ "target/request_url": {
+  "result": [
+   [
+    "hermes",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "hermes",
+    "http://h:8642",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "hermes",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "hermes",
+    "http://h:8642/",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "hermes",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "hermes",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "",
+    "",
+    ""
+   ],
+   [
+    "hermes",
+    "",
+    "default",
+    ""
+   ],
+   [
+    "hermes",
+    "",
+    "kids-agent",
+    "/p/kids-agent/v1"
+   ],
+   [
+    "hermes",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "hermes",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "hermes",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/p/kids-agent/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "openclaw",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/v1"
+   ],
+   [
+    "openclaw",
+    "",
+    "",
+    ""
+   ],
+   [
+    "openclaw",
+    "",
+    "default",
+    ""
+   ],
+   [
+    "openclaw",
+    "",
+    "kids-agent",
+    ""
+   ],
+   [
+    "openclaw",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "openclaw",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "openclaw",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "nanobot",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/v1"
+   ],
+   [
+    "nanobot",
+    "",
+    "",
+    "/v1"
+   ],
+   [
+    "nanobot",
+    "",
+    "default",
+    "/v1"
+   ],
+   [
+    "nanobot",
+    "",
+    "kids-agent",
+    "/v1"
+   ],
+   [
+    "nanobot",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "nanobot",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "nanobot",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642/",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642/",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "stub",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "stub",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "stub",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "stub",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "stub",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/v1"
+   ],
+   [
+    "stub",
+    "",
+    "",
+    ""
+   ],
+   [
+    "stub",
+    "",
+    "default",
+    ""
+   ],
+   [
+    "stub",
+    "",
+    "kids-agent",
+    ""
+   ],
+   [
+    "stub",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "stub",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "stub",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642/",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642/",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "bogus",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "bogus",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/v1"
+   ],
+   [
+    "bogus",
+    "",
+    "",
+    ""
+   ],
+   [
+    "bogus",
+    "",
+    "default",
+    ""
+   ],
+   [
+    "bogus",
+    "",
+    "kids-agent",
+    ""
+   ],
+   [
+    "bogus",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "bogus",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "bogus",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1/",
+    "",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1/",
+    "default",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642/v1/",
+    "kids-agent",
+    "http://h:8642/v1"
+   ],
+   [
+    "",
+    "http://h:8642",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642/",
+    "",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642/",
+    "default",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642/",
+    "kids-agent",
+    "http://h:8642"
+   ],
+   [
+    "",
+    "http://h:8642/p/old/v1",
+    "",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "",
+    "http://h:8642/p/old/v1",
+    "default",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "",
+    "http://h:8642/p/old/v1",
+    "kids-agent",
+    "http://h:8642/p/old/v1"
+   ],
+   [
+    "",
+    "http://h:8900/v1",
+    "",
+    "http://h:8900/v1"
+   ],
+   [
+    "",
+    "http://h:8900/v1",
+    "default",
+    "http://h:8900/v1"
+   ],
+   [
+    "",
+    "http://h:8900/v1",
+    "kids-agent",
+    "http://h:8900/v1"
+   ],
+   [
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "default",
+    ""
+   ],
+   [
+    "",
+    "",
+    "kids-agent",
+    ""
+   ],
+   [
+    "",
+    "https://h/api/v1",
+    "",
+    "https://h/api/v1"
+   ],
+   [
+    "",
+    "https://h/api/v1",
+    "default",
+    "https://h/api/v1"
+   ],
+   [
+    "",
+    "https://h/api/v1",
+    "kids-agent",
+    "https://h/api/v1"
+   ]
+  ],
+  "calls": [],
+  "logs": []
+ },
+ "target/constants": {
+  "result": {
+   "BASE_KEY_VARS": {
+    "hermes": "LVI_HERMES_KEY",
+    "openclaw": "LVI_OPENCLAW_KEY",
+    "nanobot": "LVI_NANOBOT_KEY"
+   },
+   "port": 9119,
+   "agent_re": "^[A-Za-z0-9_.-]{1,64}$",
+   "is_default": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/openclaw/ok": {
+  "result": {
+   "agents": [
+    {
+     "id": "main",
+     "key_set": true,
+     "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    {
+     "id": "kidbot",
+     "key_set": true,
+     "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "openclaw-models",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/openclaw/bare-url": {
+  "result": {
+   "agents": [
+    {
+     "id": "main",
+     "key_set": true,
+     "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    {
+     "id": "kidbot",
+     "key_set": true,
+     "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "openclaw-models",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/openclaw/no-url": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "set the OpenClaw URL first"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/openclaw/no-key": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "save the OpenClaw key to list its agents"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/openclaw/401-unsaved": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "OpenClaw answered HTTP 401 \u2014 this URL is not saved yet; save it and the stored key will be used"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/openclaw/401-saved": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "OpenClaw answered HTTP 401"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/openclaw/unreachable": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "OpenClaw unreachable (URLError)"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/openclaw/empty": {
+  "result": {
+   "agents": [],
+   "source": "openclaw-models",
+   "note": "OpenClaw listed no agents"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/nanobot/ok": {
+  "result": {
+   "agents": [
+    {
+     "id": "glm-5",
+     "key_set": true,
+     "key_hint": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "nanobot-models",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/nanobot/bare-url": {
+  "result": {
+   "agents": [
+    {
+     "id": "glm-5",
+     "key_set": true,
+     "key_hint": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "nanobot-models",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/nanobot/no-url": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "set the Nanobot URL first"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/nanobot/no-key": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "save the Nanobot key to list its agent"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/nanobot/401-unsaved": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "Nanobot answered HTTP 401 \u2014 this URL is not saved yet; save it and the stored key will be used"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/nanobot/unreachable": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "Nanobot unreachable (URLError)"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/nanobot/bad-shape": {
+  "result": {
+   "agents": [],
+   "source": "nanobot-models",
+   "note": "Nanobot listed no model"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/hermes/ok": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    {
+     "id": "kids-agent",
+     "key_set": true,
+     "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "hermes-status",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/hermes/status-url": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    {
+     "id": "kids-agent",
+     "key_set": true,
+     "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "hermes-status",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://other.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/hermes/no-url": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "fallback",
+   "note": "set the Hermes URL first"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/hermes/unreachable": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "fallback",
+   "note": "Hermes dashboard not reachable (URLError) \u2014 showing the default agent only"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/hermes/no-profiles": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "fallback",
+   "note": "Hermes listed no profiles \u2014 showing the default agent only"
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "target/discover/bogus/any": {
+  "result": {
+   "agents": [],
+   "source": "none",
+   "note": "unknown kind 'bogus'"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "target/discover/hermes/patched-port": {
+  "result": {
+   "agents": [
+    {
+     "id": "default",
+     "key_set": true,
+     "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    {
+     "id": "kids-agent",
+     "key_set": true,
+     "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    }
+   ],
+   "source": "hermes-status",
+   "note": null
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:19119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/get-intelligence/hermes-default": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": {
+     "hermes": "http://hm.test:8642/v1"
+    },
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_hermes_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/hermes-default": {
+  "result": "Hermes",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/hermes-default": {
+  "result": {
+   "agent_kind": "hermes",
+   "default_agent": "default"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/hermes-profile": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": {
+     "hermes": "http://hm.test:8642/v1"
+    },
+    "agent": null,
+    "agents": {
+     "hermes": "kids-agent",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_hermes_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/hermes-profile": {
+  "result": "Hermes \u00b7 kids-agent",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/hermes-profile": {
+  "result": {
+   "agent_kind": "hermes",
+   "default_agent": "kids-agent"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/hermes-default-named": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1/",
+    "urls": {},
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_hermes_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/hermes-default-named": {
+  "result": "Hermes",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/hermes-default-named": {
+  "result": {
+   "agent_kind": "hermes",
+   "default_agent": "default"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/openclaw-agent": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1",
+    "urls": {
+     "openclaw": "http://oc.test:18789/v1"
+    },
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": "main",
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_openclaw_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/openclaw-agent": {
+  "result": "OpenClaw \u00b7 main",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/openclaw-agent": {
+  "result": {
+   "agent_kind": "openclaw",
+   "default_agent": "main"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/openclaw-legacy": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1",
+    "urls": {},
+    "agent": "legacy-main",
+    "agents": {
+     "hermes": "default",
+     "openclaw": "legacy-main",
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_openclaw_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/openclaw-legacy": {
+  "result": "OpenClaw \u00b7 legacy-main",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/openclaw-legacy": {
+  "result": {
+   "agent_kind": "openclaw",
+   "default_agent": "legacy-main"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/openclaw-none": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1",
+    "urls": {},
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_openclaw_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/openclaw-none": {
+  "result": "OpenClaw",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/openclaw-none": {
+  "result": {
+   "agent_kind": "openclaw",
+   "default_agent": ""
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/nanobot-none": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "nanobot",
+    "url": "http://nb.test:8900/v1",
+    "urls": {
+     "nanobot": "http://nb.test:8900/v1"
+    },
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_nanobot_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/nanobot-none": {
+  "result": "Nanobot",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/nanobot-none": {
+  "result": {
+   "agent_kind": "nanobot",
+   "default_agent": ""
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/nanobot-agent": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "nanobot",
+    "url": "http://nb.test:8900",
+    "urls": {},
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": "glm-5"
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_nanobot_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/nanobot-agent": {
+  "result": "Nanobot \u00b7 glm-5",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/nanobot-agent": {
+  "result": {
+   "agent_kind": "nanobot",
+   "default_agent": "glm-5"
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/get-intelligence/bogus": {
+  "result": {
+   "status": 200,
+   "json": {
+    "kind": "bogus",
+    "url": "http://hm.test:8642/v1",
+    "urls": {},
+    "agent": null,
+    "agents": {
+     "hermes": "default",
+     "openclaw": null,
+     "nanobot": null
+    },
+    "key_set": true,
+    "keys_set": {
+     "hermes": true,
+     "openclaw": true,
+     "nanobot": true
+    },
+    "key_hints": {
+     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    },
+    "key_kind": "lvi_hermes_key",
+    "note": "applies on the next bot restart (read at pipeline construction)"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/bogus": {
+  "result": "Hermes",
+  "calls": [],
+  "logs": []
+ },
+ "routes/agent-default/bogus": {
+  "result": {
+   "agent_kind": "bogus",
+   "default_agent": ""
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/label/openclaw-env-agent": {
+  "result": "OpenClaw \u00b7 env-agent",
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/hermes-url-agent": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "hermes"
+    }
+   },
+   "saved": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": {
+     "hermes": "http://hm.test:8642/v1"
+    },
+    "agent": null,
+    "agents": {
+     "hermes": "kids-agent"
+    }
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/hermes-empty-agent": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": "hermes needs an agent; only nanobot can run without one"
+    }
+   },
+   "saved": {
+    "kind": null,
+    "url": null,
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-empty-agent": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": "openclaw needs an agent; only nanobot can run without one"
+    }
+   },
+   "saved": {
+    "kind": null,
+    "url": null,
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/nanobot-empty-agent": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "nanobot"
+    }
+   },
+   "saved": {
+    "kind": "nanobot",
+    "url": "http://nb.test:8900/v1",
+    "urls": {
+     "nanobot": "http://nb.test:8900/v1"
+    },
+    "agent": null,
+    "agents": {}
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/nanobot-agent": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "nanobot"
+    }
+   },
+   "saved": {
+    "kind": "nanobot",
+    "url": "http://nb.test:8900/v1",
+    "urls": {
+     "nanobot": "http://nb.test:8900/v1"
+    },
+    "agent": null,
+    "agents": {
+     "nanobot": "glm-5"
+    }
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-url-first": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "hermes",
+     "url_only": true
+    }
+   },
+   "saved": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": {
+     "hermes": "http://hm.test:8642/v1",
+     "openclaw": "http://oc.test:18789/v1"
+    },
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-url-first-live": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "openclaw",
+     "url_only": true
+    }
+   },
+   "saved": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1/x",
+    "urls": {
+     "openclaw": "http://oc.test:18789/v1/x"
+    },
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-with-agent": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "openclaw"
+    }
+   },
+   "saved": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1",
+    "urls": {
+     "openclaw": "http://oc.test:18789/v1"
+    },
+    "agent": "main",
+    "agents": {
+     "openclaw": "main"
+    }
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-flip-no-agent": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": "openclaw needs an agent id (intelligence.agent)"
+    }
+   },
+   "saved": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": {
+     "openclaw": "http://oc.test:18789/v1"
+    },
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/openclaw-flip-kept-agent": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "openclaw"
+    }
+   },
+   "saved": {
+    "kind": "openclaw",
+    "url": "http://oc.test:18789/v1",
+    "urls": {
+     "openclaw": "http://oc.test:18789/v1"
+    },
+    "agent": null,
+    "agents": {
+     "openclaw": "main"
+    }
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/flip-no-url": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": "set a URL for nanobot first"
+    }
+   },
+   "saved": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/flip-remembered-url": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "nanobot"
+    }
+   },
+   "saved": {
+    "kind": "nanobot",
+    "url": "http://nb.test:8900/v1",
+    "urls": {
+     "nanobot": "http://nb.test:8900/v1"
+    },
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/same-kind-no-url": {
+  "result": {
+   "resp": {
+    "status": 200,
+    "json": {
+     "ok": true,
+     "kind": "hermes"
+    }
+   },
+   "saved": {
+    "kind": "hermes",
+    "url": "http://hm.test:8642/v1",
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/bogus-kind": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": [
+      {
+       "type": "string_pattern_mismatch",
+       "loc": [
+        "body",
+        "kind"
+       ],
+       "msg": "String should match pattern '^(hermes|openclaw|nanobot)$'"
+      }
+     ]
+    }
+   },
+   "saved": {
+    "kind": null,
+    "url": null,
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-intelligence/extra-field": {
+  "result": {
+   "resp": {
+    "status": 422,
+    "json": {
+     "detail": [
+      {
+       "type": "extra_forbidden",
+       "loc": [
+        "body",
+        "zzz"
+       ],
+       "msg": "Extra inputs are not permitted"
+      }
+     ]
+    }
+   },
+   "saved": {
+    "kind": null,
+    "url": null,
+    "urls": null,
+    "agent": null,
+    "agents": null
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/hermes": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "key_set": true,
+    "replaced": true,
+    "var": "LVI_HERMES_KEY",
+    "kind": "hermes",
+    "key_hint": "new-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/hermes-profile": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "key_set": true,
+    "replaced": true,
+    "var": "LVI_HERMES_KEY_KIDS_AGENT",
+    "kind": "hermes",
+    "key_hint": "new-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/hermes-default": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "key_set": true,
+    "replaced": true,
+    "var": "LVI_HERMES_KEY",
+    "kind": "hermes",
+    "key_hint": "new-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/openclaw-agent-ignored": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "key_set": true,
+    "replaced": true,
+    "var": "LVI_OPENCLAW_KEY",
+    "kind": "openclaw",
+    "key_hint": "new-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/nanobot": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "key_set": true,
+    "replaced": true,
+    "var": "LVI_NANOBOT_KEY",
+    "kind": "nanobot",
+    "key_hint": "new-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/put-key/bogus": {
+  "result": {
+   "status": 422,
+   "json": {
+    "detail": [
+     {
+      "type": "literal_error",
+      "loc": [
+       "body",
+       "kind"
+      ],
+      "msg": "Input should be 'hermes', 'openclaw' or 'nanobot'"
+     }
+    ]
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/test/hermes/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "my-model",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"my-model\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/hermes/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"my-model\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/hermes/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/hermes-profile/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "hermes-agent",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/p/kids-agent/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/hermes-profile/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/p/kids-agent/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/hermes-profile/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/p/kids-agent/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/openclaw/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "openclaw/main",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 16, \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/openclaw/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 16, \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/openclaw/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "nanobot",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 16, \"session_id\": \"lenoxvi-test-<ID>\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400: Only a single user message is supported ***"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 16, \"session_id\": \"lenoxvi-test-<ID>\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot-agent/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "glm-5",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 16, \"session_id\": \"lenoxvi-test-<ID>\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}], \"model\": \"glm-5\"}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot-agent/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400: Only a single user message is supported ***"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://nb.test:8900/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"stream\": false, \"max_tokens\": 16, \"session_id\": \"lenoxvi-test-<ID>\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}], \"model\": \"glm-5\"}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/nanobot-agent/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/bogus/ok": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "latency_ms": 0,
+    "model": "hermes-agent",
+    "reply": "ok reply"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/bogus/http-400": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "gateway error: HTTP 400"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/bogus/unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "unreachable: URLError"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/test/no-url": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "error": "no url configured"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/agents/openclaw-saved": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [
+     {
+      "id": "main",
+      "key_set": true,
+      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     },
+     {
+      "id": "kidbot",
+      "key_set": true,
+      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     }
+    ],
+    "source": "openclaw-models",
+    "note": null,
+    "selected": null
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/openclaw-typed-other": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [],
+    "source": "none",
+    "note": "OpenClaw answered HTTP 401 \u2014 this URL is not saved yet; save it and the stored key will be used",
+    "selected": null
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://elsewhere.test:18789/v1/models",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/openclaw-same-target": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [
+     {
+      "id": "main",
+      "key_set": true,
+      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     },
+     {
+      "id": "kidbot",
+      "key_set": true,
+      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     }
+    ],
+    "source": "openclaw-models",
+    "note": null,
+    "selected": null
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/nanobot-saved": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [
+     {
+      "id": "glm-5",
+      "key_set": true,
+      "key_hint": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     }
+    ],
+    "source": "nanobot-models",
+    "note": null,
+    "selected": "glm-5"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/hermes-saved": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [
+     {
+      "id": "default",
+      "key_set": true,
+      "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     },
+     {
+      "id": "kids-agent",
+      "key_set": true,
+      "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     }
+    ],
+    "source": "hermes-status",
+    "note": null,
+    "selected": "default"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/hermes-status-url": {
+  "result": {
+   "status": 200,
+   "json": {
+    "agents": [
+     {
+      "id": "default",
+      "key_set": true,
+      "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     },
+     {
+      "id": "kids-agent",
+      "key_set": true,
+      "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+     }
+    ],
+    "source": "hermes-status",
+    "note": null,
+    "selected": "default"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://s.test:9119/api/status",
+    "headers": [],
+    "body": null,
+    "timeout": 4.0
+   }
+  ],
+  "logs": []
+ },
+ "routes/agents/bogus": {
+  "result": {
+   "status": 422,
+   "json": {
+    "detail": [
+     {
+      "type": "literal_error",
+      "loc": [
+       "body",
+       "kind"
+      ],
+      "msg": "Input should be 'hermes', 'openclaw' or 'nanobot'"
+     }
+    ]
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/key-test/hermes": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "status": "ok",
+    "detail": "hermes-agent answered"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/hermes-401": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "unreachable",
+    "detail": "gateway error: HTTP 404 \u2014 the saved URL may need /v1 at the end (Intelligence card)"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hm-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/hermes-profile": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "status": "ok",
+    "detail": "hermes-agent answered"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://hm.test:8642/p/kids-agent/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://hm.test:8642/p/kids-agent/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer hk-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 16, \"conversation\": \"dashboard-test\", \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/openclaw": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "status": "ok",
+    "detail": "openclaw/main answered"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 16, \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/openclaw-no-url": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "needs_setup",
+    "detail": "save the OpenClaw URL on the Intelligence card first"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/key-test/openclaw-no-agent": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "needs_setup",
+    "detail": "pick an OpenClaw agent on the Intelligence card first"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/key-test/openclaw-401": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "rejected",
+    "detail": "gateway error: HTTP 401"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://oc.test:18789/v1/health",
+    "headers": [],
+    "body": null,
+    "timeout": 5
+   },
+   {
+    "method": "POST",
+    "url": "http://oc.test:18789/v1/chat/completions",
+    "headers": [
+     [
+      "authorization",
+      "Bearer oc-golden-key-abcdefghijkl"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ]
+    ],
+    "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 16, \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: ok\"}]}",
+    "timeout": 30
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/nanobot": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": true,
+    "status": "ok",
+    "detail": "Nanobot accepted the key"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/nanobot-bare": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "unreachable",
+    "detail": "Nanobot answered HTTP 404"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/nanobot-401": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "rejected",
+    "detail": "Nanobot rejected the key (HTTP 401)"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/nanobot-no-url": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "needs_setup",
+    "detail": "save the Nanobot URL on the Intelligence card first"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/key-test/nanobot-unreachable": {
+  "result": {
+   "status": 200,
+   "json": {
+    "ok": false,
+    "status": "unreachable",
+    "detail": "unreachable"
+   }
+  },
+  "calls": [
+   {
+    "method": "GET",
+    "url": "http://nb.test:8900/v1/models",
+    "headers": [
+     [
+      "authorization",
+      "Bearer nb-golden-key-abcdefghijkl"
+     ]
+    ],
+    "body": null,
+    "timeout": 5
+   }
+  ],
+  "logs": []
+ },
+ "routes/key-test/unknown-var": {
+  "result": {
+   "status": 422,
+   "json": {
+    "detail": "LVI_HERMES_KEY_NOPE is not an API key this appliance uses"
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "routes/mapping-bad-kind": {
+  "result": {
+   "status": 422,
+   "json": {
+    "detail": [
+     {
+      "type": "literal_error",
+      "loc": [
+       "body",
+       "room_agents",
+       "bogus",
+       "[key]"
+      ],
+      "msg": "Input should be 'hermes', 'openclaw' or 'nanobot'"
+     }
+    ]
+   }
+  },
+  "calls": [],
+  "logs": []
+ },
+ "keys_catalog/static": {
+  "result": [
+   {
+    "var": "ELEVENLABS_API_KEY",
+    "label": "ElevenLabs",
+    "used_by": [
+     "TTS"
+    ],
+    "kind": "elevenlabs"
+   },
+   {
+    "var": "DEEPGRAM_API_KEY",
+    "label": "Deepgram",
+    "used_by": [
+     "TTS",
+     "STT"
+    ],
+    "kind": "deepgram"
+   },
+   {
+    "var": "LVI_HERMES_KEY",
+    "label": "Hermes",
+    "used_by": [
+     "Intelligence"
+    ],
+    "kind": "hermes",
+    "agent": "default"
+   },
+   {
+    "var": "LVI_OPENCLAW_KEY",
+    "label": "OpenClaw",
+    "used_by": [
+     "Intelligence"
+    ],
+    "kind": "openclaw"
+   },
+   {
+    "var": "LVI_NANOBOT_KEY",
+    "label": "Nanobot",
+    "used_by": [
+     "Intelligence"
+    ],
+    "kind": "nanobot"
+   }
+  ],
+  "calls": [],
+  "logs": []
+ },
+ "routes/key-vars": {
+  "result": {
+   "hermes": "LVI_HERMES_KEY",
+   "openclaw": "LVI_OPENCLAW_KEY",
+   "nanobot": "LVI_NANOBOT_KEY"
+  },
+  "calls": [],
+  "logs": []
+ }
+}
