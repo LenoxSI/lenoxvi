@@ -33,6 +33,9 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Intelligence card: the URL needs only `host:port` for any lane. The bot fills in `http://` and `/v1` (a full URL
+  with https or another path is kept as typed), the saved config still holds the full URL, and a saved
+  `http://host:port/v1` shows as `host:port`.
 - Dashboard: the Intelligence card, the Keys card, the rooms' agent pickers and the status chip build their lane
   options, labels, help text and brand colours from `GET /api/dashboard/intelligence/lanes` (each lane's own UI
   facts), so a new lane needs no dashboard edit. A built-in copy of the three lanes renders until the bot answers,

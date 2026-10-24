@@ -68,6 +68,20 @@ class Lane:
         `url` may carry a trailing slash."""
         return (url or "").rstrip("/")
 
+    def normalize_url(self, raw: str) -> str:
+        """What the user typed -> the URL to save. Host:port is enough: a
+        missing scheme becomes http://, a missing path becomes /v1. A full
+        URL (https, a profile or any other path) is kept as typed."""
+        url = (raw or "").strip()
+        if not url:
+            return url
+        if "://" not in url:
+            url = "http://" + url
+        scheme, rest = url.split("://", 1)
+        if "/" not in rest.rstrip("/"):
+            url = f"{scheme}://{rest.rstrip('/')}/v1"
+        return url
+
     # ── voice turn (called by IntelligenceAgent._ask_intelligence) ──
     def build_request(self, text: str, ctx: TurnContext) -> tuple[dict, dict]:
         """(payload, extra_headers) for one chat completion. The caller adds

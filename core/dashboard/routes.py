@@ -1659,6 +1659,16 @@ async def delete_key(var: str):
 _INTELLIGENCE_URL_RE = r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$"
 
 
+def _normalize_intelligence_url(data):
+    """Host:port is enough: the lane fills in http:// and /v1 (Lane.normalize_url)
+    BEFORE the URL pattern runs, so what is saved and probed is always a full URL."""
+    if isinstance(data, dict) and isinstance(data.get("url"), str) and isinstance(data.get("kind"), str):
+        lane = intelligence.LANES.get(data["kind"])
+        if lane is not None:
+            data = {**data, "url": lane.normalize_url(data["url"])}
+    return data
+
+
 def _check_intelligence_url_port(url) -> None:
     # The pattern lets a port like 70000 (or a second colon) through, and
     # urlsplit().port raises on those — refuse them here so the caller gets
@@ -1688,6 +1698,11 @@ class IntelligencePayload(BaseModel):
     # own model, so a model change on the server can't 400 every turn.
     agent: str | None = Field(default=None, max_length=64,
                               pattern=r"^[A-Za-z0-9_.-]*$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _short_url(cls, data):
+        return _normalize_intelligence_url(data)
 
     @model_validator(mode="after")
     def _url_port(self):
@@ -1901,6 +1916,11 @@ class IntelligenceAgentsPayload(BaseModel):
     # The URL on screen (may be unsaved); omitted = that kind's saved URL.
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _short_url(cls, data):
+        return _normalize_intelligence_url(data)
 
     @model_validator(mode="after")
     def _url_port(self):

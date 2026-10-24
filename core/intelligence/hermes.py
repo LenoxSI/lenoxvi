@@ -116,7 +116,7 @@ class HermesLane(Lane):
             "agent_required": self.agent_required,
             "per_agent_keys": self.per_agent_keys,
             "default_agent": self.default_agent,
-            "url_placeholder": 'http://<intelligence-host>:8642/v1',
+            "url_placeholder": '<host>:8642',
             "agent_help": 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.',
             "no_agent_label": None,
             "brand": {'backgroundColor': 'rgba(255, 255, 255, 0.92)', 'color': '#2563eb'},

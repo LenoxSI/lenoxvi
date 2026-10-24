@@ -135,7 +135,7 @@ class NanobotLane(Lane):
             "agent_required": self.agent_required,
             "per_agent_keys": self.per_agent_keys,
             "default_agent": self.default_agent,
-            "url_placeholder": 'http://<nanobot-host>:8900/v1',
+            "url_placeholder": '<host>:8900',
             "agent_help": 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.',
             "no_agent_label": "nanobot's own model",
             "brand": None,

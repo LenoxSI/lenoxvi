@@ -303,15 +303,15 @@ const readKey = (id) => {
 // answers, and stays if it can't (an older bot has no /lanes route).
 const BUILTIN_LANES = [
   { kind: 'hermes', label: 'Hermes', agent_required: true, per_agent_keys: true, default_agent: 'default',
-    url_placeholder: 'http://<intelligence-host>:8642/v1',
+    url_placeholder: '<host>:8642',
     agent_help: 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.',
     no_agent_label: null, brand: { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' } },
   { kind: 'openclaw', label: 'OpenClaw', agent_required: true, per_agent_keys: false, default_agent: null,
-    url_placeholder: 'http://<intelligence-host>:8642/v1',
+    url_placeholder: '<host>:18789',
     agent_help: 'Agents on this OpenClaw Gateway (its /v1/models).',
     no_agent_label: null, brand: { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' } },
   { kind: 'nanobot', label: 'Nanobot', agent_required: false, per_agent_keys: false, default_agent: null,
-    url_placeholder: 'http://<nanobot-host>:8900/v1',
+    url_placeholder: '<host>:8900',
     agent_help: 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.',
     no_agent_label: "nanobot's own model", brand: null },
 ]
@@ -321,6 +321,9 @@ const laneOf = kind => LANES.find(l => l.kind === kind)
 const laneLabel = kind => laneOf(kind)?.label || LANES[0].label
 // The lane whose agents each carry their own key (Hermes profiles).
 const perAgentLane = () => LANES.find(l => l.per_agent_keys)
+// A saved URL the bot would rebuild from host:port alone (http://, no path or
+// just /v1) shows as host:port; the bot fills those parts back in on Save.
+const shortUrl = u => (u || '').match(/^http:\/\/([^/]+)(\/v1)?\/?$/)?.[1] || u || ''
 
 // A picked provider/agent with no key: point at the Keys card (keys are
 // entered there only).
@@ -2565,7 +2568,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   const kinds = LANES.map(l => l.kind)
   const d = useDraft({
     kind: savedKind,
-    ...Object.fromEntries(kinds.map(k => [`url:${k}`, savedUrls[k] || ''])),
+    ...Object.fromEntries(kinds.map(k => [`url:${k}`, shortUrl(savedUrls[k])])),
     ...Object.fromEntries(kinds.map(k => [`agent:${k}`, intelligence?.agents?.[k] || null])),
   }, { blank: Object.fromEntries(kinds.map(k => [`agent:${k}`, firstAgent(k)])) })
   const intKind = d.val('kind')
@@ -2692,7 +2695,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}
             placeholder={laneOf(intKind)?.url_placeholder}
-            title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
+            title="Host:port is enough: http:// and /v1 are filled in. Type a full URL for https or another path."
             onBlur={e => {
               const u = e.target.value.trim()
               if (u !== (lastDiscoverUrl.current[intKind] || '')) discover(intKind, u)

@@ -113,7 +113,7 @@ class OpenClawLane(Lane):
             "agent_required": self.agent_required,
             "per_agent_keys": self.per_agent_keys,
             "default_agent": self.default_agent,
-            "url_placeholder": 'http://<intelligence-host>:8642/v1',
+            "url_placeholder": '<host>:18789',
             "agent_help": 'Agents on this OpenClaw Gateway (its /v1/models).',
             "no_agent_label": None,
             "brand": {'backgroundColor': 'rgba(23, 23, 23, 0.9)', 'color': '#ef4444'},
