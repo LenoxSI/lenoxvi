@@ -226,6 +226,33 @@ def main():
           and json.loads(body or "{}") == {"echo": "hello", "sid": "voice-reg-room"}
           and headers.get("x-echo") == "1" and headers.get("authorization") == "Bearer echo-key-abcdefghijkl",
           f"{url} {body} {headers}")
+    # ── host:port is enough (Lane.normalize_url, applied before validation) ──
+    cases = {"1.2.3.4:8642": "http://1.2.3.4:8642/v1", " 1.2.3.4:8642/ ": "http://1.2.3.4:8642/v1",
+             "http://h.test:1": "http://h.test:1/v1", "http://h.test:1/v1": "http://h.test:1/v1",
+             "http://h.test:1/v1/": "http://h.test:1/v1/", "https://h.test/api/v1": "https://h.test/api/v1",
+             "http://h.test:8642/p/kids-agent/v1": "http://h.test:8642/p/kids-agent/v1",
+             "h.test": "http://h.test/v1", "": ""}
+    for kind in REAL:
+        got = {raw: intelligence.LANES[kind].normalize_url(raw) for raw in cases}
+        check(f"lanes registry: {kind}: host:port gets http:// and /v1; a full URL is kept as typed",
+              got == cases, str({k: v for k, v in got.items() if v != cases[k]}))
+    r = client.put("/api/dashboard/intelligence", json={"kind": "hermes", "url": "hm.test:8642", "agent": "default"})
+    sec = dict(config_store.read_section("intelligence") or {})
+    check("lanes registry: url: PUT /intelligence saves host:port as the full URL (url + the kind's recall map)",
+          r.status_code == 200 and sec.get("url") == "http://hm.test:8642/v1"
+          and (sec.get("urls") or {}).get("hermes") == "http://hm.test:8642/v1", f"{r.status_code} {r.text[:120]} {sec.get('url')}")
+    r = client.put("/api/dashboard/intelligence", json={"kind": "hermes", "url": "http://hm.test:8642/v1/", "agent": "default"})
+    sec = dict(config_store.read_section("intelligence") or {})
+    check("lanes registry: url: a full URL is saved byte for byte, as before",
+          r.status_code == 200 and sec.get("url") == "http://hm.test:8642/v1/", f"{r.status_code} {sec.get('url')}")
+    CALLS.clear()
+    r = client.post("/api/dashboard/intelligence/agents", json={"kind": "nanobot", "url": "nb.test:8900"})
+    check("lanes registry: url: agent discovery accepts host:port and probes the full URL",
+          r.status_code == 200 and any(c[0] == "http://nb.test:8900/v1/models" for c in CALLS),
+          f"{r.status_code} {[c[0] for c in CALLS]}")
+    bad = [client.put("/api/dashboard/intelligence", json={"kind": "hermes", "url": u}).status_code
+           for u in ("hm.test:99999", "hm.test:86 42", "javascript:alert(1)")]
+    check("lanes registry: url: a bad port, a space or a non-http scheme is still a 422", bad == [422, 422, 422], str(bad))
     print(f"{len(FAILS)} failed")
     return 1 if FAILS else 0
 

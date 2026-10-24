@@ -8155,17 +8155,22 @@ def main():
     check("zones ui: the zones table says loading, a failed /mapping, or 'No speaker zones yet.'",
           "<TableState cols={4} error={mapping?.loadError} loading={!mapping?.zones}" in _ws(_zlUI)
           and "'No speaker zones yet.'" in _zlUI and "!Object.keys(speakers).length" in _zlUI)
-    _wkHO = _jsbody(_appsrc, "function WakeNameCard({ setMsg }) {")
+    _wkHO = _jsbody(_appsrc, "function WakeNameField({ setMsg }) {")
     _wkHO = _wkHO[_wkHO.find("if (!w) return"):]
     check("wake ui: the wake name card shows 'Loading…' in its place instead of rendering nothing",
-          "'Loading…'" in _wkHO and ": null" not in _wkHO and '<Section title="Wake name">' in _wkHO
+          "'Loading…'" in _wkHO and ": null" not in _wkHO and '<div id="wake-name-card"' in _wkHO
           and "`Couldn't load: ${loadErr}`" in _wkHO, _wkHO[:200])
-    _wkAll = _jsbody(_appsrc, "function WakeNameCard({ setMsg }) {")
+    _wkAll = _jsbody(_appsrc, "function WakeNameField({ setMsg }) {")
     check("wake ui: the wake name card is just the name: no spellings box or chips, no heard list, no polling",
           'id="wake-name"' in _wkAll and not any(x in _wkAll for x in (
               "heard_as", "Also heard as", "Add a spelling", "Heard right after a wake", "data-heard",
               "data-alias", "setInterval(")) and "aliasFrom" not in _appsrc and "ALIAS_RESERVED" not in _appsrc)
     _owHO = _ws(_jsbody(_appsrc, "function OwwPanel({ setMsg, reloadAll }) {"))
+    check("wake ui: one Wake word card: the name on top, then the model picker (two saves: name live, model at restart)",
+          '<Section id="wake-model" title="Wake word"' in _owHO
+          and 0 < _owHO.find("<WakeNameField setMsg={setMsg} />") < _owHO.find('<Field label="Active model / upload" between>')
+          and 'title="Wake name"' not in _appsrc and "<WakeNameCard" not in _appsrc
+          and "useUnsaved('wake-name-card'," in _appsrc and "useUnsaved('wake-model'," in _appsrc, _owHO[:200])
     _owLoad = _ws(_jsbody(_appsrc[_appsrc.find("function OwwPanel("):], "const load = async () => {"))
     check("wake ui: the model list says loading, then the load error, and 'No models yet' only when really empty",
           "<TableState cols={4} error={loadErr} loading={!loaded} empty={models.length === 0 && 'No models yet — upload one.'} />"
@@ -8301,7 +8306,7 @@ def main():
           and all(_tabTB(i) in ("rooms", "voice", "system") for i in _linksTB)
           and _tabTB("keys") == _tabTB("system") == _tabTB("intelligence") == "system" and _tabTB("rooms") == "rooms",
           f"{sorted(_linksTB)} -> {[(i, _tabTB(i)) for i in sorted(_linksTB)]}")
-    _wkTB = _fnUI("function WakeNameCard({ setMsg }) {")
+    _wkTB = _fnUI("function WakeNameField({ setMsg }) {")
     check("tabs: the wake name card keeps its id while loading, so #wake-name-card finds its tab on a fresh load",
           _wkTB.count('id="wake-name-card"') == 2
           and _wkTB.find('id="wake-name-card"') < _wkTB.find("{loadErr ? `Couldn't load: ${loadErr}` : 'Loading…'}"))
@@ -8356,7 +8361,7 @@ def main():
     _voUS = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
     _stUS = _fnUI("function SttCard({ status, setMsg }) {")
     _tuUS = _fnUI("function Tuning({ tuning, reloadAll }) {")
-    _wkUS = _fnUI("function WakeNameCard({ setMsg }) {")
+    _wkUS = _fnUI("function WakeNameField({ setMsg }) {")
     _owUS = _fnUI("function OwwPanel({ setMsg, reloadAll }) {")
     _syUS = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
     _roUS = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
@@ -8482,7 +8487,7 @@ def main():
           and "if (downloading && body.model) {" in _saveUS["stt"]
           and _saveUS["stt"].find("if (downloading && body.model) {") < _saveUS["stt"].find("await api("))
     check("unsaved: intelligence keeps a URL and agent draft per kind; switching kinds only changes which show",
-          "[`url:${k}`, savedUrls[k] || '']" in _syUS and "const switchKind = kind => {" in _syUS
+          "[`url:${k}`, shortUrl(savedUrls[k])]" in _syUS and "const switchKind = kind => {" in _syUS
           and "d.set({ kind })" in _jsbody(_syUS, "const switchKind = kind => {")
           and "urlEl.value" not in _syUS
           and "<input id=\"int-url\" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}"
