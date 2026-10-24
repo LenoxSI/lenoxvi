@@ -5003,6 +5003,13 @@ def main():
     check("fast restart: uvicorn.run is wrapped (TLS + graceful-shutdown deadline) before the runner starts",
           "wrap_uvicorn_run(uvicorn" in _main_src and _main_src.find("wrap_uvicorn_run(uvicorn") < _main_src.rfind("main()")
           and "_tls_run" not in _main_src, "wrapper missing / after main() / old TLS-only wrapper still there")
+    _pw_call = next((n for n in _astR.walk(_botR) if isinstance(n, _astR.Call)
+                     and getattr(n.func, "id", "") == "PipelineWorker"), None)
+    _pw_rtvi = next((k.value for k in (_pw_call.keywords if _pw_call else [])
+                     if k.arg == "enable_rtvi"), None)
+    check("node wire: the pipeline runs without pipecat's RTVI layer (enable_rtvi=False)",
+          isinstance(_pw_rtvi, _astR.Constant) and _pw_rtvi.value is False,
+          f"PipelineWorker found={_pw_call is not None} enable_rtvi={_astR.unparse(_pw_rtvi) if _pw_rtvi else None}")
     check("RSS preload runs before main() (startup, not first voice turn)",
           _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
           "preload call missing or after main()")
