@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from node_speaker import BUILTIN
+from paths import clips_dir
 from zone_config import LiveZoneConfig
 
 
@@ -124,7 +125,7 @@ async def shared_clip_server() -> "ClipServer":
             host_ip = cs.get("host_ip")
             if not host_ip:
                 raise RuntimeError("clip_server.host_ip not set in config.yaml")
-            _SHARED_CLIP_SERVER = ClipServer(Path("clips"), host_ip,
+            _SHARED_CLIP_SERVER = ClipServer(clips_dir(), host_ip,
                                              int(cs.get("port", 8765)))
         if _SHARED_CLIP_SERVER._runner is None:
             await _SHARED_CLIP_SERVER.start()
@@ -311,7 +312,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
             try:
-                asyncio.get_event_loop().create_task(_clip_prune_loop(Path("clips"), retention_days))
+                asyncio.get_event_loop().create_task(_clip_prune_loop(clips_dir(), retention_days))
             except RuntimeError:
                 # No event loop (sync/test context — exposed by the
                 # test suite): construction must never crash
@@ -369,7 +370,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         self._clip_server = await shared_clip_server()
         # Startup prune pass, off the event loop.
         try:
-            removed = await asyncio.to_thread(_prune_clips, Path("clips"), self._retention_days)
+            removed = await asyncio.to_thread(_prune_clips, clips_dir(), self._retention_days)
         except Exception as e:  # noqa: BLE001 — pruning must never break pipeline setup
             logger.warning(f"sonos_output: startup clip prune failed: {e}")
             removed = 0
@@ -469,7 +470,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
             return bytes(encoder.encode(pcm)) + bytes(encoder.flush())
 
         mp3 = await asyncio.to_thread(_encode)
-        p = Path("clips") / "duck-silence.mp3"
+        p = clips_dir() / "duck-silence.mp3"
         await asyncio.to_thread(_write_clip, p, mp3)
         server = self._clip_server or await shared_clip_server()
         self._duck_url = server.url_for(p.name)
@@ -713,7 +714,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # same second must never share a name (the atomic write would swap
         # one room's reply under the other zone's fetch).
         filename = f"reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
-        clip_path = Path("clips") / filename
+        clip_path = clips_dir() / filename
         # Awaited before the URL exists: the speaker never fetches a
         # clip that isn't on disk yet.
         await asyncio.to_thread(_write_clip, clip_path, mp3)

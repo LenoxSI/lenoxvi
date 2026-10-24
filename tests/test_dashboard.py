@@ -43,6 +43,7 @@ def check(name, cond, detail=""):
 
 def main():
     sys.path.insert(0, str(REPO_CORE))
+    import paths  # the runtime-paths contract (repo/LVI_STATE_DIR anchored)
 
     # ── throwaway config: copy the tracked fixture (tests/fixtures; a fresh
     # clone has no config.yaml, and a live one leaked house routing into the
@@ -1602,8 +1603,34 @@ def main():
             off += 512
         return bytes(head) + bytes(body)
 
+    # (paths contract) Runtime roots follow the repo/LVI_STATE_DIR, not the
+    # cwd: from / with no LVI_STATE_DIR the firmware root stays the repo's
+    # (the point of the change); with LVI_STATE_DIR set, every dir the
+    # suite writes moves to the scratch.
+    _pcwd_5p = os.getcwd()
+    _pstate_5p = os.environ.get("LVI_STATE_DIR")
+    try:
+        os.chdir("/")
+        os.environ.pop("LVI_STATE_DIR", None)
+        check("paths: cwd=/ and no LVI_STATE_DIR -> firmware_dir() is the repo's firmware/",
+              paths.firmware_dir() == paths.REPO / "firmware",
+              f"firmware_dir={paths.firmware_dir()} repo={paths.REPO}")
+    finally:
+        os.chdir(_pcwd_5p)
+        if _pstate_5p is not None:
+            os.environ["LVI_STATE_DIR"] = _pstate_5p
+
     _saved_updir5b = os.getcwd()
-    os.chdir(SCRATCH)  # uploads are relative to cwd; keep them in scratch
+    _saved_state5b = os.environ.get("LVI_STATE_DIR")
+    os.environ["LVI_STATE_DIR"] = str(SCRATCH)  # uploads land in the scratch, cwd or not
+    os.chdir(SCRATCH)  # the suite's own cwd-relative reads stay in the scratch
+    check("paths: LVI_STATE_DIR anchors clips/firmware/models/sessions",
+          paths.clips_dir() == SCRATCH / "clips"
+          and paths.firmware_dir() == SCRATCH / "firmware"
+          and paths.models_dir() == SCRATCH / "models"
+          and paths.sessions_file() == SCRATCH / "data" / "sessions.json",
+          f"clips={paths.clips_dir()} firmware={paths.firmware_dir()} "
+          f"models={paths.models_dir()} sessions={paths.sessions_file()}")
     try:
         # (a) flex-declared upload → firmware/flex/
         _r = client.post("/api/dashboard/firmware/upload",
@@ -1866,6 +1893,10 @@ def main():
             _fws.FIRMWARE_TRACKS.update(_saved_tracksnm)
     finally:
         os.chdir(_saved_updir5b)
+        if _saved_state5b is None:
+            os.environ.pop("LVI_STATE_DIR", None)
+        else:
+            os.environ["LVI_STATE_DIR"] = _saved_state5b
 
     # OWW model panel (Voice tab): upload validates, select merges,
     # delete blocks the active model.
@@ -1882,7 +1913,7 @@ def main():
         check("oww: corrupt model rejected with 422",
               _r_bad.status_code == 422, f"status={_r_bad.status_code}")
         # (b) upload accepts the REAL production model bytes
-        prod = Path("Hey_Willow_1-0.onnx")
+        prod = paths.wake_root() / "Hey_Willow_1-0.onnx"  # where the panel looks for root models
         if prod.is_file():
             _r_up = client.post("/api/dashboard/oww/models",
                             files={"file": (prod.name, prod.read_bytes(), "application/octet-stream")})
@@ -1891,7 +1922,7 @@ def main():
                   f"status={_r_up.status_code}")
         # (d) select merges into wake section (threshold survives) — run
         # FIRST so the uploaded models/ copy becomes the ACTIVE file
-        prod = Path("Hey_Willow_1-0.onnx")
+        prod = paths.wake_root() / "Hey_Willow_1-0.onnx"  # where the panel looks for root models
         if prod.is_file():
             _r_sel = client.put("/api/dashboard/oww/select",
                             json={"model": prod.name})
@@ -2356,7 +2387,7 @@ def main():
                     return _real_wb(self, data)
 
                 def _url_chk(n):
-                    _CW_URL.append((Path("clips") / n).is_file())
+                    _CW_URL.append((paths.clips_dir() / n).is_file())
                     return f"http://127.0.0.1:9/clips/{n}"
 
                 async def _cw_probe():
@@ -4777,9 +4808,11 @@ def main():
     # activated the other file. source=None keeps the legacy resolution.
     _l4_name = "suite-l4c.onnx"
     _l4_bytes = b"l4-placeholder-onnx-bytes"
-    _l4_models = Path("models"); _l4_models.mkdir(parents=True, exist_ok=True)
+    # where the routes now look (paths, not the cwd); the stored value stays
+    # the portable relative form ("models/<name>", "<name>")
+    _l4_models = paths.models_dir(); _l4_models.mkdir(parents=True, exist_ok=True)
     (_l4_models / _l4_name).write_bytes(_l4_bytes)
-    _l4_root = Path(_l4_name); _l4_root.write_bytes(_l4_bytes)
+    _l4_root = paths.wake_root() / _l4_name; _l4_root.write_bytes(_l4_bytes)
     try:
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "root"})
@@ -4789,11 +4822,11 @@ def main():
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "models"})
         check("wake model select: source=models activates the MODELS copy (collision)",
-              r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
+              r.status_code == 200 and r.json().get("model") == str(Path("models") / _l4_name),
               f"status={r.status_code} body={(r.json().get('model') if r.status_code == 200 else r.text[:80])!r}")
         r = client.put("/api/dashboard/oww/select", json={"model": _l4_name})
         check("wake model select: no source keeps the legacy models-first resolution",
-              r.status_code == 200 and str(_l4_models / _l4_name) in str(r.json().get("model")),
+              r.status_code == 200 and r.json().get("model") == str(Path("models") / _l4_name),
               f"status={r.status_code} body={r.text[:80]}")
         r = client.put("/api/dashboard/oww/select",
                        json={"model": "suite-l4-missing.onnx", "source": "root"})
@@ -7407,7 +7440,9 @@ def main():
             return out
 
     _cwd_fw = os.getcwd()
-    os.chdir(SCRATCH)  # uploads are relative to cwd; keep them in scratch
+    _state_fw = os.environ.get("LVI_STATE_DIR")
+    os.environ["LVI_STATE_DIR"] = str(SCRATCH)  # uploads land in the scratch, cwd or not
+    os.chdir(SCRATCH)  # the suite's own cwd-relative reads stay in the scratch
     _it_fw, _dumps_fw = _rRL.firmware_image.image_track, _rRL.json.dumps
     _fw_on_main = {"image_track": [], "manifest": []}
     try:
@@ -7464,6 +7499,10 @@ def main():
               f"{_rx_cc.status_code} {_rx_cc.text[:120]}")
     finally:
         os.chdir(_cwd_fw)
+        if _state_fw is None:
+            os.environ.pop("LVI_STATE_DIR", None)
+        else:
+            os.environ["LVI_STATE_DIR"] = _state_fw
     # ════ end zone routes + firmware upload block ════
     # ── dashboard ui (App.jsx): restart wait, Add key, mapping save, node
     # forms, wake-model picker, token prompt ───────────────────────────────

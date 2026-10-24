@@ -37,7 +37,6 @@ import time
 import urllib.request
 import urllib.parse
 import uuid
-from pathlib import Path
 
 from loguru import logger
 
@@ -51,6 +50,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from node_speaker import BUILTIN
+from paths import clips_dir
 from zone_config import LiveZoneConfig
 
 # Shared SSL context: the WiiM serves a self-signed cert on 443.
@@ -272,7 +272,7 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         # Unique per clip: a filler and a fast reply in the same second
         # must never share a name (the atomic write would swap the file
         # under a fetch still in flight).
-        clip_path = Path("clips") / f"wiim-reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
+        clip_path = clips_dir() / f"wiim-reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
         try:
             from sonos_output import _write_clip
             # off the loop, and awaited before the URL is handed out

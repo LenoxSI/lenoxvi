@@ -33,6 +33,7 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Runtime files (reply clips, wake models, uploaded firmware, sticky sessions) resolve from one anchor, `core/paths.py`: the repo, or `LVI_STATE_DIR`. They no longer depend on the working directory, and a dashboard firmware upload and the OTA server always agree on the folder. Wake models are still stored in config as short relative paths.
 - Tests run from a fresh clone: the suites read a tracked fixture (`tests/fixtures/config.yaml`, override with `LVI_TEST_CONFIG`) instead of copying the private `config.yaml`. Steps that touch real hardware (a test clip out loud, LAN speaker discovery) are opt-in with `LVI_TEST_LIVE=1`. Example names in tests and `config.example.yaml` are neutral.
 - Dashboard polish: text boxes and dropdowns sit one shade lighter than the card so they read as fields, and
   dropdowns draw their own chevron, inset to mirror the text and sized like a text box; both file pickers are

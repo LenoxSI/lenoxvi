@@ -32,6 +32,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
+from paths import firmware_dir
 
 FIRMWARE_ROOT = Path(__file__).resolve().parent.parent / "firmware"
 FIRMWARE_TRACKS = {
@@ -43,10 +44,14 @@ LEGACY_TRACK = "array"   # what the track-less legacy URLs serve (see docstring)
 
 
 def _track_dir(track: str | None) -> Path:
-    d = FIRMWARE_TRACKS.get(track or LEGACY_TRACK)
-    if d is None:
+    # Vocabulary only: the DIRECTORY resolves per request via
+    # paths.firmware_dir() (repo/LVI_STATE_DIR), so the dashboard's uploads
+    # (routes.py) and this server always agree — cwd anchoring only lined
+    # up because systemd starts the bot in the repo.
+    key = track or LEGACY_TRACK
+    if key not in FIRMWARE_TRACKS:
         raise HTTPException(status_code=404, detail=f"unknown firmware track '{track}'")
-    return d
+    return firmware_dir() / key
 
 
 def _read_manifest(track: str | None = None) -> dict:
@@ -113,5 +118,6 @@ def register_firmware_routes(app) -> None:
                     f"({target.stat().st_size} bytes)")
         return FileResponse(target, media_type="application/octet-stream")
 
-    served = {t: (d / "version.json").is_file() for t, d in FIRMWARE_TRACKS.items()}
-    logger.info(f"firmware_server: /firmware/* routes live ({FIRMWARE_ROOT}; manifests: {served})")
+    root = firmware_dir()  # what requests will serve (per-request resolution)
+    served = {t: (root / t / "version.json").is_file() for t in FIRMWARE_TRACKS}
+    logger.info(f"firmware_server: /firmware/* routes live ({root}; manifests: {served})")

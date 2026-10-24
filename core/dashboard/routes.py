@@ -35,6 +35,7 @@ import firmware_image
 import intelligence
 import intelligence_target
 import node_speaker
+from paths import clips_dir, firmware_dir, models_dir, state_root, wake_root
 import room_recorder
 import tts_kokoro
 import tts_pocket
@@ -780,7 +781,7 @@ async def test_zone(name: str):
     # generated). Slugify before it reaches the filesystem/URL.
     slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
     filename = f"test-{slug}-{int(time.time())}.mp3"
-    path = Path("clips") / filename
+    path = clips_dir() / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(mp3)
     url = server.url_for(filename)
@@ -2533,7 +2534,7 @@ def _oww_dir() -> Path:
     # Repo-root .onnx files stay where they are (legacy root models keep
     # working — the loader resolves wake.model by path); models/ is the
     # dashboard-managed home. Both gitignored; neither ships in the repo.
-    d = Path(os.getenv("LVI_MODELS_DIR", "models"))
+    d = models_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -2594,14 +2595,16 @@ async def oww_list_models():
     file still shows as a distinct row — display all options)."""
     active = _oww_active_path()
     out = []
-    for d in (_oww_dir(), Path(".")):
+    for d in (_oww_dir(), wake_root()):
         try:
             files = sorted(d.glob("*.onnx")) if d.exists() else []
         except OSError:
             continue
         for f in files:
             out.append({"name": f.name, "size": f.stat().st_size,
-                        "source": "models" if f.parent != Path(".") else "root",
+                        # resolved: an env-spelled dir equal to the root
+                        # (e.g. LVI_MODELS_DIR=".") must compare equal
+                        "source": "models" if f.parent.resolve() != wake_root().resolve() else "root",
                         "path": str(f.resolve()),
                         "selected": f.resolve() == active})
     # Stock pre-trained models ship inside the openwakeword package:
@@ -2681,7 +2684,7 @@ async def oww_select_model(payload: OWWModelPayload):
         # config stays portable across installs and venv paths.
         path = name
     elif payload.source is not None:
-        path = (_oww_dir() if payload.source == "models" else Path(".")) / name
+        path = (_oww_dir() if payload.source == "models" else wake_root()) / name
         if not path.is_file():
             raise HTTPException(
                 status_code=404,
@@ -2690,10 +2693,18 @@ async def oww_select_model(payload: OWWModelPayload):
         path = _oww_dir() / name
         if not path.is_file():
             # legacy root model? (pre-models-dir uploads / hand-copied files)
-            if (Path(".") / name).is_file():
-                path = Path(".") / name
+            if (wake_root() / name).is_file():
+                path = wake_root() / name
             else:
                 raise HTTPException(status_code=404, detail=f"model '{name}' not found")
+    # Stored relative to the state root when the file lives under it
+    # ("models/x.onnx", "x.onnx" — as before the paths anchor): the config
+    # stays portable across installs. Stock keys are bare names already.
+    if isinstance(path, Path):
+        try:
+            path = path.relative_to(state_root())
+        except ValueError:
+            pass
     current = dict(config_store.read_section("wake") or {})
     current["model"] = str(path)
     try:
@@ -2759,7 +2770,7 @@ async def oww_delete_model(name: str, source: str = ""):
     if source in ("", "models"):
         candidates.append(_oww_dir() / name)
     if source in ("", "root"):
-        candidates.append(Path(".") / name)
+        candidates.append(wake_root() / name)
     for base in candidates:
         if base.is_file():
             if base.resolve() == active:
@@ -2869,7 +2880,9 @@ async def upload_firmware(
                             detail=f"unknown track '{track}' ({' | '.join(firmware_image.TRACKS)})")
     if not (file.filename or "").endswith(".bin"):
         raise HTTPException(status_code=400, detail="must be a .bin")
-    dest_dir = Path(f"firmware/{track}")
+    # paths-anchored (repo/LVI_STATE_DIR), like the OTA server's reads — cwd
+    # anchoring only lined up because systemd starts the bot in the repo.
+    dest_dir = firmware_dir() / track
     dest = dest_dir / f"{track}_esp32.bin"  # fixed served name (manifest points here)
 
     # Stage to a temp file FIRST: a rejected upload must never clobber

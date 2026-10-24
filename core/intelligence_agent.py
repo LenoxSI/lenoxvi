@@ -45,6 +45,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 import intelligence
+from paths import sessions_file
 
 VOICE_SYSTEM_PROMPT = (
     "You are the house voice assistant, currently talking to the user over speakers. "
@@ -154,7 +155,9 @@ class _SessionStash:
     """
 
     def __init__(self, path: str | None = None):
-        self._path = Path(path or os.getenv("LVI_SESSIONS", "data/sessions.json"))
+        # explicit path wins; else paths anchors it (LVI_SESSIONS, then
+        # repo/LVI_STATE_DIR) instead of the cwd
+        self._path = Path(path) if path else sessions_file()
         # Saves run in worker threads (off the event loop): two rooms saving
         # at once must not lose each other's read-modify-write or share the
         # temp file mid-write. Re-entrant: a live session holds it while it
