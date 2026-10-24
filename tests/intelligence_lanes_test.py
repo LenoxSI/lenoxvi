@@ -162,6 +162,7 @@ def main():
                if any(w in m.record["message"] for w in ("preamble", "truncated", "no key", "no intelligence key"))
                else None, level="DEBUG")
 
+    import config
     import dashboard
     import intelligence_agent as ia
     import intelligence_target as it
@@ -198,6 +199,11 @@ def main():
     # ── voice turns ─────────────────────────────────────────────────
     def turn(text="hi", session_mode="fresh", room="golden-room", hist=True):
         def run():
+            # Each case is a session built right after boot with the case's
+            # config (boot == saved): the golden pins request shapes; the
+            # saved-vs-boot rule has its own suite (session_intelligence_test).
+            config._load.cache_clear()
+            config._BOOT = None
             a = ia.IntelligenceAgent(room=room, session_mode=session_mode,
                                      room_resolver=(lambda: room) if room else None)
             if hist:

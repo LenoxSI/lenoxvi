@@ -628,8 +628,10 @@ def main():
         import tts_pocket as _tp_m1
         _m1_avail = _tp_m1.pocket_available
         _m1_kavail = _tk_m1.kokoro_available
+        _m1_kfiles = _tk_m1._files_problem
         _tp_m1.pocket_available = lambda: True  # validate the list, not this host's install
         _tk_m1.kokoro_available = lambda: True
+        _tk_m1._files_problem = lambda: None
         _m1_bad = []
         for _prov, _vals in _cat.items():
             for _v in _vals:
@@ -649,6 +651,7 @@ def main():
                     _m1_bad.append((_prov, _v, str(_e)[:40]))
         _tp_m1.pocket_available = _m1_avail
         _tk_m1.kokoro_available = _m1_kavail
+        _tk_m1._files_problem = _m1_kfiles
         check("every catalog entry passes the server's own TTS validation",
               not _m1_bad and sum(len(v) for v in _cat.values()) == 127, f"bad={_m1_bad[:3]}")
     r = client.put("/api/dashboard/tts", json={
@@ -882,8 +885,10 @@ def main():
                   "af_sarah af_sky am_adam am_echo am_eric am_fenrir am_liam am_michael am_onyx am_puck "
                   "am_santa bf_alice bf_emma bf_isabella bf_lily bm_daniel bm_fable bm_george bm_lewis").split()
     _orig_availkr = _tkr.kokoro_available
+    _orig_fileskr = _tkr._files_problem
     _orig_availpk2 = _tppk.pocket_available
     _tkr.kokoro_available = lambda: True
+    _tkr._files_problem = lambda: None
     _tppk.pocket_available = lambda: True
     try:
         t = client.get("/api/dashboard/tts").json()
@@ -908,6 +913,23 @@ def main():
                             ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_spead": 1.0}, "misspelled key")):
             r = client.put("/api/dashboard/tts", json=_body)
             check(f"kokoro: PUT rejects {_why} (422)", r.status_code == 422, f"{r.status_code} {r.text[:120]}")
+        # Package installed but model files missing: not offered, not accepted.
+        _tkr._files_problem = lambda: "/x/kokoro-v1.0.onnx is missing"
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: model files missing -> GET /tts says not installed, files missing, and how to fetch them",
+              t.get("kokoro_installed") is False and t.get("kokoro_files_missing") is True
+              and "fetch_kokoro_models.sh" in str(t.get("kokoro_problem")),
+              str({k: t.get(k) for k in ("kokoro_installed", "kokoro_files_missing", "kokoro_problem")}))
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "bf_emma"})
+        check("kokoro: model files missing -> PUT provider kokoro is refused (422) with the fetch hint",
+              r.status_code == 422 and "fetch_kokoro_models.sh" in r.text, f"{r.status_code} {r.text[:160]}")
+        _tkr.kokoro_available = lambda: False
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: package missing -> not installed, not 'files missing'",
+              t.get("kokoro_installed") is False and t.get("kokoro_files_missing") is False
+              and "requirements-kokoro.txt" in str(t.get("kokoro_problem")), str(t.get("kokoro_problem")))
+        _tkr.kokoro_available = lambda: True
+        _tkr._files_problem = lambda: None
         t = client.get("/api/dashboard/tts").json()
         check("kokoro: refused PUTs saved nothing",
               t.get("kokoro_voice") == "bf_emma" and t.get("kokoro_speed") == 1.25, str(t)[:160])
@@ -952,6 +974,7 @@ def main():
               not any("sk_" in str(v) for v in client.get("/api/dashboard/tts").json().values()))
     finally:
         _tkr.kokoro_available = _orig_availkr
+        _tkr._files_problem = _orig_fileskr
         _tppk.pocket_available = _orig_availpk2
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
@@ -3696,6 +3719,11 @@ def main():
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
                 import intelligence_agent as _ha9_fb
+                # A session built right after boot with this config (boot ==
+                # saved): the saved-vs-boot rule has its own suite.
+                import config as _cfg9_fb
+                _cfg9_fb._load.cache_clear()
+                _cfg9_fb._BOOT = None
                 _a9_fb = _ha9_fb.IntelligenceAgent(lull_secs=0.05, room="suite",
                                              session_mode="fresh")
                 try:
@@ -7914,6 +7942,12 @@ def main():
           and '<div className="sm:hidden flex flex-wrap items-center gap-2 mt-1">' in _appsrc
           and 'font-mono text-[var(--muted)] break-all">{row.var}</div>' in _appsrc
           and '<div className="flex flex-wrap items-center justify-end gap-2">' in _appsrc)
+    check("hunt 10-24 #1: agent discovery sends a typed host:port (the server fills in http:// and /v1)",
+          "if ((url || '').trim()) body.url = url.trim()" in _appsrc
+          and "if (/^https?:\\/\\//.test(url || '')) body.url = url" not in _appsrc)
+    check("hunt 10-24 #3: the Kokoro option says when its model files are missing, with the fetch hint as its title",
+          "title={tts?.kokoro_problem || undefined}" in _appsrc
+          and "tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'" in _appsrc)
     check("ux3: the mapping and Nodes tables both list rooms by name",
           "const roomRows = [...mappedRooms, ...unmappedRooms].sort(byRoom)" in _appsrc
           and "[...(status?.rooms || [])].sort((a, b) => byRoom(a.room, b.room)).map(r => (" in _appsrc
@@ -8562,8 +8596,8 @@ def main():
     # the unsaved-changes bar.
     _voWS = _ws(_voUS)
     check("tts ui: Kokoro (local) provider option, disabled with a hint when kokoro-onnx isn't installed",
-          "<option value=\"kokoro\" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}>" in _voWS
-          and "Kokoro (local){tts?.kokoro_installed ? '' : ' — not installed'}" in _voWS, _voWS[:300])
+          "<option value=\"kokoro\" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}" in _voWS
+          and "Kokoro (local){tts?.kokoro_installed ? '' : tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'}" in _voWS, _voWS[:300])
     _klUI = _reui.search(r"const kokoroLabel = (.*?)\n\S", _appsrc, _reui.DOTALL)
     _klUI = _ws(_klUI.group(1)) if _klUI else ""
     check("tts ui: Kokoro voice select shows readable labels ('Heart — American female'), values stay the ids",

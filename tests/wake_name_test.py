@@ -105,6 +105,15 @@ check("wake name: a leading comma with no prefix still drops (', Willow.')",
 CFG["wake"] = {"name": "Willow", "heard_as": ["computer"]}
 check("wake name: a heard_as left in config.yaml is ignored",
       not wn.is_wake_phrase_only("hey computer") and wn.is_wake_phrase_only("hey junipur"))
+CFG["wake"] = {"name": "Hey Jarvis"}
+check("wake name: a name saved with its 'hey' still drops the bare wake ('Hey Jarvis.', 'Jarvis.', 'Hey, Jervis!')",
+      wn.is_wake_phrase_only("Hey Jarvis.") and wn.is_wake_phrase_only("Jarvis.")
+      and wn.is_wake_phrase_only("Hey, Jervis!") and not wn.is_wake_phrase_only("Hey Jarvis, what time is it?"))
+CFG["wake"] = {"name": "OK Computer"}
+check("wake name: 'OK Computer' as the name drops 'Okay computer.' but keeps a sentence",
+      wn.is_wake_phrase_only("Okay computer.") and not wn.is_wake_phrase_only("computer, turn on the lights"))
+check("wake name: a one-word name that IS a leading word is left alone ('Hey' stays reserved)",
+      wn._core_name("Hey") == "Hey" and wn._core_name("hey, Jarvis") == "Jarvis" and wn._core_name("Jarvis") == "Jarvis")
 
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
