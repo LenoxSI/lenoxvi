@@ -5,13 +5,13 @@
 
 # LenoxVI
 
-A voice appliance for rooms. It sits between a mic node and an agent you already run: the wake word, the speech, and the reply stay in that room.
+Voice for the agent you already run. Mic nodes in each room, a wake word, and answers played back through Sonos, WiiM or the node's own speaker.
 
-    mic node (reSpeaker) → WiFi/WebRTC → wake gate → Whisper →
-    intelligence (Hermes / OpenClaw / Nanobot) → TTS →
+    mic node (reSpeaker) → WiFi/WebRTC → wake gate → speech to text →
+    intelligence (Hermes / OpenClaw / Nanobot) → text to speech →
     speaker in the room (Sonos / WiiM / the node's own speaker)
 
-Not a chat box. Wake-gated. The dashboard operates the appliance. It does not talk to it.
+The wake word always runs on your hardware. Speech and voice can stay local or go to the cloud: you choose, per lane. Wake-gated, not a chat box. The dashboard operates the appliance. It does not talk to it.
 
 ![Rooms view of the dashboard, demo data](docs/readme/rooms.png)
 
@@ -21,30 +21,38 @@ Python 3.12+. From the repo root:
 
 1. `pip install -r requirements.txt`
 2. `cp config.example.yaml config.yaml` and fill every `<PLACEHOLDER>`
-3. `cp .env.example .env` and set the key for the intelligence you picked
-4. Wake word is **Hey Jarvis** out of the box
-5. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
-6. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/dashboard`
+3. `cp .env.example .env` and set the keys: `ELEVENLABS_API_KEY` and `LVI_TTS_VOICE_ID` for the default voice, plus the key for your intelligence (`LVI_HERMES_KEY`, `LVI_OPENCLAW_KEY` or `LVI_NANOBOT_KEY`)
+4. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
+5. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/dashboard`
 
-A browser mic is at `/client`. Optional local voices, and the wake-word license, are in [Fresh clone](#fresh-clone--running-bot).
+**Hey Jarvis** works out of the box. `/client` on the same host is a browser mic for a first test. Local voices and the wake-word license are in [Fresh clone](#fresh-clone--running-bot).
 
 ## Features
 
 | Feature | What |
 |---|---|
-| Wake gate | "Hey Jarvis" out of the box. Train your own. Not a chat box. |
-| Rooms | Mic node in, reply in that room: Sonos, WiiM, or the node's speaker. |
-| Dashboard | LAN-only operator surface. Keys, firmware, per-room agent. |
+| Wake gate | "Hey Jarvis" out of the box. Train your own. |
+| Turn-taking | Barge-in, echo containment, and filler lines while the agent thinks. |
+| Rooms | Each mic node maps to a speaker zone and can use its own agent. Sessions are sticky or fresh per room. |
+| Local or cloud | Whisper, Pocket and Kokoro run on your hardware. Cloud providers fall back to a local model. |
+| Firmware | Push node images over the air from the dashboard. |
+| Dashboard | LAN-only. Keys, zones, voices and models in one place. Mutations are guarded. |
 
-## Intelligence
+## Dashboard
 
-| System | Talks to | Session history | Spoken style |
-|---|---|---|---|
-| Hermes | Hermes API, bearer key. Agents come from the gateway. | Hermes keeps the conversation. | LenoxVI sends voice instructions: short spoken sentences, no markdown. |
-| OpenClaw | OpenClaw Gateway. Model `openclaw/<agent>`. | Sticky per room via `x-openclaw-session-key`. A fresh room sends no key; the agent may still recall from its own files. | Same voice instructions as Hermes. |
-| Nanobot | Nanobot's OpenAI-compatible API. One user message per turn, plus `session_id`. | Nanobot keeps the history. | The agent's own instructions. LenoxVI cannot send a system message. |
+Demo data. Rooms is at the top.
 
-## STT
+### Voice
+
+![Voice view of the dashboard](docs/readme/voice.png)
+
+### System
+
+![System view of the dashboard](docs/readme/system.png)
+
+## Speech to text
+
+✅ runs on your hardware. ❌ goes to the cloud.
 
 | Provider | Local | Fallback |
 |---|---|---|
@@ -52,18 +60,7 @@ A browser mic is at `/client`. Optional local voices, and the wake-word license,
 | Deepgram Nova-3 | ❌ | The configured Whisper model |
 | ElevenLabs Scribe v2 | ❌ | The configured Whisper model |
 
-The wake word stays on the box. Cloud speech-to-text falls back to the Whisper model you configured.
-
-## TTS
-
-| Provider | Local | Fallback |
-|---|---|---|
-| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Pocket, if installed |
-| Deepgram Flux or Aura-2 | ❌ | Pocket, if installed |
-| Pocket | ✅ | — |
-| Kokoro | ✅ | Pocket, if installed |
-
-## Whisper, local
+### Whisper models
 
 Four faster-whisper models. The "best for" line is the dashboard catalog label, from a benchmark on a 12 GB GPU and a 4-core CPU. Turbo and Medium need a GPU. The dashboard writes the runtime with the model: GPU is `cuda` / `float16`, no GPU is `cpu` / `int8`.
 
@@ -73,6 +70,25 @@ Four faster-whisper models. The "best for" line is the dashboard catalog label, 
 | `medium` | 1.5 GB | GPU | Faster, solid in noise. |
 | `small` | 0.5 GB | CPU is fine | Snappy in quiet rooms. |
 | `base` | 0.15 GB | CPU is fine | No GPU, or the fastest option. |
+
+## Intelligence
+
+| System | Talks to | Session history | Spoken style |
+|---|---|---|---|
+| Hermes | Hermes API, bearer key. Agents come from the gateway. | Hermes keeps the conversation. | LenoxVI sends voice instructions: short spoken sentences, no markdown. |
+| OpenClaw | OpenClaw Gateway. Model `openclaw/<agent>`. | Sticky per room via `x-openclaw-session-key`. A fresh room sends no key; the agent may still recall from its own files. | Same voice instructions as Hermes. |
+| Nanobot | Nanobot's OpenAI-compatible API. One user message per turn, plus `session_id`. | Nanobot keeps the history. | The agent's own instructions. LenoxVI cannot send a system message. |
+
+## Text to speech
+
+✅ runs on your hardware. ❌ goes to the cloud.
+
+| Provider | Local | Fallback |
+|---|---|---|
+| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Pocket, if installed |
+| Deepgram Flux or Aura-2 | ❌ | Pocket, if installed |
+| Pocket | ✅ | — |
+| Kokoro | ✅ | Pocket, if installed |
 
 ## License
 
@@ -86,18 +102,6 @@ Bugs and questions: [open an issue](https://github.com/LenoxSI/lenoxvi/issues).
 
 Maintained by the LenoxVI organization.
 
-## Dashboard
-
-Demo data. Not a live install.
-
-### Voice
-
-![Voice view of the dashboard](docs/readme/voice.png)
-
-### System
-
-![System view of the dashboard](docs/readme/system.png)
-
 ## Layout
 
 - `bot.py` — pipecat pipeline: transport, wake gate, VAD, STT, intelligence, TTS, speaker out
@@ -106,23 +110,20 @@ Demo data. Not a live install.
     default awake window 15s, tunable via `wake.awake_timeout`)
     + 2-frame wake-word barge-in (`wake.barge_in`)
   - `intelligence_agent.py` — the intelligence agent (`intelligence.kind`):
-    `hermes` (Hermes API over LAN, bearer key) — **production runs
-    this**; `openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`,
-    sticky rooms via `x-openclaw-session-key`) — the second intelligence;
-    `nanobot` (nanobot's OpenAI-compatible API: one user message per turn
-    plus a `session_id`, nanobot keeps the history — see
-    [Nanobot](#nanobot)); `stub` — deterministic echo intelligence for
-    bench/dev runs (the code
-    default when `intelligence.kind` is unset — a misconfigured deploy
-    answers with canned lines). Keys are strict per-kind:
-    `hermes` reads `LVI_HERMES_KEY`, `openclaw` reads
-    `LVI_OPENCLAW_KEY`, `nanobot` reads `LVI_NANOBOT_KEY` — no cross-kind
-    fallback; a missing key fails the
-    turn with a clear message instead of bricking construction.
-  - `intelligence_stub.py` — the stub intelligence's implementation (canned lines)
+    `hermes` (Hermes API over LAN, bearer key), `openclaw` (OpenClaw
+    Gateway, `model: openclaw/<agent>`, sticky rooms via
+    `x-openclaw-session-key`) or `nanobot` (nanobot's OpenAI-compatible API:
+    one user message per turn plus a `session_id`, nanobot keeps the history
+    — see [Nanobot](#nanobot)). Keys are strict per-kind: `hermes` reads
+    `LVI_HERMES_KEY`, `openclaw` reads `LVI_OPENCLAW_KEY`, `nanobot` reads
+    `LVI_NANOBOT_KEY` — no cross-kind fallback; a missing key fails the turn
+    with a clear message instead of bricking construction. Set
+    `intelligence.kind`: left unset, the bot answers with canned lines.
+  - `intelligence_stub.py` — the canned-line stand-in used when
+    `intelligence.kind` is unset
   - `stt_local.py` — faster-whisper large-v3-turbo on the GPU
   - `sonos_output.py` / `wiim_output.py` — replies as Sonos / WiiM
-    audio overlays (S2 only, vol ~70; WiiM `setPlayerCmd` stop path)
+    audio overlays (Sonos S2 only, volume ~70; WiiM `setPlayerCmd` stop path)
   - `echo_gate.py` — room-echo containment (permanent safety net behind
     the turn lock; `relax()` on confirmed wake/barge-in, ~0.5s tail)
   - `room_recorder.py` — time-boxed raw mic capture of one room to a WAV
@@ -130,10 +131,9 @@ Demo data. Not a live install.
   - `firmware_server.py` — `/firmware/*` OTA delivery for mic nodes
   - `dashboard/` — the operator surface (see below)
 - `scripts/` — ops tools (each has a header comment explaining what it does)
-  - `restart.sh` — systemd wrapper: restarts the bot unit on the
-    appliance host (no flags)
-  - `sync_host.sh` — bundle-based repo sync VM → host (no creds on hosts)
-  - `deploy_firmware.sh` — build + version + ship a node firmware OTA (VM-side)
+  - `restart.sh` — systemd wrapper: restarts the bot's systemd unit (no flags)
+  - `sync_host.sh` — bundle-based repo sync from a dev machine to the bot host (no creds on the host)
+  - `deploy_firmware.sh` — build + version + ship a node firmware OTA (run from the dev machine)
   - `app_bin_version.py` — reads the version/line baked into a firmware image
   - `fetch_xmos_fw.sh` — fetches the XMOS image at node bring-up
   - `serial_watch.py` — node serial capture (survives replug)
@@ -172,7 +172,7 @@ Demo data. Not a live install.
 - `logs/` — gitignored runtime logs (the bot logs to journald:
   `journalctl --user -u lenoxvi-bot`)
 
-## The dashboard (operator surface)
+## Dashboard reference
 
 `https://<bot-host-LAN-IP>:7860/dashboard` — LAN-only by design, no
 auth on reads. Mutating routes carry two guard rails
@@ -320,7 +320,7 @@ training notebook (see the [openWakeWord] README), upload the `.onnx` in the
 dashboard's Wake Word Model panel, set it active, and restart. Community
 model collections exist too — check each model's license before using it.
 
-**The name:** `wake.name` is what the house is called — set it in the
+**The name:** `wake.name` is what the assistant is called — set it in the
 dashboard's Wake name card (or in config.yaml) to match your wake word. It is
 never guessed from the model file, so change it when you change models.
 Saying the wake word again while a room is already listening gives a bare
