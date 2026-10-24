@@ -1,23 +1,75 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="design/assets/logo/horizontal/lenoxvi-horizontal-on-dark.svg">
+  <img alt="LenoxVI" src="design/assets/logo/horizontal/lenoxvi-horizontal-on-light.svg" width="420">
+</picture>
+
 # LenoxVI
 
-**house-voice appliance.** A pipecat bot that turns mic nodes into a
-house-wide voice assistant with any intelligence you want:
+A voice appliance for rooms. Mic nodes, a wake gate, speech-to-text, an intelligence lane, and a spoken reply in that room.
 
-    mic node (reSpeaker) → WiFi/WebRTC → wake gate → whisper STT →
-    intelligence lane (Hermes / OpenClaw / Nanobot / …) → ElevenLabs TTS →
-    speaker reply in the room's zone (Sonos / WiiM / the node's own speaker)
+    mic node (reSpeaker) → WiFi/WebRTC → wake gate → Whisper →
+    intelligence (Hermes / OpenClaw / Nanobot) → TTS →
+    speaker in the room (Sonos / WiiM / the node's own speaker)
 
-## What it does
+Not a chat box. Wake-gated. The dashboard operates the appliance. It does not talk to it.
 
-A mic node (ESP32-S3 + reSpeaker) listens for the wake word, streams
-audio over WebRTC, local whisper transcribes, the configured
-intelligence lane answers, and the reply is spoken in the room via
-Sonos or WiiM audio overlays. Wake-word turn-taking (supersede,
-barge-in, echo containment), tiered fillers, and the full operator
-surface — a web dashboard — run on the appliance.
+## Features
 
-**Not a chat box.** Voice-first, wake-gated. No chat UI, no skills
-harness — the dashboard's job is operating the rig, not talking to it.
+| Feature | What |
+|---|---|
+| Wake gate | "Hey Jarvis" out of the box. Train your own. Not a chat box. |
+| Rooms | Mic node in, reply in that room: Sonos, WiiM, or the node's speaker. |
+| Dashboard | LAN-only operator surface. Keys, firmware, per-room agent. |
+
+## Intelligence
+
+| System | Talks to | Memory | Spoken style | Pick it when |
+|---|---|---|---|---|
+| Hermes | Hermes API, bearer key. Agents come from the gateway. | Hermes keeps the conversation. | LenoxVI sends voice instructions: short spoken sentences, no markdown. | Default in `config.example.yaml`. |
+| OpenClaw | OpenClaw Gateway. Model `openclaw/<agent>`. | Sticky per room via `x-openclaw-session-key`. A fresh room sends no key; the agent may still recall from its own files. | Same voice instructions as Hermes. | You already run OpenClaw. |
+| Nanobot | Nanobot's OpenAI-compatible API. One user message per turn, plus `session_id`. | Nanobot keeps the history. | The agent's own instructions. LenoxVI cannot send a system message. | You already run nanobot. |
+| stub | Canned lines. | None. | None. | Bench only. Code default if `intelligence.kind` is unset. |
+
+## Voice
+
+| Lane | Provider | Leaves the box? | Fallback |
+|---|---|---|---|
+| STT | Whisper, local | No | — |
+| STT | Deepgram Nova-3 | Yes, after the wake word | The configured Whisper model |
+| STT | ElevenLabs Scribe v2 | Yes, after the wake word | The configured Whisper model |
+| TTS | ElevenLabs Flash v2.5 or v4 Turbo | Yes | Pocket, if installed |
+| TTS | Deepgram Flux or Aura-2 | Yes | Pocket, if installed |
+| TTS | Pocket, local | No | — |
+| TTS | Kokoro, local | No | Pocket, if installed |
+
+The wake word stays on the box. Cloud speech-to-text falls back to the Whisper model you configured.
+
+## Whisper, local
+
+Four faster-whisper models. The "best for" line is the dashboard catalog label, from a benchmark on a 12 GB GPU and a 4-core CPU. Turbo and Medium need a GPU. The dashboard writes the runtime with the model: GPU is `cuda` / `float16`, no GPU is `cpu` / `int8`.
+
+| Model | Size | Needs | Best for |
+|---|---|---|---|
+| `large-v3-turbo` | 1.6 GB | GPU | Best all-round. The default. |
+| `medium` | 1.5 GB | GPU | Faster, solid in noise. |
+| `small` | 0.5 GB | CPU is fine | Snappy in quiet rooms. |
+| `base` | 0.15 GB | CPU is fine | No GPU, or the fastest option. |
+
+## Dashboard
+
+Three views. The frames are placeholders. Replace `docs/readme/*.png` with shots from a demo config.
+
+### System
+
+![System, capture pending](docs/readme/system.png)
+
+### Voice
+
+![Voice, capture pending](docs/readme/voice.png)
+
+### Rooms
+
+![Rooms, capture pending](docs/readme/rooms.png)
 
 ## Layout
 
