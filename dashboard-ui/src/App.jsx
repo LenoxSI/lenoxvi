@@ -189,8 +189,12 @@ async function restartBot(setMsg, setRebooting) {
 }
 
 /* ── shared bits ───────────────────────────────────────────── */
-const sec = s => s == null ? '—' :
-  Math.floor(s / 86400) + 'd ' + new Date(s * 1000).toISOString().slice(11, 16) + 'h'
+// Uptime as people say it: 4m, 3h 12m, 2d 4h.
+const sec = s => {
+  if (s == null) return '—'
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`
+}
 
 // last_seen / last_wake times arrive as epoch SECONDS (registry
 // time.time()) — never ms, never ISO. Never treat a missing value as
@@ -207,8 +211,13 @@ const fmtAgo = t => {
   return Math.round(s / 86400) + 'd ago'
 }
 const esc = s => String(s ?? '')
+// A room with no override uses the house agent: "Default agent", naming it
+// when it has a name of its own ('default' is the main agent itself).
+// Room lists sort by name, case-insensitive, in every table.
+const byRoom = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
+const defaultAgentLabel = a => (!a || a === 'default' ? 'Default agent' : `Default agent (${a})`)
 
-const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
+const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] border border-[var(--field-border)] text-[14px] px-3 py-2'
 // Line badge per node: the hardware behind each firmware line (fw_push `line`).
 // A node's own speaker as a reply zone (server: node_speaker.BUILTIN).
 const BUILTIN = 'builtin'
@@ -220,7 +229,6 @@ const LINE_TITLE = {
 const BTN = 'rounded-full px-3 py-1.5 text-[14px] font-medium cursor-pointer disabled:opacity-50'
 const BTN_DEFAULT = `${BTN} bg-[var(--default)] text-[var(--default-foreground)]`
 const BTN_PRIMARY = `${BTN} bg-[var(--accent)] text-[var(--accent-foreground)]`
-const BTN_WARNING = `${BTN} bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]`
 const BTN_DANGER = `${BTN} bg-transparent border border-[var(--danger)] text-[var(--danger)]`
 
 // One logo — dark is the only theme (index.css, no light variant
@@ -281,6 +289,25 @@ function Switch({ checked, onChange, title }) {
 // Focus selects the hint; typing replaces it (hidden). The hint is never
 // sent back as a key — readKey() returns '' until the box is edited.
 // Remount it (React key) after a save to show the new hint.
+// File picker: a button that opens the browser's chooser, then the chosen
+// file's name. The raw file input stays out of sight; Enter or Space on the
+// focused button opens the chooser too.
+function FilePick({ accept, file, onPick }) {
+  const ref = useRef(null)
+  return (
+    <>
+      <label className={BTN_DEFAULT} tabIndex={0} role="button"
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ref.current?.click() } }}>
+        <input ref={ref} type="file" accept={accept} className="hidden"
+          onClick={e => { e.target.value = '' }}
+          onChange={e => onPick(e.target.files?.[0] || null)} />
+        Choose file
+      </label>
+      <span className="text-[13px] font-mono text-[var(--muted)]">{file ? file.name : `no ${accept} file chosen`}</span>
+    </>
+  )
+}
+
 function KeyInput({ id, hint, placeholder, label }) {
   const [dirty, setDirty] = useState(false)
   const [val, setVal] = useState('')
@@ -508,9 +535,9 @@ function KeysCard({ setMsg }) {
               <thead>
                 <tr className="text-[12px] text-[var(--muted)]">
                   <th className="text-left px-4 py-2">Key</th>
-                  <th className="text-left px-4 py-2">Used by</th>
-                  <th className="text-left px-4 py-2">In use</th>
-                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="hidden sm:table-cell text-left px-4 py-2">For</th>
+                  <th className="hidden sm:table-cell text-left px-4 py-2">In use</th>
+                  <th className="hidden sm:table-cell text-left px-4 py-2">Status</th>
                   <th className="text-left px-4 py-2"></th>
                 </tr>
               </thead>
@@ -524,19 +551,25 @@ function KeysCard({ setMsg }) {
                       <tr data-var={row.var} className="border-t border-[var(--separator)]">
                         <td className="px-4 py-2">
                           <div className="text-[14px] font-medium">{row.label}</div>
-                          <div className="text-[12px] font-mono text-[var(--muted)]">{row.var}</div>
+                          <div className="text-[12px] font-mono text-[var(--muted)] break-all">{row.var}</div>
+                          {/* Phone: the For / In use / Status columns fold in here. */}
+                          <div className="sm:hidden flex flex-wrap items-center gap-2 mt-1">
+                            {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u.toLowerCase()}</span>)}
+                            {row.in_use && <span className={OK_CHIP_CLS}>in use</span>}
+                            <span className={st.cls} title={st.title}>{st.text}</span>
+                          </div>
                         </td>
-                        <td className="px-4 py-2">
+                        <td className="hidden sm:table-cell px-4 py-2">
                           <div className="flex flex-wrap items-center gap-2">
                             {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u.toLowerCase()}</span>)}
                           </div>
                         </td>
-                        <td className="px-4 py-2">
+                        <td className="hidden sm:table-cell px-4 py-2">
                           {row.in_use && <span className={OK_CHIP_CLS}>in use</span>}
                         </td>
-                        <td className="px-4 py-2"><span className={st.cls} title={st.title} data-role="state">{st.text}</span></td>
+                        <td className="hidden sm:table-cell px-4 py-2"><span className={st.cls} title={st.title} data-role="state">{st.text}</span></td>
                         <td className="px-4 py-2 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
                               {t?.status === 'testing' ? 'Testing…' : 'Test'}</button>
                             <button className={BTN_DEFAULT} onClick={() => setOpen(open === row.var ? null : row.var)}>
@@ -1150,13 +1183,18 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll,
   // far-right Actions cell was off-screen, so muting a room needed that
   // scroll. The row is this component's only caller and hands us a render
   // function as JSX children, so the ONE mute state here feeds both cells.
+  // The state is a chip (like online/offline); the button names the action.
   const mute = (
-    <button className={muted ? BTN_WARNING : BTN_DEFAULT} disabled={!online || busy || muteBusy}
-      onClick={toggleMute}
-      title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
-        : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
-      {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Muted' : 'Mute'}
-    </button>
+    <>
+      {muted && !muteUnknown &&
+        <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>muted</span>}
+      <button className={BTN_DEFAULT} disabled={!online || busy || muteBusy}
+        onClick={toggleMute}
+        title={muteUnknown ? "Couldn't read this node's mute state since it reconnected — click to mute it."
+          : muted ? 'Mic is muted — click to unmute.' : "Mute this node's mic. Array nodes: same as the physical mute button (red LED) — pressing either one updates both."}>
+        {muteBusy ? '…' : muteUnknown ? 'Mute?' : muted ? 'Unmute' : 'Mute'}
+      </button>
+    </>
   )
   const actions = (
     <div className="grid gap-2 justify-items-end">
@@ -1265,12 +1303,11 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   // used to come from room_zones alone, so a node that had connected but
   // was never mapped had NO row — a fresh install could not map its first
   // node from the React UI (regression vs page.html; also why a third
-  // node couldn't onboard). Mapped rooms keep config order;
-  // unmapped nodes follow in registry order.
+  // node couldn't onboard). Sorted by name, the same order the Nodes list uses.
   const mappedRooms = Object.keys(mapping?.room_zones || {})
   const unmappedRooms = (status?.rooms || []).map(r => r.room)
     .filter(r => r && !mappedRooms.includes(r))
-  const roomRows = [...mappedRooms, ...unmappedRooms]
+  const roomRows = [...mappedRooms, ...unmappedRooms].sort(byRoom)
   // Speaker nodes (server-side: board line) get their own built-in speaker
   // as a private zone. Unmapped = that speaker, by default.
   const speakers = mapping?.speakers || {}
@@ -1323,7 +1360,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
       zones.settle(sentZones)
       agents.settle(sentAgents)
       if (agentEdits) {
-        const picks = changed.map(([r, a]) => `${r} → ${a || `Default (${defaultAgent})`}`).join(', ')
+        const picks = changed.map(([r, a]) => `${r} → ${a || defaultAgentLabel(defaultAgent)}`).join(', ')
         say(`Saved — restart to apply (agent ${picks}).`, 'ok', 'Room → zone mapping')
       } else {
         say(`Saved — ${picked.map(([r, z]) => `${r} → ${zoneLabel(z)}`).join(', ')}: replies now route there (live, no restart).`, 'ok', 'Room → zone mapping')
@@ -1382,7 +1419,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                       <select value={agent} data-agent-room={room}
                         onChange={e => agents.set({ [room]: e.target.value })}
                         className={`${INPUT_CLS} w-[200px]`}>
-                        <option value="">{`Default (${defaultAgent || '—'})`}</option>
+                        <option value="">{defaultAgentLabel(defaultAgent)}</option>
                         {agent && !known && <option value={agent}>
                           {!found ? agent : (agentList.length ? `${agent} (not found)` : `${agent} (unverified)`)}</option>}
                         {agentList.map(a => <option key={a.id} value={a.id}>
@@ -1419,7 +1456,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
               </tr>
             </thead>
             <tbody>
-              {(status?.rooms || []).map(r => (
+              {[...(status?.rooms || [])].sort((a, b) => byRoom(a.room, b.room)).map(r => (
                 <NodeActions key={r.room} room={r.room} online={r.online} lastSeen={r.last_seen}
                   reportedMuted={r.muted} setMsg={setMsg} reloadAll={reloadAll}>
                   {({ mute, actions }) => (
@@ -1793,8 +1830,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
             <option value="flex">flex</option>
             <option value="waveshare">waveshare</option>
           </select>
-          <input type="file" accept=".bin" className="text-[13px]"
-            onChange={e => setFwFile(e.target.files?.[0] || null)} />
+          <FilePick accept=".bin" file={fwFile} onPick={setFwFile} />
           <button className={BTN_PRIMARY} style={{ marginLeft: 'auto' }} disabled={pushing || !fwFile || !fwTrack} onClick={push}
             title={!fwTrack ? 'Pick the track first.' : !fwFile ? 'Pick a .bin first.' : ''}>
             {pushing ? 'Uploading…' : 'Push firmware'}
@@ -1935,7 +1971,7 @@ function OwwPanel({ setMsg, reloadAll }) {
     setScanning(true)
     try {
       const r = await api('/api/dashboard/oww/models', { method: 'POST', body: fd })
-      setMsg(`Model '${r.name}' uploaded (${(r.size / 1024).toFixed(0)} KB). Select it to activate.`, 'ok', 'Wake word model')
+      setMsg(`Model '${r.name}' uploaded (${fmtBytes(r.size || 0)}). Select it to activate.`, 'ok', 'Wake word model')
       setNewModel(null)
       await load()
     } catch (e) { setMsg('Upload failed: ' + e.message, 'err', 'Wake word model') }
@@ -1965,8 +2001,7 @@ function OwwPanel({ setMsg, reloadAll }) {
             </select>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <input type="file" accept=".onnx" className="text-[13px]"
-              onChange={e => setNewModel(e.target.files?.[0] || null)} />
+            <FilePick accept=".onnx" file={newModel} onPick={setNewModel} />
             <button className={BTN_DEFAULT} disabled={scanning || !newModel} onClick={upload}>
               {scanning ? 'Uploading…' : 'Upload'}
             </button>
@@ -1991,10 +2026,12 @@ function OwwPanel({ setMsg, reloadAll }) {
                     {m.source === 'stock' &&
                       <div className="text-[12px] text-[var(--muted)]">{esc(m.license || 'non-commercial')}</div>}
                   </td>
-                  <td className="px-4 py-2 font-mono text-[13px]">{((m.size || 0) / 1024).toFixed(0)} KB</td>
+                  <td className="px-4 py-2 font-mono text-[13px]">{fmtBytes(m.size || 0)}</td>
                   <td className="px-4 py-2 text-right">
-                    {m.source !== 'stock' &&
-                      <button className={BTN_DANGER} onClick={() => del(m.name, m.source)}>Delete</button>}
+                    {m.selected
+                      ? <span className="text-[12px] text-[var(--muted)]">in use</span>
+                      : m.source !== 'stock' &&
+                        <button className={BTN_DANGER} onClick={() => del(m.name, m.source)}>Delete</button>}
                   </td>
                 </tr>
               ))}
@@ -2148,6 +2185,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               {!options.length && <option value="" disabled>loading…</option>}
               {options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}
             </select>
+            {provider === 'elevenlabs' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
             {provider === 'elevenlabs' &&
               <input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
@@ -2251,7 +2289,7 @@ const WARN_CHIP_CLS = 'inline-block rounded-full bg-[var(--warning-soft)] text-[
 const OK_CHIP_CLS = 'inline-block rounded-full bg-[var(--success-soft)] text-[var(--success-soft-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
 const ERR_CHIP_CLS = 'inline-block rounded-full bg-[var(--danger-soft)] text-[var(--danger-soft-foreground)] px-2.5 py-0.5 text-[12px] font-medium'
 
-const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`
+const fmtBytes = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`
 
 function sttStateChip(st, dl) {
   if (dl?.state === 'downloading')
@@ -2406,8 +2444,8 @@ function SttCard({ status, setMsg }) {
               {st?.compute && <span className={CHIP_CLS}>{st.compute}</span>}
             </>
           )}
-          <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
-            {ms != null ? `${(ms / 1000).toFixed(2)} s / command` : '— s / command'}</span>
+          {ms != null && <span className={CHIP_CLS} title="Median speech-to-text time of the last 10 commands since restart">
+            {`${(ms / 1000).toFixed(2)} s / command`}</span>}
         </div>
         {(downloading || finished) && (
           <div className="grid gap-2">

@@ -33,6 +33,11 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Dashboard polish: text boxes and dropdowns get a hairline border so they read as fields; both file pickers are
+  styled buttons that show the chosen file; the active wake model says "in use" instead of offering Delete; a
+  muted node shows a "muted" chip and an Unmute button; on a phone the Keys table folds into the key name instead
+  of scrolling sideways. Copy: uptime reads 4m / 3h 12m / 2d 4h, "Default agent", a Voice label on the voice id,
+  wake model sizes in KB/MB, Keys "For", and both room tables sort by name.
 - Voice tab: the wake name and the wake word model share one Wake word card (name on top, then the model picker,
   upload and list). The name still applies live and a model change still needs a restart.
 - Intelligence card: the URL needs only `host:port` for any lane. The bot fills in `http://` and `/v1` (a full URL
