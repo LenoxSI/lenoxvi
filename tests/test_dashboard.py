@@ -54,6 +54,21 @@ def main():
     # URL over HTTP either way). In production the dashboard shares the
     # bot's own clip server, so this collision cannot happen there.
     cfg_test.write_text(cfg_test.read_text().replace("port: 8765", "port: 8766"))
+    # Per-house agent routing must not leak into the rig: a house agent
+    # (intelligence.agents.<kind>) or a room override (room_agents) in the
+    # live config changes which key every intelligence/keys check sees.
+    # Checks that need them set them explicitly.
+    # Round-trip (ruamel) so comments survive: a check pins them.
+    from ruamel.yaml import YAML as _RigYAML
+    _rig_y = _RigYAML()
+    with open(cfg_test) as _f:
+        _rig = _rig_y.load(_f) or {}
+    _rig_intel = _rig.get("intelligence") or {}
+    if _rig_intel.get("agents") or _rig.get("room_agents"):
+        _rig_intel.pop("agents", None)
+        _rig.pop("room_agents", None)
+        with open(cfg_test, "w") as _f:
+            _rig_y.dump(_rig, _f)
     os.environ["LVI_CONFIG"] = str(cfg_test)
 
     from fastapi import BackgroundTasks, FastAPI
@@ -520,6 +535,18 @@ def main():
               "clip_volume" not in _rt2 and "den" not in _rt2["zones"]
               and "# the kitchen speaker" in _txt_c2 and "# about the wake section" in _txt_c2,
               _txt_c2[:300])
+        # (bug-hunt) YAML 1.1 bool/null words: ruamel writes YAML 1.2
+        # (a plain `on:` key), but the bot reads config.yaml with PyYAML
+        # (YAML 1.1: on/off/yes/no/true/false/null — and y/n/~, any
+        # case — become bool/None), so a room named "on" read back as
+        # key True and played nowhere. The writer must quote exactly
+        # those words; everything else stays plain.
+        _txt_bh1 = _cfg_c.read_text()
+        config_store.write_section("room_zones", {"on": "Off", "Yes": "kitchen"})
+        _rz_bh1 = __import__("yaml").safe_load(_cfg_c.read_text()).get("room_zones")
+        check("config writes: YAML 1.1 bool/null words round-trip as the exact strings",
+              _rz_bh1 == {"on": "Off", "Yes": "kitchen"}, f"room_zones={_rz_bh1!r}")
+        _cfg_c.write_text(_txt_bh1)  # restore: the section (and comments) as they were
     finally:
         if _oh_cfg_saved is None:
             os.environ.pop("LVI_CONFIG", None)
@@ -981,6 +1008,26 @@ def main():
     client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
         "model": "eleven_flash_v2_5"})
+
+    # (bug-hunt) GET /tts used to read ONLY the config file: a knob the
+    # bot reads via cfg_env (bot.py) but that lived only in .env showed
+    # the code default on the panel. File > LVI_* env > the bot's default,
+    # per knob — pin provider (the panel's most consequential one).
+    _saved_tts_bh6 = dict(config_store.read_section("tts") or {})
+    _saved_env_bh6 = os.environ.get("LVI_TTS_PROVIDER")
+    try:
+        config_store.write_section("tts", {k: v for k, v in _saved_tts_bh6.items()
+                                           if k != "provider"})
+        os.environ["LVI_TTS_PROVIDER"] = "deepgram"
+        _t_bh6 = client.get("/api/dashboard/tts").json()
+        check("TTS GET: provider absent from the file -> the LVI_TTS_PROVIDER value (the bot's precedence)",
+              _t_bh6.get("provider") == "deepgram", f"provider={_t_bh6.get('provider')!r}")
+    finally:
+        config_store.write_section("tts", _saved_tts_bh6)
+        if _saved_env_bh6 is None:
+            os.environ.pop("LVI_TTS_PROVIDER", None)
+        else:
+            os.environ["LVI_TTS_PROVIDER"] = _saved_env_bh6
 
     # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
     # runs on the same host as prod). LVI_RESTART_COMMAND used to override
@@ -1923,6 +1970,89 @@ def main():
         os.environ.pop("LVI_MODELS_DIR", None)
         shutil.rmtree(models_dir, ignore_errors=True)
 
+    # (bug-hunt) The wake-model active path must follow the FILE, not the
+    # boot cache: _oww_active_path read cfg() first (cached until a
+    # dashboard write clears it), so a hand-edited wake.model left the
+    # active marker — and the delete guard — pointing at a stale model.
+    from ruamel.yaml import YAML as _RY_bh2
+    _p_bh2 = Path(os.environ["LVI_CONFIG"])
+    _wake_bh2 = dict(config_store.read_section("wake") or {})
+    try:
+        config_store.write_section("wake", {**_wake_bh2, "model": "stale_suite.onnx"})
+        _cfg_mod.cfg("wake")  # repopulate the boot cache from the file as written
+        _ry_bh2 = _RY_bh2()
+        _ry_bh2.preserve_quotes = True
+        with _p_bh2.open() as _f_bh2:
+            _d_bh2 = _ry_bh2.load(_f_bh2)
+        _wk_bh2 = _d_bh2.get("wake")
+        if _wk_bh2 is None:
+            _wk_bh2 = _d_bh2["wake"] = {}
+        _wk_bh2["model"] = "hand_edited_suite.onnx"   # the hand edit: NO cache clear
+        with _p_bh2.open("w") as _f_bh2:
+            _ry_bh2.dump(_d_bh2, _f_bh2)
+        check("oww active path: a hand-edited wake.model wins over the stale boot cache",
+              _cfg_mod.cfg("wake", "model") == "stale_suite.onnx"   # the cache really is stale
+              and _rRL._oww_active_path() == Path("hand_edited_suite.onnx").resolve(),
+              f"cached={_cfg_mod.cfg('wake', 'model')!r} active={_rRL._oww_active_path()}")
+    finally:
+        config_store.write_section("wake", _wake_bh2)
+
+    # (bug-hunt) Same-name OWW uploads once shared ONE temp file
+    # ("<name>.uploading"): two uploads interleaved into it and a failed
+    # one left its partial behind for the next upload to swap in. Each
+    # upload now stages to its own mkstemp file and the temp is always
+    # cleaned up (monkeypatched like the loop-gap upload check above).
+    _val_bh3, _dir_bh3 = _rRL._oww_validate, _rRL._oww_dir
+    _tmp_bh3 = Path(tempfile.mkdtemp())
+    try:
+        _rRL._oww_validate = lambda data: None
+        _rRL._oww_dir = lambda: _tmp_bh3
+
+        class _Up_bh3:
+            def __init__(self, data, name="suite_bh3.onnx"):
+                self.filename, self._data = name, data
+
+            async def read(self):
+                return self._data
+
+        async def _pair_bh3():
+            return await asyncio.gather(
+                _rRL.oww_upload_model(file=_Up_bh3(b"\x02" * 4096)),
+                _rRL.oww_upload_model(file=_Up_bh3(b"\x03" * 4096)))
+        try:
+            _res_bh3 = asyncio.run(_pair_bh3())
+        except Exception as _e_bh3:   # a shared temp would raise mid-pair
+            _res_bh3 = [_e_bh3, _e_bh3]
+        _dest_bh3 = _tmp_bh3 / "suite_bh3.onnx"
+        check("oww upload: two same-name uploads stage separately — dest holds ONE upload's whole bytes, nothing left over",
+              all(isinstance(r, dict) and r.get("ok") for r in _res_bh3)
+              and _dest_bh3.is_file()
+              and _dest_bh3.read_bytes() in (b"\x02" * 4096, b"\x03" * 4096)
+              and not list(_tmp_bh3.glob("*.uploading")),
+              f"res={[getattr(r, 'get', lambda _k: None)('ok') for r in _res_bh3]} "
+              f"size={_dest_bh3.stat().st_size if _dest_bh3.is_file() else None} "
+              f"left={[p.name for p in _tmp_bh3.glob('*.uploading')]}")
+
+        # a failed swap must leave nothing behind (the finally unlink)
+        _tmp_bh3.joinpath("suite_bh3fail.onnx").mkdir()  # target blocked -> replace fails
+        _raised_bh3 = False
+        try:
+            asyncio.run(_rRL.oww_upload_model(file=_Up_bh3(b"\x04" * 4096, name="suite_bh3fail.onnx")))
+        except OSError:
+            _raised_bh3 = True
+        check("oww upload: a failed swap leaves no .uploading temp behind",
+              _raised_bh3 and not list(_tmp_bh3.glob("*.uploading")),
+              f"raised={_raised_bh3} left={[p.name for p in _tmp_bh3.glob('*.uploading')]}")
+
+        import inspect as _insp_bh3
+        _src_bh3 = _insp_bh3.getsource(_rRL.oww_upload_model)
+        check("oww upload: staging stays per-upload (mkstemp), never the shared name+'.uploading'",
+              "mkstemp" in _src_bh3 and 'name + ".uploading"' not in _src_bh3,
+              "shared staging is back" if 'name + ".uploading"' in _src_bh3 else "ok")
+    finally:
+        _rRL._oww_validate, _rRL._oww_dir = _val_bh3, _dir_bh3
+        shutil.rmtree(_tmp_bh3, ignore_errors=True)
+
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")
     check("tuning GET shape — six knobs",
@@ -2628,6 +2758,36 @@ def main():
         check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
+
+    # 13a. (bug-hunt) A non-ASCII token: str/str compare_digest raises
+    # TypeError on it -> a 500 even for the RIGHT token. The compare runs
+    # on UTF-8 bytes now; headers ride the wire as bytes (the ASGI layer
+    # decodes them latin-1), so the probes send raw bytes.
+    _saved_tok_bh4 = os.environ.get("LVI_DASHBOARD_TOKEN")
+    # Whatever the rig maps already (no house names in a public test).
+    _rz_bh4 = {"room_zones": dict(client.get("/api/dashboard/mapping").json().get("room_zones") or {})}
+    os.environ["LVI_DASHBOARD_TOKEN"] = "rig-sécret"
+    try:
+        r = client.put("/api/dashboard/mapping", json=_rz_bh4)
+        check("guard: non-ASCII token, bare mutation 401 (not a 500)",
+              r.status_code == 401, f"status={r.status_code}")
+        r = client.put("/api/dashboard/mapping", json=_rz_bh4,
+                       headers={"X-Dashboard-Token": "rig-sécret".encode("latin-1")})
+        check("guard: non-ASCII token, matching header passes",
+              r.status_code == 200, f"status={r.status_code} body={r.text[:120]}")
+        r = client.put("/api/dashboard/mapping", json=_rz_bh4,
+                       headers={"X-Dashboard-Token": "rig-sécret".encode("utf-8")})
+        check("guard: non-ASCII token sent as raw UTF-8 (curl, scripts) passes too",
+              r.status_code == 200, f"status={r.status_code} body={r.text[:120]}")
+        r = client.put("/api/dashboard/mapping", json=_rz_bh4,
+                       headers={"X-Dashboard-Token": "wröng-tokén".encode("latin-1")})
+        check("guard: a wrong non-ASCII token is a plain 401, never a 500",
+              r.status_code == 401, f"status={r.status_code}")
+    finally:
+        if _saved_tok_bh4 is None:
+            os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+        else:
+            os.environ["LVI_DASHBOARD_TOKEN"] = _saved_tok_bh4
 
     # 13b. Guard: an Origin must match the Host's port too (a page on another
     # port of the same IP is another origin); a missing port is the scheme's.
@@ -5289,6 +5449,45 @@ def main():
               f"{_r.status_code} {_r.text[:120]} frames={len(_osp.frames)}")
         _r = client.post("/api/dashboard/node-speaker/test", json={"room": "suite-xvfsp"})
         check("speaker: test clip 404s a node without a speaker", _r.status_code == 404, str(_r.status_code))
+
+        # (bug-hunt) Test tones must block the echo gates of the rooms
+        # they play IN — the one global gate belonged to whichever
+        # session connected LAST, so a zone test blocked a different
+        # room's echo window. Two nodes, one mapped to the zone: only
+        # its gate may move.
+        from echo_gate import EchoGate as _EchoGate_bh7
+        _gA_bh7, _gB_bh7 = _EchoGate_bh7(), _EchoGate_bh7()
+        registry.mark_connected("pc-ga-bh7")
+        registry.note_offer("pc-ga-bh7", "suite-gate-a")
+        registry.mark_connected("pc-gb-bh7")
+        registry.note_offer("pc-gb-bh7", "suite-gate-b")
+        registry.set_gate(_gA_bh7, pc_id="pc-ga-bh7")
+        registry.set_gate(_gB_bh7, pc_id="pc-gb-bh7")
+        client.post("/api/dashboard/zones", json={"name": "gatezone", "backend": "wiim",
+                                                  "ip": "192.0.2.56"})
+        client.put("/api/dashboard/mapping",
+                   json={"room_zones": {**_base_rzsp, "suite-gate-a": "gatezone"}})
+        import wiim_output as _wo_bh7
+        _saved_st_bh7, _saved_api_bh7 = _wo_bh7.wiim_get_status, _wo_bh7.wiim_api
+        _wo_bh7.wiim_get_status = lambda ip: None
+        _wo_bh7.wiim_api = lambda ip, cmd: True
+        try:
+            _r_bh7 = client.post("/api/dashboard/zones/gatezone/test")
+        finally:
+            _wo_bh7.wiim_get_status, _wo_bh7.wiim_api = _saved_st_bh7, _saved_api_bh7
+        check("zone test tone blocks only the mapped room's echo gate (the other room's stays open)",
+              _r_bh7.status_code == 200 and _gA_bh7.blocked() is True and _gB_bh7.blocked() is False,
+              f"{_r_bh7.status_code} A={_gA_bh7.blocked()} B={_gB_bh7.blocked()}")
+        check("gates_for_rooms falls back to the global gate when no named session matches",
+              registry.gates_for_rooms(["nowhere-bh7"]) == [_gB_bh7],
+              str(registry.gates_for_rooms(["nowhere-bh7"])))
+        # cleanup: the zone delete drops the dangling mapping with it
+        client.delete("/api/dashboard/zones/gatezone")
+        registry.mark_disconnected("pc-ga-bh7")
+        registry.mark_disconnected("pc-gb-bh7")
+        registry.drop_sender("pc-ga-bh7")   # also drops the per-pc gate
+        registry.drop_sender("pc-gb-bh7")
+        registry.set_gate(None)
 
         # R-I3 deleting the zone a speaker room was mapped to re-syncs it
         # (the mapping drops -> the default is its own speaker again)
