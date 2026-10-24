@@ -5,7 +5,7 @@
 
 # LenoxVI
 
-Voice for the agent you already run. Mic nodes in each room, a wake word, and answers played back through Sonos, WiiM or the node's own speaker.
+Multi-zone audio for your agent. Local, cloud or hybrid based on your use case. audio routes through Sonos or Wiim audio speakers. Mics from ReSpeaker or Waveshare, including in-ceiling microphones matching architectural speakers. Web dashboard for easy and fast tuning of voice pipeline!
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → speech to text →
     intelligence (Hermes / OpenClaw / Nanobot) → text to speech →
