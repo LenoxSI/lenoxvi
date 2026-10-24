@@ -23,26 +23,30 @@ Not a chat box. Wake-gated. The dashboard operates the appliance. It does not ta
 
 ## Intelligence
 
-| System | Talks to | Memory | Spoken style | Pick it when |
-|---|---|---|---|---|
-| Hermes | Hermes API, bearer key. Agents come from the gateway. | Hermes keeps the conversation. | LenoxVI sends voice instructions: short spoken sentences, no markdown. | Default in `config.example.yaml`. |
-| OpenClaw | OpenClaw Gateway. Model `openclaw/<agent>`. | Sticky per room via `x-openclaw-session-key`. A fresh room sends no key; the agent may still recall from its own files. | Same voice instructions as Hermes. | You already run OpenClaw. |
-| Nanobot | Nanobot's OpenAI-compatible API. One user message per turn, plus `session_id`. | Nanobot keeps the history. | The agent's own instructions. LenoxVI cannot send a system message. | You already run nanobot. |
-| stub | Canned lines. | None. | None. | Bench only. Code default if `intelligence.kind` is unset. |
-
-## Voice
-
-| Lane | Provider | Leaves the box? | Fallback |
+| System | Talks to | Session history | Spoken style |
 |---|---|---|---|
-| STT | Whisper, local | No | — |
-| STT | Deepgram Nova-3 | Yes, after the wake word | The configured Whisper model |
-| STT | ElevenLabs Scribe v2 | Yes, after the wake word | The configured Whisper model |
-| TTS | ElevenLabs Flash v2.5 or v4 Turbo | Yes | Pocket, if installed |
-| TTS | Deepgram Flux or Aura-2 | Yes | Pocket, if installed |
-| TTS | Pocket, local | No | — |
-| TTS | Kokoro, local | No | Pocket, if installed |
+| Hermes | Hermes API, bearer key. Agents come from the gateway. | Hermes keeps the conversation. | LenoxVI sends voice instructions: short spoken sentences, no markdown. |
+| OpenClaw | OpenClaw Gateway. Model `openclaw/<agent>`. | Sticky per room via `x-openclaw-session-key`. A fresh room sends no key; the agent may still recall from its own files. | Same voice instructions as Hermes. |
+| Nanobot | Nanobot's OpenAI-compatible API. One user message per turn, plus `session_id`. | Nanobot keeps the history. | The agent's own instructions. LenoxVI cannot send a system message. |
+
+## STT
+
+| Provider | Local | Fallback |
+|---|---|---|
+| Whisper | ✅ | — |
+| Deepgram Nova-3 | ❌ | The configured Whisper model |
+| ElevenLabs Scribe v2 | ❌ | The configured Whisper model |
 
 The wake word stays on the box. Cloud speech-to-text falls back to the Whisper model you configured.
+
+## TTS
+
+| Provider | Local | Fallback |
+|---|---|---|
+| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Pocket, if installed |
+| Deepgram Flux or Aura-2 | ❌ | Pocket, if installed |
+| Pocket | ✅ | — |
+| Kokoro | ✅ | Pocket, if installed |
 
 ## Whisper, local
 
