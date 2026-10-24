@@ -617,15 +617,19 @@ def main():
         # (no I/O: validate the payload directly), so the list can never
         # offer a value the PUT rejects.
         _cat = t.get("catalog") or {}
-        check("TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36, pocket 21)",
+        check("TTS GET catalog sizes (elevenlabs 2, aura 40, flux 36, pocket 21, kokoro 28)",
               len(_cat.get("elevenlabs", [])) == 2 and len(_cat.get("deepgram", [])) == 40
               and len(_cat.get("deepgram-flux", [])) == 36
-              and len(_cat.get("pocket", [])) == 21,
+              and len(_cat.get("pocket", [])) == 21
+              and len(_cat.get("kokoro", [])) == 28,
               str({k: len(v) for k, v in _cat.items()}))
         from dashboard import routes as _routes_m1
+        import tts_kokoro as _tk_m1
         import tts_pocket as _tp_m1
         _m1_avail = _tp_m1.pocket_available
+        _m1_kavail = _tk_m1.kokoro_available
         _tp_m1.pocket_available = lambda: True  # validate the list, not this host's install
+        _tk_m1.kokoro_available = lambda: True
         _m1_bad = []
         for _prov, _vals in _cat.items():
             for _v in _vals:
@@ -636,14 +640,17 @@ def main():
                         _p = _routes_m1.TTSPayload(provider=_prov, deepgram_voice=_v)
                     elif _prov == "pocket":
                         _p = _routes_m1.TTSPayload(provider=_prov, pocket_voice=_v)
+                    elif _prov == "kokoro":
+                        _p = _routes_m1.TTSPayload(provider=_prov, kokoro_voice=_v)
                     else:
                         _p = _routes_m1.TTSPayload(provider=_prov, deepgram_flux_voice=_v)
                     _routes_m1._validate_tts_payload(_p)
                 except Exception as _e:
                     _m1_bad.append((_prov, _v, str(_e)[:40]))
         _tp_m1.pocket_available = _m1_avail
+        _tk_m1.kokoro_available = _m1_kavail
         check("every catalog entry passes the server's own TTS validation",
-              not _m1_bad and sum(len(v) for v in _cat.values()) == 99, f"bad={_m1_bad[:3]}")
+              not _m1_bad and sum(len(v) for v in _cat.values()) == 127, f"bad={_m1_bad[:3]}")
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
@@ -866,6 +873,86 @@ def main():
         check("pocket: PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
     finally:
         _tppk.pocket_available = _orig_availpk
+    # Kokoro lane (routes). kokoro_available is monkeypatched like Pocket's,
+    # so the pins hold whether or not kokoro-onnx is on this host.
+    import tts_kokoro as _tkr
+    check("kokoro: the dashboard imports neither kokoro_onnx nor pipecat's Kokoro service",
+          "kokoro_onnx" not in sys.modules and "pipecat.services.kokoro.tts" not in sys.modules)
+    _KOKORO_28 = ("af_alloy af_aoede af_bella af_heart af_jessica af_kore af_nicole af_nova af_river "
+                  "af_sarah af_sky am_adam am_echo am_eric am_fenrir am_liam am_michael am_onyx am_puck "
+                  "am_santa bf_alice bf_emma bf_isabella bf_lily bm_daniel bm_fable bm_george bm_lewis").split()
+    _orig_availkr = _tkr.kokoro_available
+    _orig_availpk2 = _tppk.pocket_available
+    _tkr.kokoro_available = lambda: True
+    _tppk.pocket_available = lambda: True
+    try:
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: GET /tts catalog.kokoro = exactly the 28 English voices",
+              (t.get("catalog") or {}).get("kokoro") == _KOKORO_28, f"{(t.get('catalog') or {}).get('kokoro')}")
+        check("kokoro: GET /tts reports kokoro_voice + kokoro_speed + kokoro_installed",
+              {"kokoro_voice", "kokoro_speed", "kokoro_installed"} <= set(t)
+              and t.get("kokoro_installed") is True and t.get("kokoro_voice") in _KOKORO_28,
+              str({k: t.get(k) for k in ("kokoro_voice", "kokoro_speed", "kokoro_installed")}))
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "bf_emma",
+                                                   "kokoro_speed": 1.25})
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: PUT provider kokoro + voice + speed round-trips",
+              r.status_code == 200 and t.get("provider") == "kokoro" and t.get("kokoro_voice") == "bf_emma"
+              and t.get("kokoro_speed") == 1.25, f"{r.status_code} {r.text[:120]} {t.get('kokoro_voice')}/{t.get('kokoro_speed')}")
+        for _body, _why in (({"provider": "kokoro"}, "no voice"),
+                            ({"provider": "kokoro", "kokoro_voice": "af_nope"}, "unknown voice"),
+                            ({"provider": "kokoro", "kokoro_voice": "alba"}, "a Pocket voice"),
+                            ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 1.27}, "off-step speed"),
+                            ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 1.6}, "speed above 1.5"),
+                            ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 0.45}, "speed below 0.5"),
+                            ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_spead": 1.0}, "misspelled key")):
+            r = client.put("/api/dashboard/tts", json=_body)
+            check(f"kokoro: PUT rejects {_why} (422)", r.status_code == 422, f"{r.status_code} {r.text[:120]}")
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: refused PUTs saved nothing",
+              t.get("kokoro_voice") == "bf_emma" and t.get("kokoro_speed") == 1.25, str(t)[:160])
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "am_adam"})
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: PUT without kokoro_speed leaves the saved speed as-is",
+              r.status_code == 200 and t.get("kokoro_voice") == "am_adam" and t.get("kokoro_speed") == 1.25,
+              f"{t.get('kokoro_voice')}/{t.get('kokoro_speed')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+                                                   "model": "eleven_flash_v2_5"})
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: a PUT for another provider leaves kokoro_voice and kokoro_speed as they are",
+              r.status_code == 200 and t.get("provider") == "elevenlabs"
+              and t.get("kokoro_voice") == "am_adam" and t.get("kokoro_speed") == 1.25,
+              f"{t.get('provider')} {t.get('kokoro_voice')}/{t.get('kokoro_speed')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
+                                                   "fallback": "pocket", "pocket_voice": "vera"})
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: Kokoro primary + Pocket fallback persists (same as behind the cloud voices)",
+              r.status_code == 200 and t.get("provider") == "kokoro" and t.get("fallback") == "pocket"
+              and t.get("pocket_voice") == "vera", f"{r.status_code} {t.get('provider')}/{t.get('fallback')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
+                                                   "fallback": "off"})
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: fallback off clears it behind Kokoro",
+              r.status_code == 200 and t.get("fallback") is None, f"{t.get('fallback')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
+                                                   "fallback": "kokoro"})
+        check("kokoro: Kokoro as a fallback is refused (422)", r.status_code == 422, f"{r.status_code}")
+        # Not installed: the card shows it disabled, a PUT says how to install.
+        _tkr.kokoro_available = lambda: False
+        t = client.get("/api/dashboard/tts").json()
+        check("kokoro: GET /tts reports kokoro_installed false when missing",
+              t.get("kokoro_installed") is False, f"{t.get('kokoro_installed')}")
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart"})
+        check("kokoro: PUT provider kokoro refused when not installed (422 + install hint)",
+              r.status_code == 422 and _tkr.INSTALL_HINT in r.text, f"{r.status_code} {r.text[:160]}")
+        r = client.put("/api/dashboard/tts", json={"provider": "deepgram", "deepgram_voice": "aura-2-thalia-en"})
+        check("kokoro: Kokoro missing: other providers still save",
+              r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+        check("kokoro: GET /tts never returns a key value with Kokoro fields added",
+              not any("sk_" in str(v) for v in client.get("/api/dashboard/tts").json().values()))
+    finally:
+        _tkr.kokoro_available = _orig_availkr
+        _tppk.pocket_available = _orig_availpk2
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
     client.put("/api/dashboard/tts", json={
@@ -4691,6 +4778,240 @@ def main():
           _main_src.count("warn_once(") >= 2, f"count={_main_src.count('warn_once(')}")
     check("pocket bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
           "tts_primary = tts" in _main_src)
+
+    # ── Kokoro lane: bot.py wiring (code only, like the Pocket pins above) ──
+    _rbKK = next((n for n in _astR.walk(_botR)
+                  if isinstance(n, _astR.AsyncFunctionDef) and n.name == "run_bot"), None)
+    _rbKKsrc = _astR.unparse(_rbKK) if _rbKK else ""
+    _kkBranch = _rbKKsrc.find("tts_provider == 'kokoro'")
+    _kkWarm, _kkMake = _rbKKsrc.find("await tts_kokoro.warm()"), _rbKKsrc.find("tts_kokoro.make_service(")
+    check("kokoro bot.py: tts.provider kokoro warms the shared model off the loop, then builds the service",
+          0 <= _kkBranch < _kkWarm < _kkMake and _rbKKsrc.count("tts_kokoro.make_service(") == 1,
+          f"branch={_kkBranch} warm={_kkWarm} make={_kkMake}")
+    check("kokoro bot.py: voice + speed via cfg/env with the module defaults",
+          "cfg_env('tts', 'kokoro_voice', 'LVI_TTS_KOKORO_VOICE', tts_kokoro.DEFAULT_VOICE)" in _rbKKsrc
+          and "cfg_env('tts', 'kokoro_speed', 'LVI_TTS_KOKORO_SPEED', tts_kokoro.DEFAULT_SPEED)" in _rbKKsrc)
+    check("kokoro bot.py: not installed / failed load fail loud with the install hint",
+          "tts.provider=kokoro but kokoro-onnx is not installed" in _rbKKsrc
+          and "tts.provider=kokoro but the Kokoro model failed to load" in _rbKKsrc
+          and _rbKKsrc.count("tts_kokoro.INSTALL_HINT") >= 2)
+    check("kokoro bot.py: Kokoro is a primary in the same dispatch, before the Pocket fallback wrap",
+          0 <= _kkBranch < _rbKKsrc.find("tts_primary = tts") < _rbKKsrc.find("if _fallback == 'pocket':"))
+    check("kokoro bot.py: another provider never imports Kokoro (only inside its branch and the startup preload)",
+          not any(isinstance(n, (_astR.Import, _astR.ImportFrom))
+                  and "tts_kokoro" in _astR.unparse(n) for n in _botR.body)
+          and _rbKKsrc.count("import tts_kokoro") == 1
+          and _rbKKsrc.find("import tts_kokoro") > _kkBranch)
+    _kkPre = _main_src.find("tts_kokoro.preload()")
+    check("kokoro bot.py: Kokoro preload at startup when it's the provider, before main(), non-fatal",
+          0 <= _kkPre < _main_src.rfind("main()") and "kokoro preload failed" in _main_src
+          and "if _tp == 'kokoro':" in _main_src)
+    # Must still hold: the number pass is for the local voices only. A custom
+    # speller in front of ElevenLabs' own normalizer once garbled times.
+    _numUsers = sorted(p.relative_to(REPO_CORE).as_posix() for p in REPO_CORE.rglob("*.py")
+                       if "spell_numbers" in p.read_text() and p.name != "tts_numbers.py")
+    check("number pass: only the Pocket and Kokoro modules call spell_numbers (never bot.py or a cloud lane)",
+          _numUsers == ["tts_kokoro.py", "tts_pocket.py"]
+          and "spell_numbers" not in _main_src and "tts_numbers" not in _main_src, f"users={_numUsers}")
+    check("number pass: the ElevenLabs and Deepgram services keep pipecat's own run_tts",
+          _bot13.TrackedElevenLabsTTSService.run_tts is _bot13.ElevenLabsTTSService.run_tts
+          and (_bot13.TrackedElevenLabsDialogueTTSService is None
+               or _bot13.TrackedElevenLabsDialogueTTSService.run_tts is _bot13.ElevenLabsDialogueTTSService.run_tts)
+          and (_bot13.TrackedDeepgramTTSService is None
+               or _bot13.TrackedDeepgramTTSService.run_tts is _bot13.DeepgramTTSService.run_tts)
+          and (_bot13.TrackedDeepgramFluxTTSService is None
+               or _bot13.TrackedDeepgramFluxTTSService.run_tts is _bot13.DeepgramFluxTTSService.run_tts))
+    _cloud13 = _Tracked13()
+    _aio13.run(_cloud13._synthesize_text("It's 9:06, that's $12.50 and 75%.", "suite-ctx"))
+    check("number pass: a cloud service (TTSTracked) speaks the text exactly as given",
+          _cloud13.spokes == ["It's 9:06, that's $12.50 and 75%."], f"spokes={_cloud13.spokes}")
+
+    # ── Kokoro lane: one shared model per process. kokoro-onnx is not
+    # installed where this suite runs: a fake kokoro_onnx module and fake
+    # (sparse) model files in the scratch dir stand in. Nothing downloads. ──
+    import inspect as _inspKK
+    import types as _typesKK
+    import numpy as _npKK
+    from loguru import logger as _lgKK
+    import tts_kokoro as _tk
+    _KK = {"loads": 0, "delay": 0.0, "fail": False, "calls": [], "downloads": 0}
+
+    class _FakeKokoro:
+        def __init__(self, model_path, voices_path):
+            time.sleep(_KK["delay"])
+            _KK["loads"] += 1
+            if _KK["fail"]:
+                raise RuntimeError("suite: onnx refused the model")
+            _KK["paths"] = (model_path, voices_path)
+            self.voices = {v: object() for v in _tk.KOKORO_VOICES}
+
+        async def create_stream(self, text, voice, speed=1.0, lang="en-us", **kw):
+            _KK["calls"].append((text, voice, lang, speed))
+            yield _npKK.zeros(240, dtype=_npKK.float32), 24000
+
+    _kkSaved = {"mod": sys.modules.get("kokoro_onnx"), "dir": _tk.model_dir}
+    _fakeKKmod = _typesKK.ModuleType("kokoro_onnx")
+    _fakeKKmod.Kokoro = _FakeKokoro
+    sys.modules["kokoro_onnx"] = _fakeKKmod
+    _kkDir = SCRATCH / "kokoro-models"
+    _tk.model_dir = lambda: _kkDir
+    _tk._reset_for_tests()
+    _kkLog = []
+    _kkSink = _lgKK.add(lambda m: _kkLog.append(str(m)), level="WARNING")
+    try:
+        check("kokoro: the catalog is the 28 English voices, af_heart the default",
+              list(_tk.KOKORO_VOICES) == _KOKORO_28 and _tk.DEFAULT_VOICE == "af_heart")
+        check("kokoro: kokoro_available() true with kokoro_onnx importable", _tk.kokoro_available() is True)
+        check("kokoro: resolve_voice keeps a catalog voice, anything else -> af_heart",
+              _tk.resolve_voice("bm_lewis") == "bm_lewis" and _tk.resolve_voice("alba") == "af_heart"
+              and _tk.resolve_voice(None) == "af_heart")
+        check("kokoro: language_for: a* American (en-us), b* British (en-gb)",
+              _tk.language_for("af_heart") == "en-us" and _tk.language_for("am_puck") == "en-us"
+              and _tk.language_for("bf_emma") == "en-gb" and _tk.language_for("bm_george") == "en-gb")
+        # No model files: warm() fails, names the fetch script, loads nothing.
+        _kkOk = asyncio.run(_tk.warm())
+        check("kokoro: missing model files: warm() returns False and names the fetch script",
+              _kkOk is False and _KK["loads"] == 0
+              and any("fetch_kokoro_models.sh" in s for s in _kkLog), f"ok={_kkOk} loads={_KK['loads']} log={_kkLog[-1:]}")
+        check("kokoro: a room's make_service never loads the model itself (None until warm() succeeded)",
+              _tk.make_service(mixin=_bot13.TTSTracked, voice="af_heart", speed=1.0) is None and _KK["loads"] == 0)
+        _kkDir.mkdir(parents=True, exist_ok=True)
+        (_kkDir / "kokoro-v1.0.onnx").write_bytes(b"truncated")
+        (_kkDir / "voices-v1.0.bin").write_bytes(b"truncated")
+        check("kokoro: wrong-size model files are refused before onnx sees them",
+              asyncio.run(_tk.warm()) is False and _KK["loads"] == 0)
+        for _name, _size in _tk.MODEL_FILES.items():
+            with open(_kkDir / _name, "wb") as _fh:
+                _fh.truncate(_size)   # sparse: the right size, no real bytes
+        # warm(): off the event loop, and two rooms warming at once load ONCE.
+        _KK["delay"] = 0.3
+
+        async def _kkWarmProbe():
+            gaps, state = [], {"stop": False}
+
+            async def ticker():
+                last = time.monotonic()
+                while not state["stop"]:
+                    await asyncio.sleep(0.02)
+                    now = time.monotonic()
+                    gaps.append(now - last)
+                    last = now
+
+            tick = asyncio.create_task(ticker())
+            await asyncio.sleep(0.05)
+            res = await asyncio.gather(_tk.warm(), _tk.warm(), _tk.warm())
+            state["stop"] = True
+            await tick
+            return res, max(gaps) if gaps else None
+
+        _kkRes, _kkGap = asyncio.run(_kkWarmProbe())
+        _KK["delay"] = 0.0
+        check("kokoro: warm() keeps the event loop responsive during the model load",
+              _kkGap is not None and _kkGap < 0.15, f"max loop gap={_kkGap}")
+        check("kokoro: three concurrent warms load the model once",
+              _kkRes == [True, True, True] and _KK["loads"] == 1, f"res={_kkRes} loads={_KK['loads']}")
+        check("kokoro: the shared model loads from the fixed cache directory",
+              _KK.get("paths") == (str(_kkDir / "kokoro-v1.0.onnx"), str(_kkDir / "voices-v1.0.bin")),
+              f"{_KK.get('paths')}")
+        check("kokoro: a later warm() reuses the loaded model", asyncio.run(_tk.warm()) is True and _KK["loads"] == 1)
+        # A room's service: the shared instance, never pipecat's per-instance load or download.
+        import pipecat.services.kokoro.tts as _pkk
+        _kkOrigEnsure, _kkOrigDl = _pkk._ensure_model_files, _pkk._download_file
+
+        def _kkNoDownload(*a, **k):
+            _KK["downloads"] += 1
+            raise AssertionError("suite: a room's Kokoro service tried to fetch model files")
+
+        _pkk._ensure_model_files = _kkNoDownload
+        _pkk._download_file = _kkNoDownload
+        try:
+            _kk1 = _tk.make_service(mixin=_bot13.TTSTracked, voice="af_heart", speed=1.0)
+            _kk2 = _tk.make_service(mixin=_bot13.TTSTracked, voice="bf_emma", speed="1.25")
+        finally:
+            _pkk._ensure_model_files, _pkk._download_file = _kkOrigEnsure, _kkOrigDl
+        check("kokoro: two rooms share the one model: no load, no download per room",
+              _kk1 is not None and _kk2 is not None and _kk1._kokoro is _kk2._kokoro is _tk.get_shared_model()
+              and _KK["loads"] == 1 and _KK["downloads"] == 0,
+              f"svc={_kk1},{_kk2} loads={_KK['loads']} downloads={_KK['downloads']}")
+        check("kokoro: the service is pipecat's Kokoro service with the TTSTracked health tap, labelled kokoro",
+              isinstance(_kk1, _pkk.KokoroTTSService) and isinstance(_kk1, _bot13.TTSTracked)
+              and _kk1._tts_provider == "kokoro")
+        check("kokoro: voice, espeak language and speed reach the service settings",
+              (_kk1._settings.voice, _kk1._settings.language, _kk1._settings.speed) == ("af_heart", "en-us", 1.0)
+              and (_kk2._settings.voice, _kk2._settings.language, _kk2._settings.speed) == ("bf_emma", "en-gb", 1.25),
+              f"{(_kk1._settings.voice, _kk1._settings.language, _kk1._settings.speed)} "
+              f"{(_kk2._settings.voice, _kk2._settings.language, _kk2._settings.speed)}")
+        _kk3 = _tk.make_service(mixin=_bot13.TTSTracked, voice="nope", speed=3)
+        _kk4 = _tk.make_service(mixin=_bot13.TTSTracked, voice="am_adam", speed="fast")
+        check("kokoro: unknown voice -> af_heart; out-of-range or junk speed -> 1.0",
+              _kk3 is not None and _kk3._settings.voice == "af_heart" and _kk3._settings.speed == 1.0
+              and _kk4 is not None and _kk4._settings.speed == 1.0)
+        check("kokoro: _try_revive is a no-op (no websocket to retry)",
+              type(_kk1)._try_revive is not _bot13.TTSTracked._try_revive
+              and asyncio.run(_kk1._try_revive()) is None)
+
+        # The number pass runs inside the Kokoro service, on the shared model.
+        async def _kkSpeak(svc, text):
+            async for _ in svc.run_tts(text, "suite-ctx"):
+                pass
+
+        _KK["calls"].clear()
+        asyncio.run(_kkSpeak(_kk2, "It's 9:06 and 72°F, lunch was $12.50."))
+        check("kokoro: number pass: the engine hears times, degrees and money as words",
+              _KK["calls"] == [("It's nine oh six and seventy-two degrees Fahrenheit, lunch was "
+                                "twelve dollars and fifty cents.", "bf_emma", "en-gb", 1.25)], f"{_KK['calls']}")
+        _kkPlain = "The porch light is on."
+        _KK["calls"].clear()
+        asyncio.run(_kkSpeak(_kk1, _kkPlain))
+        check("kokoro: number pass: digit-free text reaches the engine unchanged",
+              len(_KK["calls"]) == 1 and _KK["calls"][0][0] is _kkPlain, f"{_KK['calls']}")
+
+        # Two rooms speaking at once queue on the one model.
+        async def _kkLockProbe():
+            active = {"now": 0, "max": 0}
+            orig = _pkk.KokoroTTSService.run_tts
+
+            async def slow(self, text, context_id):
+                active["now"] += 1
+                active["max"] = max(active["max"], active["now"])
+                await asyncio.sleep(0.05)
+                active["now"] -= 1
+                yield None
+
+            _pkk.KokoroTTSService.run_tts = slow
+            try:
+                await asyncio.gather(_kkSpeak(_kk1, "hi"), _kkSpeak(_kk2, "hi"))
+            finally:
+                _pkk.KokoroTTSService.run_tts = orig
+            return active["max"]
+
+        check("kokoro: the generation lock serializes two rooms", asyncio.run(_kkLockProbe()) == 1)
+        # Drift pins: the pipecat internals the shared-model subclass relies on.
+        _kkRunSrc = _inspKK.getsource(_pkk.KokoroTTSService.run_tts)
+        _kkInitSrc = _inspKK.getsource(_pkk.KokoroTTSService.__init__)
+        check("kokoro: pipecat internals: run_tts reads only _kokoro/_resampler/_settings; __init__ is what loads",
+              "self._kokoro.create_stream(" in _kkRunSrc and "self._resampler.resample(" in _kkRunSrc
+              and "_ensure_model_files(" in _kkInitSrc and "Kokoro(" in _kkInitSrc)
+        # A load that fails is final for the process (no per-room retries).
+        _tk._reset_for_tests()
+        _KK["fail"], _KK["loads"] = True, 0
+        _kkLog.clear()
+        _kkF1 = asyncio.run(_tk.warm())
+        _kkF2 = asyncio.run(_tk.warm())
+        check("kokoro: a failed load returns False with the install hint, and is not retried",
+              _kkF1 is False and _kkF2 is False and _KK["loads"] == 1
+              and any(_tk.INSTALL_HINT in s for s in _kkLog), f"loads={_KK['loads']} log={_kkLog[-1:]}")
+        check("kokoro: make_service after a failed load is None (the bot fails loud)",
+              _tk.make_service(mixin=_bot13.TTSTracked, voice="af_heart", speed=1.0) is None)
+    finally:
+        _lgKK.remove(_kkSink)
+        _KK["fail"] = False
+        _tk.model_dir = _kkSaved["dir"]
+        _tk._reset_for_tests()
+        if _kkSaved["mod"] is None:
+            sys.modules.pop("kokoro_onnx", None)
+        else:
+            sys.modules["kokoro_onnx"] = _kkSaved["mod"]
     import stt_local as _sttR
     import ctypes as _ctR
     _orig_cdll = _ctR.CDLL
@@ -8158,6 +8479,37 @@ def main():
               "body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)", "body.pocket_voice = model",
               "if (provider !== 'pocket') body.fallback = fallback",
               "if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice")), _ttsUS[:300])
+    # Kokoro on the TTS card: provider option (disabled like Pocket's when not
+    # installed), a voice select with readable labels, a speed slider; all on
+    # the unsaved-changes bar.
+    _voWS = _ws(_voUS)
+    check("tts ui: Kokoro (local) provider option, disabled with a hint when kokoro-onnx isn't installed",
+          "<option value=\"kokoro\" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}>" in _voWS
+          and "Kokoro (local){tts?.kokoro_installed ? '' : ' — not installed'}" in _voWS, _voWS[:300])
+    _klUI = _reui.search(r"const kokoroLabel = (.*?)\n\S", _appsrc, _reui.DOTALL)
+    _klUI = _ws(_klUI.group(1)) if _klUI else ""
+    check("tts ui: Kokoro voice select shows readable labels ('Heart — American female'), values stay the ids",
+          "/^([ab])([fm])_(\\w+)$/" in _klUI and "'American' : 'British'" in _klUI and "'female' : 'male'" in _klUI
+          and " — " in _klUI
+          and "{options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}"
+          in _voWS
+          and "p === 'kokoro' ? t?.kokoro_voice" in _ws(_appsrc), _klUI[:200])
+    check("tts ui: Kokoro speed slider 0.5–1.5 in 0.05 steps (the Flux slider's pattern)",
+          "<input id=\"tts-kokoro-speed\" type=\"range\" min=\"0.5\" max=\"1.5\" step=\"0.05\" value={kokoroSpeed} "
+          "onChange={e => t.set({ kokoro_speed: parseFloat(e.target.value) })}" in _voWS
+          and "aria-label=\"Kokoro speed\"" in _voWS and "{kokoroSpeed.toFixed(2)}" in _voWS
+          and "{provider === 'kokoro' && (" in _voWS)
+    check("tts ui: Kokoro voice + speed ride the unsaved bar and the save (speed only when edited or saved)",
+          "...(provider === 'kokoro' ? ['kokoro_speed'] : [])" in _voWS
+          and "kokoro_speed: num(tts?.kokoro_speed, parseFloat) ?? 1.0" in _voWS
+          and "const kokoroSpeed = t.val('kokoro_speed') ?? 1.0" in _voWS
+          and "body.kokoro_voice = model" in _ttsUS
+          and "if (t.changed('kokoro_speed') || tts?.kokoro_speed != null) body.kokoro_speed = kokoroSpeed" in _ttsUS,
+          _ttsUS[-400:])
+    check("tts ui: Kokoro needs no key (no Missing key notice); the chip says 'kokoro'",
+          "{TTS_KEY_HINT[provider] && tts && !tts[TTS_KEY_HINT[provider]] && (" in _voWS
+          and "kokoro: 'Kokoro'" in _appsrc and "return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }"
+          in _appsrc)
     check("unsaved: the STT save still starts a model download and the 0.5 s progress poll follows it (still holds)",
           "if (r.download === 'started') {" in _saveUS["stt"]
           and "`Downloading ${model} — restart to apply once it's on disk.`" in _saveUS["stt"]

@@ -715,6 +715,43 @@ FakeTTSModel.load_model = _orig_load_fv
 tp._reset_for_tests()
 # ── end pocket: failed voice ──
 
+# ── pocket: number pass ──
+# Pocket reads digits one at a time ("4-4-9"), so its service spells numbers
+# before generation. bot.py builds the fallback with the same make_service,
+# so Pocket as the fallback gets the pass too. Digit-free text is untouched.
+
+
+async def _pocket_hears(svc, text):
+    from pipecat.services.pocket_tts.tts import PocketTTSService
+    heard = []
+    orig = PocketTTSService.run_tts
+
+    async def record(self, t, context_id):
+        heard.append(t)
+        yield None
+
+    PocketTTSService.run_tts = record
+    try:
+        async for _ in svc.run_tts(text, "c"):
+            pass
+    finally:
+        PocketTTSService.run_tts = orig
+    return heard
+
+
+_np_svc = tp.make_service(mixin=Mixin, voice="alba")
+_np_heard = asyncio.run(_pocket_hears(_np_svc, "It's 9:06, the total is $12.50."))
+check("pocket: number pass: the model hears times and money as words",
+      _np_heard == ["It's nine oh six, the total is twelve dollars and fifty cents."], f"heard={_np_heard}")
+_np_plain = "Good morning, the lights are on."
+_np_heard = asyncio.run(_pocket_hears(_np_svc, _np_plain))
+check("pocket: number pass: digit-free text reaches the model unchanged",
+      len(_np_heard) == 1 and _np_heard[0] is _np_plain, f"heard={_np_heard}")
+check("pocket: number pass: the generation lock still wraps run_tts",
+      "async with GEN_LOCK" in inspect.getsource(tp._service_class(Mixin).run_tts))
+tp._reset_for_tests()
+# ── end pocket: number pass ──
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)
