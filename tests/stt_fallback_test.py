@@ -421,7 +421,8 @@ try:
     _od_cls = type(svc)
     _od_mod = sys.modules[_od_cls.__module__]
     _sel = sys.modules.get("stt_elevenlabs")
-    _sel_saved = {k: getattr(_sel, k) for k in ("IDLE_CLOSE_SECS", "HOLD_SECS", "CONNECT_TIMEOUT_SECS")} if _sel else {}
+    _sel_saved = {k: getattr(_sel, k) for k in ("IDLE_CLOSE_SECS", "HOLD_SECS", "CONNECT_TIMEOUT_SECS",
+                                                  "SERVER_IDLE_SECS") if hasattr(_sel, k)} if _sel else {}
 
     def _tune(**kw):
         for k, v in kw.items():
@@ -707,7 +708,7 @@ try:
 
     from loguru import logger as _logger
 
-    SEQ = {"conns": 0, "closed": 0, "events": [], "delay": 0.0, "start": True}
+    SEQ = {"conns": 0, "closed": 0, "events": [], "delay": 0.0, "start": True, "err": None, "hangup": None}
 
     def _seq(n):
         return InputAudioRawFrame(audio=struct.pack("<H", n) * 320, sample_rate=16000, num_channels=1)
@@ -719,8 +720,22 @@ try:
         conn = SEQ["conns"]
         try:
             await asyncio.sleep(SEQ["delay"])
-            if SEQ["start"]:
+            if SEQ["err"]:
+                await ws.send(json.dumps({"message_type": SEQ["err"], "error": "refused: acct el-SECRET-4242"}))
+            elif SEQ["start"]:
                 await ws.send(json.dumps({"message_type": "session_started"}))
+            if SEQ["hangup"] is not None:
+                # Scribe's own quiet-socket hang-up: close after this long without a message.
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(ws.recv(), SEQ["hangup"])
+                    except TimeoutError:
+                        await ws.close()
+                        return
+                    d = json.loads(msg)
+                    pcm = base64.b64decode(d.get("audio_base_64") or "")
+                    SEQ["events"].append((conn, "commit" if d.get("commit") else
+                                          struct.unpack("<H", pcm[:2])[0] if pcm.strip(b"\0") else "silence"))
             async for msg in ws:
                 d = json.loads(msg)
                 pcm = base64.b64decode(d.get("audio_base_64") or "")
@@ -735,10 +750,11 @@ try:
         finally:
             SEQ["closed"] += 1
 
-    def _seq_run(steps, delay=0.0, start=True):
-        SEQ.update(conns=0, closed=0, events=[], delay=delay, start=start)
+    def _seq_run(steps, delay=0.0, start=True, err=None, hangup=None, svc=None, cooldown=3600):
+        SEQ.update(conns=0, closed=0, events=[], delay=delay, start=start, err=err, hangup=hangup)
         LOGS.clear()
-        return asyncio.run(_with_server(_el_seq, _run(_scribe(EL_PORT), 3600, steps, provider="elevenlabs")))
+        return asyncio.run(_with_server(_el_seq, _run(svc or _scribe(EL_PORT), cooldown, steps,
+                                                      provider="elevenlabs")))
 
     LOGS = []
     _sink = _logger.add(lambda m: LOGS.append(m.record["message"]), level="INFO")
@@ -788,7 +804,11 @@ try:
             return {"events": list(SEQ["events"]), "conns": SEQ["conns"],
                     "open": ws is not None and ws.state is State.OPEN}
 
-        r = _seq_run(_el_quiet)
+        _tune(IDLE_CLOSE_SECS=30.0)           # hold it open past pipecat's 10-15 s keepalive point
+        try:
+            r = _seq_run(_el_quiet)
+        finally:
+            _tune(**_sel_saved)
         check("on-demand: an idle open socket gets no keepalive silence (17 s, inside IDLE_CLOSE_SECS)",
               r.get("open") and r.get("conns") == 1 and r.get("events") == [(1, 1), (1, 2), (1, 3)], str(r))
 
@@ -858,6 +878,113 @@ try:
         check("on-demand: the hold is bounded — overflow keeps the newest audio in order and warns once",
               _kept == [4, 5, 6, 7, 8] and getattr(svc, "_held_bytes", None) == 3200
               and sum("dropping the oldest" in m for m in LOGS) == 1, f"{_kept} {LOGS}")
+
+        # ── hardening: live traces and a read-only bug hunt ──
+        # Scribe hangs up a quiet socket by itself (~15 s): it stays closed
+        # (no reconnect nobody is talking to); the next audio reopens it.
+        async def _el_server_quiet(switcher, whisper, task, until):
+            el = switcher._lenoxvi_primary
+            r = {}
+            for n in range(1, 4):
+                await task.queue_frame(_seq(n))
+            r["hung_up"] = await until(lambda: SEQ["closed"] >= 1, 5)
+            await asyncio.sleep(2.5)          # pipecat would reconnect inside this
+            r["conns_quiet"] = SEQ["conns"]
+            r["on_el"] = switcher.strategy.active_service is el
+            for n in range(4, 7):
+                await task.queue_frame(_seq(n))
+            await until(lambda: len(SEQ["events"]) >= 6, 5)
+            r["conns"] = SEQ["conns"]
+            r["events"] = list(SEQ["events"])
+            return r
+
+        _tune(IDLE_CLOSE_SECS=30.0, SERVER_IDLE_SECS=0.3)
+        try:
+            r = _seq_run(_el_server_quiet, hangup=1.0)
+        finally:
+            _tune(**_sel_saved)
+        check("hardening: Scribe hanging up a quiet socket is not reconnected while quiet (no idle sessions)",
+              r.get("hung_up") and r.get("conns_quiet") == 1 and r.get("on_el")
+              and any("closed by the server while quiet" in m for m in LOGS), str(r))
+        check("hardening: after Scribe's quiet hang-up the next audio opens one fresh connection, in order",
+              r.get("conns") == 2 and r.get("events") == [(1, 1), (1, 2), (1, 3), (2, 4), (2, 5), (2, 6)], str(r))
+
+        # A wake that lands while the idle close is still tearing the socket
+        # down: it waits its turn and opens a fresh socket — nothing lost,
+        # nothing orphaned, no false failure.
+        slow = _scribe(EL_PORT)
+        _orig_close = slow._disconnect_websocket
+
+        async def _slow_close():
+            await asyncio.sleep(0.6)          # a slow close handshake
+            await _orig_close()
+        slow._disconnect_websocket = _slow_close
+
+        async def _el_race(switcher, whisper, task, until):
+            el = switcher._lenoxvi_primary
+            r = {}
+            for n in range(1, 4):
+                await task.queue_frame(_seq(n))
+            r["closing"] = await until(lambda: any("closed until the next audio" in m for m in LOGS), 5)
+            for n in range(4, 7):             # mid-teardown
+                await task.queue_frame(_seq(n))
+            await until(lambda: len(SEQ["events"]) >= 6, 5)
+            await asyncio.sleep(1.5)
+            r["conns"], r["closed"] = SEQ["conns"], SEQ["closed"]
+            r["events"] = list(SEQ["events"])
+            ws = el._websocket
+            r["open"] = ws is not None and ws.state is State.OPEN
+            r["on_el"] = switcher.strategy.active_service is el
+            r["no_session"] = any(m.startswith("stt: elevenlabs no session") for m in LOGS)
+            return r
+
+        _tune(IDLE_CLOSE_SECS=1.0, CONNECT_TIMEOUT_SECS=1.0)
+        try:
+            r = _seq_run(_el_race, svc=slow)
+        finally:
+            _tune(**_sel_saved)
+        check("hardening: audio during the idle close's teardown reaches a fresh connection, complete and in order",
+              r.get("closing") and r.get("conns") == 2
+              and r.get("events") == [(1, 1), (1, 2), (1, 3), (2, 4), (2, 5), (2, 6)], str(r))
+        check("hardening: after that race exactly one socket is open, it is ours, and the room stays on ElevenLabs",
+              r.get("open") and r.get("closed") == 1 and r.get("on_el") and not r.get("no_session"), str(r))
+
+        # Out of credits / bad key / terms: an account error moves the room
+        # to Whisper at once, and recovery won't switch back while it lasts.
+        async def _el_account(switcher, whisper, task, until):
+            el = switcher._lenoxvi_primary
+            r = {}
+            t0 = time.monotonic()
+            r["landed"] = await _feed_until(task, lambda: switcher.strategy.active_service is whisper, 8)
+            r["took"] = round(time.monotonic() - t0, 1)
+            await asyncio.sleep(4.5)          # >= 3 recovery rounds at the 1 s floor
+            r["still"] = switcher.strategy.active_service is whisper and el is not None
+            r["st"] = sf.status()
+            return r
+
+        PROBES.update(elevenlabs=0, deepgram=0)
+        r = _seq_run(_el_account, err="quota_exceeded", cooldown=1)
+        check("hardening: Scribe quota_exceeded moves the room to Whisper at once (not deaf on a refusing account)",
+              r.get("landed") and r.get("took", 99) < 4, str(r))
+        check("hardening: recovery keeps Whisper while Scribe still refuses the account (no switch back, no flapping)",
+              r.get("still") and (r.get("st") or {}).get("active") == "whisper" and PROBES["elevenlabs"] >= 1, str(r))
+        check("hardening: the account error's server text never reaches status or logs",
+              "SECRET" not in str(r.get("st")) and not any("SECRET" in m for m in LOGS), str(r.get("st")))
+
+        # No session at wake (dead network, no answer): Whisper takes the
+        # room right away instead of after pipecat's ~25 s reconnect ladder.
+        async def _el_dead_wake(switcher, whisper, task, until):
+            t0 = time.monotonic()
+            landed = await _feed_until(task, lambda: switcher.strategy.active_service is whisper, 8)
+            return {"landed": landed, "took": round(time.monotonic() - t0, 1)}
+
+        _tune(CONNECT_TIMEOUT_SECS=0.5)
+        try:
+            r = _seq_run(_el_dead_wake, start=False)
+        finally:
+            _tune(**_sel_saved)
+        check("hardening: a wake that gets no session fails over to Whisper within the connect timeout",
+              r.get("landed") and r.get("took", 99) < 3, str(r))
     finally:
         _logger.remove(_sink)
 finally:
