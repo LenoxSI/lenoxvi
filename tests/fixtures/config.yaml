@@ -1,0 +1,220 @@
+# LenoxVI config — THE tuning surface for the house voice bot.
+# Behavior lives here; secrets stay in gitignored .env (API keys).
+# Precedence: this file > LVI_* env var > code default (core/config.py).
+# Edit + `bash scripts/restart.sh` on your bot host to apply.
+#
+# This is the TEMPLATE. Copy to config.yaml and fill in your values:
+#   cp config.example.yaml config.yaml
+# Placeholders use <ANGLE_BRACKETS> — every one must be replaced.
+
+# ── Wake gate ──────────────────────────────────────────────────────────
+wake:
+  enabled: true
+  barge_in: true        # wake-word interrupt: true =
+                        # "Hey <YourName>" mid-reply kills her clip and
+                        # reopens the mic (2-frame confirm). false =
+                        # today's behavior, bit-for-bit.
+  threshold: 0.55        # OWW score needed to wake; real "Hey <YourName>"
+                         # typically lands 0.84-1.00. Lower = more sensitive,
+                         # but scores below real speech risk false wakes.
+  awake_timeout: 6.0     # seconds of no user/bot activity before the gate
+                         # closes and the mic stops feeding STT
+  model: hey_jarvis      # a stock model bundled with openwakeword (hey_jarvis,
+                         # hey_mycroft, alexa — CC BY-NC-SA 4.0, non-commercial)
+                         # OR a path to your own trained .onnx (see README)
+  name: Willow           # what the house is called — set it to match your
+                         # wake word (also editable in the dashboard's Wake
+                         # name card); never guessed from the model file.
+                         # A bare "Hey <name>." is dropped, not answered —
+                         # sound-alike mis-spellings included
+
+# ── Voice activity detection (Silero, via bot.py) ───────────────────────
+vad:
+  confidence: 0.7       # speech probability to trigger start/stop
+  start_secs: 0.2
+  stop_secs: 0.2        # lower = snappier turn-ends but clips word onsets
+  min_volume: 0.6       # floor under VAD (ignores very quiet speech/noise)
+
+# ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
+stt:
+  # provider: whisper    # whisper (local, default) | deepgram (Nova-3) |
+  #                      # elevenlabs (Scribe v2, uses ELEVENLABS_API_KEY);
+  #                      # a cloud provider keeps the Whisper model below
+  #                      # as its automatic fallback
+  model: small
+  device: cpu
+  compute_type: int8
+  # language: en         # unset = auto-detect per utterance
+
+# ── Text-to-speech ───────────────────────────────────────────────────────
+# Provider dropdown (dashboard Settings tab): elevenlabs | deepgram-flux |
+# deepgram (Aura-2). API keys stay in .env only — secrets never ride
+# config.yaml (it ships in the public repo). ElevenLabs voice_id/model;
+# Deepgram Flux (voice-agent-first surface, /v2/speak) uses
+# deepgram_flux_voice; Aura-2 uses deepgram_voice. Flux and Aura-2 share
+# the DEEPGRAM_API_KEY. Voice catalogs: developers.deepgram.com/docs/
+# flux-tts/voices and developers.deepgram.com/docs/tts-models.
+  language: en
+  provider: whisper
+tts:
+  provider: elevenlabs
+  voice_id: AbC123xyZw9876543210    # e.g. your custom voice's ID
+  model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
+                             # the websocket handshake rejects v3 with HTTP 400
+  # elevenlabs_text_normalization: on     # auto (ElevenLabs default: OFF on Flash) | on | off
+  #                                       # on = ElevenLabs spells out numbers, times, dates
+  #                                       # (~+0.15 s to first audio). Recommended on
+  #                                       # for Flash: it garbles clock times without it.
+  # deepgram_flux_voice: flux-hannah-en   # used when provider: deepgram-flux
+  # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
+  # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
+  # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
+  # pocket_voice: alba                    # used when provider: pocket, or by the fallback
+  #                                       # (preset name, or a .wav path for cloning)
+  # kokoro_voice: af_heart                # used when provider: kokoro (28 English voices;
+  #                                       # af_/am_ American, bf_/bm_ British)
+  # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
+  #                                       # (needs requirements-kokoro.txt)
+  # fallback: pocket                     # local hot standby behind a cloud provider
+  #                                       # (needs requirements-pocket.txt)
+  # revive_cooldown_secs: 30   # min seconds between websocket retries once the
+  #                             # TTS service is marked dead (revive fires on the
+  #                             # next speak; one retry per window, 0 = every utterance)
+
+# ── Intelligence (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
+  pocket_voice: alba
+  kokoro_voice: af_heart
+  fallback: pocket
+intelligence:
+  kind: hermes          # hermes | openclaw | nanobot | stub (stub = canned echo, bench only).
+                        # openclaw = OpenClaw Gateway: model "openclaw/<agent>",
+                        # x-openclaw-session-key for sticky rooms, no Hermes-only
+                        # conversation field. Enable the endpoint first:
+                        # openclaw config set gateway.http.endpoints.chatCompletions.enabled true
+                        # nanobot = nanobot's OpenAI-compatible API: one user
+                        # message per turn + session_id (nanobot keeps the
+                        # history), key LVI_NANOBOT_KEY. No system prompt reaches
+                        # it: give the nanobot agent its own spoken-style rules.
+  # kind: openclaw
+  #   url: http://<openclaw-host>:18789/v1   # the Gateway (with /v1)
+  # kind: nanobot
+  #   url: http://<nanobot-host>:8900/v1     # the nanobot API server (with /v1)
+  # agents:               # the agent per kind (the dashboard's agent dropdown)
+  #   openclaw: <your-agent-id>   # model becomes openclaw/<agent>
+  #   nanobot: <model-id>         # optional: the server's configured model (its
+  #                               # /v1/models); omitted = nanobot uses its own
+  #   hermes: default             # or a profile name on a multiplexing Hermes
+  #                               # gateway: turns go to <base>/p/<profile>/v1
+  #                               # with that profile's own key (see .env.example)
+  url: http://192.0.2.10:8642/v1
+  model: hermes-agent
+  max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards
+                        # against runaway replies (the 16k-token
+                        # degenerate reply incident, 2026-10-04)
+  zone: Kitchen        # conversation tag prefix: voice-<zone>-<id>
+  lull_secs: 0.6        # silence after speech before the turn flushes to the
+                        # intelligence; lower = snappier but risks clipping slow talkers
+  dedup_window: 10.0    # same utterance re-heard within this window = echo,
+                        # dropped (the lull-timer double-fire fix)
+  supersede_ack_gap: 45 # seconds: after "Hold on — switching." is spoken,
+                        # further interruptions inside this gap switch silently
+  # Tiered fillers: one line per latency tier so a slow intelligence turn doesn't
+  # go silent after the first ack. `after` = seconds from turn start.
+  # Keep each line <2s spoken, >=3 words (echo containment), never
+  # command-shaped. A flat string list still works = single ack tier at
+  # intelligence.filler_after_secs (default 3.0).
+  fillers:
+  - after: 3.0
+    lines: ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]
+  - after: 12.0
+    lines:
+    - "Still on it — this one's a slow one."
+    - "Still working — it's a deep one."
+    - "Still with you — taking a minute."
+  - after: 25.0
+    lines:
+    - "Still here — it's a big one."
+    - "Still here — give me a few more seconds."
+    - "Not done yet — hang tight."
+
+# Session modes (fresh | sticky per node — dashboard checkbox). Sticky
+# rooms keep conversation memory across node reconnects and bot restarts
+# (history stash: data/sessions.json, gitignored). Fresh is the default —
+# rooms not listed here start every session clean.
+# session_modes:
+#   bedroom: sticky
+session_modes:
+  hall-mic: sticky
+
+# ── Sonos output (Sonos audioClip overlay; S2 Port/Amp only) ────────────
+sonos:
+  enabled: true
+  default_zone: Kitchen      # legacy, still accepted; an unmapped room's reply plays nowhere
+  # Voice-clip volume (0-100). 70 was the through-matrix sweet spot;
+  # 35 is the ear-tuned direct-to-amp value (2026-10-04).
+  clip_volume: 35
+  # 48h retention: clips are served once, then garbage.
+  clip_retention_days: 7
+  # Hold the audioClip duck for the whole awake window (silence-holder
+  # clip + reply-clip silence tail = gapless duck from wake to sleep;
+  # false = duck only while reply clips sound).
+  duck_while_awake: true
+  # Per-zone overrides land here from the dashboard Volume slider — live
+  # layer applies to the NEXT clip, no restart (durable copy below).
+  zone_volumes:
+    Hall: 25
+    Den: 30
+  zones:
+    Kitchen:
+      ip: 192.0.2.21
+      player_uid: RINCON_FIXTURE0000001400
+    Hall:
+      ip: 192.0.2.22
+      player_uid: RINCON_FIXTURE0000002400
+    Den:
+      ip: 192.0.2.23
+      player_uid: RINCON_FIXTURE0000003400
+  #     Kitchen:
+  #       ip: 192.0.2.21
+  #       player_uid: RINCON_xxxxxxxxxxxx1400
+  #     Hall:
+  #       ip: 192.0.2.22
+  #       player_uid: RINCON_xxxxxxxxxxxx1400
+
+# ── WiiM output (interrupt-no-restore; 2026-10-04 arrival verify) ──────
+# playPromptUrl is a STUB on current firmware: acks
+# OK, never fetches. Replies play via setPlayerCmd:play as MAIN media —
+# music stops, nothing restores. Volume snapshots/restores around the
+# clip. No player_uid needed (HTTP API is UID-less, HTTPS-only).
+wiim:
+  enabled: true
+  default_zone: ''           # legacy, still accepted; an unmapped room's reply plays nowhere
+  clip_volume: 35
+  zone_volumes: {}
+  zones:
+    Loft:
+      ip: 192.0.2.31
+  #     Loft:
+  #       ip: 192.0.2.31
+
+# How the Sonos players fetch TTS clips: the appliance serves them over
+# LAN HTTP. host_ip must be the LAN IP the Sonos players can reach.
+clip_server:
+  host_ip: 127.0.0.1
+  port: 8766
+
+# ── Room → zone mapping (mic rooms → Sonos zones) ─────────────────────
+# Edited via the web dashboard (https://<bot-host-LAN-IP>:7860/dashboard)
+# — or by hand here. The mic node's firmware sends its room name in the
+# WebRTC offer; when a wake fires in a mapped room, the reply clip plays
+# in that room's zone. An unmapped room's reply plays on no speaker until
+# the room is mapped (default_zone is not a fallback); the browser client
+# still hears its replies in the browser.
+room_zones:
+  hall-mic: Loft
+  kitchen-mic: Den
+  study-mic: builtin
+dashboard:
+  enabled: true
+node_speaker:
+  volumes: {}

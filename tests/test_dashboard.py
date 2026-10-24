@@ -303,8 +303,17 @@ def main():
         _cp = str(_cfg_mod.CONFIG_PATH)
         check("config path is repo-anchored (cwd-proof)",
               _cp == str(REPO_CORE.parent / "config.yaml"), f"CONFIG_PATH={_cp}")
-        check("config loads away from repo root",
-              bool(_cfg_mod.cfg("tts")), f"tts={_cfg_mod.cfg('tts')}")
+        # A fresh clone has no config.yaml at the root (it's private and
+        # gitignored): then the loader must read {} cleanly, not raise. The
+        # suite never writes one there (a crash would leave a fake config the
+        # bot could load).
+        if Path(_cp).is_file():
+            check("config loads away from repo root",
+                  bool(_cfg_mod.cfg("tts")), f"tts={_cfg_mod.cfg('tts')}")
+        else:
+            print("[SKIP] config loads away from repo root: no config.yaml at the repo root (fresh clone)")
+            check("config: no config.yaml at the repo root reads as empty, never raises",
+                  _cfg_mod.cfg("tts") == {}, f"tts={_cfg_mod.cfg('tts')}")
     finally:
         os.chdir(_saved_cwd)
         if _saved_os_config is not None:
@@ -1912,20 +1921,26 @@ def main():
                          files={"file": ("bad.onnx", b"\x00" * 4096, "application/octet-stream")})
         check("oww: corrupt model rejected with 422",
               _r_bad.status_code == 422, f"status={_r_bad.status_code}")
-        # (b) upload accepts the REAL production model bytes
-        prod = paths.wake_root() / "Hey_Willow_1-0.onnx"  # where the panel looks for root models
+        # (b) upload accepts a REAL wake model: openwakeword's stock
+        # hey_mycroft from the installed package (nothing private, nothing
+        # checked in), uploaded under a suite name. A missing package model
+        # is a loud SKIP, never a silent pass.
+        import openwakeword as _owwup
+        prod = Path((_owwup.models.get("hey_mycroft") or {}).get("model_path") or "/nonexistent.onnx")
+        _upname = "suite_wake_model.onnx"
+        if not prod.is_file():
+            print("[SKIP] oww real-model checks: openwakeword's stock hey_mycroft model is not installed")
         if prod.is_file():
             _r_up = client.post("/api/dashboard/oww/models",
-                            files={"file": (prod.name, prod.read_bytes(), "application/octet-stream")})
+                            files={"file": (_upname, prod.read_bytes(), "application/octet-stream")})
             check("oww: real model upload accepted",
-                  _r_up.status_code == 200 and _r_up.json().get("name") == prod.name,
+                  _r_up.status_code == 200 and _r_up.json().get("name") == _upname,
                   f"status={_r_up.status_code}")
         # (d) select merges into wake section (threshold survives) — run
         # FIRST so the uploaded models/ copy becomes the ACTIVE file
-        prod = paths.wake_root() / "Hey_Willow_1-0.onnx"  # where the panel looks for root models
         if prod.is_file():
             _r_sel = client.put("/api/dashboard/oww/select",
-                            json={"model": prod.name})
+                            json={"model": _upname})
             _wake_after = __import__("yaml").safe_load(
                 Path(os.environ["LVI_CONFIG"]).read_text()).get("wake") or {}
             check("oww: select writes wake.model and preserves threshold",
@@ -1940,9 +1955,8 @@ def main():
             check("oww: deleting the active model is blocked (409)",
                   _r_del.status_code == 409, f"status={_r_del.status_code}")
         # (e) a NON-active model is deletable — upload a distinct-name
-        # spare from the prod bytes, then delete it (200). Never touches
-        # the real root copy: a suite must not delete production files
-        # (and the dev host's root copy is the ONLY local model copy).
+        # spare from the same bytes, then delete it (200). Never touches
+        # the package's stock file.
         if prod.is_file():
             _r_sp = client.post("/api/dashboard/oww/models",
                             files={"file": ("zz_suite_probe.onnx", prod.read_bytes(), "application/octet-stream")})

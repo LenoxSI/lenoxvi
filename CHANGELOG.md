@@ -33,6 +33,7 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- The test fixture config is actually in the repo now (the blanket `config.yaml` ignore rule had kept it out), so the suites run from a fresh clone. The wake-model upload checks use openwakeword's stock `hey_mycroft` model instead of skipping when a private model is absent.
 - `intelligence_agent`, `intelligence_stub` and `intelligence_target` moved into the `core/intelligence/` package (`agent.py`, `stub.py`, `target.py`). The old module names still work as aliases.
 - Runtime files (reply clips, wake models, uploaded firmware, sticky sessions) resolve from one anchor, `core/paths.py`: the repo, or `LVI_STATE_DIR`. They no longer depend on the working directory, and a dashboard firmware upload and the OTA server always agree on the folder. Wake models are still stored in config as short relative paths.
 - Tests run from a fresh clone: the suites read a tracked fixture (`tests/fixtures/config.yaml`, override with `LVI_TEST_CONFIG`) instead of copying the private `config.yaml`. Steps that touch real hardware (a test clip out loud, LAN speaker discovery) are opt-in with `LVI_TEST_LIVE=1`. Example names in tests and `config.example.yaml` are neutral.

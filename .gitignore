@@ -23,6 +23,8 @@ CLAUDE.md
 design/
 # runtime config — template is config.example.yaml
 config.yaml
+# ...except the tracked test fixture (the suites read it; a fresh clone needs it)
+!tests/fixtures/config.yaml
 config.backup.yaml
 
 # runtime artifacts — certs are regenerable per-host (make-cert.sh), clips
