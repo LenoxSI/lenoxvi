@@ -128,7 +128,10 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         self._wake_gate = wake_gate
         self._led = led
         self._end_of_speech_timer = None
-        self._pcm: list[bytes] = []
+        # bytearray, not a list (SonosOutput does the same): extend() on a
+        # list adds one element per byte — ≈1M of them for a 20 s reply,
+        # built on the event loop.
+        self._pcm: bytearray = bytearray()
         self._sample_rate = 16000
         self._channels = 1
         # Optional sync callable returning the reply zone NAME (same

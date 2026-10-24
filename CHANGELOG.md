@@ -79,6 +79,26 @@ The two version streams are independent.
 - Dashboard: the empty Rooms table reads "No mic nodes yet. A flashed node appears here when it connects."
 
 ### Fixed
+- Follow-ups after a Sonos/WiiM reply: the wake gate stays locked until the speaker clip really ends (barge-in
+  works to the last syllable) and the follow-up window starts there, not seconds early when the bot's own copy
+  of the reply finished.
+- A late speech-to-text tail that lands after a turn closed is dropped instead of being glued onto the front of
+  the next question.
+- The Sonos duck holder no longer loads its silence clip over a reply that is still loading (long tool turns
+  could lose the reply).
+- After a room rename, its agent override is looked up under the new name before the node reconnects.
+- Dashboard test tones block the echo gate of the room that hears them, not the last-connected room.
+- Config: a dashboard save racing a reader can no longer leave the bot on the pre-save config; rooms or zones
+  named on/off/yes/no (and other YAML 1.1 words) are written quoted so the bot reads them as names.
+- Dashboard: a broken import is logged loudly instead of looking like a missing optional dependency; a
+  non-ASCII dashboard token works (browser or curl) instead of a 500; GET /tts honours the LVI_TTS_* env vars
+  like the bot; the wake-model delete guard reads the file, not the boot cache; same-name wake-model uploads
+  stage separately and leave no temp file behind.
+- `intelligence.kind` is case-insensitive and an unknown kind is logged; `LVI_WAKE_WORD` accepts yes/on/true.
+- WiiM collects reply audio in a bytearray (it built a list of ~1M ints per reply on the event loop).
+- Scripts: `sync_host.sh` fails when the host's fetch/reset fails and checks the host landed on the bundled
+  commit; `deploy_firmware.sh` writes the manifest only after its version check; `fetch_xmos_fw.sh` downloads
+  to a `.part` and never leaves a partial image at the flash path.
 - Intelligence card: typing a new `host:port` now lists that server's agents (it showed the saved server's,
   so a typo never said "unreachable" and Save paired the old server's agent with the new URL).
 - An intelligence lane or room agent saved with a new key keeps the boot lane/agent until the restart loads

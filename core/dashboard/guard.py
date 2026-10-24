@@ -92,7 +92,16 @@ def mutation_guard(request: Request) -> None:
     token = os.environ.get("LVI_DASHBOARD_TOKEN", "")
     if token:
         supplied = request.headers.get(TOKEN_HEADER, "")
-        if not hmac.compare_digest(supplied, token):
+        # Non-ASCII token or header: str/str compare_digest raises
+        # TypeError on it (the caller sees a 500), so compare bytes. The
+        # server decodes headers as latin-1: a browser sends "é" as the one
+        # byte 0xE9 (decoded back to "é"), curl/scripts send its raw UTF-8
+        # bytes (decoded to "Ã©"). Accept either against the token's UTF-8;
+        # both compares always run. A wrong token is still a plain 401.
+        want = token.encode("utf-8", "surrogateescape")
+        as_sent = supplied.encode("latin-1", "replace")
+        as_text = supplied.encode("utf-8", "surrogateescape")
+        if not (hmac.compare_digest(as_sent, want) | hmac.compare_digest(as_text, want)):
             raise HTTPException(
                 status_code=401, detail="dashboard: invalid or missing token"
             )

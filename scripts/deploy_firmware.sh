@@ -206,14 +206,6 @@ EOF
 )
 fi
 
-cat > "$VFILE" <<EOF
-{
-  "version": "$NEW",
-  "filename": "${TRACK}_esp32.bin",
-  "md5": "$BIN_MD5",
-  "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
 echo "==> version $CUR -> $NEW (md5 $BIN_MD5)"
 
 # ── Version gate: the bin's embedded version MUST equal the manifest's ─────
@@ -229,6 +221,18 @@ if [ "$BIN_VER" != "$NEW" ]; then
   echo "  (or pass --version $BIN_VER to ship what was actually built)."
   exit 1
 fi
+
+# Manifest written only now that the gate passed: a failed check must not
+# leave a bumped version.json behind — the next run would compute its bump
+# from a version that never shipped.
+cat > "$VFILE" <<EOF
+{
+  "version": "$NEW",
+  "filename": "${TRACK}_esp32.bin",
+  "md5": "$BIN_MD5",
+  "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
 
 # ── 3. Ship to the appliance host ──────────────────────────────────────────────────
 echo "==> copying firmware + manifest to $LVI_HOST"

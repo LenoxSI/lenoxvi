@@ -484,12 +484,9 @@ class IntelligenceAgent(FrameProcessor):
         early would send a racing session to the default agent."""
         if self._lane is None:
             return
-        room = self._room if self._room not in (None, "", "unknown") else None
-        if room is None and self._room_resolver is not None:
-            try:
-                room = self._room_resolver()
-            except Exception:  # noqa: BLE001 — no room yet = default for now
-                room = None
+        # The room's CURRENT name (a dashboard rename relabels the live
+        # session, and the carry moves its room_agents entry to the new name).
+        room = self._stash_room()
         if not room or room == "unknown" or room == self._routed_room:
             return
         from config import cfg
@@ -631,6 +628,13 @@ class IntelligenceAgent(FrameProcessor):
                     logger.debug(f"intelligence_agent: echo-gate dropped [{frame.text.strip()}]")
                 elif self._is_own_echo(frame.text):
                     logger.info(f"intelligence_agent: containment dropped echo [{frame.text.strip()[:60]}]")
+                elif self._flushed and not self._speaking:
+                    # The turn already closed: a late STT tail (busy GPU,
+                    # Deepgram finalize). Kept, it would sit in the buffer
+                    # and be glued onto the front of the NEXT question,
+                    # however much later that came.
+                    logger.info(f"intelligence_agent: dropped late transcript after the turn closed "
+                                f"[{frame.text.strip()[:60]}]")
                 else:
                     self._buffer.append(frame.text.strip())
                     self._last_transcription = time.monotonic()

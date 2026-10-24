@@ -385,7 +385,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             None,
         )
     from dashboard import registry as dash_registry
-    dash_registry.set_gate(gate)
+    dash_registry.set_gate(gate, pc_id=pc_id)  # per session: test tones block THIS room's gate
 
     def _pipeline_room():
         # This pipeline's room — None if the tee hasn't correlated yet
@@ -436,11 +436,18 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # is_usable means "some service can still speak".
     tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
                         if isinstance(tts_primary, TTSTracked) else None)
+    # Case-insensitive like the agent itself (`kind: Hermes` used to fall to
+    # the canned stub here while the agent lowercased it), and loud when the
+    # kind is unknown instead of silently answering from the stub.
+    _intel_kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND",
+                              intelligence_lanes.DEFAULT_KIND) or intelligence_lanes.DEFAULT_KIND).strip().lower()
+    if _intel_kind not in intelligence_lanes.KINDS and _intel_kind != "stub":
+        logger.error(f"intelligence.kind '{_intel_kind}' is not one of {sorted(intelligence_lanes.KINDS)} "
+                     f"— this room answers from the offline stub")
     intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, room_resolver=_pipeline_room,
                                 session_mode=_session_mode,
                                 tts_is_usable=tts_usable_probe)
-             if cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_lanes.DEFAULT_KIND)
-             in intelligence_lanes.KINDS
+             if _intel_kind in intelligence_lanes.KINDS
              else StubIntelligence(echo_gate=gate))
 
     # VAD tunables from config.yaml (vad: section) — SileroVADAnalyzer takes
@@ -484,7 +491,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # dark) and fires speaking LEDs from its real-time TTS frames.
     wake_filter = (WakeWordFilter(echo_gate=gate, on_wake=_on_wake, led=led,
                                   on_interrupt=_on_interrupt)
-                   if cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1") in (True, 1, "1", "true")
+                   if str(cfg_env("wake", "enabled", "LVI_WAKE_WORD", "1")).strip().lower()
+                   in ("1", "true", "yes", "on")
                    else None)
 
     # Barge-in holder fill: the interrupt callback's

@@ -17,7 +17,7 @@ restart picks up edits.
 
 import copy
 import os
-from functools import lru_cache
+import threading
 from pathlib import Path
 
 import yaml
@@ -46,21 +46,55 @@ DEFAULT_CLIP_VOLUME = 35
 _BOOT = None
 
 
-@lru_cache(maxsize=1)
-def _load() -> dict:
-    global _BOOT
-    p = Path(CONFIG_PATH)
-    if not p.is_file():
-        data = {}
-    else:
-        try:
-            data = yaml.safe_load(p.read_text()) or {}
-        except yaml.YAMLError as e:
-            # A broken config must be loud at boot, not a silent empty dict.
-            raise RuntimeError(f"config.yaml parse error: {e}") from e
-    if _BOOT is None:
-        _BOOT = copy.deepcopy(data)
-    return data
+# _load's cache is hand-rolled, not @lru_cache: lru_cache raced dashboard
+# writes — a reader mid-parse when a write cleared the (already empty)
+# cache stored its PRE-write result on return, and every cfg() then kept
+# serving that stale copy until the next write. cache_clear() bumps the
+# generation, and a load caches its result only if no clear happened
+# while it parsed. The lock guards the bookkeeping alone — reads and
+# YAML parsing stay outside it so readers never serialise on file I/O.
+_CACHE_LOCK = threading.Lock()
+_CACHE: dict | None = None  # the cached config; None = nothing cached yet
+_GENERATION = 0  # bumped by every cache_clear
+
+
+class _CachedLoad:
+    """Call for the (cached) config; cache_clear() after replacing config.yaml."""
+
+    def __call__(self) -> dict:
+        global _BOOT, _CACHE
+        with _CACHE_LOCK:
+            cached = _CACHE
+            if cached is not None:
+                return cached
+            gen = _GENERATION
+        p = Path(CONFIG_PATH)
+        if not p.is_file():
+            data = {}
+        else:
+            try:
+                data = yaml.safe_load(p.read_text()) or {}
+            except yaml.YAMLError as e:
+                # A broken config must be loud at boot, not a silent empty dict.
+                raise RuntimeError(f"config.yaml parse error: {e}") from e
+        with _CACHE_LOCK:
+            # Under the lock so exactly one load ever sets _BOOT, even when
+            # two parse concurrently (deep-copied, never refreshed).
+            if _BOOT is None:
+                _BOOT = copy.deepcopy(data)
+            if _GENERATION == gen:  # no cache_clear mid-parse: safe to share
+                _CACHE = data
+        return data
+
+    def cache_clear(self) -> None:
+        """Drop the cached config; a load still parsing won't repopulate it."""
+        global _CACHE, _GENERATION
+        with _CACHE_LOCK:
+            _GENERATION += 1
+            _CACHE = None
+
+
+_load = _CachedLoad()
 
 
 def boot_config() -> dict:

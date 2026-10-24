@@ -508,8 +508,10 @@ async def test_node_speaker(payload: NodeSpeakerRoomPayload):
     from pipecat.frames.frames import OutputAudioRawFrame
 
     pcm = _test_tone_pcm()
-    gate = registry.gate()
-    if gate is not None:
+    # THIS room's gate(s), not the one global: with several nodes the
+    # global belongs to whichever session connected last, and the tone
+    # would block a different room's echo window.
+    for gate in registry.gates_for_rooms([room]):
         gate.block(len(pcm) / (2 * 24000) + 1.5)  # same margin as the zone test
     await out.queue_frame(OutputAudioRawFrame(audio=pcm, sample_rate=24000, num_channels=1))
     return {"ok": True, "room": room}
@@ -784,8 +786,13 @@ async def test_zone(name: str):
     url = server.url_for(filename)
 
     duration = len(pcm) / (2 * 24000)
-    gate = registry.gate()
-    if gate is not None:
+    # Block the echo gates of every room mapped to THIS zone (same read
+    # as the mapping routes) — the one global gate belonged to whichever
+    # session connected last, so the tone blocked a different room's
+    # echo window.
+    mapped_rooms = [r for r, z in (config_store.read_section("room_zones") or {}).items()
+                    if z == name]
+    for gate in registry.gates_for_rooms(mapped_rooms):
         gate.block(duration + 1.5)  # same margin sonos_output uses
 
     zone = zones[name]
@@ -1296,28 +1303,40 @@ class TTSKeyPayload(BaseModel):
 
 @router.get("/tts")
 async def get_tts():
-    """Current TTS config + key status per provider. Never returns keys."""
+    """Current TTS config + key status per provider. Never returns keys.
+    Every knob the bot reads with an env var resolves file > LVI_* env >
+    the bot's default (bot.py's cfg_env precedence) — the panel used to
+    show the code default for a knob that lived only in .env."""
     import os as _os
     tts_cfg = config_store.read_section("tts") or {}
     kokoro_problem = tts_kokoro.setup_problem()
+
+    def _cfg_env(key, env_var, default=None):
+        # same precedence as core.config.cfg_env, on the fresh file read
+        v = tts_cfg.get(key)
+        if v is None:
+            v = _os.getenv(env_var)
+        return default if v is None else v
+
     return {
-        "provider": tts_cfg.get("provider") or "elevenlabs",
-        "voice_id": tts_cfg.get("voice_id") or _os.getenv("LVI_TTS_VOICE_ID"),
-        "model": tts_cfg.get("model") or "eleven_flash_v2_5",
-        "deepgram_voice": tts_cfg.get("deepgram_voice") or "aura-2-thalia-en",
-        "deepgram_flux_voice": tts_cfg.get("deepgram_flux_voice") or "flux-hannah-en",
+        "provider": _cfg_env("provider", "LVI_TTS_PROVIDER", "elevenlabs"),
+        "voice_id": _cfg_env("voice_id", "LVI_TTS_VOICE_ID"),
+        "model": _cfg_env("model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
+        "deepgram_voice": _cfg_env("deepgram_voice", "LVI_TTS_VOICE", "aura-2-thalia-en"),
+        "deepgram_flux_voice": _cfg_env("deepgram_flux_voice", "LVI_TTS_FLUX_VOICE", "flux-hannah-en"),
         "deepgram_flux_speed": tts_cfg.get("deepgram_flux_speed"),
         "deepgram_flux_expressivity": tts_cfg.get("deepgram_flux_expressivity"),
         "elevenlabs_speed": tts_cfg.get("elevenlabs_speed"),
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         # None = unset = ElevenLabs' own default (auto).
         "elevenlabs_text_normalization": tts_cfg.get("elevenlabs_text_normalization"),
-        "pocket_voice": tts_cfg.get("pocket_voice") or tts_pocket.DEFAULT_VOICE,
+        "pocket_voice": _cfg_env("pocket_voice", "LVI_TTS_POCKET_VOICE", tts_pocket.DEFAULT_VOICE),
         "fallback": tts_cfg.get("fallback") or None,
         "pocket_installed": tts_pocket.pocket_available(),
-        "kokoro_voice": tts_cfg.get("kokoro_voice") or tts_kokoro.DEFAULT_VOICE,
-        # None = unset = the bot's default (1.0).
-        "kokoro_speed": tts_cfg.get("kokoro_speed"),
+        "kokoro_voice": _cfg_env("kokoro_voice", "LVI_TTS_KOKORO_VOICE", tts_kokoro.DEFAULT_VOICE),
+        # None = unset in file and env = the bot's default (1.0). Kept None
+        # so the card doesn't pin 1.0 into config on its next save.
+        "kokoro_speed": _cfg_env("kokoro_speed", "LVI_TTS_KOKORO_SPEED"),
         "kokoro_installed": kokoro_problem is None,
         "kokoro_files_missing": tts_kokoro.kokoro_available() and kokoro_problem is not None,
         "kokoro_problem": kokoro_problem,
@@ -2523,8 +2542,11 @@ def _oww_active_path() -> Path:
     """The model file the loader would resolve RIGHT NOW (config > env >
     code default) as a full resolved path — path-exact, so two files
     with the same basename (root vs models/) are distinct."""
+    # The FILE, not cfg(): the boot cache only refreshes on dashboard
+    # writes, so a hand-edited wake.model left the active marker — and
+    # the delete guard — pointing at a stale model.
     wake = config_store.read_section("wake") or {}
-    value = str(cfg_env("wake", "model", "LVI_WAKE_MODEL", wake.get("model") or wake_name.DEFAULT_MODEL))
+    value = str(wake.get("model") or _getenv("LVI_WAKE_MODEL") or wake_name.DEFAULT_MODEL)
     try:
         return Path(wake_name.resolve_model(value)).resolve()
     except Exception:                   # stock key but openwakeword broken: never 500 the panel
@@ -2596,6 +2618,12 @@ async def oww_list_models():
     return {"models": out, "current": active.name}
 
 
+# One swap lock per model name: same-name uploads each stage to their
+# OWN temp file, and the swap into `dest` serializes so a slower upload
+# can't un-seat a finished one mid-swap.
+_OWW_UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+
+
 @router.post("/oww/models", dependencies=GUARD)
 async def oww_upload_model(file: UploadFile = File(...)):
     """Upload a wake-word .onnx. Validates by loading + one test
@@ -2614,14 +2642,26 @@ async def oww_upload_model(file: UploadFile = File(...)):
     # event loop: this process also runs every room's voice pipeline.
     await asyncio.to_thread(_oww_validate, data)
     dest = _oww_dir() / name
-    tmp = _oww_dir() / (name + ".uploading")
+    # One temp file per upload (mkstemp), never the shared
+    # "<name>.uploading": two same-name uploads wrote that one file and
+    # the first swap moved what the second was still writing (the same
+    # race the firmware uploader stages around).
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f"{name}.",
+                                    suffix=".uploading")
+    tmp = Path(tmp_name)
+    lock = _OWW_UPLOAD_LOCKS.setdefault(name, asyncio.Lock())
+    try:
+        def _write():
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
 
-    def _write():
-        with open(tmp, "wb") as f:
-            f.write(data)
-        tmp.replace(dest)  # validated: swap in atomically
-
-    await asyncio.to_thread(_write)
+        await asyncio.to_thread(_write)
+        async with lock:
+            await asyncio.to_thread(tmp.replace, dest)  # validated: swap in atomically
+    finally:
+        # gone after the swap; a refused or dropped upload must not
+        # leave its partial behind for the next upload to swap in
+        await asyncio.to_thread(tmp.unlink, missing_ok=True)
     logger.info(f"dashboard: OWW model '{name}' uploaded ({len(data)} bytes) — select it to use")
     return {"ok": True, "name": name, "size": len(data)}
 

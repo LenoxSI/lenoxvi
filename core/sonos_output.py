@@ -271,6 +271,9 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # must not refresh silence over it (a loadAudioClip replaces the
         # active clip; refreshing mid-reply would mute her mid-sentence).
         self._clip_active_until = 0.0
+        # Reply clips between connect and load: the holder must not load its
+        # silence over one either (that window is before _clip_active_until).
+        self._reply_loading = 0
         # Duration-timed end-of-speaking LED (see process_frame): a loop
         # timer, cancelled on new speech / session teardown. (Re-added
         # 2026-09-30 — the duck-holder insertion clobbered this line and
@@ -553,7 +556,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                     next_refresh = 0.0  # load immediately
                     logger.info(f"sonos_output: duck-holder active on '{zone_name}'")
 
-                if time.monotonic() < self._clip_active_until:
+                if self._reply_loading or time.monotonic() < self._clip_active_until:
                     # Her SPEECH is sounding: it owns the duck (a load
                     # would replace her clip mid-sentence). The reply clip
                     # carries a silence TAIL, so the moment this window
@@ -721,6 +724,10 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         from sonos_websocket import SonosWebsocket
 
         sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
+        # From connect until the load returns this reply owns the player: the
+        # duck holder skips its silence loads (one racing in replaced the
+        # reply on long tool turns that started from IDLE).
+        self._reply_loading += 1
         try:
             await asyncio.wait_for(sw.connect(), timeout=5.0)  # bounded
             if self._barged(barge):
@@ -768,6 +775,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         except Exception as e:
             logger.warning(f"sonos_output: play failed on {zone_name}: {e} — generation-anchored fallback timers stand")
         finally:
+            self._reply_loading -= 1
             try:
                 await asyncio.wait_for(sw.close(), timeout=2.0)
             except Exception:

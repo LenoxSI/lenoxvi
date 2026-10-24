@@ -19,15 +19,21 @@ EXPECT_MD5="a78df62809b03a7bec72bfa139a17521"
 BASE="https://github.com/reSpeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY/raw/main/xmos_firmwares/i2s"
 
 mkdir -p "$(dirname "$DEST")"
+# Fetch to a .part, rename in only after the md5 checks out: a curl that
+# dies mid-transfer must not leave a half image at $DEST — or clobber a
+# good one already there. The trap scrubs the .part on any failure, never
+# $DEST itself.
+PART="$DEST.part"
+trap 'rm -f "$PART"' EXIT ERR
 echo "fetch: $BASE/$(basename "$DEST")"
-curl -fsSL "$BASE/$(basename "$DEST")" -o "$DEST"
+curl -fsSL "$BASE/$(basename "$DEST")" -o "$PART"
 
-GOT=$(md5sum "$DEST" | cut -d' ' -f1)
+GOT=$(md5sum "$PART" | cut -d' ' -f1)
 if [ "$GOT" != "$EXPECT_MD5" ]; then
     echo "md5 MISMATCH: got $GOT, expected $EXPECT_MD5" >&2
     echo "refusing to keep the file — delete it and retry" >&2
-    rm -f "$DEST"
     exit 1
 fi
+mv "$PART" "$DEST"
 echo "ok: $DEST (md5 verified)"
 echo "flash per README 'Mic node hardware' (XMOS port, DFU, hold Mute)."

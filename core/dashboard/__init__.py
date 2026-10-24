@@ -50,15 +50,29 @@ def register_dashboard(app) -> None:
         logger.info("dashboard: disabled in config.yaml — not mounting")
         return
 
+    # Optional deps FIRST and alone: a missing soco/ruamel really is the
+    # fresh-clone case that message was written for.
     try:
-        from . import registry
-        from .offer_tee import OfferTeeMiddleware
-        from .routes import router
+        import ruamel.yaml  # noqa: F401
+        import soco  # noqa: F401
     except ImportError as e:
         logger.warning(
             f"dashboard: optional deps missing ({e}) — not mounting. "
             "pip install soco ruamel.yaml to enable it."
         )
+        return
+
+    # Everything past here is OUR code, not a dependency: a broken
+    # dashboard import used to fall into the same quiet "optional deps"
+    # warning and silently unmount the dashboard. Loud, with the
+    # traceback — but still never a crash: the voice pipeline mounts
+    # without its UI.
+    try:
+        from . import registry
+        from .offer_tee import OfferTeeMiddleware
+        from .routes import router
+    except Exception:  # noqa: BLE001 — any failure: loud, never a crash
+        logger.exception("dashboard: failed to load — not mounting")
         return
 
     registry.mark_boot()

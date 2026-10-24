@@ -40,6 +40,8 @@ _line_by_pc = {}  # pc_id -> board line "array"|"flex"|"waveshare" (firmware 1.2
 NODE_LINES = ("array", "flex", "waveshare")
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
+_gate_by_pc = {}  # pc_id -> that session's echo gate (multi-node: one
+                  # global gate blocked the wrong room's test clips)
 
 PROVISIONAL = "unknown"
 BROWSER = "browser"  # the label of a session whose offer names no room
@@ -57,6 +59,7 @@ def _evict_other_sessions(pc_id, room):
     for p in stale:
         _room_by_pc.pop(p, None)
         _out_by_pc.pop(p, None)
+        _gate_by_pc.pop(p, None)
         if stale:
             logger.info(f"registry: evicted stale session {p[:24]}… from room '{room}'")
     # Two DIFFERENT nodes claiming the same room name
@@ -106,14 +109,39 @@ def boot_time():
     return _boot_time
 
 
-def set_gate(gate):
-    """bot.py hands over the EchoGate so test clips can block echo."""
+def set_gate(gate, pc_id=None):
+    """bot.py hands over the EchoGate so test clips can block echo.
+    With pc_id it is THAT session's gate (each node gets its own); the
+    process-wide gate stays for single-node/older callers."""
     global _gate
     _gate = gate
+    if pc_id:
+        _gate_by_pc[pc_id] = gate
 
 
 def gate():
     return _gate
+
+
+def gates_for_rooms(rooms) -> list:
+    """The echo gates of the live sessions sitting in `rooms` — a
+    dashboard test tone must block the room it plays in, and with
+    several nodes the one global gate belongs to whichever session
+    connected last. Falls back to the global gate (the pre-multi-node
+    handoff) when no named session matches; empty when nothing can be
+    blocked."""
+    wanted = set(rooms)
+    gates = []
+    for pc_id, room in _room_by_pc.items():
+        if room == PROVISIONAL or room not in wanted:
+            continue
+        g = _gate_by_pc.get(pc_id)
+        if g is not None and g not in gates:
+            gates.append(g)
+    if gates:
+        return gates
+    g = gate()
+    return [g] if g is not None else []
 
 
 def note_firmware(pc_id: str, version: str) -> None:
@@ -361,6 +389,7 @@ def register_sender(pc_id: str, out) -> None:
 
 def drop_sender(pc_id: str) -> None:
     _out_by_pc.pop(pc_id, None)
+    _gate_by_pc.pop(pc_id, None)
 
 
 def room_claimed(room: str, pc_id: str) -> bool:

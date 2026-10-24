@@ -21,11 +21,32 @@ from pathlib import Path
 
 from loguru import logger
 from ruamel.yaml import YAML
+from ruamel.yaml.representer import RoundTripRepresenter
 
 from config import CONFIG_PATH
 
 _YAML = YAML()  # round-trip mode: comments and layout survive
 _YAML.preserve_quotes = True
+
+# The bot reads config.yaml with PyYAML (YAML 1.1: on/off/yes/no/true/
+# false/null — and y/n/~, any case — resolve to bool/None), but this
+# writer is YAML 1.2, which emits those words PLAIN. A room named "on"
+# was written as a bare `on:` key and read back as key True, so it
+# played nowhere. Any plain scalar (key OR value) that YAML 1.1 would
+# resolve to something else is written double-quoted; every other string
+# stays plain, exactly as today. ruamel has no per-instance registry
+# (add_representer mutates the representer class) — fine, this module
+# is the process's only ruamel writer.
+_YAML11_PLAIN = frozenset({"on", "off", "yes", "no", "y", "n", "true", "false", "null", "~"})
+
+
+def _represent_str(dumper, data):
+    if str(data).lower() in _YAML11_PLAIN:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+    return RoundTripRepresenter.represent_str(dumper, data)
+
+
+_YAML.representer.add_representer(str, _represent_str)
 
 # One lock for every read and write. The ruamel YAML() instance keeps its
 # parser/emitter state on itself (not thread-safe) and every write shares one

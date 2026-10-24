@@ -124,6 +124,8 @@ class WakeWordFilter(FrameProcessor):
         self._frame_size = 2560
         self._audio_buf = bytearray()
         self._last_activity = time.monotonic()
+        self._clip_until = 0.0   # end of the sounding speaker clip (note_speech); 0 = none
+        self._bot_stopped = True  # transport has no reply in flight
         # Window forensics (2026-10-03): track what the MIC delivered
         # during an AWAKE window so a speechless close can name its own
         # cause. Observed: wake 0.98, then 7s of silence —
@@ -177,7 +179,15 @@ class WakeWordFilter(FrameProcessor):
         sound: the LOCKED safety cap tracks the real speech window
         instead of the 30s fallback. Must be cheap and never raise into
         the reply path."""
-        self._speech_until = time.monotonic() + seconds + 2.0
+        now = time.monotonic()
+        self._speech_until = now + seconds + 2.0
+        # When the clip actually stops sounding. The transport's
+        # BotStoppedSpeakingFrame comes when ITS copy of the reply ends,
+        # which started at the first TTS frame; a Sonos/WiiM clip only
+        # starts after TTS ends + encode + load, so it ends seconds later.
+        # Until then the gate stays LOCKED (barge-in works to the last
+        # syllable) and the follow-up window starts from the real end.
+        self._clip_until = now + seconds
 
     def _score(self, pcm: bytes) -> float:
         audio = np.frombuffer(pcm, dtype=np.int16)
@@ -249,6 +259,7 @@ class WakeWordFilter(FrameProcessor):
                         self._audio_buf.clear()
                         self._state = TurnState.AWAKE
                         self._last_activity = now
+                        self._clip_until = 0.0  # the clip is being killed
                         logger.info(
                             f"wake_word: BARGE-IN (score {score:.2f}, "
                             f"2-frame confirm) -> AWAKE")
@@ -292,6 +303,14 @@ class WakeWordFilter(FrameProcessor):
             # duration + margin; clips play ASYNC after the bot's browser
             # audio ends — observed live 2026-09-15).
             if self._state is TurnState.LOCKED:
+                # A speaker clip outlived the transport's reply: release when
+                # the clip really ends, and count the follow-up from there.
+                if self._bot_stopped and self._clip_until and now >= self._clip_until:
+                    self._state = TurnState.AWAKE
+                    self._last_activity = now
+                    self._clip_until = 0.0
+                    logger.debug("wake_word: -> AWAKE (speaker clip finished)")
+                    return
                 # The only other exit from LOCKED is
                 # BotStoppedSpeakingFrame — a TTS error mid-stream can
                 # swallow it and leave the mic deaf (and the duck held)
@@ -354,15 +373,26 @@ class WakeWordFilter(FrameProcessor):
         if isinstance(frame, BotStartedSpeakingFrame):
             self._state = TurnState.LOCKED
             self._speech_until = now + 30.0  # fallback cap; SonosOutput refines via note_speech
+            self._bot_stopped = False
+            # A clip still sounding from the previous generation (a filler
+            # under the reply) keeps its end; the new clip re-reports at load.
             logger.debug("wake_word: LOCKED (bot speaking)")
             # Speaking LED now fires from SonosOutput's real-time TTS
             # frames (led_state direct wire) — this frame itself arrives
             # late when the intelligence stalls the pipeline, so the gate is the
             # wrong place to notify the ring.
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._state = TurnState.AWAKE
-            self._last_activity = now
-            logger.debug("wake_word: -> AWAKE (bot finished)")
+            self._bot_stopped = True
+            if self._state is TurnState.LOCKED and self._clip_until > now:
+                # Speaker clip still sounding: stay LOCKED until it ends
+                # (released on the audio path above).
+                logger.debug(f"wake_word: transport done, holding LOCKED "
+                             f"{self._clip_until - now:.1f}s until the speaker clip ends")
+            else:
+                self._state = TurnState.AWAKE
+                self._last_activity = now
+                self._clip_until = 0.0
+                logger.debug("wake_word: -> AWAKE (bot finished)")
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             # Real activity: user is talking (this is what keeps AWAKE alive)
             self._vad_fired = True
