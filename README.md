@@ -276,3 +276,38 @@ Changes apply on the next bot restart. Preset voices and their licences:
 `kyutai/pocket-tts` weights and your own Hugging Face login.
 
 [Pocket TTS]: https://github.com/kyutai-labs/pocket-tts
+
+## Local TTS (optional): Kokoro
+
+[Kokoro] is an 82M-parameter text-to-speech model that runs on the CPU
+through ONNX Runtime: no API key, and nothing leaves your network. It needs
+no torch, and onnxruntime is already installed for the wake word.
+
+    pip install -r requirements-kokoro.txt
+    bash scripts/fetch_kokoro_models.sh
+
+The script downloads the model and voice files (about 354 MB) into
+`~/.cache/lenoxvi/kokoro` (or `$XDG_CACHE_HOME/lenoxvi/kokoro`) and
+checks each against a pinned sha256. Run it as the user the bot runs as. The
+bot never downloads anything itself: if the files are missing, it logs an
+error naming this script. One model is loaded per process and shared by every
+room.
+
+Then, in the dashboard's TTS panel, pick **Kokoro (local)** as the provider,
+choose a voice and a speed (0.5–1.5). There are 28 English voices: `af_`/`am_`
+are American female/male, `bf_`/`bm_` British female/male (default
+`af_heart`). In config.yaml these are `tts.kokoro_voice` and
+`tts.kokoro_speed`. **Fallback → Pocket (local)** works behind Kokoro the same
+way it does behind the cloud providers. Changes apply on the next bot restart.
+
+Both local voices (Pocket and Kokoro) get a number pass before they speak:
+"9:06" is read as "nine oh six", "$12.50" as "twelve dollars and fifty
+cents", "75%" as "seventy-five percent". The cloud providers don't: they
+normalise text themselves.
+
+Licences: the Kokoro model is Apache-2.0 and kokoro-onnx is MIT. kokoro-onnx
+converts text to phonemes with espeak-ng, which is GPL-3.0; the
+espeakng-loader package ships it as a shared library that is loaded into the
+bot's process at run time. LenoxVI does not bundle or modify espeak-ng.
+
+[Kokoro]: https://huggingface.co/hexgrad/Kokoro-82M

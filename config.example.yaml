@@ -69,7 +69,11 @@ tts:
   # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
   # pocket_voice: alba                    # used when provider: pocket, or by the fallback
   #                                       # (preset name, or a .wav path for cloning)
-  # fallback: pocket                      # local hot standby behind a cloud provider
+  # kokoro_voice: af_heart                # used when provider: kokoro (28 English voices;
+  #                                       # af_/am_ American, bf_/bm_ British)
+  # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
+  #                                       # (needs requirements-kokoro.txt)
+  # fallback: pocket                     # local hot standby behind a cloud provider
   #                                       # (needs requirements-pocket.txt)
   # revive_cooldown_secs: 30   # min seconds between websocket retries once the
   #                             # TTS service is marked dead (revive fires on the

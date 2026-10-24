@@ -235,6 +235,23 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             raise RuntimeError("tts.provider=pocket but the Pocket model failed to "
                                f"load — run: {tts_pocket.INSTALL_HINT}")
         logger.info("tts backend: pocket (local)")
+    elif tts_provider == "kokoro":
+        # Kokoro (82M, CPU via ONNX, fully local: no key, no egress). One
+        # model per process (tts_kokoro), loaded off the event loop; a
+        # room's service never loads or downloads anything itself.
+        import tts_kokoro
+        if not tts_kokoro.kokoro_available():
+            raise RuntimeError("tts.provider=kokoro but kokoro-onnx is not installed — "
+                               f"run: {tts_kokoro.INSTALL_HINT}")
+        await tts_kokoro.warm()
+        tts = tts_kokoro.make_service(
+            mixin=TTSTracked,
+            voice=cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", tts_kokoro.DEFAULT_VOICE),
+            speed=cfg_env("tts", "kokoro_speed", "LVI_TTS_KOKORO_SPEED", tts_kokoro.DEFAULT_SPEED))
+        if tts is None:
+            raise RuntimeError("tts.provider=kokoro but the Kokoro model failed to load — "
+                               f"run: {tts_kokoro.INSTALL_HINT}")
+        logger.info("tts backend: kokoro (local)")
     elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
         # Verified against developers.deepgram.com/docs/tts-models. Key is
@@ -732,5 +749,21 @@ if __name__ == "__main__":
                 logger.warning(f"pocket tts not installed — {tts_pocket.INSTALL_HINT}")
     except Exception as e:
         logger.warning(f"pocket preload failed ({e}) — running without Pocket")
+
+    # Kokoro at STARTUP when it's the provider: one model per process, so
+    # sessions never load it mid-wake. Non-fatal: a failure means a loud
+    # construction error per session (missing files are retried there).
+    try:
+        from config import cfg_env as _cfg_env
+
+        _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
+        if _tp == "kokoro":
+            import tts_kokoro
+            if tts_kokoro.kokoro_available():
+                tts_kokoro.preload()
+            else:
+                logger.warning(f"kokoro tts not installed — {tts_kokoro.INSTALL_HINT}")
+    except Exception as e:  # noqa: BLE001 — boot must survive any preload failure
+        logger.warning(f"kokoro preload failed ({e}) — sessions will retry the load")
 
     main()

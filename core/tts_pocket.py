@@ -4,7 +4,9 @@ pipecat 1.11 ships PocketTTSService, but it loads the model in __init__
 and LenoxVI builds a TTS per SESSION, so every wake would reload weights.
 This module keeps ONE model per process (loaded at startup by preload())
 and hands it to every session's service. A process-wide lock serializes
-generation, so two rooms queue instead of thrashing the CPU.
+generation, so two rooms queue instead of thrashing the CPU. Text gets the
+local-voice number pass (tts_numbers) before generation, as primary and as
+the fallback alike.
 
 Optional dependency: pocket-tts + CPU torch (requirements-pocket.txt).
 Nothing here imports torch at module import time. pocket_available()
@@ -24,6 +26,7 @@ import threading
 import time
 from typing import Any
 
+import tts_numbers
 from loguru import logger
 
 # English presets shipped by pocket-tts 3.3.0 (README voice list; every
@@ -176,6 +179,8 @@ def _service_class(mixin: type) -> type:
             self._voice_state = _voice_state(voice)
 
         async def run_tts(self, text: str, context_id: str):
+            # Pocket reads digits one at a time ("4-4-9"): spell them first.
+            text = tts_numbers.spell_numbers(text)
             async with GEN_LOCK:
                 async for frame in super().run_tts(text, context_id):
                     yield frame

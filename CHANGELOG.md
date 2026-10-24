@@ -23,6 +23,12 @@ The two version streams are independent.
   LenoxVI's own voice detection, and keeps local Whisper on standby: a bad key, a dead network or an
   account refusal (out of credits, terms not accepted) moves the room to Whisper at once, and it switches back
   once ElevenLabs answers with a working session again. The language is fixed when a session starts, so changing it needs a restart.
+- TTS: Kokoro (82M, Apache-2.0, CPU) is a local provider on the TTS card (`tts.provider: kokoro`), with 28 English
+  voices and a speed setting (`tts.kokoro_voice`, `tts.kokoro_speed`). Optional install:
+  `requirements-kokoro.txt`, then `scripts/fetch_kokoro_models.sh` downloads the model files once and checks their
+  sha256; the bot never downloads at run time. One model is shared by every room, and Pocket works as its
+  fallback. The local voices (Pocket and Kokoro) now read times, money, percentages, degrees, ordinals, years and
+  numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
 - Wake name: a bare "Hey <name>." is matched by sound-alike spelling, so the

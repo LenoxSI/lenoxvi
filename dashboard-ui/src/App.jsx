@@ -882,7 +882,7 @@ function nodesChip(rooms, mapping) {
   return { tone: 'warning', text, title: `${down.join(', ')} offline` }
 }
 
-const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket' }
+const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket', kokoro: 'Kokoro' }
 const ttsName = p => TTS_NAMES[p] || p
 
 // TTS: the voice service the rooms are actually using (each online room
@@ -1992,13 +1992,21 @@ const ttsLabel = v =>
   v.startsWith('aura-2-') ? 'aura-2 ' + v.slice(7).replace(/-en$/, '')
   : v.startsWith('flux-') ? 'flux ' + v.slice(5).replace(/-en$/, '')
   : (EL_MODEL_LABELS[v] || v)
+// Kokoro voice ids: accent (a American, b British), f/m, name.
+// 'af_heart' -> 'Heart — American female'.
+const kokoroLabel = v => {
+  const [, accent, sex, name] = /^([ab])([fm])_(\w+)$/.exec(v) || []
+  return name
+    ? `${name[0].toUpperCase()}${name.slice(1)} — ${accent === 'a' ? 'American' : 'British'} ${sex === 'f' ? 'female' : 'male'}`
+    : v
+}
 // Each provider's SAVED value lives in its own field. The old sync loaded
 // tts.model (the ElevenLabs model) for every provider, so a Deepgram
 // config DISPLAYED the first voice while holding 'eleven_flash_v2_5' —
 // the first Save 422'd.
 const savedFor = (t, p) =>
   p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice
-  : p === 'pocket' ? t?.pocket_voice : t?.deepgram_flux_voice
+  : p === 'pocket' ? t?.pocket_voice : p === 'kokoro' ? t?.kokoro_voice : t?.deepgram_flux_voice
 
 function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const catalog = tts?.catalog || {}
@@ -2021,6 +2029,8 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
     el_norm: tts?.elevenlabs_text_normalization || null,
     flux_speed: num(tts?.deepgram_flux_speed, parseFloat),
     flux_expr: num(tts?.deepgram_flux_expressivity, v => parseInt(v, 10)),
+    // Unset = the bot's default 1.0, so the slider at 1.0 is not a change.
+    kokoro_speed: num(tts?.kokoro_speed, parseFloat) ?? 1.0,
     fallback: tts?.fallback === 'pocket' ? 'pocket' : 'off',
     pocket_voice: tts?.pocket_voice || 'alba',
   }, { blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 } })
@@ -2030,10 +2040,12 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const elSpeed = t.val('el_speed'), elStab = t.val('el_stab'), elNorm = t.val('el_norm')
   const fluxSpeed = t.val('flux_speed') ?? 1.0, fluxExpr = t.val('flux_expr') ?? 1
   const fallback = t.val('fallback'), pocketVoice = t.val('pocket_voice')
+  const kokoroSpeed = t.val('kokoro_speed') ?? 1.0
   // What Save sends for this provider, so the count matches the save.
   const ttsFields = ['provider', `model:${provider}`,
     ...(provider === 'elevenlabs' ? ['voice_id', 'el_speed', 'el_stab', 'el_norm'] : []),
     ...(provider === 'deepgram-flux' ? ['flux_speed', 'flux_expr'] : []),
+    ...(provider === 'kokoro' ? ['kokoro_speed'] : []),
     ...(provider !== 'pocket' ? ['fallback', ...(fallback === 'pocket' ? ['pocket_voice'] : [])] : [])]
 
   // Switching provider resets the model menu to that
@@ -2066,9 +2078,13 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
         body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)
     } else if (provider === 'pocket') {
       body.pocket_voice = model
+    } else if (provider === 'kokoro') {
+      body.kokoro_voice = model
+      // Same rule as the Flux knobs: an untouched unset speed writes nothing.
+      if (t.changed('kokoro_speed') || tts?.kokoro_speed != null) body.kokoro_speed = kokoroSpeed
     }
-    // The fallback only rides with a cloud primary; the server drops it
-    // when Pocket itself is the provider.
+    // The fallback rides with a cloud or Kokoro primary; the server drops
+    // it when Pocket itself is the provider.
     if (provider !== 'pocket') body.fallback = fallback
     if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
     const sent = t.snap(ttsFields)
@@ -2096,6 +2112,9 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               <option value="pocket" disabled={!tts?.pocket_installed && provider !== 'pocket'}>
                 Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
               </option>
+              <option value="kokoro" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}>
+                Kokoro (local){tts?.kokoro_installed ? '' : ' — not installed'}
+              </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => t.set({ [`model:${provider}`]: e.target.value })}>
@@ -2104,7 +2123,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               {model && !options.includes(model) &&
                 <option value={model} disabled>{ttsLabel(model)} (not accepted)</option>}
               {!options.length && <option value="" disabled>loading…</option>}
-              {options.map(v => <option key={v} value={v}>{ttsLabel(v)}</option>)}
+              {options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}
             </select>
             {provider === 'elevenlabs' &&
               <input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
@@ -2121,6 +2140,15 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                   value={fluxExpr} onChange={e => t.set({ flux_expr: parseInt(e.target.value, 10) })}
                   className="w-[140px] accent-[var(--accent)]" aria-label="Flux expressivity" />
                 <span className="font-mono text-[12px] w-[20px] text-right">{fluxExpr}</span>
+              </>
+            )}
+            {provider === 'kokoro' && (
+              <>
+                <span className="text-[12px] font-medium text-[var(--muted)]">Speed</span>
+                <input id="tts-kokoro-speed" type="range" min="0.5" max="1.5" step="0.05"
+                  value={kokoroSpeed} onChange={e => t.set({ kokoro_speed: parseFloat(e.target.value) })}
+                  className="w-[140px] accent-[var(--accent)]" aria-label="Kokoro speed" />
+                <span className="font-mono text-[12px] w-[36px] text-right">{kokoroSpeed.toFixed(2)}</span>
               </>
             )}
           </Field>
@@ -2176,8 +2204,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               )}
             </Field>
           )}
-          {provider !== 'pocket' && tts &&
-            !(provider === 'elevenlabs' ? tts.elevenlabs_key_hint : tts.deepgram_key_hint) && (
+          {TTS_KEY_HINT[provider] && tts && !tts[TTS_KEY_HINT[provider]] && (
             <MissingKey label={provider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram'} />
           )}
         </div>

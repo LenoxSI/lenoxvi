@@ -36,6 +36,7 @@ import firmware_image
 import intelligence_target
 import node_speaker
 import room_recorder
+import tts_kokoro
 import tts_pocket
 import wake_name
 
@@ -1184,13 +1185,14 @@ TTS_CATALOG = {
     "deepgram": list(_DEEPGRAM_VOICES),
     "deepgram-flux": list(_DEEPGRAM_FLUX_VOICES),
     "pocket": list(tts_pocket.POCKET_VOICES),
+    "kokoro": list(tts_kokoro.KOKORO_VOICES),
 }
 
 
 class TTSPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
-                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket)$")
+                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket|kokoro)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
     # Model trim: flash for reliability/speed, v4
     # turbo for expressiveness — v2/v3/v4-regular have no use case in a
@@ -1217,6 +1219,10 @@ class TTSPayload(BaseModel):
     # Pocket (local): a preset voice name only from the dashboard; a .wav
     # clone path is config-file-only (it needs gated weights + an HF login).
     pocket_voice: str | None = Field(default=None)
+    # Kokoro (local): one of the 28 English voices; speed 0.5–1.5 in 0.05
+    # steps (None = leave as-is).
+    kokoro_voice: str | None = Field(default=None)
+    kokoro_speed: float | None = Field(default=None, ge=0.5, le=1.5)
     # Local hot standby behind a cloud provider. "off" clears it; None =
     # leave as-is (partial update).
     fallback: str | None = Field(default=None, pattern="^(pocket|off)$")
@@ -1241,6 +1247,15 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
             raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
         if not tts_pocket.pocket_available():
             raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
+    elif p.provider == "kokoro":
+        if not p.kokoro_voice or p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
+            raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
+        if not tts_kokoro.kokoro_available():
+            raise HTTPException(status_code=422, detail=f"Kokoro is not installed — {tts_kokoro.INSTALL_HINT}")
+    if p.kokoro_voice is not None and p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
+        raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
+    if p.kokoro_speed is not None and abs(p.kokoro_speed * 20 - round(p.kokoro_speed * 20)) > 1e-9:
+        raise HTTPException(status_code=422, detail="kokoro_speed must be 0.5–1.5 in 0.05 steps")
     # A Pocket voice is validated wherever it rides (primary voice or the
     # fallback's voice): only the presets are dashboard-settable.
     if p.pocket_voice is not None and p.pocket_voice not in tts_pocket.POCKET_VOICES:
@@ -1286,6 +1301,10 @@ async def get_tts():
         "pocket_voice": tts_cfg.get("pocket_voice") or tts_pocket.DEFAULT_VOICE,
         "fallback": tts_cfg.get("fallback") or None,
         "pocket_installed": tts_pocket.pocket_available(),
+        "kokoro_voice": tts_cfg.get("kokoro_voice") or tts_kokoro.DEFAULT_VOICE,
+        # None = unset = the bot's default (1.0).
+        "kokoro_speed": tts_cfg.get("kokoro_speed"),
+        "kokoro_installed": tts_kokoro.kokoro_available(),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
@@ -1322,6 +1341,10 @@ async def put_tts(payload: TTSPayload):
     elif payload.provider == "pocket":
         current["pocket_voice"] = payload.pocket_voice
         current.pop("fallback", None)   # Pocket as primary never carries a fallback
+    elif payload.provider == "kokoro":
+        current["kokoro_voice"] = payload.kokoro_voice
+        if payload.kokoro_speed is not None:   # None = leave as-is
+            current["kokoro_speed"] = payload.kokoro_speed
     else:
         current["deepgram_flux_voice"] = payload.deepgram_flux_voice
         # Flux knobs ride along — None means "leave as-is" (partial update
