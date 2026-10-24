@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/assets/logo/horizontal/lenoxvi-horizontal-on-dark.svg">
-  <img alt="LenoxVI" src="design/assets/logo/horizontal/lenoxvi-horizontal-on-light.svg" width="420">
+  <source media="(prefers-color-scheme: dark)" srcset="dashboard-ui/public/lenoxvi-horizontal-on-dark.svg">
+  <img alt="LenoxVI" src="dashboard-ui/public/lenoxvi-horizontal-on-light.svg" width="420">
 </picture>
 
 # LenoxVI
