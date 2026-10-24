@@ -29,9 +29,9 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-from intelligence_stub import StubIntelligence
+from intelligence.stub import StubIntelligence
 from echo_gate import EchoGate
-from intelligence_agent import IntelligenceAgent
+from intelligence.agent import IntelligenceAgent
 import intelligence as intelligence_lanes
 from sonos_output import SonosOutput
 from wiim_output import WiiMOutput

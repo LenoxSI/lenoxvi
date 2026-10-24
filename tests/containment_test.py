@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "core")
 
-from intelligence_agent import _normalize
+from intelligence.agent import _normalize
 
 # Case 1: the live failure — her reply + filler blob transcribed back
 echo_texts = [

@@ -53,7 +53,7 @@ class NanobotLane(Lane):
         # nanobot explains a refusal in its body ("Only a single user
         # message is supported", "Only configured model ... is
         # available"); put that in the failure log, never the key.
-        import intelligence_target as _it
+        import intelligence.target as _it
         return RuntimeError(f"nanobot answered HTTP {err.code}: "
                             f"{_it.http_error_message(err, key)}")
 
@@ -103,7 +103,7 @@ class NanobotLane(Lane):
         return model, body
 
     def probe_error(self, err, key):
-        import intelligence_target as _it
+        import intelligence.target as _it
         return (f"gateway error: HTTP {err.code}: "
                 f"{_it.http_error_message(err, key)}")
 

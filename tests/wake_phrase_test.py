@@ -9,7 +9,7 @@ import wake_name  # noqa: E402
 
 wake_name._wake = lambda: {"name": "Willow"}   # spellings matched by sound, no list
 
-from intelligence_agent import _is_wake_phrase_only  # noqa: E402
+from intelligence.agent import _is_wake_phrase_only  # noqa: E402
 
 should_drop = ["Hey Yellow.", "hey willow", "Willow.", "ok willow!", "Hey Willow?",
                "okay wilow.", "hi willow"]

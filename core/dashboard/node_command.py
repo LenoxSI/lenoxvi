@@ -301,7 +301,7 @@ def on_message(message, pc_id: str) -> None:
             # resolves its name there at every save, so a save in flight
             # lands wholly under the old name (and is moved) or the new one.
             try:
-                import intelligence_agent
+                from intelligence import agent as intelligence_agent
 
                 intelligence_agent.rename_session_history(
                     old, new, then=lambda: registry.relabel_room(pc_id, info))

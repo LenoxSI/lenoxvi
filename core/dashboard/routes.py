@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
 import intelligence
-import intelligence_target
+from intelligence import target as intelligence_target
 import node_speaker
 from paths import clips_dir, firmware_dir, models_dir, state_root, wake_root
 import room_recorder

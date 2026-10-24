@@ -36,7 +36,7 @@ os.environ["LVI_HERMES_KEY"] = "hm-key"
 
 import config
 from echo_gate import EchoGate
-from intelligence_agent import IntelligenceAgent
+from intelligence.agent import IntelligenceAgent
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,

@@ -31,7 +31,7 @@ class HermesLane(Lane):
         return agent
 
     def key_var(self, agent: str = "") -> str:
-        from intelligence_target import is_default_agent
+        from intelligence.target import is_default_agent
 
         base = self.base_key_var
         if not is_default_agent(agent):
@@ -39,7 +39,7 @@ class HermesLane(Lane):
         return base
 
     def request_url(self, url: str, agent: str = "") -> str:
-        from intelligence_target import is_default_agent
+        from intelligence.target import is_default_agent
 
         url = (url or "").rstrip("/")
         if not is_default_agent(agent):
@@ -75,7 +75,7 @@ class HermesLane(Lane):
 
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
         # Read at call time: the suite swaps intelligence_target.HERMES_STATUS_PORT.
-        import intelligence_target as _it
+        import intelligence.target as _it
 
         fallback = {"agents": [self.entry("default", env)], "source": "fallback"}
         if not status_url:

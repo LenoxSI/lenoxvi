@@ -176,8 +176,8 @@ def main():
           "in intelligence_lanes.KINDS" in bot_src and "('hermes', 'openclaw', 'nanobot')" not in bot_src)
 
     import dashboard
-    import intelligence_agent as ia
-    import intelligence_target as it
+    import intelligence.agent as ia
+    import intelligence.target as it
     import keys_catalog
     from dashboard import config_store
     from fastapi import FastAPI

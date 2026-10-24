@@ -1385,6 +1385,17 @@ def main():
           and (REPO_CORE / "intelligence" / "agent.py").exists(), "")
     _ia_src = (REPO_CORE / "intelligence" / "agent.py").read_text() \
         if (REPO_CORE / "intelligence" / "agent.py").exists() else ""
+    import ast as _astoi
+    _old_imports = []
+    for _pf in [REPO_CORE.parent / "bot.py"] + list(REPO_CORE.rglob("*.py")) + list((REPO_CORE.parent / "tests").glob("*.py")):
+        for _node in _astoi.walk(_astoi.parse(_pf.read_text())):
+            _mods = ([a.name for a in _node.names] if isinstance(_node, _astoi.Import)
+                     else [_node.module or ""] if isinstance(_node, _astoi.ImportFrom) else [])
+            if any(m in ("intelligence_agent", "intelligence_stub", "intelligence_target") for m in _mods):
+                _old_imports.append(_pf.name)
+    check("intelligence: the old intelligence_* aliases are gone and nothing imports them",
+          not any((REPO_CORE / f"intelligence_{n}.py").exists() for n in ("agent", "stub", "target"))
+          and not _old_imports, f"importers={sorted(set(_old_imports))}")
     check("intelligence_agent logs under its own module name",
           "intelligence_agent:" in _ia_src and "hermes_agent:" not in _ia_src
           and "def _ask_intelligence(" in _ia_src, "")
@@ -2910,7 +2921,7 @@ def main():
         import types as _types_module
         from types import SimpleNamespace as _NS8
         from echo_gate import EchoGate as _EchoGate8
-        from intelligence_agent import IntelligenceAgent as _Agent  # noqa: E402
+        from intelligence.agent import IntelligenceAgent as _Agent  # noqa: E402
         from wake_word import TurnState as _TurnState, WakeWordFilter as _WF  # noqa: E402
         _FD = _FD8
 
@@ -3125,7 +3136,7 @@ def main():
             # ── session end: the in-flight turn dies with the session ──
             import threading as _thSE
 
-            import intelligence_agent as _iaSE
+            import intelligence.agent as _iaSE
             from pipecat.frames.frames import CancelFrame as _CancelSE
             from pipecat.frames.frames import VADUserStoppedSpeakingFrame as _VADStopSE
             _stash_saved_SE = _iaSE._session_stash._path
@@ -3268,7 +3279,7 @@ def main():
                   f"calls={_dd_n} spoken={_dd_spoken}")
             _df_n, _df_spoken = _asyncio.run(_dedup_probe(fail_first=False, slow_first=True))
             # ── no filler while the user is talking ──
-            import intelligence_agent as _ia_fill
+            import intelligence.agent as _ia_fill
 
             async def _filler_probe(talk_until, ask_secs):
                 agent = _Agent(echo_gate=_EchoGate8(), room="suite-fh",
@@ -3903,10 +3914,10 @@ def main():
                 _os.environ["LVI_BRAIN_KEY"] = "suite-intelligence-key-not-real"
                 _os.environ["LVI_HERMES_KEY"] = "suite-hermes-key-not-real"
                 _os.environ["LVI_OPENCLAW_KEY"] = "suite-openclaw-key-not-real"
-                for mod_name in ("intelligence_agent",):
+                for mod_name in ("intelligence.agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import intelligence_agent as _ha9
+                import intelligence.agent as _ha9
                 _urq9.urlopen = _fake_open9
                 # kind from the LVI_CONFIG we just PUT (openclaw)
                 _a9 = _ha9.IntelligenceAgent(lull_secs=0.05, room="suite",
@@ -3928,10 +3939,10 @@ def main():
                 # a clear error naming its OWN variable, never silently
                 # auth with another intelligence's token (a real wrong-token 401).
                 _os.environ.pop("LVI_OPENCLAW_KEY", None)
-                for mod_name in ("intelligence_agent",):
+                for mod_name in ("intelligence.agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import intelligence_agent as _ha9_fb
+                import intelligence.agent as _ha9_fb
                 # A session built right after boot with this config (boot ==
                 # saved): the saved-vs-boot rule has its own suite.
                 import config as _cfg9_fb
@@ -3957,10 +3968,10 @@ def main():
                       "x-openclaw-session-key" not in _cap9[-1]["headers"], "")
                 # hermes round-trip: flip kind back, conversation field returns
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes"})
-                for mod_name in ("intelligence_agent",):
+                for mod_name in ("intelligence.agent",):
                     if mod_name in sys.modules:
                         del sys.modules[mod_name]
-                import intelligence_agent as _ha9b
+                import intelligence.agent as _ha9b
                 _a9b = _ha9b.IntelligenceAgent(lull_secs=0.05, room="suite",
                                          session_mode="fresh")
                 _a9b._ask_intelligence("hi")
@@ -4106,7 +4117,7 @@ def main():
             # discovered per provider, remembered per kind; a Hermes profile
             # routes to <base>/p/<agent>/v1 with ITS OWN key; set keys show
             # their first 4 characters, never more.
-            import intelligence_target as _it12
+            import intelligence.target as _it12
             import threading as _th12
             import http.server as _hs12
             _h12 = _it12.key_hint
@@ -4255,9 +4266,9 @@ def main():
                         return _FakeResp9(b"{}")
                     return _fake_open9(req, timeout)
                 _os.environ["LVI_HERMES_KEY_HOME_HELPER"] = "helper-key-not-real-123"
-                for _m12 in ("intelligence_agent", "intelligence.agent"):
+                for _m12 in ("intelligence.agent",):
                     sys.modules.pop(_m12, None)
-                import intelligence_agent as _ia12
+                import intelligence.agent as _ia12
                 _urq9.urlopen = _fake_open12
                 _a12 = _ia12.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
                 _a12._ask_intelligence("hi")
@@ -4266,9 +4277,9 @@ def main():
                       and _urls12[-1][1].get("authorization") == "Bearer helper-key-not-real-123",
                       f"{_urls12[-1][0]} {_urls12[-1][1].get('authorization')}")
                 client.put("/api/dashboard/intelligence", json={"kind": "hermes", "agent": "default"})
-                for _m12 in ("intelligence_agent", "intelligence.agent"):
+                for _m12 in ("intelligence.agent",):
                     sys.modules.pop(_m12, None)
-                import intelligence_agent as _ia12b
+                import intelligence.agent as _ia12b
                 _a12b = _ia12b.IntelligenceAgent(lull_secs=0.05, room="suite", session_mode="fresh")
                 _a12b._ask_intelligence("hi")
                 check("agent picker: hermes default agent: configured URL + LVI_HERMES_KEY (unchanged behaviour)",
@@ -4352,7 +4363,7 @@ def main():
             # agent is known, so discovery can then list agents with the key.
             # A bad port is a 422, never a 500. Pinned at urlopen: the header
             # that actually leaves the box.
-            import intelligence_target as _it13
+            import intelligence.target as _it13
             _icfg_saved13 = dict(config_store.read_section("intelligence") or {})
             _okey_saved13 = _os.environ.get("LVI_OPENCLAW_KEY")
             _saved_open13 = _urq9.urlopen
@@ -4486,7 +4497,7 @@ def main():
     # texts can never echo back — they register nothing).
     import asyncio as _aio12
     import echo_gate as _eg12
-    import intelligence_agent as _ha12
+    import intelligence.agent as _ha12
     from pipecat.frames.frames import (  # noqa: E402
         TranscriptionFrame as _TF12, VADUserStartedSpeakingFrame as _VAD12,
     )
@@ -5399,7 +5410,7 @@ def main():
     _alldr = getattr(_dashdr, "DIST_ROOT_FILES", None)
     check("dashboard: dist-root allowlist exists and every name in it is in dist/",
           bool(_alldr) and all((_distdr / f).is_file() for f in _alldr), str(_alldr))
-    import intelligence_agent as _iawn
+    import intelligence.agent as _iawn
     check("wake name: intelligence drop-filter delegates to wake_name",
           "wake_name" in _inspwn.getsource(_iawn._is_wake_phrase_only))
     _ia_srcwn = _inspwn.getsource(_iawn)
@@ -5608,7 +5619,7 @@ def main():
         registry.mark_disconnected("pc-spxvf")
 
     # ── per-room agent override (Intelligence agent = house default) ──
-    import intelligence_agent as _iaRA
+    import intelligence.agent as _iaRA
     from dashboard import node_command as _ncRA
 
     _57_cfg = {sec: config_store.read_section(sec) for sec in ("intelligence", "room_agents", "room_zones")}
@@ -5764,7 +5775,7 @@ def main():
         registry.mark_disconnected("pc-ra")
 
         # ── rename: never onto an existing room; mode + history follow ──
-        import intelligence_agent as _iaRN
+        import intelligence.agent as _iaRN
         from dashboard import routes as _rRN
         _rz_saved = dict(config_store.read_section("room_zones") or {})
         _sm_saved = dict(config_store.read_section("session_modes") or {})
@@ -5896,7 +5907,7 @@ def main():
     import urllib.request as _urqRN2
     from concurrent.futures import ThreadPoolExecutor as _TPERN2
 
-    import intelligence_agent as _iaRN2
+    import intelligence.agent as _iaRN2
     from dashboard import node_command as _ncRN2
     from dashboard import routes as _rRN2
     from fastapi import HTTPException as _HTTPExcRN2
@@ -6799,11 +6810,11 @@ def main():
     import threading as _thNB
     import urllib.request as _urqNB
 
-    import intelligence_agent as _iaNB
+    import intelligence.agent as _iaNB
     from dashboard import routes as _rNB
     from loguru import logger as _lgNB
 
-    import intelligence_target as _itNB
+    import intelligence.target as _itNB
 
     _NB_KEY = "nb-suite-key-abcdefghijkl"
     _NB_WRONG = "nb-wrong-key-abcdefghijkl"
@@ -7910,7 +7921,7 @@ def main():
     # ── intelligence: nanobot's saved model can be cleared ──────────────
     import urllib.request as _urqCL
 
-    import intelligence_agent as _iaCL
+    import intelligence.agent as _iaCL
     _clCfg = {sec: config_store.read_section(sec) for sec in ("intelligence", "room_agents")}
     _clEnv = os.environ.get("LVI_NANOBOT_KEY")
     _clOpen = _urqCL.urlopen

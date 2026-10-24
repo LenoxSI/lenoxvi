@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 import intelligence
-import intelligence_target
+from intelligence import target as intelligence_target
 
 # Static rows, in card order. used_by = features that read the key
 # (ElevenLabs adds STT while Scribe is the STT provider: _used_by).

@@ -147,7 +147,7 @@ class Lane:
             (icfg.get("url") if (icfg.get("kind") or "hermes") == self.kind else None) or ""
 
     def entry(self, agent_id: str, env) -> dict:
-        from intelligence_target import key_hint  # kind-free helper stays there
+        from intelligence.target import key_hint  # kind-free helper stays there
         var = self.key_var(agent_id)
         value = env.get(var) if var else None
         return {"id": agent_id, "key_set": bool(value), "key_hint": key_hint(value)}

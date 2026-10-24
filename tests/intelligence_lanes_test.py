@@ -164,8 +164,8 @@ def main():
 
     import config
     import dashboard
-    import intelligence_agent as ia
-    import intelligence_target as it
+    import intelligence.agent as ia
+    import intelligence.target as it
     import keys_catalog
     from dashboard import config_store, routes
     from fastapi import FastAPI

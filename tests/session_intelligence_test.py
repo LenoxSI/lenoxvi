@@ -26,7 +26,7 @@ for k in list(os.environ):
         del os.environ[k]
 
 import config
-import intelligence_agent as ia
+import intelligence.agent as ia
 
 HM, OC = "http://hm.test:8642/v1", "http://oc.test:18789/v1"
 
