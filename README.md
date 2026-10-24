@@ -5,7 +5,7 @@
 
 # LenoxVI
 
-Multi-zone audio for your agent. Local, cloud or hybrid based on your use case. Audio routes through Sonos or WiiM audio speakers. Mics from ReSpeaker (Array, Flex) or Waveshare, including in-ceiling microphones matching architectural speakers. Web dashboard for easy and fast tuning of voice pipeline!
+High quality multi-zone audio for your AI agent, with mic and room routing + audio ducking. Local, cloud or hybrid based on your use case. Audio routes through Sonos or WiiM audio speakers. Mics from ReSpeaker (Array, Flex) or Waveshare, including in-ceiling microphones matching architectural speakers. Web dashboard for easy and fast tuning of voice pipeline!
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → speech to text →
     intelligence (Hermes / OpenClaw / Nanobot) → text to speech →
