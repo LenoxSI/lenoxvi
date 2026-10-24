@@ -79,6 +79,13 @@ The two version streams are independent.
 - Dashboard: the empty Rooms table reads "No mic nodes yet. A flashed node appears here when it connects."
 
 ### Fixed
+- Intelligence card: typing a new `host:port` now lists that server's agents (it showed the saved server's,
+  so a typo never said "unreachable" and Save paired the old server's agent with the new URL).
+- An intelligence lane or room agent saved with a new key keeps the boot lane/agent until the restart loads
+  the key, instead of failing every turn in any room that reconnects first (same rule as TTS).
+- Kokoro is offered and accepted only when its model files are there too; the option says "model files
+  missing" with the fetch command. Saved without them, every room failed to build its pipeline.
+- A wake name saved as "Hey Jarvis" (or "OK …") drops the bare wake phrase again.
 - Dashboard: the Rooms, Nodes, Zones and wake model tables and the wake name card say "Loading…" while
   loading and show a failed load as "Couldn't load: …", instead of claiming there is nothing there.
 - Speakers: a Sonos or WiiM zone added (or a room mapped to it) after a node

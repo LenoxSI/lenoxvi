@@ -221,6 +221,56 @@ def rename_session_history(old: str, new: str, then=None) -> bool:
 _PREAMBLE_HITS = [0]
 
 
+def _intel_settings(sec: dict) -> dict:
+    """intelligence.* as a session uses it: config.yaml wins, then the LVI_*
+    env var, then the default (the cfg_env rule)."""
+    sec = sec if isinstance(sec, dict) else {}
+
+    def pick(key, env_var, default):
+        val = sec.get(key)
+        if val is None:
+            val = os.getenv(env_var)
+        return default if val is None else val
+
+    return {"url": pick("url", "LVI_HERMES_URL", "http://<intelligence-host>:8642/v1"),
+            "kind": str(pick("kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").lower(),
+            "agent": pick("agent", "LVI_INTELLIGENCE_AGENT", ""),
+            "agents": sec.get("agents") or {},
+            "model": pick("model", "LVI_HERMES_MODEL", "hermes-agent")}
+
+
+def _settings_key_var(s: dict) -> str | None:
+    lane = intelligence.get(s["kind"])
+    if lane is None:
+        return None
+    return lane.key_var(lane.agent_for({"agent": s["agent"], "agents": s["agents"]}))
+
+
+def session_intelligence(live: dict, boot: dict, environ) -> tuple[dict, str | None]:
+    """The intelligence settings a new session can actually use, plus a warning.
+
+    Keys load only at restart. When the saved lane/agent needs a key this
+    process doesn't have yet and the boot settings' key IS loaded, keep the
+    boot settings until the restart. Otherwise the live settings, even
+    without a key: a key that is simply missing still fails loudly."""
+    need = _settings_key_var(live)
+    if not need or environ.get(need) or live == boot:
+        return live, None
+    boot_need = _settings_key_var(boot)
+    if intelligence.get(boot["kind"]) is not None and (not boot_need or environ.get(boot_need)):
+        return boot, (f"intelligence_agent: the saved {live['kind']} settings need {need}, which "
+                      f"loads at restart; keeping the boot settings ({boot['kind']}) until then")
+    return live, None
+
+
+def _room_agent(overrides, room: str, default: str) -> tuple[str, str]:
+    """room_agents.<kind>.<room> when it names a valid agent, else the house default."""
+    agent = str(overrides.get(room) or "").strip() if isinstance(overrides, dict) else ""
+    if not agent or not intelligence.AGENT_RE.match(agent):
+        return default, "default"
+    return agent, "override"
+
+
 class IntelligenceAgent(FrameProcessor):
     """Buffers user speech; on end-of-turn lull, asks the Hermes API for a reply."""
 
@@ -228,15 +278,26 @@ class IntelligenceAgent(FrameProcessor):
                  room: str = None, session_mode: str = "fresh",
                  tts_is_usable=None, room_resolver=None, **kwargs):
         super().__init__(**kwargs)
-        from config import cfg, cfg_env
+        from config import boot_config, cfg, cfg_env
 
-        self._url = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://<intelligence-host>:8642/v1")
+        # Keys load only at restart, but dashboard config edits reach every
+        # new session at once (a room that reconnects). A lane or agent
+        # switch saved with its NEW key would make that room fail every turn
+        # until the restart, so until then keep what the bot booted with
+        # (same rule as keys_catalog.session_tts_provider).
+        _live = _intel_settings(cfg("intelligence") or {})
+        _boot = _intel_settings(boot_config().get("intelligence") or {})
+        _use, _warn = session_intelligence(_live, _boot, os.environ)
+        if _warn:
+            logger.warning(_warn)
+        self._boot_room_agents = boot_config().get("room_agents") or {}
+        self._url = _use["url"]
         # Intelligence lane: intelligence.kind picks the request
         # shape. hermes = today's api_server contract; openclaw = OpenClaw
         # Gateway (model "openclaw/<agent>", x-openclaw-session-key, no
         # `conversation` field). The UI calls this "Intelligence" — the
         # word "intelligence" never reaches the dashboard.
-        self._kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").lower()
+        self._kind = _use["kind"]
         # Agent per kind (intelligence_target.agent_for): openclaw addresses
         # it in the model field; hermes routes a named profile to
         # <base>/p/<agent>/v1 with that profile's own key; nanobot sends it
@@ -244,8 +305,7 @@ class IntelligenceAgent(FrameProcessor):
         # The lane (core/intelligence/<kind>.py) owns the request shape;
         # None = an unknown kind (turns fail with "no key set").
         self._lane = intelligence.get(self._kind)
-        _icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
-                 "agents": cfg("intelligence", "agents") or {}}
+        _icfg = {"agent": _use["agent"], "agents": _use["agents"]}
         self._agent = self._lane.agent_for(_icfg) if self._lane else ""
         # Per-room override (room_agents.<kind>.<room>) is resolved at the
         # first turn (_ensure_route): the room can still be unknown here.
@@ -275,7 +335,7 @@ class IntelligenceAgent(FrameProcessor):
             logger.warning(
                 f"intelligence_agent: no intelligence key set ({self._key_var}) "
                 f"— kind={self._kind}; turns will fail until it is set")
-        self._model = cfg_env("intelligence", "model", "LVI_HERMES_MODEL", "hermes-agent")
+        self._model = _use["model"]
         # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
         # intelligence request carried no max_tokens, so a runaway model loop
         # could monologue until the context window died (measured: one
@@ -434,11 +494,18 @@ class IntelligenceAgent(FrameProcessor):
             return
         from config import cfg
 
-        overrides = cfg("room_agents", self._kind) or {}
-        agent = str(overrides.get(room) or "").strip() if isinstance(overrides, dict) else ""
-        how = "override"
-        if not agent or not intelligence.AGENT_RE.match(agent):
-            agent, how = self._default_agent, "default"
+        agent, how = _room_agent(cfg("room_agents", self._kind), room, self._default_agent)
+        key_var = self._lane.key_var(agent)
+        if key_var and not os.getenv(key_var):
+            # A per-room agent saved with its new key: keep the room's boot
+            # agent until the restart loads the key (when that one has one).
+            boot_kinds = self._boot_room_agents if isinstance(self._boot_room_agents, dict) else {}
+            boot_agent, boot_how = _room_agent(boot_kinds.get(self._kind), room, self._default_agent)
+            boot_var = self._lane.key_var(boot_agent)
+            if boot_agent != agent and (not boot_var or os.getenv(boot_var)):
+                logger.warning(f"intelligence_agent: room '{room}' agent '{agent or 'default'}' needs "
+                               f"{key_var}, which loads at restart; keeping '{boot_agent or 'default'}' until then")
+                agent, how = boot_agent, boot_how
         if agent != self._agent:
             # Build the whole route first, then swap it in; _routed_room is
             # set LAST, so an overlapping (superseded) turn's thread that

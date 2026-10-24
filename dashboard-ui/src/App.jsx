@@ -2172,8 +2172,9 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               <option value="pocket" disabled={!tts?.pocket_installed && provider !== 'pocket'}>
                 Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
               </option>
-              <option value="kokoro" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}>
-                Kokoro (local){tts?.kokoro_installed ? '' : ' — not installed'}
+              <option value="kokoro" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}
+                title={tts?.kokoro_problem || undefined}>
+                Kokoro (local){tts?.kokoro_installed ? '' : tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'}
               </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
@@ -2619,7 +2620,9 @@ function System({ intelligence, status, setMsg, reloadAll }) {
     discSeq.current[kind] = seq
     setFound(f => ({ ...f, [kind]: { ...(f[kind] || {}), loading: true } }))
     const body = { kind }
-    if (/^https?:\/\//.test(url || '')) body.url = url
+    // Any typed URL, host:port included: the server fills in http:// and /v1
+    // (Lane.normalize_url), and only attaches the saved key for the saved host.
+    if ((url || '').trim()) body.url = url.trim()
     try {
       const r = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: body })
       if (seq !== discSeq.current[kind]) return

@@ -1262,8 +1262,9 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
     elif p.provider == "kokoro":
         if not p.kokoro_voice or p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
             raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
-        if not tts_kokoro.kokoro_available():
-            raise HTTPException(status_code=422, detail=f"Kokoro is not installed — {tts_kokoro.INSTALL_HINT}")
+        problem = tts_kokoro.setup_problem()
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
     if p.kokoro_voice is not None and p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
         raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
     if p.kokoro_speed is not None and abs(p.kokoro_speed * 20 - round(p.kokoro_speed * 20)) > 1e-9:
@@ -1298,6 +1299,7 @@ async def get_tts():
     """Current TTS config + key status per provider. Never returns keys."""
     import os as _os
     tts_cfg = config_store.read_section("tts") or {}
+    kokoro_problem = tts_kokoro.setup_problem()
     return {
         "provider": tts_cfg.get("provider") or "elevenlabs",
         "voice_id": tts_cfg.get("voice_id") or _os.getenv("LVI_TTS_VOICE_ID"),
@@ -1316,7 +1318,9 @@ async def get_tts():
         "kokoro_voice": tts_cfg.get("kokoro_voice") or tts_kokoro.DEFAULT_VOICE,
         # None = unset = the bot's default (1.0).
         "kokoro_speed": tts_cfg.get("kokoro_speed"),
-        "kokoro_installed": tts_kokoro.kokoro_available(),
+        "kokoro_installed": kokoro_problem is None,
+        "kokoro_files_missing": tts_kokoro.kokoro_available() and kokoro_problem is not None,
+        "kokoro_problem": kokoro_problem,
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.

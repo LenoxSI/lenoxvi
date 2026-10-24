@@ -86,12 +86,22 @@ def _distance(a: str, b: str) -> int:
     return prev[-1]
 
 
+def _core_name(s: str) -> str:
+    """The name without a leading hey/ok/okay/hi: the utterance side drops
+    that word before matching (_WHOLE), so the name side must as well, or a
+    name saved as "Hey Jarvis" never matches the "Jarvis" left over."""
+    words = str(s or "").split()
+    if len(words) > 1 and words[0].strip(",").lower() in _LEADING:
+        words = words[1:]
+    return " ".join(words)
+
+
 def sounds_like(term: str, wake: str | None = None) -> bool:
     """`term` is the name or a spelling speech-to-text writes for it: the same
     letters within 2 edits for names of 5+ letters ("Jarvas", "Jervis" for
     "Jarvis"), 1 for 4 letters, exact below that (short names are too
     close to ordinary words)."""
-    n = _letters(name() if wake is None else wake)
+    n = _letters(_core_name(name() if wake is None else wake))
     t = _letters(term)
     if not n or not t or reserved_term(term):
         return False

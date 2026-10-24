@@ -158,6 +158,20 @@ def _files_problem() -> str | None:
     return None
 
 
+def setup_problem() -> str | None:
+    """Why Kokoro can't be used here (package or model files), or None.
+
+    The dashboard offers and accepts Kokoro only when this is None: a
+    provider saved without its model files makes every room fail to build
+    its pipeline."""
+    if not kokoro_available():
+        return f"Kokoro is not installed — {INSTALL_HINT}"
+    files = _files_problem()
+    if files:
+        return f"Kokoro model files: {files} — fetch them with: bash scripts/fetch_kokoro_models.sh"
+    return None
+
+
 def preload() -> bool:
     """Load the shared model (blocking). Never raises."""
     global _kokoro, _load_failed
