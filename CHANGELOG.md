@@ -20,13 +20,15 @@ The two version streams are independent.
   used by TTS and STT), connects only while a room is awake (on the first audio after the wake word, holding
   that audio until the session is up; it closes after 10 s without audio, stays closed when ElevenLabs hangs up
   a quiet socket, and never sends keepalive silence, which ElevenLabs would bill), ends each turn on
-  LenoxVI's own voice detection, and keeps local Whisper on standby: a bad key, a dead network or an
+  LenoxVI's own voice detection (a blip too short for Scribe to accept rides along with the next words
+  instead of dropping the connection), and keeps local Whisper on standby: a bad key, a dead network or an
   account refusal (out of credits, terms not accepted) moves the room to Whisper at once, and it switches back
   once ElevenLabs answers with a working session again. The language is fixed when a session starts, so changing it needs a restart.
 - TTS: Kokoro (82M, Apache-2.0, CPU) is a local provider on the TTS card (`tts.provider: kokoro`), with 28 English
   voices and a speed setting (`tts.kokoro_voice`, `tts.kokoro_speed`). Optional install:
   `requirements-kokoro.txt`, then `scripts/fetch_kokoro_models.sh` downloads the model files once and checks their
-  sha256; the bot never downloads at run time. One model is shared by every room, and Pocket works as its
+  sha256; the bot never downloads at run time. One model is shared by every room, replies are spoken a
+  sentence at a time (the first words come quickly, even for long replies), and Pocket works as its
   fallback. The local voices (Pocket and Kokoro) now read times, money, percentages, degrees, ordinals, years and
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 

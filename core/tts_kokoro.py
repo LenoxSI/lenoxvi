@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,37 @@ INSTALL_HINT = ("pip install -r requirements-kokoro.txt && "
                 "bash scripts/fetch_kokoro_models.sh")
 
 GEN_LOCK = asyncio.Lock()
+# Kokoro makes a chunk's audio in one go (no streaming inside a sentence), and
+# pipecat ends a TTS context after stop_frame_timeout_s (default 3 s) without
+# audio — a long reply then logged "completed with no audio" and briefly
+# counted as finished. Sentences are spoken one at a time (first audio fast),
+# and a slow one is tolerated this long. A normal reply still ends at once:
+# its end is an explicit marker, not this timer.
+STOP_FRAME_TIMEOUT_S = 10.0
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def sentences(text: str) -> list[str]:
+    """`text` split after . ! or ? followed by a space; blanks dropped. A
+    fragment under 12 characters ("Mr.", "Sure.") joins the next one."""
+    out: list[str] = []
+    carry = ""
+    for p in _SENTENCE_END.split(text or ""):
+        p = p.strip()
+        if not p:
+            continue
+        p = f"{carry} {p}" if carry else p
+        if len(p) < 12:
+            carry = p
+            continue
+        out.append(p)
+        carry = ""
+    if carry:
+        if out:
+            out[-1] = f"{out[-1]} {carry}"   # a tiny tail joins the sentence before it
+        else:
+            out.append(carry)
+    return out
 
 _kokoro: Any = None
 _load_failed = False
@@ -184,16 +216,19 @@ def _service_class(mixin: type) -> type:
             # the settings (the suite pins that).
             settings = KokoroTTSService.Settings(model=None, voice=voice, speed=speed,
                                                  language=languages[language_for(voice)])
+            kwargs.setdefault("stop_frame_timeout_s", STOP_FRAME_TIMEOUT_S)
             TTSService.__init__(self, push_start_frame=True,
                                 push_stop_frames=True, settings=settings, **kwargs)
             self._kokoro = _kokoro
             self._resampler = create_stream_resampler()
 
         async def run_tts(self, text: str, context_id: str):
-            text = tts_numbers.spell_numbers(text)
-            async with GEN_LOCK:
-                async for frame in super().run_tts(text, context_id):
-                    yield frame
+            # One sentence at a time: its audio goes out while the next is
+            # made, and another room can take its turn in between.
+            for part in sentences(tts_numbers.spell_numbers(text)):
+                async with GEN_LOCK:
+                    async for frame in super().run_tts(part, context_id):
+                        yield frame
 
         async def _try_revive(self) -> None:
             return None  # no websocket to revive

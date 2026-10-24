@@ -46,6 +46,11 @@ SERVER_IDLE_SECS = 5.0
 HOLD_SECS = 10.0
 # Handshake + session_started; well inside HOLD_SECS, so a connect can't overflow it.
 CONNECT_TIMEOUT_SECS = 5.0
+# Scribe refuses a commit with under ~0.3 s of audio since the last one and
+# then drops the socket ("Commit request ignored: only 0.26s ..."). A shorter
+# turn (a noise blip right after the wake word) is not committed: its audio
+# rides along with the next words' commit.
+MIN_COMMIT_SECS = 0.35
 
 _COMMIT = object()                        # a held VAD stop, in its place among the audio
 # Account-level refusals: no retry can fix these, so Whisper takes the room.
@@ -75,6 +80,7 @@ class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
         # fresh socket (never one the teardown is about to wipe).
         self._conn_lock = asyncio.Lock()
         self._closing = False
+        self._uncommitted_bytes = 0          # audio streamed since the last commit
 
     async def setup(self, setup):
         # The parent's setup connects; skip it and keep the rest.
@@ -129,10 +135,17 @@ class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
         else:
             # Open: stream. (While pipecat's receive loop reconnects a dropped
             # socket, its run_stt drops the audio, as it always has.)
-            async for frame in super().run_stt(audio):
+            async for frame in self._stream(audio):
                 yield frame
             return
         yield None
+
+    async def _stream(self, audio):
+        """pipecat's send, counting what the open socket actually got."""
+        if self._socket_open():
+            self._uncommitted_bytes += len(audio)
+        async for frame in super().run_stt(audio):
+            yield frame
 
     async def _open(self):
         t0 = time.monotonic()
@@ -170,26 +183,38 @@ class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
                     await self._send_commit()
                 else:
                     self._held_bytes -= len(item)
-                    await self.process_generator(super().run_stt(item))
+                    await self.process_generator(self._stream(item))
         finally:
             self._drop_held()                 # empty unless the open broke off: never stream stale audio later
             self._opening = False
             self._open_task = None
 
     async def _send_commit(self):
-        # pipecat's manual commit (ElevenLabsRealtimeSTTService.process_frame).
+        # Every manual commit comes through here (the parent's own commit on a
+        # VAD stop is skipped in process_frame).
+        if not self._socket_open():
+            return
+        secs = self._uncommitted_bytes / (2 * max(self.sample_rate, 1))
+        if secs < MIN_COMMIT_SECS:
+            logger.debug(f"stt: elevenlabs commit skipped: {secs:.2f} s of audio is under Scribe's minimum")
+            return
         try:
             await self._websocket.send(json.dumps({"message_type": "input_audio_chunk", "audio_base_64": "",
                                                    "commit": True, "sample_rate": self.sample_rate}))
+            self._uncommitted_bytes = 0
         except Exception as e:  # noqa: BLE001 — the receive loop handles a dead socket
             logger.warning(f"stt: elevenlabs commit not sent: {e}")
 
     async def process_frame(self, frame, direction):
-        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._opening:
-            # Held before any await, so it can't slip past the audio still held;
-            # skips the parent, which would commit at once if the socket is open.
-            self._hold(_COMMIT)
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            held = self._opening
+            if held:
+                # Held before any await, so it can't slip past the audio still held.
+                self._hold(_COMMIT)
+            # Skip the parent's commit (it has no minimum-length check).
             await super(ElevenLabsRealtimeSTTService, self).process_frame(frame, direction)
+            if not held:
+                await self._send_commit()
             return
         await super().process_frame(frame, direction)
 
@@ -229,6 +254,7 @@ class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
     async def _connect(self):
         # Every connect (on demand or recover_stt's) starts unanswered.
         self._session_started = False
+        self._uncommitted_bytes = 0          # a new socket has nothing to commit
         self._account_error = False
         self._session_event.clear()
         await super()._connect()
