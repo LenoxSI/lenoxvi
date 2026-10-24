@@ -1272,15 +1272,17 @@ def main():
                 and _n.targets and isinstance(_n.targets[0], _ast.Name) \
                 and _n.targets[0].id == "intelligence":
             _brain_exp = _n.value
-    _routes_live_kinds = False
-    if _brain_exp is not None:
-        for _sub in _ast.walk(_brain_exp.test):
-            if isinstance(_sub, _ast.Constant) and _sub.value in ("hermes", "openclaw"):
-                _routes_live_kinds = True
+    # The ternary accepts every registered lane (intelligence.KINDS), so a
+    # kind is dispatched exactly when the registry holds it.
+    import intelligence as _lanes_reg
+    _routes_registry = _brain_exp is not None and any(
+        isinstance(_sub, _ast.Attribute) and _sub.attr == "KINDS" and isinstance(_sub.value, _ast.Name)
+        and _sub.value.id == "intelligence_lanes" for _sub in _ast.walk(_brain_exp.test)) \
+        and "import intelligence as intelligence_lanes" in _bot_src
+    _routes_live_kinds = _routes_registry and {"hermes", "openclaw"} <= set(_lanes_reg.KINDS)
     check("bot.py: intelligence dispatch routes hermes AND openclaw to the real agent",
           _routes_live_kinds, "construction ternary must accept both live kinds")
-    _routes_nanobot = _brain_exp is not None and any(
-        isinstance(_sub, _ast.Constant) and _sub.value == "nanobot" for _sub in _ast.walk(_brain_exp.test))
+    _routes_nanobot = _routes_registry and "nanobot" in _lanes_reg.KINDS
     check("nanobot: bot.py: intelligence dispatch routes nanobot to the real agent (not the echo stub)",
           _routes_nanobot, "construction ternary must accept kind nanobot")
     # Naming rule (2026-10-17): the intelligence step is named for what it
@@ -6936,8 +6938,9 @@ def main():
         _appNB = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
         _sysNB = _appNB[_appNB.find("function System({"):]
         check("nanobot: dashboard ui: the provider dropdown offers Nanobot and the Keys card can save its key",
-              '<option value="nanobot">Nanobot</option>' in _sysNB and "row.kind !== 'nanobot'" in _appNB
-              and "nanobot: 'Nanobot'" in _appNB, "")
+              "{LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}" in _sysNB
+              and "const lane = laneOf(row.kind)" in _appNB and "if (!lane) return null" in _appNB
+              and "kind: 'nanobot', label: 'Nanobot'" in _appNB, "")
     finally:
         _rNB._write_env_key = _nb_saved_wek
         _urqNB.urlopen = _nb_real_open
@@ -7794,27 +7797,33 @@ def main():
     _selUI = _reui.search(r"const agentSel = (.*?)\n\s*const agentEntry", _sysUI, _reui.DOTALL)
     _selUI = _ws(_selUI.group(1)) if _selUI else ""
     _oldFallback = "intAgent || found[intKind]?.selected || agentList[0]?.id || ''"
+    import intelligence as _lanesUI
+    _NB_FREE = "laneOf(intKind)?.agent_required === false ? intAgent :"
+    _nbFree = _lanesUI.LANES["nanobot"].agent_required is False
     check("intelligence ui: nanobot's model pick never falls back to the first listed model",
-          _selUI.startswith("intKind === 'nanobot' ? intAgent :"), _selUI[:160])
+          _selUI.startswith(_NB_FREE) and _nbFree, _selUI[:160])
     check("intelligence ui: hermes and openclaw keep their saved-then-first-listed fallback",
-          _selUI == f"intKind === 'nanobot' ? intAgent : {_oldFallback}", _selUI[:160])
+          _selUI == f"{_NB_FREE} {_oldFallback}"
+          and _lanesUI.LANES["hermes"].agent_required and _lanesUI.LANES["openclaw"].agent_required, _selUI[:160])
     _optUI = _reui.search(r'<select id="int-agent".*?</select>', _sysUI, _reui.DOTALL)
     _optUI = _ws(_optUI.group(0)) if _optUI else ""
     check("intelligence ui: nanobot always offers 'nanobot's own model' (value '') first; other kinds unchanged",
-          "intKind === 'nanobot' ? <option value=\"\">nanobot's own model</option> "
+          "laneOf(intKind)?.agent_required === false ? <option value=\"\">{laneOf(intKind).no_agent_label}</option> "
           ": !agentSel && <option value=\"\">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}"
-          in _optUI, _optUI[:240])
+          in _optUI and _lanesUI.LANES["nanobot"].ui_meta()["no_agent_label"] == "nanobot's own model"
+          and _lanesUI.LANES["hermes"].ui_meta()["no_agent_label"] is None
+          and _lanesUI.LANES["openclaw"].ui_meta()["no_agent_label"] is None, _optUI[:240])
     check("intelligence ui: Save always sends nanobot's pick ('' clears it); other kinds send an agent only when one is set",
-          "if (agentSel || kind === 'nanobot') body.agent = agentSel" in _sysUI
-          and "if (agentSel) body.agent = agentSel" not in _sysUI)
+          "if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel" in _sysUI
+          and "if (agentSel) body.agent = agentSel" not in _sysUI and _nbFree)
     check("intelligence ui: a saved nanobot model is what shows after reload (pick synced from the saved agents)",
-          _selUI.startswith("intKind === 'nanobot' ? intAgent :")
+          _selUI.startswith(_NB_FREE) and _nbFree
           and "[`agent:${k}`, intelligence?.agents?.[k] || null]" in _sysUI
           and "const intAgent = d.val(`agent:${intKind}`) || ''" in _sysUI, _selUI[:200])
     _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
     check("zones ui: 'nanobot's own model' lives only on the Intelligence card, never in the per-room agent picker",
-          "nanobot's own model" in _sysUI and bool(_rmUI) and "nanobot's own model" not in _rmUI
-          and "room_agents" in _rmUI)
+          "laneOf(intKind).no_agent_label" in _sysUI and bool(_rmUI) and "no_agent_label" not in _rmUI
+          and "nanobot's own model" not in _rmUI and "room_agents" in _rmUI)
 
     _discUI = _jsbody(_sysUI, "const discover = async (kind, url) => {")
     _dTry = _discUI[_discUI.find("try {"):_discUI.find("} catch")]
@@ -8085,8 +8094,12 @@ def main():
           0 <= _intHO.find("text: 'no url', href: '#intelligence'") < _intHO.find("text: 'no key', href: '#keys'")
           and "if (!intel.url)" in _intHO and "!intel.key_set" in _intHO
           and {"kind", "url", "key_set", "agents"} <= set(_intGet), _intHO[:200])
+    import intelligence as _lanes_ov
     check("overview: a Hermes profile (its own key, not reported by /intelligence) never gets a false 'no key'",
-          "intel.agents.hermes !== 'default'" in _intHO and "if (!profile && !intel.key_set)" in _intHO)
+          "laneOf(intel.kind)?.per_agent_keys && intel.agents?.[intel.kind]" in _intHO
+          and "intel.agents[intel.kind] !== laneOf(intel.kind).default_agent" in _intHO
+          and "if (!profile && !intel.key_set)" in _intHO
+          and _lanes_ov.LANES["hermes"].per_agent_keys and _lanes_ov.LANES["hermes"].default_agent == "default")
     check("overview: the nodes chip warns 'N unmapped' (link to Rooms) for online rooms with no zone, once /mapping loaded",
           bool(_nodHO) and "text: `${silent.length} unmapped`, href: '#rooms'" in _ws(_nodHO)
           and "mapping?.room_zones ? rooms.filter(r => r.online && !heard(r.room))" in _nodHO, _nodHO[:300])
@@ -8109,9 +8122,13 @@ def main():
           and "if (down.length === rooms.length) return { tone: 'danger', text, title: 'All nodes offline' }" in _nodHO
           and "return { tone: 'warning', text, title: `${down.join(', ')} offline` }" in _nodHO)
     check("overview: the intelligence chip keeps its brand colours when healthy",
-          "{ backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }" in _intHO
-          and "{ backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }" in _intHO
-          and "return { tone: s ? 'brand' : 'neutral', muted: !s && brand !== 'Nanobot', style: s, text: brand.toLowerCase() }"
+          "brand: { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }" in _appsrc
+          and "brand: { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }" in _appsrc
+          and _lanes_ov.LANES["openclaw"].ui_meta()["brand"] == {"backgroundColor": "rgba(23, 23, 23, 0.9)", "color": "#ef4444"}
+          and _lanes_ov.LANES["hermes"].ui_meta()["brand"] == {"backgroundColor": "rgba(255, 255, 255, 0.92)", "color": "#2563eb"}
+          and _lanes_ov.LANES["nanobot"].ui_meta()["brand"] is None
+          and "const s = lane?.brand || null" in _intHO
+          and "return { tone: s ? 'brand' : 'neutral', muted: !s && !lane, style: s, text: brand.toLowerCase() }"
           in _intHO)
 
     # Tables: every listed table ends in one state row spanning its columns.
@@ -8536,7 +8553,7 @@ def main():
           and "}, 500)" in _stUS and "if (!downloading) return" in _stUS)
     check("unsaved: the intelligence save body and 'Test saved config' stay as they were (still holds)",
           "const body = { kind, url }" in _saveUS["intelligence"]
-          and "if (agentSel || kind === 'nanobot') body.agent = agentSel" in _saveUS["intelligence"]
+          and "if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel" in _saveUS["intelligence"]
           and "if (!url) { say(`Enter the ${label} URL first.`" in _saveUS["intelligence"]
           and '<button id="btn-int-test" className={BTN_DEFAULT}' in _syUS and ">Test saved config</button>" in _syUS)
     check("unsaved: restartBot's latch and the Restart confirm are unchanged (still holds)",
