@@ -1755,6 +1755,12 @@ async def get_intelligence():
     }
 
 
+@router.get("/intelligence/lanes")
+async def get_intelligence_lanes():
+    """The UI renders lane pickers/labels from this; static, no secrets."""
+    return {"lanes": [lane.ui_meta() for lane in intelligence.LANES.values()]}
+
+
 @router.put("/intelligence", dependencies=GUARD)
 async def put_intelligence(payload: IntelligencePayload):
     """Write kind (+ url/agent when provided) to config.yaml (intelligence

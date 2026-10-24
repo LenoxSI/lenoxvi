@@ -33,6 +33,10 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Dashboard: the Intelligence card, the Keys card, the rooms' agent pickers and the status chip build their lane
+  options, labels, help text and brand colours from `GET /api/dashboard/intelligence/lanes` (each lane's own UI
+  facts), so a new lane needs no dashboard edit. A built-in copy of the three lanes renders until the bot answers,
+  and stays when an older bot has no lane list.
 - Intelligence lanes: each intelligence system (Hermes, OpenClaw, Nanobot) now lives in its own module under
   `core/intelligence/`, behind one `Lane` contract and one registry (`intelligence.KINDS`). The voice agent, the
   dashboard routes, the key catalog and the bot's dispatch read the registry instead of keeping their own lists of

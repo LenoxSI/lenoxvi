@@ -105,3 +105,16 @@ class OpenClawLane(Lane):
             return {"ok": False, "status": "needs_setup",
                     "detail": "pick an OpenClaw agent on the Intelligence card first"}
         return key_test_via_probe(self, row, url, agent, icfg, probe, scrub)
+
+    def ui_meta(self) -> dict:
+        return {
+            "kind": self.kind,
+            "label": self.label,
+            "agent_required": self.agent_required,
+            "per_agent_keys": self.per_agent_keys,
+            "default_agent": self.default_agent,
+            "url_placeholder": 'http://<intelligence-host>:8642/v1',
+            "agent_help": 'Agents on this OpenClaw Gateway (its /v1/models).',
+            "no_agent_label": None,
+            "brand": {'backgroundColor': 'rgba(23, 23, 23, 0.9)', 'color': '#ef4444'},
+        }

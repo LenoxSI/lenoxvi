@@ -298,8 +298,29 @@ const readKey = (id) => {
   return el && el.dataset.dirty === '1' ? el.value.trim() : ''
 }
 
-// Display names of the intelligence systems (kind -> label).
-const KIND_LABEL = { hermes: 'Hermes', openclaw: 'OpenClaw', nanobot: 'Nanobot' }
+// Intelligence lanes (kind -> UI facts) from GET /api/dashboard/intelligence/lanes,
+// in display order. The built-in copy is today's lanes: it renders until the bot
+// answers, and stays if it can't (an older bot has no /lanes route).
+const BUILTIN_LANES = [
+  { kind: 'hermes', label: 'Hermes', agent_required: true, per_agent_keys: true, default_agent: 'default',
+    url_placeholder: 'http://<intelligence-host>:8642/v1',
+    agent_help: 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.',
+    no_agent_label: null, brand: { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' } },
+  { kind: 'openclaw', label: 'OpenClaw', agent_required: true, per_agent_keys: false, default_agent: null,
+    url_placeholder: 'http://<intelligence-host>:8642/v1',
+    agent_help: 'Agents on this OpenClaw Gateway (its /v1/models).',
+    no_agent_label: null, brand: { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' } },
+  { kind: 'nanobot', label: 'Nanobot', agent_required: false, per_agent_keys: false, default_agent: null,
+    url_placeholder: 'http://<nanobot-host>:8900/v1',
+    agent_help: 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.',
+    no_agent_label: "nanobot's own model", brand: null },
+]
+let LANES = BUILTIN_LANES
+const laneOf = kind => LANES.find(l => l.kind === kind)
+// Unknown kind -> the first lane's label (today's 'Hermes' fallback).
+const laneLabel = kind => laneOf(kind)?.label || LANES[0].label
+// The lane whose agents each carry their own key (Hermes profiles).
+const perAgentLane = () => LANES.find(l => l.per_agent_keys)
 
 // A picked provider/agent with no key: point at the Keys card (keys are
 // entered there only).
@@ -317,8 +338,9 @@ function MissingKey({ label }) {
 function keyRoute(row) {
   if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
   if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
-  if (row.kind !== 'hermes' && row.kind !== 'openclaw' && row.kind !== 'nanobot') return null
-  const named = row.kind === 'hermes' && row.agent && row.agent !== 'default'
+  const lane = laneOf(row.kind)
+  if (!lane) return null
+  const named = lane.per_agent_keys && row.agent && row.agent !== lane.default_agent
   return ['/api/dashboard/intelligence/key', { kind: row.kind, ...(named ? { agent: row.agent } : {}) }]
 }
 
@@ -341,7 +363,7 @@ function KeysCard({ setMsg }) {
   const [open, setOpen] = useState(null)        // var being replaced
   const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
   const [tests, setTests] = useState({})        // var -> {status, detail}
-  const [agents, setAgents] = useState([])      // Hermes agents with no key yet
+  const [agents, setAgents] = useState([])      // per-agent-key agents with no key yet
   const [agentNote, setAgentNote] = useState('')
   const [addPick, setAddPick] = useState('')     // catalog var, or 'agent:<id>'; '' = nothing picked yet
   const [addEpoch, setAddEpoch] = useState(0)    // remounts (clears) the Add box when its pick goes away
@@ -353,10 +375,12 @@ function KeysCard({ setMsg }) {
   useEffect(() => {
     discover.current = async () => {
       const seq = ++discSeq.current
+      const lane = perAgentLane()
+      if (!lane) { setAgents([]); return }
       try {
-        const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: 'hermes' } })
+        const d = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: lane.kind } })
         if (seq !== discSeq.current) return
-        setAgents((d.agents || []).filter(a => a.id !== 'default' && !a.key_set).map(a => a.id))
+        setAgents((d.agents || []).filter(a => a.id !== lane.default_agent && !a.key_set).map(a => a.id))
         setAgentNote(d.note || '')
       } catch (e) {
         if (seq !== discSeq.current) return
@@ -458,7 +482,7 @@ function KeysCard({ setMsg }) {
       setMsg('That key is no longer offered — pick again.', 'err', 'Keys'); return  // stays on 'pick again' until the user chooses
     }
     const row = pickValue.startsWith('agent:')
-      ? { var: '', label: `Hermes · ${pickValue.slice(6)}`, kind: 'hermes', agent: pickValue.slice(6) }
+      ? { var: '', label: `${perAgentLane()?.label} · ${pickValue.slice(6)}`, kind: perAgentLane()?.kind, agent: pickValue.slice(6) }
       : services.find(r => r.var === pickValue)
     setBusy(true)
     try {
@@ -565,8 +589,8 @@ function KeysCard({ setMsg }) {
                   </optgroup>
                 )}
                 {agents.length > 0 && (
-                  <optgroup label="Hermes agents">
-                    {agents.map(a => <option key={a} value={`agent:${a}`}>{`Hermes · ${a}`}</option>)}
+                  <optgroup label={`${perAgentLane()?.label} agents`}>
+                    {agents.map(a => <option key={a} value={`agent:${a}`}>{`${perAgentLane()?.label} · ${a}`}</option>)}
                   </optgroup>
                 )}
               </select>
@@ -838,29 +862,27 @@ function StatChip({ stat, tone = 'neutral', text, title, muted, href, className,
 // URL or no key saved (the next restart can't reach it).
 function intelligenceChip(status, intel) {
   if (intel) {
-    const label = KIND_LABEL[intel.kind] || 'Hermes'
+    const label = laneLabel(intel.kind)
     if (!intel.url)
       return { tone: 'warning', text: 'no url', href: '#intelligence', title: `No ${label} URL saved. Set it on the Intelligence card.` }
-    // A Hermes profile reads its own key (LVI_HERMES_KEY_<AGENT>), which
-    // /intelligence doesn't report: only the kind's base key is judged here.
-    const profile = intel.kind === 'hermes' && intel.agents?.hermes && intel.agents.hermes !== 'default'
+    // A per-agent-key lane's profile reads its own key (e.g.
+    // LVI_HERMES_KEY_<AGENT>), which /intelligence doesn't report: only the
+    // kind's base key is judged here.
+    const profile = laneOf(intel.kind)?.per_agent_keys && intel.agents?.[intel.kind] && intel.agents[intel.kind] !== laneOf(intel.kind).default_agent
     if (!profile && !intel.key_set)
       return { tone: 'warning', text: 'no key', href: '#keys', title: `No ${label} key saved. Add it on the Keys card.` }
   }
-  // Brand chips (2026-10-08): OpenClaw = black/red, Hermes = white/blue.
-  // Inline styles — these are foreign brands, they don't earn design tokens.
+  // Brand chips (2026-10-08): the colours come from the lane list. Inline
+  // styles — these are foreign brands, they don't earn design tokens.
   // Chip shows the brand only — the agent id lives in the Intelligence
   // section: strip " · <agent>" from the label.
   const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
+  const lane = LANES.find(l => l.label === brand)
   // Only a real brand wears brand colors — the loading
-  // placeholder ('—') used to render in Hermes white/blue.
-  const s = brand === 'OpenClaw'
-    ? { backgroundColor: 'rgba(23, 23, 23, 0.9)', color: '#ef4444' }
-    : brand === 'Hermes'
-    ? { backgroundColor: 'rgba(255, 255, 255, 0.92)', color: '#2563eb' }
-    : null
-  // Nanobot has no brand colors here: a plain chip, not the muted placeholder.
-  return { tone: s ? 'brand' : 'neutral', muted: !s && brand !== 'Nanobot', style: s, text: brand.toLowerCase() }
+  // placeholder ('—') must not wear brand colors.
+  const s = lane?.brand || null
+  // A lane with no brand of its own: a plain chip, not the muted placeholder.
+  return { tone: s ? 'brand' : 'neutral', muted: !s && !lane, style: s, text: brand.toLowerCase() }
 }
 
 // Nodes online: green = every node up, yellow = some down, red = all down.
@@ -1361,10 +1383,10 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         {agent && !known && <option value={agent}>
                           {!found ? agent : (agentList.length ? `${agent} (not found)` : `${agent} (unverified)`)}</option>}
                         {agentList.map(a => <option key={a.id} value={a.id}>
-                          {(a.id === 'default' && agentKind === 'hermes' ? 'default (pinned)' : a.id) + (a.key_set ? '' : ' — no key')}</option>)}
+                          {(a.id === laneOf(agentKind)?.default_agent && laneOf(agentKind)?.per_agent_keys ? 'default (pinned)' : a.id) + (a.key_set ? '' : ' — no key')}</option>)}
                       </select>
                       {effective && !effective.key_set &&
-                        <MissingKey label={`${KIND_LABEL[agentKind] || 'Hermes'} · ${effective.id}`} />}
+                        <MissingKey label={`${laneLabel(agentKind)} · ${effective.id}`} />}
                     </div>
                   </td>
                 </tr>
@@ -2535,12 +2557,12 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   // (2026-10-08): the lanes live at different addresses, so each kind keeps
   // its own drafts (url:<kind>, agent:<kind>) and switching kinds only
   // changes which ones show. An agent left unpicked shows the saved one,
-  // else the first listed (not nanobot: '' is its own model), so picking
-  // that one back is no change.
-  const savedKind = intelligence?.kind || 'hermes'
+  // else the first listed (a lane that runs without an agent keeps '': its
+  // own model), so picking that one back is no change.
+  const savedKind = intelligence?.kind || LANES[0].kind
   const savedUrls = { ...(intelligence?.urls || {}), ...(intelligence?.url ? { [savedKind]: intelligence.url } : {}) }
-  const firstAgent = k => (k === 'nanobot' ? '' : found[k]?.selected || found[k]?.agents?.[0]?.id || '')
-  const kinds = Object.keys(KIND_LABEL)
+  const firstAgent = k => (laneOf(k)?.agent_required === false ? '' : found[k]?.selected || found[k]?.agents?.[0]?.id || '')
+  const kinds = LANES.map(l => l.kind)
   const d = useDraft({
     kind: savedKind,
     ...Object.fromEntries(kinds.map(k => [`url:${k}`, savedUrls[k] || ''])),
@@ -2583,7 +2605,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   useEffect(() => {
     if (intelligence && !intSynced.current) {
       intSynced.current = true
-      const kind = intelligence.kind || 'hermes'
+      const kind = intelligence.kind || LANES[0].kind
       discover(kind, intelligence.url || intelligence.urls?.[kind])
     }
   }, [intelligence])
@@ -2593,23 +2615,25 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   }
   const agentList = found[intKind]?.agents || []
   // Nothing picked for this kind yet: the saved one, else the first listed.
-  // Nanobot never falls back: '' is a real choice (its own model), and a
-  // fallback would pin whatever model it lists today on the next Save.
-  const agentSel = intKind === 'nanobot' ? intAgent
+  // A lane that runs without an agent never falls back: '' is a real
+  // choice (its own model), and a fallback would pin whatever model it
+  // lists today on the next Save.
+  const agentSel = laneOf(intKind)?.agent_required === false ? intAgent
     : intAgent || found[intKind]?.selected || agentList[0]?.id || ''
   const agentEntry = agentList.find(a => a.id === agentSel)
   const agentNote = found[intKind]?.note
   const save = async say => {
     const kind = intKind
     const url = (intUrl || '').trim()
-    const label = KIND_LABEL[kind] || 'Hermes'
+    const label = laneLabel(kind)
     // Only the URL on screen is saved, under the kind on screen.
     // The other kind's draft stays here: the stored key goes to a
     // kind's saved URL, so it must be saved while looking at it.
     if (!url) { say(`Enter the ${label} URL first.`, 'err', 'Intelligence'); return false }
     const body = { kind, url }
-    // Nanobot always sends its pick: '' clears a saved model.
-    if (agentSel || kind === 'nanobot') body.agent = agentSel
+    // A lane that runs without an agent always sends its pick: '' clears
+    // a saved model.
+    if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel
     const sent = d.snap(intFields), sentUrl = d.snap([`url:${kind}`])
     try {
       const r = await api('/api/dashboard/intelligence', { method: 'PUT', json: body })
@@ -2626,9 +2650,10 @@ function System({ intelligence, status, setMsg, reloadAll }) {
       say('Saved — restart to apply.', 'ok', 'Intelligence')
       await reloadAll()
       d.settle(sent)
-      // Nanobot can save with no model picked; its URL is saved now, so
-      // discovery can use the stored key and list its model.
-      if (kind === 'nanobot') discover(kind, url)
+      // A lane that runs without an agent can save with none picked; its
+      // URL is saved now, so discovery can use the stored key and list its
+      // agents.
+      if (laneOf(kind)?.agent_required === false) discover(kind, url)
       return true
     } catch (e) { say('Save failed: ' + e.message, 'err', 'Intelligence'); return false }
   }
@@ -2642,23 +2667,17 @@ function System({ intelligence, status, setMsg, reloadAll }) {
         <Field label="Provider / agent / API URL">
           <select id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
             className={`${INPUT_CLS} w-[160px]`}>
-            <option value="hermes">Hermes</option>
-            <option value="openclaw">OpenClaw</option>
-            <option value="nanobot">Nanobot</option>
+            {LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}
           </select>
           <select id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
-            title={intKind === 'openclaw'
-              ? 'Agents on this OpenClaw Gateway (its /v1/models).'
-              : intKind === 'nanobot'
-              ? 'The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.'
-              : 'Agents (profiles) on this Hermes gateway. Each one needs its own API key.'}
+            title={laneOf(intKind)?.agent_help}
             className={`${INPUT_CLS} w-[220px] font-mono`}>
-            {intKind === 'nanobot'
-              ? <option value="">nanobot's own model</option>
+            {laneOf(intKind)?.agent_required === false
+              ? <option value="">{laneOf(intKind).no_agent_label}</option>
               : !agentSel && <option value="">{found[intKind]?.loading ? 'loading…' : 'no agents'}</option>}
             {agentList.map(a => (
               <option key={a.id} value={a.id}>
-                {a.id}{intKind === 'hermes' && !a.key_set ? ' — no key' : ''}
+                {a.id}{laneOf(intKind)?.per_agent_keys && !a.key_set ? ' — no key' : ''}
               </option>
             ))}
             {agentSel && !agentList.some(a => a.id === agentSel) && (
@@ -2672,7 +2691,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
           </button>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
           <input id="int-url" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}
-            placeholder={intKind === 'nanobot' ? 'http://<nanobot-host>:8900/v1' : 'http://<intelligence-host>:8642/v1'}
+            placeholder={laneOf(intKind)?.url_placeholder}
             title="Base URL of the OpenAI-compatible chat endpoint — the lane appends /chat/completions."
             onBlur={e => {
               const u = e.target.value.trim()
@@ -2682,8 +2701,8 @@ function System({ intelligence, status, setMsg, reloadAll }) {
         </Field>
         {agentNote ? <div className="text-[12px] text-[var(--muted)] -mt-2">{agentNote}</div> : null}
         {intelligence && !(agentEntry ? agentEntry.key_set : intelligence.keys_set?.[intKind]) && (
-          <MissingKey label={intKind !== 'hermes' ? KIND_LABEL[intKind]
-            : `Hermes${agentSel && agentSel !== 'default' ? ` · ${agentSel}` : ''}`} />
+          <MissingKey label={!laneOf(intKind)?.per_agent_keys ? laneLabel(intKind)
+            : `${laneLabel(intKind)}${agentSel && agentSel !== laneOf(intKind).default_agent ? ` · ${agentSel}` : ''}`} />
         )}
         {/* Footer: the test reads the saved config; edits save from the bar at the page bottom */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -2721,6 +2740,13 @@ export default function App() {
   const [intelligence, setIntelligence] = useState(null)
   const [msg, setMsg] = useMsg()
   const [rebooting, setRebooting] = useState(false)
+  const [, setLanesEpoch] = useState(0)
+  // Lane list: fetched once; a failure (older bot) keeps BUILTIN_LANES.
+  useEffect(() => {
+    api('/api/dashboard/intelligence/lanes')
+      .then(d => { if (Array.isArray(d?.lanes) && d.lanes.length) { LANES = d.lanes; setLanesEpoch(n => n + 1) } })
+      .catch(() => {})
+  }, [])
   const tab = useHashTab()
 
   // Unsaved changes (useUnsaved): each card's save and discard, current

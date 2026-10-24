@@ -4,8 +4,8 @@ A lane is one OpenAI-compatible chat backend (Hermes, OpenClaw, Nanobot, ...).
 Each lane lives in its own module next to this one and overrides only what
 makes it different; the defaults here are the plain OpenAI shape. The
 registry (`intelligence/__init__.py`) is the one list of kinds: the voice
-agent, the facade (`intelligence_target`), the dashboard routes and the
-key catalog all read it.
+agent, the facade (`intelligence_target`), the dashboard routes, the key
+catalog and the dashboard UI (through `ui_meta`) all read it.
 
 Lanes are stateless singletons: every method takes what it needs as
 arguments, and nothing reads config at import time (the suite reloads
@@ -43,7 +43,7 @@ class Lane:
     label: str = ""           # display name: "Hermes"
     base_key_var: str = ""    # the lane's one key variable: LVI_<KIND>_KEY
 
-    # ── behaviour flags (read by routes / keys_catalog) ─────────────
+    # ── behaviour flags (read by routes / keys_catalog / ui_meta) ──
     agent_required: bool = True     # False = runs with no agent picked (nanobot)
     per_agent_keys: bool = False    # True = each agent has its own key var (hermes)
     default_agent: str | None = None  # name the UI shows for "no agent" (hermes: "default")
@@ -111,6 +111,18 @@ class Lane:
         probe(probe_cfg) = routes._intelligence_probe; http(method, url,
         headers) -> (code, body) = routes._keys_http; scrub(text) removes the
         key and caps length. `icfg` is the saved intelligence section."""
+        raise NotImplementedError
+
+    def ui_meta(self) -> dict:
+        """Static, public UI facts for GET /api/dashboard/intelligence/lanes.
+        No secrets, no config. Shape (frozen; App.jsx depends on it):
+          {"kind": str, "label": str,
+           "agent_required": bool, "per_agent_keys": bool,
+           "default_agent": str|None,
+           "url_placeholder": str, "agent_help": str,
+           "no_agent_label": str|None,   # option text for '' when agent_required is False
+           "brand": {"backgroundColor": str, "color": str} | None}
+        """
         raise NotImplementedError
 
     # ── shared helpers for subclasses ───────────────────────────────
