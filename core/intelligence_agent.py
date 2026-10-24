@@ -4,10 +4,9 @@ The real counterpart of intelligence_stub.py, same turn shape: buffers user
 speech, waits for the end-of-turn lull, plays fillers while it waits, filters
 echo/dedup/wake-phrase-only turns, keeps per-room history, and asks the
 configured intelligence over its OpenAI-compatible chat API (bearer auth).
-`intelligence.kind` picks the request shape — `hermes` (Hermes API server),
-`openclaw` (OpenClaw Gateway, `model: openclaw/<agent>`) or `nanobot`
-(nanobot's API: one user message + `session_id`, history server-side);
-everything else here is shared. The agent behind the API keeps its own
+`intelligence.kind` picks the lane (core/intelligence/: `hermes`, `openclaw`,
+`nanobot`, ...); the lane owns its request shape and quirks, and everything
+else here is shared. The agent behind the API keeps its own
 tools + memory; our system prompt layers voice-appropriate instructions on
 top (short, spoken-word replies) — except on nanobot, which accepts no
 system message: its agent's own instructions set the spoken style.
@@ -44,6 +43,8 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+import intelligence
 
 VOICE_SYSTEM_PROMPT = (
     "You are the house voice assistant, currently talking to the user over speakers. "
@@ -240,18 +241,20 @@ class IntelligenceAgent(FrameProcessor):
         # it in the model field; hermes routes a named profile to
         # <base>/p/<agent>/v1 with that profile's own key; nanobot sends it
         # as the model field (its one configured model), or nothing.
-        import intelligence_target as _it
+        # The lane (core/intelligence/<kind>.py) owns the request shape;
+        # None = an unknown kind (turns fail with "no key set").
+        self._lane = intelligence.get(self._kind)
         _icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
                  "agents": cfg("intelligence", "agents") or {}}
-        self._agent = _it.agent_for(_icfg, self._kind) if self._kind in _it.BASE_KEY_VARS else ""
+        self._agent = self._lane.agent_for(_icfg) if self._lane else ""
         # Per-room override (room_agents.<kind>.<room>) is resolved at the
         # first turn (_ensure_route): the room can still be unknown here.
         self._base_url = self._url
         self._default_agent = self._agent
         self._room_resolver = room_resolver
         self._routed_room = None
-        if self._kind in _it.BASE_KEY_VARS:
-            self._url = _it.request_url(self._kind, self._url, self._agent)
+        if self._lane:
+            self._url = self._lane.request_url(self._url, self._agent)
         # Missing key is NOT a construction brick (the provider-
         # switch-without-key incident): the turn fails with a clear error
         # and the dashboard Test button reports it.
@@ -265,7 +268,7 @@ class IntelligenceAgent(FrameProcessor):
         # (LVI_<KIND>_KEY), and it reads only its own.
         # A named Hermes profile reads its own variable,
         # LVI_HERMES_KEY_<AGENT> (Hermes rejects the default key on /p/<x>/).
-        self._key_var = _it.key_var(self._kind, self._agent)
+        self._key_var = self._lane.key_var(self._agent) if self._lane else None
         self._key = (os.getenv(self._key_var)
                      if self._key_var else None)
         if not self._key and self._kind != "stub":
@@ -419,9 +422,7 @@ class IntelligenceAgent(FrameProcessor):
         every turn but only acts once the room is known — the pipeline's
         room can still be unknown when the session is built, and resolving
         early would send a racing session to the default agent."""
-        import intelligence_target as _it
-
-        if self._kind not in _it.BASE_KEY_VARS:
+        if self._lane is None:
             return
         room = self._room if self._room not in (None, "", "unknown") else None
         if room is None and self._room_resolver is not None:
@@ -436,14 +437,14 @@ class IntelligenceAgent(FrameProcessor):
         overrides = cfg("room_agents", self._kind) or {}
         agent = str(overrides.get(room) or "").strip() if isinstance(overrides, dict) else ""
         how = "override"
-        if not agent or not _it.AGENT_RE.match(agent):
+        if not agent or not intelligence.AGENT_RE.match(agent):
             agent, how = self._default_agent, "default"
         if agent != self._agent:
             # Build the whole route first, then swap it in; _routed_room is
             # set LAST, so an overlapping (superseded) turn's thread that
             # sees it set also sees the complete route.
-            url = _it.request_url(self._kind, self._base_url, agent)
-            key_var = _it.key_var(self._kind, agent)
+            url = self._lane.request_url(self._base_url, agent)
+            key_var = self._lane.key_var(agent)
             key = os.getenv(key_var) if key_var else None
             self._agent, self._url, self._key_var, self._key = agent, url, key_var, key
             if not key:
@@ -476,13 +477,9 @@ class IntelligenceAgent(FrameProcessor):
     def _ask_intelligence(self, text: str) -> str:
         """One chat completion; returns the reply text.
 
-        Intelligence lane: kind=openclaw reshapes the request —
-        model "openclaw/<agent>" addresses the agent, x-openclaw-session-key
-        carries sticky continuity, and the Hermes-only `conversation` field
-        is omitted. kind=hermes keeps today's contract (conversation +
-        X-Hermes-Session-Key). kind=nanobot sends only the user's message
-        plus session_id (nanobot holds the history). Output caps and fillers
-        are shared — the lanes differ only in envelope.
+        The lane builds the request envelope (payload + its own headers:
+        session keys) and explains its own HTTP errors; output caps,
+        fillers and history are shared — the lanes differ only in envelope.
         """
         self._ensure_route()
         if not self._key:
@@ -491,63 +488,11 @@ class IntelligenceAgent(FrameProcessor):
                 f"(a lane's key names its intelligence; no cross-kind fallback)")
         headers = {"Authorization": f"Bearer {self._key}",
                    "Content-Type": "application/json"}
-        if self._kind == "openclaw":
-            model = f"openclaw/{self._agent}" if self._agent else "openclaw"
-            payload = {
-                "model": model,
-                "stream": False,
-                "max_tokens": self._max_tokens,
-                "messages": [
-                    {"role": "system", "content": VOICE_SYSTEM_PROMPT},
-                    *self._history,
-                    {"role": "user", "content": text},
-                ],
-            }
-            # Sticky continuity rides the header (proven live 2026-10-05:
-            # seed/recall under the same key). Fresh sends nothing — and
-            # the agent's own memory files may still recall earlier facts
-            # (documented boundary, README row).
-            if self._sticky and self._room:
-                headers["x-openclaw-session-key"] = self._conversation
-        elif self._kind == "nanobot":
-            # nanobot's contract (measured against v0.3.5): exactly ONE
-            # user message — a system message or prior turns get HTTP 400 —
-            # because it keeps the history itself, per session_id. So no
-            # VOICE_SYSTEM_PROMPT and no local history here. session_id is
-            # ALWAYS sent: without it every client shares one default
-            # session. Sticky -> voice-<room>, fresh -> this connection's id.
-            # model must equal the server's configured model, so it is sent
-            # only when an agent is picked.
-            payload = {
-                "stream": False,
-                "max_tokens": self._max_tokens,
-                "messages": [{"role": "user", "content": text}],
-                "session_id": self._conversation,
-            }
-            if self._agent:
-                payload["model"] = self._agent
-        else:
-            payload = {
-                "model": self._model,
-                "stream": False,
-                "max_tokens": self._max_tokens,
-                "conversation": self._conversation,
-                "messages": [
-                    {"role": "system", "content": VOICE_SYSTEM_PROMPT},
-                    *self._history,
-                    {"role": "user", "content": text},
-                ],
-            }
-            # X-Hermes-Session-Key (2026-10-04): the api_server keys
-            # dashboard-visible session continuity on THIS header, not
-            # the body's `conversation` field — the label in the body
-            # alone left voice sessions invisible in the Hermes admin
-            # dash (the operator needs to audit them). With the header, sticky rooms
-            # merge into ONE long-lived dashboard session per room and
-            # fresh pipelines get one session per connection — both
-            # visible and auditable. Requires API_SERVER_KEY on the
-            # intelligence (present on this install).
-            headers["X-Hermes-Session-Key"] = self._conversation
+        payload, lane_headers = self._lane.build_request(text, intelligence.TurnContext(
+            agent=self._agent, model=self._model, max_tokens=self._max_tokens,
+            conversation=self._conversation, sticky=self._sticky, room=self._room,
+            system_prompt=VOICE_SYSTEM_PROMPT, history=list(self._history)))
+        headers.update(lane_headers)
         req = urllib.request.Request(
             f"{self._url}/chat/completions",
             data=json.dumps(payload).encode(),
@@ -557,14 +502,12 @@ class IntelligenceAgent(FrameProcessor):
             with urllib.request.urlopen(req, timeout=120) as r:
                 data = json.loads(r.read())
         except urllib.error.HTTPError as e:
-            if self._kind != "nanobot":
+            # A lane may explain a refusal from the server's body (never
+            # the key); otherwise the error propagates unchanged.
+            err = self._lane.on_http_error(e, self._key)
+            if err is None:
                 raise
-            # nanobot explains a refusal in its body ("Only a single user
-            # message is supported", "Only configured model ... is
-            # available"); put that in the failure log, never the key.
-            import intelligence_target as _it
-            raise RuntimeError(f"nanobot answered HTTP {e.code}: "
-                               f"{_it.http_error_message(e, self._key)}") from None
+            raise err from None
         reply = data["choices"][0]["message"]["content"].strip()
         if not reply:
             # e.g. a run that ended on a tool call with no closing text. A
@@ -573,18 +516,14 @@ class IntelligenceAgent(FrameProcessor):
             # dedup-dropped.
             raise RuntimeError("the intelligence returned an empty reply")
         usage = data.get("usage", {})
-        # Reasoning-preamble meter: the OpenClaw agent
-        # on GLM 5.3 intermittently merges planning text into `content`
-        # (measured live 2026-10-05, 2 of 8 spike calls). A voice assistant
-        # speaks content verbatim — so MEASURE, never silently strip (no
-        # delimiter exists; a heuristic strip risks eating real answers).
-        # Data first, fix decided later (source suppression preferred).
-        if self._kind == "openclaw" and reply[:24].startswith((
-                "The user", "I need to", "I should", "Let me", "Okay, the user",
-                "The human", "Looking at", "First, I", "I'll ")):
+        # Lane defect meter (e.g. a reasoning preamble merged into
+        # `content`): the lane names it, we count and log it. MEASURE,
+        # never silently strip — a voice assistant speaks content verbatim.
+        leak = self._lane.inspect_reply(reply)
+        if leak:
             _PREAMBLE_HITS[0] += 1
             logger.warning(
-                "intelligence_agent: openclaw reasoning preamble leaked into content "
+                f"intelligence_agent: {leak} "
                 f"({_PREAMBLE_HITS[0]} this process) — reply[:80]={reply[:80]!r}")
         # Client-side output cap (2026-10-04): Hermes's api_server IGNORES
         # the request's max_tokens (verified live: max_tokens:5 returned a

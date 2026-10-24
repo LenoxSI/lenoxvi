@@ -33,6 +33,11 @@ The two version streams are independent.
   numbers as words ("9:06" -> "nine oh six"); the cloud providers' text is unchanged.
 
 ### Changed
+- Intelligence lanes: each intelligence system (Hermes, OpenClaw, Nanobot) now lives in its own module under
+  `core/intelligence/`, behind one `Lane` contract and one registry (`intelligence.KINDS`). The voice agent, the
+  dashboard routes, the key catalog and the bot's dispatch read the registry instead of keeping their own lists of
+  kinds, so a new lane is one module plus one registry line. No behaviour change: every request, header, error text
+  and dashboard answer is the same as before.
 - Wake name: a bare "Hey <name>." is matched by sound-alike spelling, so the
   spellings list (`wake.heard_as`, "Also heard as" / "Add a spelling") and the
   "Heard right after a wake" list are gone from the Wake name card and the

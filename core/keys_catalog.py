@@ -8,18 +8,24 @@ from __future__ import annotations
 
 import re
 
+import intelligence
 import intelligence_target
 
 # Static rows, in card order. used_by = features that read the key
 # (ElevenLabs adds STT while Scribe is the STT provider: _used_by).
+# One row per intelligence lane, in registry order; a per-agent-key lane's
+# row is its default agent's.
 STATIC = [
     {"var": "ELEVENLABS_API_KEY", "label": "ElevenLabs", "used_by": ["TTS"], "kind": "elevenlabs"},
     {"var": "DEEPGRAM_API_KEY", "label": "Deepgram", "used_by": ["TTS", "STT"], "kind": "deepgram"},
-    {"var": "LVI_HERMES_KEY", "label": "Hermes", "used_by": ["Intelligence"], "kind": "hermes", "agent": "default"},
-    {"var": "LVI_OPENCLAW_KEY", "label": "OpenClaw", "used_by": ["Intelligence"], "kind": "openclaw"},
-    {"var": "LVI_NANOBOT_KEY", "label": "Nanobot", "used_by": ["Intelligence"], "kind": "nanobot"},
+    *({"var": lane.base_key_var, "label": lane.label, "used_by": ["Intelligence"], "kind": lane.kind,
+       **({"agent": lane.default_agent} if lane.per_agent_keys else {})}
+      for lane in intelligence.LANES.values()),
 ]
-_AGENT_VAR = re.compile(r"^LVI_HERMES_KEY_([A-Z0-9_]+)$")
+# The lane whose agents each have their own key variable (<base var>_<AGENT>);
+# those keys get agent rows of their own.
+_AGENT_LANE = next(lane for lane in intelligence.LANES.values() if lane.per_agent_keys)
+_AGENT_VAR = re.compile(rf"^{re.escape(_AGENT_LANE.base_key_var)}_([A-Z0-9_]+)$")
 
 
 def tts_secret(provider: str | None) -> str | None:
@@ -59,7 +65,7 @@ def agent_of(var: str, known=()):
     if not m:
         return None
     for name in known:
-        if name and intelligence_target.key_var("hermes", str(name)) == var:
+        if name and intelligence_target.key_var(_AGENT_LANE.kind, str(name)) == var:
             return str(name)
     return m.group(1).lower().replace("_", "-")
 
@@ -71,8 +77,8 @@ def target_for(var: str, known=()):
             return dict(row)
     agent = agent_of(var, known)
     if agent:
-        return {"var": var, "label": f"Hermes · {agent}", "used_by": ["Intelligence"], "kind": "hermes",
-                "agent": agent}
+        return {"var": var, "label": f"{_AGENT_LANE.label} · {agent}", "used_by": ["Intelligence"],
+                "kind": _AGENT_LANE.kind, "agent": agent}
     return None
 
 
@@ -81,8 +87,9 @@ def known_agents(cfg: dict) -> list:
     override — so a key's variable maps back to its real agent name."""
     icfg = cfg.get("intelligence") or {}
     agents = icfg.get("agents") or {}
-    out = [agents.get("hermes")] if isinstance(agents, dict) and agents.get("hermes") else []
-    rooms = (cfg.get("room_agents") or {}).get("hermes") or {}
+    kind = _AGENT_LANE.kind
+    out = [agents.get(kind)] if isinstance(agents, dict) and agents.get(kind) else []
+    rooms = (cfg.get("room_agents") or {}).get(kind) or {}
     for a in (rooms.values() if isinstance(rooms, dict) else []):
         if a and str(a) not in out:
             out.append(str(a))
@@ -108,7 +115,7 @@ def _in_use(row: dict, cfg: dict) -> bool:
         return tts_provider == "elevenlabs" or _stt_provider(cfg) == "elevenlabs"
     if row["var"] == "DEEPGRAM_API_KEY":
         return tts_provider in ("deepgram", "deepgram-flux") or _stt_provider(cfg) == "deepgram"
-    kind = str(icfg.get("kind") or "hermes").strip().lower()
+    kind = str(icfg.get("kind") or intelligence.DEFAULT_KIND).strip().lower()
     if row["kind"] != kind:
         return False
     if intelligence_target.key_var(kind, intelligence_target.agent_for(icfg, kind)) == row["var"]:
@@ -132,7 +139,7 @@ def rows(saved_env: dict, live_env: dict, cfg: dict, file_env=None) -> list[dict
     # isn't in .env still gets a row, so the card shows it as Missing.
     listed = {t["var"] for t in templates}
     for name in known:
-        var = intelligence_target.key_var("hermes", str(name))
+        var = intelligence_target.key_var(_AGENT_LANE.kind, str(name))
         t = target_for(var, known) if var not in listed else None
         if t is not None and _in_use(t, cfg):
             templates.append(t)

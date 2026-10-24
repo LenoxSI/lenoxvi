@@ -21,20 +21,32 @@ like intelligence.urls. Hermes reads ONLY agents.hermes — the legacy
 top-level `agent` key was always OpenClaw's (the Hermes lane never read
 it), so honouring it for Hermes would reroute an existing install to a
 profile that does not exist. OpenClaw falls back to the legacy key.
+
+The per-lane rules above live in the lane classes (core/intelligence/);
+this module is the facade every caller keeps importing, plus the kind-free
+helpers (key_hint, http_error_message, same_target).
 """
 
 import json
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 
-AGENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-BASE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY",
-                 "nanobot": "LVI_NANOBOT_KEY"}
+import intelligence
+from intelligence.base import AGENT_RE, get_json  # noqa: F401 — re-exported
+
+BASE_KEY_VARS = {kind: lane.base_key_var for kind, lane in intelligence.LANES.items()}
 # The Hermes web dashboard's public status route lists the gateway's
 # profiles (the API server itself has no list endpoint).
 HERMES_STATUS_PORT = 9119
+
+
+def _lane(kind):
+    """The lane for EXACTLY `kind`: no case folding, so a spelling this
+    module never knew stays unknown."""
+    try:
+        return intelligence.LANES.get(kind)
+    except TypeError:  # unhashable: no lane
+        return None
 
 
 def is_default_agent(agent) -> bool:
@@ -43,40 +55,28 @@ def is_default_agent(agent) -> bool:
 
 def agent_for(cfg: dict, kind: str) -> str:
     """The live agent for `kind` from an intelligence config section."""
+    lane = _lane(kind)
+    if lane is not None:
+        return lane.agent_for(cfg)
     agents = cfg.get("agents") or {}
     agent = agents.get(kind) if isinstance(agents, dict) else None
-    if agent is None and kind == "openclaw":
-        agent = cfg.get("agent")
-    agent = str(agent or "")
-    if kind == "hermes" and agent == "default":
-        return ""
-    return agent
+    return str(agent or "")
 
 
 def key_var(kind: str, agent: str = ""):
     """The ONE env variable a (kind, agent) pair reads; None for unknown kinds."""
-    base = BASE_KEY_VARS.get(kind)
-    if base is None:
+    lane = intelligence.LANES.get(kind)
+    if lane is None:
         return None
-    if kind == "hermes" and not is_default_agent(agent):
-        return base + "_" + re.sub(r"[^A-Z0-9]", "_", agent.upper())
-    return base
+    return lane.key_var(agent)
 
 
 def request_url(kind: str, url: str, agent: str = "") -> str:
     """The base URL a turn posts to (callers append /chat/completions)."""
-    url = (url or "").rstrip("/")
-    if kind == "hermes" and not is_default_agent(agent):
-        root = url[:-3] if url.endswith("/v1") else url
-        root = re.sub(r"/p/[^/]+$", "", root)  # a saved profile URL, normalised
-        return f"{root}/p/{agent}/v1"
-    if kind == "nanobot" and urllib.parse.urlsplit(url).path in ("", "/"):
-        # A bare http://host:8900 is what users type; nanobot's API lives
-        # under /v1. Discovery already tolerated both forms, so turns, the
-        # Test probe and the key Test must too (a model listed, then every
-        # turn a 404, is the worst way to find out).
-        return url + "/v1"
-    return url
+    lane = _lane(kind)
+    if lane is None:
+        return (url or "").rstrip("/")
+    return lane.request_url(url, agent)
 
 
 def key_hint(value):
@@ -113,10 +113,7 @@ def http_error_message(err, key=None) -> str:
     return " ".join(msg.split())[:200] or str(getattr(err, "reason", "") or "no detail")
 
 
-def _get_json(url: str, headers: dict, timeout: float):
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+_get_json = get_json
 
 
 def _entry(kind: str, agent_id: str, env) -> dict:
@@ -156,82 +153,7 @@ def discover_agents(kind: str, url: str, env, timeout: float = 4.0,
     -> {"agents": [{"id", "key_set", "key_hint"}], "source": str, "note": str|None}
     """
     url = (url or "").rstrip("/")
-    if kind == "openclaw":
-        if not url:
-            return {"agents": [], "source": "none", "note": "set the OpenClaw URL first"}
-        token = env.get("LVI_OPENCLAW_KEY")
-        if attach_key and not token:
-            return {"agents": [], "source": "none",
-                    "note": "save the OpenClaw key to list its agents"}
-        models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
-        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
-        try:
-            data = _get_json(models_url, headers, timeout)
-        except urllib.error.HTTPError as e:
-            note = f"OpenClaw answered HTTP {e.code}"
-            if e.code == 401 and not attach_key:
-                note += " — this URL is not saved yet; save it and the stored key will be used"
-            return {"agents": [], "source": "none", "note": note}
-        except Exception as e:
-            return {"agents": [], "source": "none", "note": f"OpenClaw unreachable ({type(e).__name__})"}
-        ids = []
-        for m in (data.get("data") or []):
-            mid = str((m or {}).get("id") or "")
-            if mid.startswith("openclaw/"):
-                name = mid[len("openclaw/"):]
-                if AGENT_RE.match(name) and name not in ids:
-                    ids.append(name)
-        return {"agents": [_entry(kind, a, env) for a in ids], "source": "openclaw-models",
-                "note": None if ids else "OpenClaw listed no agents"}
-
-    if kind == "nanobot":
-        # nanobot serves exactly one model (its configured one); the picker
-        # lists it. Same key rule as OpenClaw: only the saved URL gets it.
-        if not url:
-            return {"agents": [], "source": "none", "note": "set the Nanobot URL first"}
-        token = env.get("LVI_NANOBOT_KEY")
-        if attach_key and not token:
-            return {"agents": [], "source": "none",
-                    "note": "save the Nanobot key to list its agent"}
-        models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
-        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
-        try:
-            data = _get_json(models_url, headers, timeout)
-        except urllib.error.HTTPError as e:
-            note = f"Nanobot answered HTTP {e.code}"
-            if e.code == 401 and not attach_key:
-                note += " — this URL is not saved yet; save it and the stored key will be used"
-            return {"agents": [], "source": "none", "note": note}
-        except Exception as e:  # noqa: BLE001 — any failure is a discovery note, never a 500
-            return {"agents": [], "source": "none", "note": f"Nanobot unreachable ({type(e).__name__})"}
-        ids = []
-        models = data.get("data") if isinstance(data, dict) else None
-        for m in (models if isinstance(models, list) else []):
-            mid = str(m.get("id") or "") if isinstance(m, dict) else ""
-            if AGENT_RE.match(mid) and mid not in ids:
-                ids.append(mid)
-        return {"agents": [_entry(kind, a, env) for a in ids], "source": "nanobot-models",
-                "note": None if ids else "Nanobot listed no model"}
-
-    if kind == "hermes":
-        fallback = {"agents": [_entry(kind, "default", env)], "source": "fallback"}
-        if not status_url:
-            p = urllib.parse.urlsplit(url)
-            if not p.hostname:
-                return {**fallback, "note": "set the Hermes URL first"}
-            status_url = f"{p.scheme or 'http'}://{p.hostname}:{HERMES_STATUS_PORT}/api/status"
-        try:
-            data = _get_json(status_url, {}, timeout)
-        except Exception as e:
-            return {**fallback, "note": f"Hermes dashboard not reachable ({type(e).__name__}) "
-                                        f"— showing the default agent only"}
-        parked = set(data.get("parked_profiles") or [])
-        ids = [p for p in (data.get("profiles") or [])
-               if isinstance(p, str) and AGENT_RE.match(p) and p not in parked]
-        if "default" in ids:  # default first: it is the main agent
-            ids = ["default"] + [p for p in ids if p != "default"]
-        if not ids:
-            return {**fallback, "note": "Hermes listed no profiles — showing the default agent only"}
-        return {"agents": [_entry(kind, a, env) for a in ids], "source": "hermes-status", "note": None}
-
-    return {"agents": [], "source": "none", "note": f"unknown kind {kind!r}"}
+    lane = _lane(kind)
+    if lane is None:
+        return {"agents": [], "source": "none", "note": f"unknown kind {kind!r}"}
+    return lane.discover_agents(url, env, timeout, status_url, attach_key)

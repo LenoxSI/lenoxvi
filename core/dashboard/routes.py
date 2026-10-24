@@ -17,7 +17,6 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
-import uuid
 from pathlib import Path
 from typing import Literal
 from os import getenv as _getenv
@@ -33,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
+import intelligence
 import intelligence_target
 import node_speaker
 import room_recorder
@@ -89,6 +89,10 @@ RECORDER_GUARD = [*GUARD, Depends(recording_guard)]
 
 # ── models ───────────────────────────────────────────────────────────
 
+# Every intelligence kind, from the lane registry (a tuple subscript is the
+# same Literal as listing the members).
+_LaneKind = Literal[intelligence.KINDS]
+
 
 class MappingPayload(BaseModel):
     # extra='forbid': an unwrapped dict (pre-2026-10-07 React bug) must
@@ -100,7 +104,7 @@ class MappingPayload(BaseModel):
     # Per-room agent overrides, per intelligence system. Omitted = leave
     # them alone (an older page); a system sent = that system's map
     # replaced; "" = back to the house default.
-    room_agents: dict[Literal["hermes", "openclaw", "nanobot"], dict[str, str]] | None = None
+    room_agents: dict[_LaneKind, dict[str, str]] | None = None
 
 
 class SessionModePayload(BaseModel):
@@ -141,16 +145,21 @@ def _intelligence_label() -> str:
     """Rig-facts label for the Intelligence line: 'OpenClaw · <agent>'
     or 'Hermes'. Resolved through the same cfg_env chain the agent uses."""
     intelligence_cfg = config_store.read_section("intelligence") or {}
-    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or "hermes") or "hermes")
-    if kind == "openclaw":
-        agent = intelligence_target.agent_for(intelligence_cfg, "openclaw") \
-            or str(_getenv("LVI_INTELLIGENCE_AGENT") or "")
-        return f"OpenClaw · {agent}" if agent else "OpenClaw"
-    if kind == "nanobot":
-        agent = intelligence_target.agent_for(intelligence_cfg, "nanobot")
-        return f"Nanobot · {agent}" if agent else "Nanobot"
-    agent = intelligence_target.agent_for(intelligence_cfg, "hermes")
-    return f"Hermes · {agent}" if agent else "Hermes"
+    default = intelligence.DEFAULT_KIND
+    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or default) or default)
+    # An unknown kind shows the default lane's label.
+    lane = _lane(kind) or intelligence.LANES[default]
+    agent = lane.agent_for(intelligence_cfg)
+    if lane.legacy_agent_key:
+        agent = agent or str(_getenv("LVI_INTELLIGENCE_AGENT") or "")
+    return f"{lane.label} · {agent}" if agent else lane.label
+
+
+def _lane(kind):
+    """The lane for `kind`, matched exactly. These routes always compared
+    kind case-sensitively (a mixed-case kind took the default path), so
+    they don't use intelligence.get(), which lowercases."""
+    return intelligence.LANES.get(kind) if isinstance(kind, str) else None
 
 
 @router.get("/status")
@@ -239,7 +248,8 @@ def _restart_pending() -> list:
     if any(differs(s, keys) for s, keys in tuning.items()):
         out.append("voice tuning")
     # A room override is read for the running kind only.
-    kinds = {str(pick(c, "intelligence").get("kind") or os.getenv("LVI_INTELLIGENCE_KIND") or "hermes").lower()
+    kinds = {str(pick(c, "intelligence").get("kind") or os.getenv("LVI_INTELLIGENCE_KIND")
+                 or intelligence.DEFAULT_KIND).lower()
              for c in (boot, saved)}
     if differs("room_agents", sorted(kinds)):
         out.append("room agents")
@@ -357,10 +367,12 @@ def _agent_default() -> dict:
     """The intelligence system the bot runs and its house-default agent —
     what a room without an override uses. Same inputs as the bot
     (IntelligenceAgent.__init__), env fallbacks included."""
-    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes") or "hermes").strip().lower()
+    default = intelligence.DEFAULT_KIND
+    kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", default) or default).strip().lower()
     icfg = {"agent": cfg_env("intelligence", "agent", "LVI_INTELLIGENCE_AGENT", ""),
             "agents": dict(config_store.read_section("intelligence") or {}).get("agents") or {}}
-    agent = intelligence_target.agent_for(icfg, kind) or ("default" if kind == "hermes" else "")
+    lane = _lane(kind)
+    agent = intelligence_target.agent_for(icfg, kind) or ((lane.default_agent if lane else None) or "")
     return {"agent_kind": kind, "default_agent": agent}
 
 
@@ -1516,7 +1528,7 @@ def _keys_cfg() -> dict:
         v = (config_store.read_section(sec) or {}).get(key)
         return str(v if v not in (None, "") else os.getenv(env, default)).strip().lower()
     icfg = dict(config_store.read_section("intelligence") or {})
-    icfg["kind"] = pick("intelligence", "kind", "LVI_INTELLIGENCE_KIND", "hermes")
+    icfg["kind"] = pick("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence.DEFAULT_KIND)
     return {"tts": {"provider": pick("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")},
             "stt": {"provider": pick("stt", "provider", "LVI_STT_PROVIDER", "whisper")},
             "intelligence": icfg,
@@ -1555,59 +1567,11 @@ def _key_test_inner(row: dict, key: str) -> dict:
     def scrub(text):
         return str(text).replace(key, "***")[:160] if key else str(text)[:160]
 
-    if row["kind"] in ("hermes", "openclaw"):
-        kind = row["kind"]
+    lane = intelligence.get(row["kind"])
+    if lane:
+        # Each lane knows how to check its own key against its SAVED URL.
         icfg = dict(config_store.read_section("intelligence") or {})
-        url = (icfg.get("urls") or {}).get(kind) or \
-            (icfg.get("url") if (icfg.get("kind") or "hermes") == kind else None) or ""
-        if kind == "openclaw":
-            # Setup not finished yet is not a failure: "needs_setup" says
-            # what to do next instead of a red "unreachable".
-            if not url:
-                return {"ok": False, "status": "needs_setup",
-                        "detail": "save the OpenClaw URL on the Intelligence card first"}
-            agent = intelligence_target.agent_for(icfg, "openclaw")
-            if not agent:
-                return {"ok": False, "status": "needs_setup",
-                        "detail": "pick an OpenClaw agent on the Intelligence card first"}
-        else:
-            agent = row.get("agent") or "default"
-        # Build the config the way the probe READS it (agents.<kind>), then
-        # refuse unless the variable it will send is exactly this row's.
-        probe_cfg = {"kind": kind, "url": url, "agents": {kind: agent}, "agent": agent,
-                     "model": icfg.get("model")}
-        if intelligence_target.key_var(kind, intelligence_target.agent_for(probe_cfg, kind)) != row["var"]:
-            return {"ok": False, "status": "unreachable", "detail": "refused: that test would use a different key"}
-        r = _intelligence_probe(probe_cfg)
-        if r.get("ok"):
-            return {"ok": True, "status": "ok", "detail": f"{r.get('model') or row['label']} answered"}
-        err = scrub(r.get("error") or "failed")
-        status = "rejected" if ("401" in err or "403" in err) else "unreachable"
-        if "HTTP 404" in err and not url.rstrip("/").endswith("/v1"):
-            err += " — the saved URL may need /v1 at the end (Intelligence card)"
-        return {"ok": False, "status": status, "detail": err}
-    if row["kind"] == "nanobot":
-        # GET <saved url>/models answers 401 to a wrong key. The key only
-        # goes to nanobot's SAVED URL, never a typed one.
-        icfg = dict(config_store.read_section("intelligence") or {})
-        url = ((icfg.get("urls") or {}).get("nanobot") or
-               (icfg.get("url") if (icfg.get("kind") or "hermes") == "nanobot" else None) or "").rstrip("/")
-        url = intelligence_target.request_url("nanobot", url) if url else url
-        if not url:
-            return {"ok": False, "status": "needs_setup",
-                    "detail": "save the Nanobot URL on the Intelligence card first"}
-        try:
-            code, _body = _keys_http("GET", url + "/models", {"Authorization": f"Bearer {key}"})
-        except OSError as e:
-            return {"ok": False, "status": "unreachable", "detail": scrub(e)}
-        if 200 <= code < 300:
-            return {"ok": True, "status": "ok", "detail": "Nanobot accepted the key"}
-        if code in (401, 403):
-            return {"ok": False, "status": "rejected", "detail": f"Nanobot rejected the key (HTTP {code})"}
-        detail = f"Nanobot answered HTTP {code}"
-        if code == 404 and not url.endswith("/v1"):
-            detail += " — the saved URL may need /v1 at the end (Intelligence card)"
-        return {"ok": False, "status": "unreachable", "detail": detail}
+        return lane.key_test(row, key, icfg, probe=_intelligence_probe, http=_keys_http, scrub=scrub)
     if row["kind"] == "deepgram":
         req = ("GET", "https://api.deepgram.com/v1/projects", {"Authorization": f"Token {key}"})
     else:
@@ -1633,7 +1597,11 @@ async def post_key_test(payload: KeyTestPayload):
     import keys_catalog
 
     row = keys_catalog.target_for(payload.var, keys_catalog.known_agents(_keys_cfg()))
-    if row is None or (row["kind"] == "hermes" and row["var"] != "LVI_HERMES_KEY" and payload.var not in _file_env()):
+    lane = intelligence.get(row["kind"]) if row is not None else None
+    # A per-agent key is testable only once it's in .env (never a stray
+    # process variable).
+    if row is None or (lane is not None and lane.per_agent_keys and row["var"] != lane.base_key_var
+                       and payload.var not in _file_env()):
         raise HTTPException(status_code=422, detail=f"{payload.var} is not an API key this appliance uses")
     key = _key_saved_value(payload.var)
     if not key:
@@ -1708,7 +1676,7 @@ class IntelligencePayload(BaseModel):
     # conversation field); nanobot = one user message + session_id, agent
     # optional. Any other kind 422s.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
-    kind: str = Field(pattern="^(hermes|openclaw|nanobot)$")
+    kind: str = Field(pattern=f"^({'|'.join(intelligence.KINDS)})$")
     # The URL on screen, filed under `kind` only (intelligence.urls[kind]
     # is the per-kind recall map). There is deliberately no way to save the
     # OTHER kind's URL from here: the stored key goes to a kind's saved URL,
@@ -1729,9 +1697,8 @@ class IntelligencePayload(BaseModel):
 
 # One lane, one variable, named for its intelligence (naming law
 # 2026-10-08). Single source for the dashboard routes — GET status, key
-# save, and the Test probe all read this map.
-INTELLIGENCE_KEY_VARS = {"hermes": "LVI_HERMES_KEY", "openclaw": "LVI_OPENCLAW_KEY",
-                         "nanobot": "LVI_NANOBOT_KEY"}
+# save, and the Test probe all read this map. Built from the lane registry.
+INTELLIGENCE_KEY_VARS = {k: lane.base_key_var for k, lane in intelligence.LANES.items()}
 
 
 class IntelligenceKeyPayload(BaseModel):
@@ -1743,7 +1710,7 @@ class IntelligenceKeyPayload(BaseModel):
     # by the UI. kind is REQUIRED (no default = no silent guess) and
     # extra="forbid" so a misspelled field 422s instead of no-opping.
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["hermes", "openclaw", "nanobot"]
+    kind: _LaneKind
     # Hermes profiles each have their own key (LVI_HERMES_KEY_<AGENT>);
     # omitted or "default" = the kind's base variable. OpenClaw agents share
     # one Gateway token and nanobot has one server key, so agent is ignored
@@ -1762,7 +1729,7 @@ async def get_intelligence():
     import os as _os
     _env = _saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
-    kind = intelligence_cfg.get("kind") or "hermes"
+    kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
     # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY; nanobot:
     # LVI_NANOBOT_KEY. No cross-kind fallback anywhere (a fallback turned a
@@ -1770,16 +1737,15 @@ async def get_intelligence():
     # the variable.
     # keys_set: status for EVERY kind, so the UI chip shows
     # the key of the kind on screen, not the kind in config.
-    _kv = INTELLIGENCE_KEY_VARS.get(kind, "LVI_HERMES_KEY")
+    _kv = INTELLIGENCE_KEY_VARS.get(kind, intelligence.LANES[intelligence.DEFAULT_KIND].base_key_var)
     return {
         "kind": kind,
         "url": intelligence_cfg.get("url") or _env.get("LVI_HERMES_URL"),
         "urls": intelligence_cfg.get("urls") or {},
         "agent": intelligence_cfg.get("agent"),
         # Live agent per kind (hermes "default" = the main agent).
-        "agents": {k: (intelligence_target.agent_for(intelligence_cfg, k)
-                       or ("default" if k == "hermes" else None))
-                   for k in INTELLIGENCE_KEY_VARS},
+        "agents": {k: (intelligence_target.agent_for(intelligence_cfg, k) or lane.default_agent)
+                   for k, lane in intelligence.LANES.items()},
         "key_set": bool(_env.get(_kv)),
         "keys_set": {k: bool(_env.get(v)) for k, v in INTELLIGENCE_KEY_VARS.items()},
         "key_hints": {k: intelligence_target.key_hint(_env.get(v))
@@ -1794,27 +1760,30 @@ async def put_intelligence(payload: IntelligencePayload):
     """Write kind (+ url/agent when provided) to config.yaml (intelligence
     section) — read-merge-write, so fillers/max_tokens/lull always
     survive. Applies on the next bot restart."""
-    if payload.agent == "" and payload.kind != "nanobot":
+    lane = intelligence.LANES[payload.kind]  # the pattern admits registry kinds only
+    if payload.agent == "" and lane.agent_required:
+        optional = " / ".join(k for k, ln in intelligence.LANES.items() if not ln.agent_required)
         raise HTTPException(status_code=422,
-                            detail=f"{payload.kind} needs an agent; only nanobot can run without one")
+                            detail=f"{payload.kind} needs an agent; only {optional} can run without one")
     current = dict(config_store.read_section("intelligence") or {})
-    saved_kind = current.get("kind") or "hermes"
+    saved_kind = current.get("kind") or intelligence.DEFAULT_KIND
     urls = dict(current.get("urls") or {})
-    if (payload.kind == "openclaw" and payload.agent is None and payload.url is not None
-            and not intelligence_target.agent_for(current, "openclaw")):
-        # New OpenClaw setup: its agents can't be listed until the URL is
-        # saved (discovery only sends the key to a saved URL), and the lane
+    if (lane.url_first_setup and payload.agent is None and payload.url is not None
+            and not lane.agent_for(current)):
+        # New setup of a URL-first lane (OpenClaw): its agents can't be
+        # listed until the URL is saved (discovery only sends the key to a
+        # saved URL), and the lane
         # can't run without an agent. Save just the URL and leave the live
         # lane as it is; the next Save, with an agent picked, switches it.
-        urls["openclaw"] = payload.url
+        urls[payload.kind] = payload.url
         current["urls"] = urls
-        if saved_kind == "openclaw":
+        if saved_kind == payload.kind:
             current["url"] = payload.url
         try:
             config_store.write_section("intelligence", current)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
-        logger.info("dashboard: intelligence openclaw URL saved (no agent yet; live lane unchanged)")
+        logger.info(f"dashboard: intelligence {payload.kind} URL saved (no agent yet; live lane unchanged)")
         return {"ok": True, "kind": saved_kind, "url_only": True}
     current["kind"] = payload.kind
     if payload.url is not None:
@@ -1837,10 +1806,10 @@ async def put_intelligence(payload: IntelligencePayload):
         else:
             agents.pop(payload.kind, None)  # nanobot: back to its own model
         current["agents"] = agents
-        if payload.kind == "openclaw":
+        if lane.legacy_agent_key:
             current["agent"] = payload.agent  # legacy key, read by older builds
-    if payload.kind == "openclaw" and not intelligence_target.agent_for(current, "openclaw"):
-        raise HTTPException(status_code=422, detail="openclaw needs an agent id (intelligence.agent)")
+    if lane.agent_required and lane.default_agent is None and not lane.agent_for(current):
+        raise HTTPException(status_code=422, detail=f"{payload.kind} needs an agent id (intelligence.agent)")
     try:
         config_store.write_section("intelligence", current)
     except FileNotFoundError as e:
@@ -1874,7 +1843,10 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     import os as _os
     import urllib.request as _rq
     import urllib.error as _ue
-    kind = intelligence_cfg.get("kind") or "hermes"
+    kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
+    # An unknown kind probes the default lane's way (health, body, error).
+    default_lane = intelligence.LANES[intelligence.DEFAULT_KIND]
+    lane = _lane(kind) or default_lane
     agent = intelligence_target.agent_for(intelligence_cfg, kind)
     url = intelligence_target.request_url(
         kind, intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "", agent)
@@ -1883,15 +1855,14 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     # fallback anywhere (this probe previously read the now-DELETED
     # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
     # caught in the 2026-10-08 brain→intelligence sweep).
-    _kv = intelligence_target.key_var(kind, agent) or "LVI_HERMES_KEY"
+    _kv = intelligence_target.key_var(kind, agent) or default_lane.base_key_var
     key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:
         return {"ok": False, "error": "no url configured"}
     if not key:
         return {"ok": False, "error": "no key set (save the key first)"}
     t0 = time.monotonic()
-    # nanobot's /health lives at the server root, beside /v1.
-    health = (url[:-3] if kind == "nanobot" and url.endswith("/v1") else url) + "/health"
+    health = lane.health_url(url)
     try:
         # health: no-auth liveness (OpenClaw /health; hermes api_server
         # has none — a plain GET on the base URL 404s but proves reach)
@@ -1900,25 +1871,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         pass  # 404/401 on health still proves the endpoint is listening
     except Exception as e:
         return {"ok": False, "error": f"unreachable: {type(e).__name__}"}
-    if kind == "openclaw":
-        model = "openclaw/" + agent
-        body = {"model": model, "stream": False, "max_tokens": 16,
-                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
-    elif kind == "nanobot":
-        # A throwaway session: nanobot stores every turn under session_id,
-        # so a test must never land in a room's voice session (or in the
-        # shared default session an omitted id falls into).
-        model = agent or "nanobot"
-        body = {"stream": False, "max_tokens": 16,
-                "session_id": f"lenoxvi-test-{uuid.uuid4().hex[:12]}",
-                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
-        if agent:
-            body["model"] = agent
-    else:
-        model = intelligence_cfg.get("model") or "hermes-agent"
-        body = {"model": model, "stream": False, "max_tokens": 16,
-                "conversation": "dashboard-test",
-                "messages": [{"role": "user", "content": "Reply with exactly: ok"}]}
+    model, body = lane.probe_body(agent, intelligence_cfg)
     req = _rq.Request(url + "/chat/completions",
                       data=json.dumps(body).encode(),
                       headers={"Authorization": f"Bearer {key}",
@@ -1931,17 +1884,14 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         return {"ok": True, "latency_ms": latency, "model": model,
                 "reply": (content or "")[:80]}
     except _ue.HTTPError as e:
-        if kind == "nanobot":
-            return {"ok": False, "error": f"gateway error: HTTP {e.code}: "
-                                          f"{intelligence_target.http_error_message(e, key)}"}
-        return {"ok": False, "error": f"gateway error: HTTP {e.code}"}
+        return {"ok": False, "error": lane.probe_error(e, key)}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}"}
 
 
 class IntelligenceAgentsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["hermes", "openclaw", "nanobot"]
+    kind: _LaneKind
     # The URL on screen (may be unsaved); omitted = that kind's saved URL.
     url: str | None = Field(default=None, max_length=200,
                              pattern=r"^https?://[A-Za-z0-9._:-]+(:\d+)?(/[\w./-]*)?$")
@@ -1964,16 +1914,15 @@ async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
     not yet saved — is probed unauthenticated, so a mistyped or third-party
     host can never receive the OpenClaw or Nanobot key."""
     icfg = dict(config_store.read_section("intelligence") or {})
-    saved_url = (icfg.get("urls") or {}).get(payload.kind) \
-        or (icfg.get("url") if (icfg.get("kind") or "hermes") == payload.kind else None) or ""
+    lane = intelligence.LANES[payload.kind]  # the Literal admits registry kinds only
+    saved_url = lane.saved_url(icfg)
     url = payload.url or saved_url
     attach_key = not payload.url or intelligence_target.same_target(payload.url, saved_url)
     result = await asyncio.to_thread(
         intelligence_target.discover_agents, payload.kind, url, _saved_env(), 4.0,
-        icfg.get("hermes_status_url") if payload.kind == "hermes" else None,
+        icfg.get(lane.status_url_key) if lane.status_url_key else None,
         attach_key)
-    result["selected"] = intelligence_target.agent_for(icfg, payload.kind) \
-        or ("default" if payload.kind == "hermes" else None)
+    result["selected"] = intelligence_target.agent_for(icfg, payload.kind) or lane.default_agent
     return result
 
 
@@ -2471,14 +2420,14 @@ async def get_voice_tuning():
     """Current wake/VAD/turn knob values for the Voice Tuning panel."""
     wake = config_store.read_section("wake") or {}
     vad = config_store.read_section("vad") or {}
-    intelligence = config_store.read_section("intelligence") or {}
+    intelligence_cfg = config_store.read_section("intelligence") or {}
     return {
         "wake_threshold": wake.get("threshold"),
         "wake_awake_timeout": wake.get("awake_timeout"),
         "vad_confidence": vad.get("confidence"),
         "vad_min_volume": vad.get("min_volume"),
-        "lull_secs": intelligence.get("lull_secs"),
-        "dedup_window": intelligence.get("dedup_window"),
+        "lull_secs": intelligence_cfg.get("lull_secs"),
+        "dedup_window": intelligence_cfg.get("dedup_window"),
         "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
