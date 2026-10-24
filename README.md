@@ -103,13 +103,13 @@ Replies play on a Sonos or WiiM zone. Each zone picks its own backend. The diffe
 | Source limits | Any source | Spotify Connect, AirPlay and Bluetooth sessions cannot be resumed |
 | Connects with | Local websocket control: IP and player UID | HTTPS HTTP API: IP only |
 | Find it in the dashboard | Discover button | Add by IP |
-| Built and tested on | Port | Pro |
+| Built and tested on | Port, Amp, Era 100 SL | Pro |
 
 WiiM's prompt-overlay command does nothing on the firmware we tested, so the WiiM backend interrupts instead of ducking. Other WiiM models use the same HTTP API and are untested.
 
 ### Sonos speakers that can duck
 
-Ducking needs the `AUDIO_CLIP` capability. [Sonos documents](https://docs.sonos.com/reference/audioclip) that every player running S2 software has it and that S1-only players do not. The list below is Sonos's own [compatibility list](https://support.sonos.com/en-us/article/sonos-app-version-compatibility) sorted that way. Tested on a Port; the rest follow Sonos's documentation. At startup the bot checks each configured zone and logs whether it has `AUDIO_CLIP`.
+Ducking needs the `AUDIO_CLIP` capability. [Sonos documents](https://docs.sonos.com/reference/audioclip) that every player running S2 software has it and that S1-only players do not. The list below is Sonos's own [compatibility list](https://support.sonos.com/en-us/article/sonos-app-version-compatibility) sorted that way. Tested on a Port, an Amp and an Era 100 SL; the rest follow Sonos's documentation. At startup the bot checks each configured zone and logs whether it has `AUDIO_CLIP`.
 
 | Can duck | Models |
 |---|---|
