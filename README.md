@@ -90,6 +90,35 @@ Four faster-whisper models. The "best for" line is the dashboard catalog label, 
 | Pocket | ✅ | — |
 | Kokoro | ✅ | Pocket, if installed |
 
+## Speakers
+
+Replies play on a Sonos or WiiM zone. Each zone picks its own backend. The difference that matters is ducking.
+
+| | Sonos | WiiM |
+|---|---|---|
+| How a reply plays | Audio clip overlay, mixed over whatever is playing | Replaces what is playing |
+| Music while she talks | Ducks and keeps playing, without pausing | Stops, and is not resumed |
+| Stays ducked while the room listens | ✅ | ❌ |
+| Reply volume | Set per clip | Sets the main volume, then puts your music volume back |
+| Source limits | Any source | Spotify Connect, AirPlay and Bluetooth sessions cannot be resumed |
+| Connects with | Local websocket control: IP and player UID | HTTPS HTTP API: IP only |
+| Find it in the dashboard | Discover button | Add by IP |
+| Built and tested on | Port | Pro |
+
+WiiM's prompt-overlay command does nothing on the firmware we tested, so the WiiM backend interrupts instead of ducking. Other WiiM models use the same HTTP API and are untested.
+
+### Sonos speakers that can duck
+
+Ducking needs the `AUDIO_CLIP` capability. [Sonos documents](https://docs.sonos.com/reference/audioclip) that every player running S2 software has it and that S1-only players do not. The list below is Sonos's own [compatibility list](https://support.sonos.com/en-us/article/sonos-app-version-compatibility) sorted that way. Tested on a Port; the rest follow Sonos's documentation. At startup the bot checks each configured zone and logs whether it has `AUDIO_CLIP`.
+
+| Can duck | Models |
+|---|---|
+| ✅ S2 only | Arc, Arc SL, Arc Ultra, Beam (Gen 2), Beam Ultra, Era 100, Era 100 Pro, Era 100 SL, Era 300, Five, Move 2, One SL, Ray, Roam, Roam 2, Roam SL, Sonos Play, Amp Multi, SYMFONISK Bookshelf (Gen 2), Floor lamp, Picture frame, Table lamp (Gen 2) |
+| ✅ When set up on the S2 app | Amp, Beam (Gen 1), Move, One (Gen 1), One (Gen 2), Play:1, Play:3, Play:5 (Gen 2), Playbar, Playbase, Port, Connect (Gen 2), Connect:Amp (Gen 2), SYMFONISK Bookshelf (Gen 1), SYMFONISK Table lamp (Gen 1) |
+| ❌ S1 only | Connect (Gen 1), Connect:Amp (Gen 1), Play:5 (Gen 1), ZonePlayer 80, 90, 100, 120 and S5, CR200 |
+
+Subs, Boost, Bridge and the Ace headphones are left out: they are not speaker zones. Sonos says not to rely on model names, so the logged capability check is the final word.
+
 ## License
 
 No project license is set. Until one is, do not treat this repository as open source.
