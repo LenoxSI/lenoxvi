@@ -5,13 +5,28 @@
 
 # LenoxVI
 
-A voice appliance for rooms. Mic nodes, a wake gate, speech-to-text, an intelligence lane, and a spoken reply in that room.
+A voice appliance for rooms. It sits between a mic node and an agent you already run: the wake word, the speech, and the reply stay in that room.
 
     mic node (reSpeaker) → WiFi/WebRTC → wake gate → Whisper →
     intelligence (Hermes / OpenClaw / Nanobot) → TTS →
     speaker in the room (Sonos / WiiM / the node's own speaker)
 
 Not a chat box. Wake-gated. The dashboard operates the appliance. It does not talk to it.
+
+![Rooms view of the dashboard, demo data](docs/readme/rooms.png)
+
+## Quick start
+
+Python 3.12+. From the repo root:
+
+1. `pip install -r requirements.txt`
+2. `cp config.example.yaml config.yaml` and fill every `<PLACEHOLDER>`
+3. `cp .env.example .env` and set the key for the intelligence you picked
+4. Wake word is **Hey Jarvis** out of the box
+5. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
+6. `python bot.py`, then open `https://<bot-host-LAN-IP>:7860/dashboard`
+
+A browser mic is at `/client`. Optional local voices, and the wake-word license, are in [Fresh clone](#fresh-clone--running-bot).
 
 ## Features
 
@@ -59,21 +74,29 @@ Four faster-whisper models. The "best for" line is the dashboard catalog label, 
 | `small` | 0.5 GB | CPU is fine | Snappy in quiet rooms. |
 | `base` | 0.15 GB | CPU is fine | No GPU, or the fastest option. |
 
+## License
+
+No project license is set. Until one is, do not treat this repository as open source.
+
+The wake-word models that install with openWakeWord are CC BY-NC-SA 4.0 — non-commercial only. See [Wake word](#wake-word).
+
+## Help
+
+Bugs and questions: [open an issue](https://github.com/LenoxSI/lenoxvi/issues).
+
+Maintained by the LenoxVI organization.
+
 ## Dashboard
 
-Three views. The frames are placeholders. Replace `docs/readme/*.png` with shots from a demo config.
-
-### System
-
-![System, capture pending](docs/readme/system.png)
+Demo data. Not a live install.
 
 ### Voice
 
-![Voice, capture pending](docs/readme/voice.png)
+![Voice view of the dashboard](docs/readme/voice.png)
 
-### Rooms
+### System
 
-![Rooms, capture pending](docs/readme/rooms.png)
+![System view of the dashboard](docs/readme/system.png)
 
 ## Layout
 
