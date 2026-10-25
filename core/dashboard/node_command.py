@@ -22,6 +22,7 @@ automatically — a quiet house never false-reboots a node.
 import asyncio
 import itertools
 import json
+import re
 import time
 
 from loguru import logger
@@ -62,9 +63,26 @@ SETTLE_SECS = 15.0
 _next_id = itertools.count(1)
 _pending_ids: dict = {}   # (pc_id, cmd) -> id of the request awaiting a reply
 _echoes_id: set = set()   # pc_ids whose node echoes request ids
+ID_ECHO_FW = (1, 2, 37)   # first firmware that echoes them (fw_push says so up front)
+_rejected_logged: set = set()  # pc_ids whose refused OTA version was already logged
 # In-flight sends: the loop keeps only weak references to tasks, so an
 # unreferenced one can be garbage-collected mid-send.
 _inflight: set = set()
+
+
+def _fw_tuple(fw):
+    """'1.2.37' -> (1, 2, 37). Anything else (a suffix, a prefix, a
+    number, None) -> None: an unreadable version proves nothing."""
+    if not isinstance(fw, str):
+        return None
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", fw.strip())
+    return tuple(int(p) for p in m.groups()) if m else None
+
+
+def _remember(seen: set, pc_id: str) -> None:
+    if len(seen) > 1000:  # one entry per session; keep it bounded
+        seen.clear()
+    seen.add(pc_id)
 
 
 def _send(out, payload: dict) -> bool:
@@ -180,6 +198,21 @@ def on_message(message, pc_id: str) -> None:
         if fw:
             registry.note_firmware(pc_id, str(fw))
             logger.info(f"node_command: <- {pc_id[:24]}… fw_push: running {fw}")
+        # Firmware 1.2.37+ echoes request ids: trust it from the first
+        # command on, not only after the first id-bearing reply.
+        ver = _fw_tuple(fw)
+        if ver and ver >= ID_ECHO_FW:
+            _remember(_echoes_id, pc_id)
+        # Firmware 1.2.41+: an OTA image this node rolled back from and now
+        # refuses, and whether this boot went back to the previous Wi-Fi.
+        # Stored on every push: a push without them clears last boot's.
+        rejected = info.get("rejected")
+        registry.note_boot_flags(pc_id, rejected, info.get("wifi_rollback"))
+        if isinstance(rejected, str) and rejected and pc_id not in _rejected_logged:
+            _remember(_rejected_logged, pc_id)
+            room = registry.room_for_pc(pc_id) or pc_id[:24]
+            logger.warning(f"node_command: {room} refuses firmware {rejected} (it failed its "
+                           "health check and rolled back) - upload a fixed build")
         # firmware 1.2.19+: fw_push names the board line (registry.NODE_LINES).
         if isinstance(info, dict) and isinstance(info.get("line"), str):
             registry.note_line(pc_id, info["line"])
@@ -225,9 +258,7 @@ def on_message(message, pc_id: str) -> None:
     # still apply (they're the node's truth), but it answers no request.
     rid = data.get("id")
     if isinstance(rid, int) and not isinstance(rid, bool):
-        if len(_echoes_id) > 1000:  # one entry per session; keep it bounded
-            _echoes_id.clear()
-        _echoes_id.add(pc_id)
+        _remember(_echoes_id, pc_id)
         late = rid != _pending_ids.get(key)
         _settling.pop(key, None)
     else:  # firmware without id echo: the settling window decides

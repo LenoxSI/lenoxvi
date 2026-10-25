@@ -8,6 +8,26 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- Nodes table: a "rollback <version>" chip when a node refused a firmware version that failed its health check and
+  rolled back, and a "wifi rolled back" chip when its last Wi-Fi change never reached the bot and it went back to the
+  previous network (from the node's connect report; `/status` rooms carry `fw_rejected` and `wifi_rollback`).
+- Nodes table: a Details toggle per online node shows its health from one `get_info` read: why it last booted and
+  how long the previous run lasted, Wi-Fi signal and the last disconnect reason, the last update check, and mic
+  start-up and gaps, with a warning when the mic sent silence while unmuted. Older firmware shows a one-line note.
+
+- The LED ring shows "thinking" while the intelligence works on a turn: the bot sends `bot-thinking` when it hands
+  the turn over, and speech replaces it (firmware 1.2.41+ shows it; older firmware ignores the message).
+
+### Changed
+- The bot learns that a node echoes request ids from the firmware version it reports on connect (1.2.37+), so its
+  first command already skips the settling window; the first id-bearing reply still teaches it as before.
+
+### Fixed
+- The pipeline runs without pipecat's RTVI layer (`enable_rtvi=False`): nodes no longer receive pipecat's own
+  speaking, TTS and transcript messages, which drove the LED ring outside the bot's own LED logic, and the
+  "Ignoring not RTVI message" log on every node reply is gone.
+
 ## [0.6.9] — 2026-10-24 — Kokoro, ElevenLabs Scribe, a tabbed dashboard
 
 ### Added

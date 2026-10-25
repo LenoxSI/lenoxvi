@@ -473,6 +473,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     out = transport.output()
     led = LedSender(out)
+    if hasattr(intelligence, "set_led"):  # the offline stub has no thinking phase
+        intelligence.set_led(led)
     # Barge-in: the interrupt callback stops whichever
     # output is sounding. The outputs are built in the pipeline list below,
     # so the closure reaches them through this holder — set right after

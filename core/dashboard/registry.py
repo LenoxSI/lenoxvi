@@ -37,6 +37,7 @@ _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
 _muted_by_pc = {}  # pc_id -> mic mute state (held the same way as fw)
 _line_by_pc = {}  # pc_id -> board line "array"|"flex"|"waveshare" (firmware 1.2.19+; held the same way)
+_boot_flags_by_pc = {}  # pc_id -> (fw_rejected, wifi_rollback) from fw_push (held the same way)
 NODE_LINES = ("array", "flex", "waveshare")
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
@@ -227,6 +228,23 @@ def note_muted(pc_id: str, muted: bool) -> None:
     note_muted_room(room, muted)
 
 
+def note_boot_flags(pc_id: str, rejected, wifi_rollback) -> None:
+    """Firmware 1.2.41+: fw_push says what this boot recovered from —
+    `rejected` names an OTA image the node rolled back from and now
+    refuses, `wifi_rollback` that it went back to its previous network
+    after a failed Wi-Fi change. Every fw_push sets both: a push without
+    the keys (a clean boot, or older firmware) clears them. Same
+    provisional-window handling as note_firmware."""
+    flags = (rejected if isinstance(rejected, str) and rejected else None,
+             wifi_rollback is True)
+    room = _room_by_pc.get(pc_id)
+    if not room or room == PROVISIONAL:
+        _boot_flags_by_pc[pc_id] = flags
+        return
+    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec["fw_rejected"], rec["wifi_rollback"] = flags
+
+
 def note_muted_room(room: str, muted: bool) -> None:
     """Mute state by room (the set_mute route's ack lands here)."""
     if not room or room == PROVISIONAL:
@@ -242,7 +260,8 @@ def _drain_held(pc_id, label) -> None:
     held_fw = _fw_by_pc.pop(pc_id, None)
     held_muted = _muted_by_pc.pop(pc_id, None)
     held_line = _line_by_pc.pop(pc_id, None)
-    if held_fw is None and held_muted is None and held_line is None:
+    held_flags = _boot_flags_by_pc.pop(pc_id, None)
+    if held_fw is None and held_muted is None and held_line is None and held_flags is None:
         return
     rec = _known_rooms.setdefault(label, {"online": False, "first_seen": time.time()})
     if held_fw:
@@ -252,6 +271,8 @@ def _drain_held(pc_id, label) -> None:
         rec["speaker_ok"] = None  # new session: re-proven by its set_speaker ack
     if held_muted is not None:
         rec["muted"] = held_muted
+    if held_flags is not None:
+        rec["fw_rejected"], rec["wifi_rollback"] = held_flags
 
 
 def note_tts(room: str | None, provider: str, usable: bool) -> None:
@@ -443,6 +464,11 @@ def known_rooms():
                 "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
                 "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
+                # fw_push, 1.2.41+: the OTA version this node rolled back
+                # from and now refuses (None = none), and whether this boot
+                # went back to the previous Wi-Fi (False on older firmware).
+                "fw_rejected": rec.get("fw_rejected"),
+                "wifi_rollback": bool(rec.get("wifi_rollback")),
                 # board line, one of NODE_LINES (fw_push, 1.2.19+); None =
                 # older firmware that doesn't say.
                 "line": rec.get("line"),

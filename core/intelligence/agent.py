@@ -353,6 +353,9 @@ class IntelligenceAgent(FrameProcessor):
         self._lull_secs = float(cfg_env("intelligence", "lull_secs", "LVI_LULL_SECS", lull_secs))
         self._max_history = max_history
         self._echo_gate = echo_gate
+        # Direct LED wire (led_state.LedSender), set by bot.py after the
+        # transport exists; None = no ring to drive (tests, stub lanes).
+        self._led = None
         self._buffer: list[str] = []
         self._history: list[dict] = []
         self._last_transcription: float = 0.0
@@ -756,6 +759,10 @@ class IntelligenceAgent(FrameProcessor):
             except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — a dying turn stays quiet
                 pass
 
+    def set_led(self, led) -> None:
+        """Bind this pipeline's LED sender (bot.py, once per session)."""
+        self._led = led
+
     async def _run_turn(self, text: str, epoch: int) -> None:
         """One turn as a background task. Every await
         checks the epoch — a superseded turn discards its reply, skips
@@ -764,6 +771,11 @@ class IntelligenceAgent(FrameProcessor):
         broad-catch: the user never gets dead silence on an intelligence failure."""
         filler_spoken = False
         ask = None
+        # The turn is now with the intelligence: show "thinking" on the ring
+        # until speech (filler or reply) takes over. Cosmetic and
+        # fire-and-forget: LedSender.send never raises.
+        if self._led is not None and epoch == self._turn_epoch:
+            self._led.send("bot-thinking")
         try:
             ask = asyncio.get_running_loop().run_in_executor(
                 _INTEL_POOL, self._ask_intelligence, text)

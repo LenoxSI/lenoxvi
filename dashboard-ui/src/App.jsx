@@ -1250,10 +1250,125 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll,
   )
   return renderRow({ mute, actions })
 }
+
+/* ── node details ─────────────────────────────────────────── */
+// get_info's health keys (firmware 1.2.41+) in plain words. Older firmware
+// omits them, so every line renders only from the keys the node sent; an
+// unknown tag shows as the node sent it.
+const BOOT_WHY = {
+  'bot-closed': 'the bot closed the session',
+  'peer-dropped': 'the connection to the bot dropped',
+  'connect-timeout': "couldn't connect to the bot",
+  'dc-never-opened': 'the data channel never opened',
+  'liveness-no-pong': 'the bot stopped answering its liveness check',
+  'cmd-restart': 'restarted from the dashboard',
+  'check-ota': 'restarted to check for an update',
+  'ota-success': 'restarted onto new firmware',
+  'ota-health-timeout': 'new firmware failed its health check',
+  'set-wifi': 'restarted onto new Wi-Fi',
+  'wifi-trial-timeout': 'the new Wi-Fi never reached the bot',
+  'wifi-trial-authfail': 'the new Wi-Fi password was refused',
+  'offer-http-error': 'the bot refused its connection offer',
+  'offer-bad-json': "the bot's answer to its offer was unreadable",
+  'offer-no-sdp': "the bot's answer to its offer was empty",
+  'offer-too-big': "the bot's answer to its offer was too big",
+  'offer-oom': 'out of memory while connecting',
+  'audio-oom': 'out of memory starting the mic',
+  'rtvi-init': 'the message channel failed to start',
+}
+const OTA_LAST = {
+  none: 'no update check yet',
+  'up-to-date': 'up to date',
+  'check-failed': 'update check failed',
+  'bad-http': 'update server error',
+  'wrong-board': 'refused an image built for another board',
+  'refused-rolled-back': 'refused a version it rolled back from',
+  'too-big': 'image too big',
+  'download-failed': 'download failed',
+  'flash-failed': 'flash write failed',
+  'version-mismatch': "image version didn't match the manifest",
+  updated: 'updated',
+  deferred: 'update deferred',
+}
+// ESP-IDF Wi-Fi disconnect reasons worth naming; the rest show as a number.
+const WIFI_REASON = {
+  2: 'auth expired', 4: 'association expired', 8: 'left the network', 15: '4-way handshake timeout',
+  201: 'no access point found', 202: 'auth failed', 203: 'association failed', 204: 'handshake timeout',
+}
+const upFor = s => (s < 60 ? `${s}s` : sec(s))
+
+// One node's health from get_info (boot, Wi-Fi, updates, audio). One /info
+// per open, never polled: each ask is a round-trip to the node. The ref (not
+// effect cleanup) keeps it to one ask, as in NodeActions.
+function NodeDetails({ room }) {
+  const [info, setInfo] = useState(null)  // {data} | {error}
+  const askedRef = useRef(false)
+  useEffect(() => {
+    if (askedRef.current) return
+    askedRef.current = true
+    api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`, { promptForToken: true })
+      .then(r => setInfo(r?.ok ? { data: r.data || {} } : { error: 'no answer' }))
+      .catch(e => setInfo({ error: e?.message || 'no answer' }))
+  }, [room])
+
+  const note = text => <span className="text-[13px] text-[var(--muted)]">{text}</span>
+  if (!info) return note('Reading details from the node…')
+  if (info.error) return note(`Details unavailable (${info.error}). Older firmware doesn't report them.`)
+  const part = v => (v && typeof v === 'object' ? v : {})
+  const num = v => typeof v === 'number'
+  const boot = part(info.data.boot), wifi = part(info.data.wifi), ka = part(wifi.ka)
+  const ota = part(info.data.ota), audio = part(info.data.audio)
+  const warnings = []
+  const rows = [
+    ['Boot', [
+      boot.why && (BOOT_WHY[boot.why] || String(boot.why)),
+      boot.reason != null && `reset: ${boot.reason}`,
+      num(boot.prev_up_s) && `previous run ${upFor(boot.prev_up_s)}`,
+      num(boot.up_s) && `up ${upFor(boot.up_s)}`,
+    ]],
+    ['Wi-Fi', [
+      num(wifi.rssi) && `${wifi.rssi} dBm`,
+      num(wifi.last_reason) && wifi.last_reason !== 0
+        && `last disconnect: ${WIFI_REASON[wifi.last_reason] || `reason ${wifi.last_reason}`}`,
+      num(wifi.disconnects) && `${wifi.disconnects} disconnect${wifi.disconnects === 1 ? '' : 's'}`,
+      (num(ka.resent) || num(ka.rescued)) && `keepalive: ${ka.resent ?? 0} resent, ${ka.rescued ?? 0} rescued`,
+    ]],
+    ['Updates', [
+      ota.last && (OTA_LAST[ota.last] || String(ota.last)),
+      ota.http != null && ota.http !== 0 && `HTTP ${ota.http}`,
+      num(ota.at_s) && `${ota.at_s}s after boot`,
+    ]],
+    ['Audio', [
+      audio.init === 'ok' && 'mic started',
+      num(audio.max_gap_ms) && `max gap ${audio.max_gap_ms} ms`,
+    ]],
+  ].map(([label, parts]) => [label, parts.filter(p => typeof p === 'string')]).filter(([, parts]) => parts.length)
+  if (audio.init && audio.init !== 'ok') warnings.push(`mic failed to start: ${audio.init}`)
+  if (num(audio.zero_s) && audio.zero_s > 0) warnings.push(`mic sent silence for ${audio.zero_s} s while unmuted`)
+  if (!rows.length && !warnings.length) return note("This node's firmware doesn't report details.")
+  return (
+    <div className="grid gap-1 text-[13px]">
+      {rows.map(([label, parts]) => (
+        <div key={label}>
+          <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span> {parts.join(' · ')}
+        </div>
+      ))}
+      {warnings.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {warnings.map(w => (
+            <span key={w} className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>{w}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Rooms({ status, mapping, setMsg, reloadAll }) {
   // Per-room agent override. The Intelligence card's agent is the house
   // default; a room only differs when picked here ('' = back to Default).
   const [found, setFound] = useState(null)
+  const [openDetails, setOpenDetails] = useState({})  // room -> Details shown under its Nodes row
   const agentKind = mapping?.agent_kind || ''
   const defaultAgent = mapping?.default_agent || ''
   const savedAgents = mapping?.room_agents?.[agentKind] || {}
@@ -1460,8 +1575,19 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                 <NodeActions key={r.room} room={r.room} online={r.online} lastSeen={r.last_seen}
                   reportedMuted={r.muted} setMsg={setMsg} reloadAll={reloadAll}>
                   {({ mute, actions }) => (
+                    <>
                     <tr className="border-t border-[var(--separator)]">
-                      <td className="px-4 py-2 font-mono text-[13px]">{esc(r.room)}</td>
+                      <td className="px-4 py-2 font-mono text-[13px]">
+                        {esc(r.room)}
+                        {r.online && (
+                          <button aria-expanded={!!openDetails[r.room]}
+                            className="ml-2 font-sans text-[12px] text-[var(--muted)] hover:text-[var(--foreground)] cursor-pointer"
+                            onClick={() => setOpenDetails(o => ({ ...o, [r.room]: !o[r.room] }))}
+                            title="Boot, Wi-Fi, update and audio health, read from the node.">
+                            {openDetails[r.room] ? 'Hide details' : 'Details'}
+                          </button>
+                        )}
+                      </td>
                       <td className="px-4 py-2">
                         {/* Brand Chip rule: soft success "online", soft danger "offline".
                             The Mute button rides with the chip (flex-wrap keeps them on
@@ -1499,6 +1625,21 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                             {r.line}
                           </span>
                         )}
+                        {/* fw_push (1.2.41+): what this boot recovered from. */}
+                        {r.fw_rejected && (
+                          <span
+                            title={`This node refused ${esc(r.fw_rejected)} after it failed its health check and rolled back. Upload a fixed build.`}
+                            className={`ml-2 inline-block rounded-full px-2.5 py-0.5 text-[12px] font-sans font-medium ${STAT_TONE.warning}`}>
+                            rollback {esc(r.fw_rejected)}
+                          </span>
+                        )}
+                        {r.wifi_rollback === true && (
+                          <span
+                            title="The last Wi-Fi change never reached the bot, so the node went back to its previous network."
+                            className={`ml-2 inline-block rounded-full px-2.5 py-0.5 text-[12px] font-sans font-medium ${STAT_TONE.warning}`}>
+                            wifi rolled back
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-2">
@@ -1513,6 +1654,12 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                       </td>
                       <td className="px-4 py-2">{actions}</td>
                     </tr>
+                    {r.online && openDetails[r.room] && (
+                      <tr data-role="node-details">
+                        <td className="px-4 pb-3" colSpan={6}><NodeDetails room={r.room} /></td>
+                      </tr>
+                    )}
+                    </>
                   )}
                 </NodeActions>
               ))}
