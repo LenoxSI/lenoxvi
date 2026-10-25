@@ -1498,6 +1498,111 @@ def main():
           len(_wr_hit) == 1 and "wifirb-room" in _wr_hit[0] and not _wr_quiet,
           f"hit={_wr_hit} quiet={_wr_quiet}")
 
+    # Boot flags (firmware 1.2.41+): fw_push "rejected" names an OTA version
+    # the node rolled back from and now refuses, "wifi_rollback" that this boot
+    # went back to the previous network. Both land on the room record for the
+    # Nodes table; every push sets them (a push without them clears last
+    # boot's), with the same connect-race handling as fw.
+    def _nh_push(pc, data):
+        node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result",
+                                            "cmd": "fw_push", "ok": True, "data": data}), pc)
+
+    def _nh_rec(name):
+        return next((r for r in _reg.known_rooms() if r["room"] == name), {})
+
+    _reg.note_offer("test-pc-nh", "Hall")
+    _nh_push("test-pc-nh", {"fw": "1.2.41", "line": "array", "rejected": "1.2.42", "wifi_rollback": True})
+    check("node health: fw_push rejected + wifi_rollback land on the room record",
+          _nh_rec("Hall").get("fw_rejected") == "1.2.42" and _nh_rec("Hall").get("wifi_rollback") is True,
+          str(_nh_rec("Hall")))
+    _nh_push("test-pc-nh", {"fw": "1.2.41", "line": "array"})
+    check("node health: a fw_push without the keys clears both (a clean boot)",
+          "fw_rejected" in _nh_rec("Hall") and _nh_rec("Hall")["fw_rejected"] is None
+          and _nh_rec("Hall").get("wifi_rollback") is False, str(_nh_rec("Hall")))
+    _nh_push("test-pc-nh", {"fw": "1.2.41", "rejected": 142, "wifi_rollback": "yes"})
+    check("node health: a non-string rejected and a non-true wifi_rollback are dropped",
+          "fw_rejected" in _nh_rec("Hall") and _nh_rec("Hall")["fw_rejected"] is None
+          and _nh_rec("Hall").get("wifi_rollback") is False, str(_nh_rec("Hall")))
+    check("node health: a node that never reported (older firmware) shows fw_rejected=None, wifi_rollback=False",
+          "fw_rejected" in _nh_rec("fw-direct-room") and _nh_rec("fw-direct-room")["fw_rejected"] is None
+          and _nh_rec("fw-direct-room").get("wifi_rollback") is False, str(_nh_rec("fw-direct-room")))
+    # provisional window: the push lands before the tee binds the room
+    _reg.mark_connected("test-pc-nh-race")
+    _nh_push("test-pc-nh-race", {"fw": "1.2.41", "rejected": "1.2.40", "wifi_rollback": True})
+    _reg.note_offer("test-pc-nh-race", "Den")
+    check("node health: boot flags survive the connect/tee race (held, promoted with the room)",
+          _nh_rec("Den").get("fw_rejected") == "1.2.40" and _nh_rec("Den").get("wifi_rollback") is True,
+          str(_nh_rec("Den")))
+    # unbound pc_id (the fw=None race order): held, drained by note_offer
+    _nh_push("test-pc-nh-unbound", {"fw": "1.2.41", "rejected": "1.2.40", "wifi_rollback": True})
+    _nh_held = getattr(_reg, "_boot_flags_by_pc", {}).get("test-pc-nh-unbound")
+    _reg.note_offer("test-pc-nh-unbound", "Loft")
+    check("node health: unbound-pc boot flags drained by note_offer (with the fw hold)",
+          _nh_held == ("1.2.40", True) and "test-pc-nh-unbound" not in getattr(_reg, "_boot_flags_by_pc", {})
+          and _nh_rec("Loft").get("fw_rejected") == "1.2.40" and _nh_rec("Loft").get("wifi_rollback") is True
+          and _nh_rec("Loft").get("fw") == "1.2.41", f"held={_nh_held} rec={_nh_rec('Loft')}")
+    _st_nh = client.get("/api/dashboard/status").json()
+    check("node health: /status rooms[] carries fw_rejected and wifi_rollback",
+          any(r.get("room") == "Loft" and r.get("fw_rejected") == "1.2.40" and r.get("wifi_rollback") is True
+              for r in _st_nh.get("rooms", [])), str(_st_nh.get("rooms"))[:200])
+
+    # rejected is logged at WARNING once per session, naming room and version.
+    _nh_lines = []
+    _nh_sink = _lg_wr.add(lambda m: _nh_lines.append((m.record["level"].name, m.record["message"])),
+                          level="DEBUG")
+    try:
+        _reg.note_offer("test-pc-nh-log", "Hall")
+        for _ in range(2):
+            _nh_push("test-pc-nh-log", {"fw": "1.2.41", "rejected": "1.2.42"})
+        _nh_once = [m for lv, m in _nh_lines if lv == "WARNING" and "refuses firmware" in m]
+    finally:
+        _lg_wr.remove(_nh_sink)
+    check("node health: a refused version is logged at WARNING once per session, naming room and version",
+          len(_nh_once) == 1 and "Hall" in _nh_once[0] and "1.2.42" in _nh_once[0], str(_nh_once))
+
+    # Request-id echo from the version (firmware 1.2.37+ echoes ids): fw_push
+    # marks the session at once; anything that isn't a plain x.y.z proves nothing.
+    _nh_gate = [("1.2.37", True), ("1.2.41", True), ("1.10.0", True), ("2.0.0", True),
+                ("1.2.36", False), ("1.1.99", False), ("0.9.99", False), ("garbage", False), ("1.2", False),
+                ("1.2.37-dirty", False), ("v1.2.37", False), ("", False), (None, False), (1.237, False),
+                (["1", "2", "37"], False), ({"v": "1.2.37"}, False)]
+    _nh_wrong = []
+    for _i, (_fwv, _want) in enumerate(_nh_gate):
+        _pc = f"test-pc-nh-echo-{_i}"
+        _nh_push(_pc, {"fw": _fwv})
+        if (_pc in node_command._echoes_id) != _want:
+            _nh_wrong.append(_fwv)
+        node_command._echoes_id.discard(_pc)
+    # an unreadable version still learns from the first id-bearing reply
+    _nh_push("test-pc-nh-echo-learn", {"fw": "garbage"})
+    node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "get_info",
+                                        "id": 7, "ok": True, "data": {}}), "test-pc-nh-echo-learn")
+    _nh_learned = "test-pc-nh-echo-learn" in node_command._echoes_id
+    node_command._echoes_id.discard("test-pc-nh-echo-learn")
+    check("node health: fw_push fw >= 1.2.37 marks the session as echoing ids; older or garbage versions don't, "
+          "and the first id-bearing reply still teaches it",
+          not _nh_wrong and _nh_learned, f"wrong for {_nh_wrong} learned={_nh_learned}")
+
+    async def _nh_settle_probe():
+        _saved = (node_command.registry.sender_for_room, node_command._send)
+        node_command.registry.sender_for_room = lambda room: (object(), "test-pc-nh-echo-fw")
+        node_command._send = lambda out, payload: True
+        try:
+            try:
+                await node_command.request("Hall", "set_mute", {"mute": True}, timeout=0.1)
+            except TimeoutError:
+                pass
+            return ("test-pc-nh-echo-fw", "set_mute") in node_command._settling
+        finally:
+            node_command.registry.sender_for_room, node_command._send = _saved
+            node_command._settling.pop(("test-pc-nh-echo-fw", "set_mute"), None)
+
+    _nh_push("test-pc-nh-echo-fw", {"fw": "1.2.41"})
+    _nh_settles = asyncio.run(_nh_settle_probe())
+    node_command._echoes_id.discard("test-pc-nh-echo-fw")
+    check("node health: a 1.2.37+ node's timed-out command opens no settling window (its retry goes out at once)",
+          _nh_settles is False, f"settling={_nh_settles}")
+
     # Mute state (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
     # state — fw_push carries "muted" at connect, mute_push fires when an
     # array node's PHYSICAL button is pressed. Same race handling as fw.
@@ -8576,6 +8681,67 @@ def main():
           and _appsrc.count("const toggleMute = async () => {") == 1,
           f"renderRow x{_naMut.count('renderRow')}, "
           f"muted useState x{_appsrc.count('const [muted, setMuted] = useState(false)')}")
+
+    # ── node health ui (App.jsx): rollback chips, per-node Details ──────
+    # fw_push (1.2.41+) reports a refused OTA version and a Wi-Fi rollback
+    # (/status rooms[].fw_rejected / wifi_rollback); get_info reports boot,
+    # Wi-Fi, update and audio health. Chips reuse the table's warning chip.
+    _rmNH = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _fcNH = _reui.search(r"\{esc\(r\.fw\) \|\| '—'\}.*?</td>", _rmNH, _reui.DOTALL)
+    _fcNH = _fcNH.group(0) if _fcNH else ""
+    _warnNH = "className={`ml-2 inline-block rounded-full px-2.5 py-0.5 text-[12px] font-sans font-medium ${STAT_TONE.warning}`}"
+    check("nodes: the Firmware cell shows a 'rollback <version>' warning chip when the node refused a version",
+          "{r.fw_rejected && (" in _fcNH and "rollback {esc(r.fw_rejected)}" in _fcNH
+          and "title={`This node refused ${esc(r.fw_rejected)} after it failed its health check and rolled back. "
+              "Upload a fixed build.`}" in _fcNH, _fcNH[:300] or "no Firmware cell")
+    check("nodes: the Firmware cell shows a 'wifi rolled back' warning chip when the last Wi-Fi change rolled back",
+          "{r.wifi_rollback === true && (" in _fcNH and "wifi rolled back" in _fcNH
+          and 'title="The last Wi-Fi change never reached the bot, so the node went back to its previous network."'
+              in _fcNH, _fcNH[:300] or "no Firmware cell")
+    check("nodes: both rollback chips reuse the table's warning chip style (soft warning tone, sans in the mono cell)",
+          _fcNH.count(_warnNH) == 2 and "STAT_TONE.warning" in _appsrc[:_appsrc.find("function Rooms(")],
+          f"warning chips x{_fcNH.count(_warnNH)}")
+
+    _ndNH = _fnUI("function NodeDetails({ room }) {")
+    check("node health: Details opens per online node and renders under its row across every column",
+          "const [openDetails, setOpenDetails] = useState({})" in _rmNH
+          and "onClick={() => setOpenDetails(o => ({ ...o, [r.room]: !o[r.room] }))}" in _rmNH
+          and "aria-expanded={!!openDetails[r.room]}" in _rmNH
+          and "{openDetails[r.room] ? 'Hide details' : 'Details'}" in _rmNH
+          and "{r.online && openDetails[r.room] && (" in _rmNH
+          and '<td className="px-4 pb-3" colSpan={6}><NodeDetails room={r.room} /></td>' in _rmNH
+          and _appsrc.count("<NodeDetails ") == 1, _ndNH[:200] or "no NodeDetails")
+    _infoNH = "api(`/api/dashboard/nodes/${encodeURIComponent(room)}/info`, { promptForToken: true })"
+    check("node health: Details asks /info once per open (ref-guarded, no timer, no poll)",
+          bool(_ndNH) and _ndNH.count("/info`") == 1 and _infoNH in _ndNH
+          and "if (askedRef.current) return" in _ndNH
+          and 0 <= _ndNH.find("askedRef.current = true") < _ndNH.find(_infoNH)
+          and "setInterval" not in _ndNH and "setTimeout" not in _ndNH, _ndNH[:300])
+    check("node health: a failed /info is a one-line note, and firmware without the keys says so",
+          "if (info.error) return note(`Details unavailable (${info.error}). Older firmware doesn't report them.`)"
+          in _ndNH and ".catch(e => setInfo({ error: e?.message || 'no answer' }))" in _ndNH
+          and "if (!rows.length && !warnings.length) return note(\"This node's firmware doesn't report details.\")"
+          in _ndNH, _ndNH[:300])
+    check("node health: Details shows only the keys a node sent (non-strings dropped, empty sections hidden)",
+          ".map(([label, parts]) => [label, parts.filter(p => typeof p === 'string')]).filter(([, parts]) => parts.length)"
+          in _ndNH and "const part = v => (v && typeof v === 'object' ? v : {})" in _ndNH
+          and all(f"['{s}', [" in _ndNH for s in ("Boot", "Wi-Fi", "Updates", "Audio")), _ndNH[:300])
+    _wrNH = _jsbody(_appsrc, "const WIFI_REASON = {")
+    check("node health: Wi-Fi disconnect reasons are named for the common codes, else 'reason N'; 0 shows nothing",
+          all(f"{c}: '" in _wrNH for c in (2, 4, 8, 15, 201, 202, 203, 204))
+          and "`last disconnect: ${WIFI_REASON[wifi.last_reason] || `reason ${wifi.last_reason}`}`" in _ndNH
+          and "wifi.last_reason !== 0" in _ndNH, _wrNH[:200] or "no WIFI_REASON")
+    check("node health: boot why and update tags read as plain words, unknown tags as sent",
+          "boot.why && (BOOT_WHY[boot.why] || String(boot.why))" in _ndNH
+          and "ota.last && (OTA_LAST[ota.last] || String(ota.last))" in _ndNH
+          and "num(ota.at_s) && `${ota.at_s}s after boot`" in _ndNH
+          and all(f"'{t}': " in _appsrc for t in ("liveness-no-pong", "ota-health-timeout", "wifi-trial-authfail",
+                                                   "refused-rolled-back", "version-mismatch")), _ndNH[:300])
+    check("node health: a mic that sent silence while unmuted is flagged with the warning chip",
+          "if (num(audio.zero_s) && audio.zero_s > 0) warnings.push(`mic sent silence for ${audio.zero_s} s while unmuted`)"
+          in _ndNH and "if (audio.init && audio.init !== 'ok') warnings.push(" in _ndNH
+          and "className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>{w}</span>"
+          in _ndNH, _ndNH[:300])
 
     # ── tabs (App.jsx): Rooms, Voice and System as tabs, picked by the hash ──
     # The page was one long scroll; now one tab shows at a time. All three

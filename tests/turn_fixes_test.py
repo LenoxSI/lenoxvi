@@ -190,6 +190,45 @@ ag._ensure_route()
 check("agent: after a rename the room agent is looked up under the NEW name",
       ag._agent == "kids-agent" and ag._key_var == "LVI_HERMES_KEY_KIDS_AGENT", f"{ag._agent!r} {ag._key_var}")
 
+# ── thinking LED: a turn handed to the intelligence lights "thinking" ─
+class _Led:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, t):
+        self.sent.append(t)
+
+
+async def think_probe(supersede=False, with_led=True):
+    LIVE.clear()
+    LIVE.update({"intelligence": {"kind": "hermes", "url": "http://hm.test:8642/v1",
+                                  "fillers": [{"after": 30, "lines": ["One moment."]}]}})
+    config._BOOT = LIVE
+    a = IntelligenceAgent(echo_gate=EchoGate(), room="suite-think", session_mode="fresh")
+    led = _Led()
+    if with_led:
+        a.set_led(led)
+    a._ask_intelligence = lambda text: "It is noon."
+    spoken = []
+
+    async def push(frame, direction=None):
+        t = getattr(frame, "text", None)
+        if t is not None:
+            spoken.append(t)
+    a.push_frame = push
+    epoch = a._turn_epoch - 1 if supersede else a._turn_epoch
+    await a._run_turn("what time is it", epoch)
+    return led.sent, spoken
+
+
+sent, spoken = asyncio.run(think_probe())
+check("agent: a turn handed to the intelligence sends bot-thinking once, before the reply",
+      sent == ["bot-thinking"] and spoken and spoken[-1] == "It is noon.", f"sent={sent} spoken={spoken}")
+sent, spoken = asyncio.run(think_probe(supersede=True))
+check("agent: a superseded turn sends no thinking LED", sent == [], f"sent={sent}")
+sent, spoken = asyncio.run(think_probe(with_led=False))
+check("agent: no LED bound (stub/tests) -> the turn still answers", spoken and spoken[-1] == "It is noon.", str(spoken))
+
 # ── pins ──────────────────────────────────────────────────────────
 src = Path(CORE, "sonos_output.py").read_text()
 check("sonos pin: the duck holder skips loads while a reply clip is loading (counter held over connect+load)",
@@ -197,6 +236,8 @@ check("sonos pin: the duck holder skips loads while a reply clip is loading (cou
       and "self._reply_loading += 1\n        try:\n            await asyncio.wait_for(sw.connect(), timeout=5.0)" in src
       and "        finally:\n            self._reply_loading -= 1\n" in src)
 bot = Path(CORE).parent.joinpath("bot.py").read_text()
+check("bot pin: the intelligence gets this pipeline's LED sender right after it is built",
+      "led = LedSender(out)\n    if hasattr(intelligence, \"set_led\"):" in bot and "intelligence.set_led(led)" in bot)
 check("bot pin: the lane kind is lowercased and an unknown kind is logged, not silently stubbed",
       ").strip().lower()" in bot and "answers from the offline stub" in bot
       and "if _intel_kind in intelligence_lanes.KINDS" in bot)
