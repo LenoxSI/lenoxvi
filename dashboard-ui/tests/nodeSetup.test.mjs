@@ -604,3 +604,52 @@ test('the reset still finishes when the board drops off USB mid-reset', async ()
   await new ns.PulseReset(transport).reset()
   assert.deepEqual(sig, ['DTR=0', 'RTS=1', 'RTS=0'])
 })
+
+// ── A node that can't reach its host restarts in a loop ──────────────────
+
+test('save follows a node that resets mid-request and sends set again', async () => {
+  let sets = 0
+  const { port, link } = await openLink((req, p) => {
+    if (req.cmd === 'info') return [reply({ ...INFO, id: req.id })]
+    if (req.cmd !== 'set') return []
+    if (++sets === 1) { setTimeout(() => p.reenumerate(150), 0); return [] } // the first set lands in a reboot
+    return [reply({ cmd: 'set', id: req.id, ok: true, saved: ['bot_url'] })]
+  })
+  assert.deepEqual(await link.save({ bot_url: 'https://192.0.2.10:7860/api/offer' }), ['bot_url'])
+  assert.equal(sets, 2, 'sent again after the reset')
+  assert.equal(port.opens, 2, 'followed the board back')
+  await link.close()
+})
+
+test('save reopens a board that reset while the page sat idle', async () => {
+  const { port, link } = await openLink(simpleNode())
+  port.reenumerate(100) // the node restarted on its own between its last answer and Save
+  await tick(250)
+  assert.deepEqual(await link.save({ name: 'Den' }), ['name'])
+  assert.equal(port.requests.filter((r) => r.cmd === 'set').length, 1, 'nothing sent into the dead port')
+  assert.equal(port.opens, 2)
+  await link.close()
+})
+
+test('save still gives up when the node never answers', async () => {
+  const { link } = await openLink((req) => (req.cmd === 'info' ? [reply({ ...INFO, id: req.id })] : []))
+  await assert.rejects(link.save({ name: 'Den' }, { timeoutMs: 1500 }), /no reply to set/)
+  await link.close()
+})
+
+test('watchLink blames the host when the node reached Wi-Fi, then keeps restarting', async () => {
+  let up = false
+  const { link } = await openLink((req, p) => {
+    if (req.cmd !== 'info') return []
+    if (!up) {
+      up = true
+      setTimeout(() => p.reenumerate(100), 20) // Wi-Fi up, the offer fails, the node restarts ...
+      return [reply({ ...INFO, id: req.id, link: 'wifi_up' })]
+    }
+    return [reply({ ...INFO, id: req.id, link: 'wifi_connecting' })] // ... and the watch ends while it rejoins
+  })
+  const states = []
+  await assert.rejects(link.watchLink({ timeoutMs: 2000, onState: (s) => states.push(s) }), /host address/)
+  assert.deepEqual(states.slice(0, 2), ['wifi_up', 'wifi_connecting'])
+  await link.close()
+})
