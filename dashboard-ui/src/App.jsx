@@ -2067,6 +2067,11 @@ function NodeSetupPanel({ setMsg }) {
     try {
       const saved = await linkRef.current.save(fields)
       setForm(f => ({ ...f, wifi_pass: '' }))
+      // The node holds these now, whatever the restart and watch do next: the next Save compares against them.
+      setInfo(i => i && { ...i,
+        ...('name' in fields && { name: fields.name }),
+        ...('wifi_ssid' in fields && { wifi_ssid: fields.wifi_ssid }),
+        ...('bot_url' in fields && { bot_url: fields.bot_url, bot_url_saved: fields.bot_url !== '' }) })
       M(`Saved ${saved.join(', ')}. Restarting the node…`, 'pulse')
       await linkRef.current.restart()
       await watch()
