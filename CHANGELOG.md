@@ -9,6 +9,12 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- System tab: a Node setup panel sets up and flashes nodes over USB from Chrome or Edge (Web Serial): new boards, a
+  node moving to a new host address, a node whose Wi-Fi changed. It saves Wi-Fi, room name and host address straight
+  to the node (the password never reaches the bot), restarts it and follows it until it's online, and flashes the
+  full image set without touching the node's settings. Saving needs firmware 1.2.47+; any board can be flashed.
+  `deploy_firmware.sh` now publishes that set (bootloader, partition table, OTA data, `flash.json`) next to each
+  line's image, and `GET /api/dashboard/firmware/{track}/flash` serves it.
 - Nodes table: a "rollback <version>" chip when a node refused a firmware version that failed its health check and
   rolled back, and a "wifi rolled back" chip when its last Wi-Fi change never reached the bot and it went back to the
   previous network (from the node's connect report; `/status` rooms carry `fw_rejected` and `wifi_rollback`).

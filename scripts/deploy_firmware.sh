@@ -8,7 +8,8 @@
 #      nodes read them from NVS, set via the dashboard WiFi flow)
 #   2. Bump firmware/<track>/version.json (semver: pass "major"/"minor"/"patch",
 #      default patch; or --version X.Y.Z to set explicitly)
-#   3. Copy bin + version.json to the LenoxVI repo on the appliance host
+#   3. Copy bin + version.json + the full flash set (boot files + flash.json)
+#      to the LenoxVI repo on the appliance host
 #      (core/firmware_server.py reads the track dir per request — the bot is
 #      NOT restarted; a restart would drop every room)
 #   4. The node picks the image up on its next boot: restart just that line's
@@ -222,6 +223,14 @@ if [ "$BIN_VER" != "$NEW" ]; then
   exit 1
 fi
 
+# Full flash set for the dashboard's Node setup page (USB): the three boot
+# files + flash.json from THIS build's own flasher_args.json, staged outside
+# the repo so a refusal leaves nothing behind. Refuses an unexpected layout.
+FSTAGE="$(mktemp -d)"
+trap 'rm -rf "$FSTAGE"' EXIT
+python3 "$LVI_LOCAL/scripts/flash_manifest.py" "$FW_REPO/build/$TRACK" "$FSTAGE" \
+  || { echo "FATAL: flash set refused — not publishing"; exit 1; }
+
 # Manifest written only now that the gate passed: a failed check must not
 # leave a bumped version.json behind — the next run would compute its bump
 # from a version that never shipped.
@@ -236,10 +245,13 @@ EOF
 
 # ── 3. Ship to the appliance host ──────────────────────────────────────────────────
 echo "==> copying firmware + manifest to $LVI_HOST"
-scp -q "$BIN" "$VFILE" "$LVI_HOST:$LVI_REMOTE_DIR/"
+scp -q "$BIN" "$VFILE" "$FSTAGE"/bootloader.bin "$FSTAGE"/partition-table.bin \
+  "$FSTAGE"/ota_data_initial.bin "$FSTAGE"/flash.json "$LVI_HOST:$LVI_REMOTE_DIR/"
 # The manifest names only ${TRACK}_esp32.bin — drop any other .bin left in the
-# track dir (e.g. a pre-rename node_esp32.bin) so it holds exactly what's served.
-ssh "$LVI_HOST" "find ~/$LVI_REMOTE_DIR -maxdepth 1 -name '*.bin' ! -name '${TRACK}_esp32.bin' -delete"
+# track dir (e.g. a pre-rename node_esp32.bin) so it holds exactly what's
+# served. Exception: the flash set's boot files are served too (flash.json's
+# parts) — they stay.
+ssh "$LVI_HOST" "find ~/$LVI_REMOTE_DIR -maxdepth 1 -name '*.bin' ! -name '${TRACK}_esp32.bin' ! -name 'bootloader.bin' ! -name 'partition-table.bin' ! -name 'ota_data_initial.bin' -delete"
 
 # ── 4. Hand off to the node ────────────────────────────────────────────────
 # No bot restart: firmware_server serves the new files on the next request.

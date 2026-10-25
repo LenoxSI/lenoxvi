@@ -48,6 +48,8 @@
 /* Scan only this directory for class names: the default scans the whole
    repo, so a word in README or a Python file could add CSS rules. */
 @import "tailwindcss" source(".");
+/* The USB setup module is logic, not markup: keep its words out of the CSS. */
+@source not "./nodeSetup.js";
 @import "@heroui/styles";
 @import "./lenoxvi-theme.css";
 

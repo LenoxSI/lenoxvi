@@ -10,6 +10,7 @@ the LAN can read status and edit mappings — accepted risk.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -2786,6 +2787,10 @@ async def oww_delete_model(name: str, source: str = ""):
 
 _FIRMWARE_SWAP_LOCKS = {t: asyncio.Lock() for t in firmware_image.TRACKS}
 
+# Node setup's boot files (deploy_firmware.sh publishes them): a Firmware-card
+# upload replaces the app only and must never delete them.
+FLASH_SET_FILES = ("bootloader.bin", "partition-table.bin", "ota_data_initial.bin")
+
 
 def _check_firmware_image(tmp: Path, size: int, track: str) -> str:
     """Validate a staged upload for `track`; returns its version or raises
@@ -2843,9 +2848,11 @@ def _swap_firmware_image(tmp: Path, dest: Path, version: str) -> None:
     mtmp.replace(mpath)
     # The manifest now names only dest: any other .bin in the track dir
     # (e.g. a pre-rename node_esp32.bin) is unreachable — remove it so the
-    # directory holds exactly what's served.
+    # directory holds exactly what's served. Exception: Node setup's boot
+    # files (FLASH_SET_FILES) are served too, via the flash-set route —
+    # they stay.
     for stale in dest.parent.glob("*.bin"):
-        if stale.name != dest.name:
+        if stale.name != dest.name and stale.name not in FLASH_SET_FILES:
             stale.unlink(missing_ok=True)
 
 
@@ -2926,3 +2933,49 @@ async def upload_firmware(
 # that was never validated (or never uploaded). The upload route above is
 # the only manifest writer now: version AND track come from the image
 # itself, guarded by the board-identity check.
+
+
+# ── node setup: the full USB flash set (System tab) ──────────────────
+
+_SETTINGS_REGION = (0x9000, 0x10000)  # nvs + phy_init: never part of a flash set
+
+
+def _flash_set(track: str) -> dict:
+    """The full flash set for one line (bootloader, partition table, OTA data,
+    app). Blocking file I/O — call in a thread."""
+    d = firmware_dir() / track
+    root = d.resolve()
+    missing = HTTPException(
+        status_code=404,
+        detail=f"no full flash set for '{track}' — publish one with deploy_firmware.sh")
+    try:
+        fm = json.loads((d / "flash.json").read_text())
+        vm = json.loads((d / "version.json").read_text())
+        parts = [{"name": str(p["name"]), "file": str(p["file"]), "offset": int(p["offset"])}
+                 for p in fm["parts"]]
+        parts.append({"name": "app", "file": str(vm["filename"]), "offset": int(fm["app_offset"])})
+        flash = {k: str(fm["flash"][k]) for k in ("mode", "freq", "size")}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise missing
+    lo, hi = _SETTINGS_REGION
+    out = []
+    for p in parts:
+        f = (d / p["file"]).resolve()
+        if f.parent != root or not f.is_file():
+            raise missing
+        data = f.read_bytes()
+        if p["offset"] < hi and p["offset"] + len(data) > lo:
+            raise HTTPException(status_code=404,
+                                detail=f"flash set for '{track}' would write the node's settings region — refusing")
+        out.append({**p, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    return {"track": track, "version": str(vm.get("version", "")), "flash": flash, "parts": out}
+
+
+@router.get("/firmware/{track}/flash")
+async def firmware_flash_set(track: str):
+    """Full flash set for the System tab's Node setup page. Parts download
+    from /firmware/{track}/{file}. The settings region is never part of a
+    set, so a reflash keeps the node's Wi-Fi, name and host address."""
+    if track not in firmware_image.TRACKS:
+        raise HTTPException(status_code=404, detail=f"unknown track '{track}'")
+    return await asyncio.to_thread(_flash_set, track)

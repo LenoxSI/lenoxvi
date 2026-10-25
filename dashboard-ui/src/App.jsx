@@ -6,6 +6,7 @@
 // against the live rig.
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { isSupported, hostOfferUrl, validateSettings, NodeLink } from './nodeSetup.js'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
@@ -2008,6 +2009,147 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
     </Section>
   )
 }
+const NS_LINK = { boot: 'starting', wifi_connecting: 'joining wi-fi', wifi_up: 'no host yet', bot: 'online' }
+const NS_STAGE = { boot: 'Restarting…', wifi_connecting: 'Joining Wi-Fi…', wifi_up: 'Wi-Fi up, reaching the host…', bot: 'Online.' }
+
+function NodeSetupPanel({ setMsg }) {
+  const linkRef = useRef(null)
+  const [phase, setPhase] = useState('idle')        // idle | connecting | ready | unknown | saving | flashing | watching
+  const [info, setInfo] = useState(null)            // last info reply; null = board didn't answer
+  const [form, setForm] = useState({ wifi_ssid: '', wifi_pass: '', name: '', bot_url: '' })
+  const [pickTrack, setPickTrack] = useState('')    // unknown boards only, no default
+  const [progress, setProgress] = useState(null)    // { part, pct } while flashing
+  const [stage, setStage] = useState('')
+  const M = (text, kind) => setMsg(text, kind, 'Node setup')
+  useEffect(() => () => { linkRef.current?.close() }, [])
+
+  const fill = i => setForm({ wifi_ssid: i.wifi_ssid || '', wifi_pass: '', name: i.name || '',
+                              bot_url: hostOfferUrl(window.location.origin) })
+  const changed = () => {
+    const f = {}
+    if (!info || form.name !== info.name) f.name = form.name
+    if (!info || form.bot_url !== info.bot_url || !info.bot_url_saved) f.bot_url = form.bot_url
+    if (form.wifi_pass || (info && form.wifi_ssid !== info.wifi_ssid)) { f.wifi_ssid = form.wifi_ssid; f.wifi_pass = form.wifi_pass }
+    return f
+  }
+  const connect = async () => {
+    setPhase('connecting'); M('Pick the node’s USB port…', 'pulse')
+    try {
+      const link = await NodeLink.request(); linkRef.current = link
+      M('Asking the node who it is…', 'pulse')
+      try {
+        const i = await link.info(); setInfo(i); fill(i); setPhase('ready')
+        M(`Connected: ${i.name} (${i.track}, ${i.fw}).`, 'ok')
+      } catch {
+        setInfo(null); setForm(f => ({ ...f, bot_url: hostOfferUrl(window.location.origin) })); setPhase('unknown')
+        M('No LenoxVI firmware answered: blank board, another firmware, or older than 1.2.47.', 'muted')
+      }
+    } catch (e) { setPhase('idle'); M('Connect failed: ' + e.message, 'err') }
+  }
+  const watch = async () => {
+    setPhase('watching'); setStage('boot')
+    try {
+      await linkRef.current.watchLink({ onState: setStage })
+      const i = await linkRef.current.info(); setInfo(i); fill(i); setPhase('ready')
+      let host = i.bot_url
+      try { host = new URL(i.bot_url).host } catch { host = i.bot_url }
+      M(`${i.name} is online on ${host}.`, 'ok')
+    } catch (e) { setPhase('ready'); M(e.message, 'err') }
+  }
+  const save = async () => {
+    const fields = changed()
+    if (!Object.keys(fields).length) { M('Nothing changed.', 'muted'); return }
+    // A new network needs its password: an empty field would save it as an open network.
+    if ('wifi_ssid' in fields && !fields.wifi_pass) { M('Enter the password for that Wi-Fi network.', 'err'); return }
+    const bad = validateSettings(fields)
+    if (bad) { M(bad, 'err'); return }
+    setPhase('saving'); M('Saving to the node…', 'pulse')
+    try {
+      const saved = await linkRef.current.save(fields)
+      setForm(f => ({ ...f, wifi_pass: '' }))
+      M(`Saved ${saved.join(', ')}. Restarting the node…`, 'pulse')
+      await linkRef.current.restart()
+      await watch()
+    } catch (e) { setForm(f => ({ ...f, wifi_pass: '' })); setPhase(info ? 'ready' : 'unknown'); M('Save failed: ' + e.message, 'err') }
+  }
+  const flash = async () => {
+    const track = info?.track || pickTrack
+    if (!track) { M('Pick the board’s line first.', 'err'); return }
+    if (!window.confirm(`Flash the ${track.toUpperCase()} firmware to this board?\n\n` +
+        'Wi-Fi, name and host address are kept. Wrong line = dead node (USB rescue).')) return
+    setPhase('flashing'); setProgress({ part: '', pct: 0 })
+    try {
+      await linkRef.current.flash(track, { onProgress: setProgress })
+      M('Flashed. Waiting for the node…', 'pulse')
+      try {
+        const i = await linkRef.current.info({ timeoutMs: 30000 }); setInfo(i); fill(i); setPhase('ready')
+        M(`Flashed ${i.fw}.` + (i.bot_url_saved ? '' : ' Save the host address to finish.'), 'ok')
+      } catch { setPhase('unknown'); M('Flashed, but the node didn’t answer on USB.', 'err') }
+    } catch (e) { setPhase(info ? 'ready' : 'unknown'); M('Flash failed: ' + e.message, 'err') }
+    finally { setProgress(null) }
+  }
+  const disconnect = async () => {
+    await linkRef.current?.close(); linkRef.current = null
+    setInfo(null); setPhase('idle'); M('Disconnected.', 'muted')
+  }
+  const busy = ['connecting', 'saving', 'flashing', 'watching'].includes(phase)
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  return (
+    <Section title="Node setup" note="Flash and set up a node over USB: new boards, a new host, a changed Wi-Fi.">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        {!isSupported() ? (
+          <span className="text-[13px]">Node setup needs Chrome or Edge on a desktop computer.</span>
+        ) : phase === 'idle' || phase === 'connecting' ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[13px]">Plug the node into this computer. Flex and array boards: use the XIAO’s USB-C port, not the one by the headphone jack.</span>
+            <button className={BTN_PRIMARY} style={{ marginLeft: 'auto' }} disabled={busy} onClick={connect}>
+              {phase === 'connecting' ? 'Connecting…' : 'Connect'}
+            </button>
+          </div>
+        ) : (
+          <>
+            {info && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={CHIP_CLS}>{esc(info.track)}</span>
+                <span className={CHIP_CLS}>{esc(info.fw)}</span>
+                <span className={CHIP_CLS}>{NS_LINK[info.link] || esc(info.link)}</span>
+                <span className="text-[13px] font-mono">{esc(info.name)}</span>
+                <span className="text-[12px] font-medium text-[var(--muted)]">{info.bot_url_saved ? 'host: saved' : 'host: built-in'}</span>
+              </div>
+            )}
+            {phase === 'unknown' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[12px] font-medium text-[var(--muted)]">Line</span>
+                <select className={`${INPUT_CLS} w-[150px]`} value={pickTrack} onChange={e => setPickTrack(e.target.value)}>
+                  <option value="" disabled>pick a line…</option>
+                  <option value="array">array</option>
+                  <option value="flex">flex</option>
+                  <option value="waveshare">waveshare</option>
+                </select>
+              </div>
+            )}
+            {info && (
+              <div className="grid gap-2">
+                <Field label="Wi-Fi network"><input className={INPUT_CLS} value={form.wifi_ssid} onChange={set('wifi_ssid')} /></Field>
+                <Field label="Wi-Fi password"><input className={INPUT_CLS} type="password" autoComplete="new-password" placeholder="unchanged" value={form.wifi_pass} onChange={set('wifi_pass')} /></Field>
+                <Field label="Room name"><input className={INPUT_CLS} value={form.name} onChange={set('name')} /></Field>
+                <Field label="Host address"><input className={INPUT_CLS} value={form.bot_url} onChange={set('bot_url')} /></Field>
+              </div>
+            )}
+            {progress && <span className="text-[13px]">Flashing {esc(progress.part)}… {Math.round(progress.pct)}%</span>}
+            {phase === 'watching' && <span className="text-[13px]">{NS_STAGE[stage] || 'Restarting…'}</span>}
+            <div className="flex gap-2 flex-wrap">
+              {info && <button className={BTN_PRIMARY} disabled={busy} onClick={save}>Save to node</button>}
+              <button className={BTN_DEFAULT} disabled={busy || (!info && !pickTrack)} onClick={flash}>Flash firmware</button>
+              <button className={BTN_DEFAULT} style={{ marginLeft: 'auto' }} disabled={busy} onClick={disconnect}>Disconnect</button>
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
+  )
+}
 // Wake name (top of the Wake word card): what the house is called. A bare
 // "Hey <name>." (the wake word said again while the room listens) is dropped,
 // mis-spellings included — matched by sound, so there's no list to keep.
@@ -2916,6 +3058,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
     </Section>
 
     <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
+    <NodeSetupPanel setMsg={setMsg} />
     </>
   )
 }

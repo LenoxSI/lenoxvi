@@ -1,0 +1,1 @@
+import{o as e}from"./lib-B4N_ywlb.js";export{e as ESP32C5ROM};
