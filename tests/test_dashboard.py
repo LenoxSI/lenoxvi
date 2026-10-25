@@ -1972,6 +1972,78 @@ def main():
               and "Waveshare ESP32-S3-AUDIO track" in _xa.text,
               f"{_xw.status_code} {_xw.text[:140]} | {_xa.status_code} {_xa.text[:140]}")
 
+        # ── node setup route: GET /api/dashboard/firmware/{track}/flash ──
+        # The full flash set (boot files + app) the System tab's Node setup
+        # page flashes over USB. Uses the waveshare track dir, restored after.
+        import hashlib as _hlNS
+        _fsNS = Path("firmware/waveshare")
+        _fsNS.mkdir(parents=True, exist_ok=True)
+        _keepNS = {q.name: q.read_bytes() for q in _fsNS.iterdir() if q.is_file()}
+        try:
+            for _q in list(_fsNS.iterdir()):
+                if _q.is_file():
+                    _q.unlink()
+            (_fsNS / "waveshare_esp32.bin").write_bytes(_fake_image5b("1.2.47", "waveshare"))
+            (_fsNS / "version.json").write_text(json.dumps({"version": "1.2.47", "filename": "waveshare_esp32.bin"}))
+            _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
+            check("node setup route: an app-only track has no full flash set (404 naming deploy_firmware)",
+                  _rNS.status_code == 404 and "deploy_firmware" in _rNS.text, f"{_rNS.status_code} {_rNS.text[:160]}")
+            _goodNS = {"flash": {"mode": "dio", "freq": "80m", "size": "8MB"},
+                       "parts": [{"name": "bootloader", "file": "bootloader.bin", "offset": 0},
+                                 {"name": "partition-table", "file": "partition-table.bin", "offset": 32768},
+                                 {"name": "ota-data", "file": "ota_data_initial.bin", "offset": 65536}],
+                       "app_offset": 131072}
+            for _n, _b in (("bootloader.bin", b"B" * 1000), ("partition-table.bin", b"P" * 300),
+                           ("ota_data_initial.bin", b"O" * 200)):
+                (_fsNS / _n).write_bytes(_b)
+            (_fsNS / "flash.json").write_text(json.dumps(_goodNS))
+            _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
+            _jNS = _rNS.json() if _rNS.status_code == 200 else {}
+            check("node setup route: full set -> 4 parts at the manifest offsets, app from version.json",
+                  _rNS.status_code == 200 and _jNS.get("version") == "1.2.47" and _jNS.get("track") == "waveshare"
+                  and [p.get("offset") for p in _jNS.get("parts", [])] == [0, 32768, 65536, 131072]
+                  and _jNS["parts"][-1].get("file") == "waveshare_esp32.bin"
+                  and _jNS.get("flash") == {"mode": "dio", "freq": "80m", "size": "8MB"},
+                  f"{_rNS.status_code} {_rNS.text[:200]}")
+            check("node setup route: sizes + sha256 match the files on disk",
+                  bool(_jNS) and all(p["size"] == (_fsNS / p["file"]).stat().st_size
+                                     and p["sha256"] == _hlNS.sha256((_fsNS / p["file"]).read_bytes()).hexdigest()
+                                     for p in _jNS["parts"]), str(_jNS)[:200])
+            _rNS = client.get("/api/dashboard/firmware/warp/flash")
+            check("node setup route: unknown track 404s naming it",
+                  _rNS.status_code == 404 and "unknown track" in _rNS.text, f"{_rNS.status_code} {_rNS.text[:120]}")
+            _badNS = json.loads(json.dumps(_goodNS))
+            _badNS["parts"][1]["offset"] = 0x9000
+            (_fsNS / "flash.json").write_text(json.dumps(_badNS))
+            _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
+            check("node setup route: a part in the settings region (0x9000-0xFFFF) is refused",
+                  _rNS.status_code == 404 and "settings" in _rNS.text, f"{_rNS.status_code} {_rNS.text[:160]}")
+            _badNS["parts"][1]["offset"] = 32768
+            _badNS["parts"][1]["file"] = "../../config.yaml"
+            (_fsNS / "flash.json").write_text(json.dumps(_badNS))
+            _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
+            check("node setup route: a part outside the track dir is refused",
+                  _rNS.status_code == 404 and "no full flash set" in _rNS.text, f"{_rNS.status_code} {_rNS.text[:160]}")
+            (_fsNS / "flash.json").write_text("{not json")
+            _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
+            check("node setup route: a corrupt flash.json is a clear 404, never a 500",
+                  _rNS.status_code == 404 and "no full flash set" in _rNS.text, f"{_rNS.status_code} {_rNS.text[:160]}")
+            (_fsNS / "flash.json").write_text(json.dumps(_goodNS))
+            _ruNS = client.post("/api/dashboard/firmware/upload",
+                                files={"file": ("waveshare.bin", _fake_image5b("1.2.48", "waveshare"),
+                                                "application/octet-stream")},
+                                data={"track": "waveshare"})
+            check("node setup route: a Firmware-card upload keeps the three boot files",
+                  _ruNS.status_code == 200 and all((_fsNS / n).is_file() for n in
+                                                   ("bootloader.bin", "partition-table.bin", "ota_data_initial.bin")),
+                  f"{_ruNS.status_code} {_ruNS.text[:160]} {sorted(q.name for q in _fsNS.iterdir())}")
+        finally:
+            for _q in list(_fsNS.iterdir()):
+                if _q.is_file():
+                    _q.unlink()
+            for _n, _b in _keepNS.items():
+                (_fsNS / _n).write_bytes(_b)
+
         # The OTA server (core/firmware_server.py) — first suite
         # coverage of the node-facing routes. Tracks point at this scratch.
         import firmware_server as _fws
@@ -9322,6 +9394,35 @@ def main():
     check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
           "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
           and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
+
+    # ── node setup ui (App.jsx): the System tab's USB setup panel ──
+    _nsUI = _fnUI("function NodeSetupPanel({ setMsg }) {")
+    _sysNS = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
+    check("node setup ui: the panel renders right after the Firmware panel on the System tab",
+          bool(_reui.search(r"<FirmwarePanel [^>]*/>\s*<NodeSetupPanel setMsg=\{setMsg\} />", _sysNS)),
+          _sysNS[-300:] or "no System()")
+    check("node setup ui: App.jsx imports the USB module and never loads esptool-js itself",
+          "from './nodeSetup.js'" in _appsrc and "esptool-js" not in _appsrc)
+    check("node setup ui: the password field is a password input that never autofills",
+          'type="password"' in _nsUI and 'autoComplete="new-password"' in _nsUI, _nsUI[:200] or "no NodeSetupPanel")
+    check("node setup ui: an unknown board's line picker has no default",
+          '<option value="" disabled>pick a line…</option>' in _nsUI
+          and "const [pickTrack, setPickTrack] = useState('')" in _nsUI, _nsUI[:200] or "no NodeSetupPanel")
+    _flNS = _nsUI[_nsUI.find("const flash = async"):_nsUI.find("const disconnect = async")] if _nsUI else ""
+    check("node setup ui: every flash asks first",
+          "window.confirm(" in _flNS and ".flash(" in _flNS and _flNS.find("window.confirm(") < _flNS.find(".flash("),
+          _flNS[:300] or "no flash()")
+    _svNS = _nsUI[_nsUI.find("const save = async"):_nsUI.find("const flash = async")] if _nsUI else ""
+    check("node setup ui: the password field is cleared after a save, success or failure",
+          _svNS.count("setForm(f => ({ ...f, wifi_pass: '' }))") >= 2, _svNS[:300] or "no save()")
+    check("node setup ui: a new network without its password is refused before anything is sent",
+          "'wifi_ssid' in fields && !fields.wifi_pass" in _svNS and ".save(" in _svNS
+          and _svNS.find("'wifi_ssid' in fields && !fields.wifi_pass") < _svNS.find(".save("), _svNS[:300] or "no save()")
+    check("node setup ui: the password never reaches a message or the console",
+          bool(_nsUI) and "wifi_pass" not in "".join(_reui.findall(r"(?:\bM|setMsg|console\.\w+)\(([^)]*)\)", _nsUI)))
+    _cssNS = (REPO_CORE.parent / "dashboard-ui" / "src" / "index.css").read_text()
+    check("node setup ui: the USB module stays out of the CSS scan (its words would add rules)",
+          '@source not "./nodeSetup.js";' in _cssNS)
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
