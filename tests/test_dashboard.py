@@ -9415,6 +9415,10 @@ def main():
     _svNS = _nsUI[_nsUI.find("const save = async"):_nsUI.find("const flash = async")] if _nsUI else ""
     check("node setup ui: the password field is cleared after a save, success or failure",
           _svNS.count("setForm(f => ({ ...f, wifi_pass: '' }))") >= 2, _svNS[:300] or "no save()")
+    check("node setup ui: a save the node confirmed becomes the page's record before the restart and watch",
+          ".save(fields)" in _svNS and "setInfo(" in _svNS and ".restart()" in _svNS
+          and _svNS.find(".save(fields)") < _svNS.find("setInfo(") < _svNS.find(".restart()"),
+          _svNS[:400] or "no save()")
     check("node setup ui: a new network without its password is refused before anything is sent",
           "'wifi_ssid' in fields && !fields.wifi_pass" in _svNS and ".save(" in _svNS
           and _svNS.find("'wifi_ssid' in fields && !fields.wifi_pass") < _svNS.find(".save("), _svNS[:300] or "no save()")
