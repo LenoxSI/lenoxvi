@@ -101,6 +101,27 @@ export function checkManifest(manifest, track) {
   return null
 }
 
+/** esptool.py's hard reset for the board's own USB-Serial-JTAG port: DTR low (normal boot, not
+ *  download mode), RTS high (chip in reset), then RTS low. esptool-js 0.7.0's HardReset only
+ *  ever lowers RTS, so its after('hard_reset') left a freshly flashed chip sitting in the flasher.
+ *  The board may drop off USB as it resets: a failed RTS release is fine (its reset clears RTS). */
+export class PulseReset {
+  constructor(transport) {
+    this.transport = transport
+  }
+
+  async reset() {
+    await this.transport.setDTR(false)
+    await this.transport.setRTS(true)
+    await sleep(200)
+    await this.transport.setRTS(false).catch(() => {})
+    await sleep(200)
+  }
+}
+
+/** Handed to esptool-js so after('hard_reset') really resets the board. */
+export const RESET_CONSTRUCTORS = { hardReset: (transport) => new PulseReset(transport) }
+
 export class NodeLink {
   /** @param port Web Serial-like port; opts.log(msg) never receives secrets */
   constructor(port, { log = () => {}, serial = globalThis.navigator?.serial } = {}) {
@@ -316,7 +337,7 @@ export class NodeLink {
       const { ESPLoader, Transport } = await loadEsptool()
       transport = new Transport(this.port)
       const quiet = { clean() {}, write() {}, writeLine() {} }
-      const loader = new ESPLoader({ transport, baudrate: 460800, terminal: quiet })
+      const loader = new ESPLoader({ transport, baudrate: 460800, terminal: quiet, resetConstructors: RESET_CONSTRUCTORS })
       this.log('connecting to the bootloader')
       const chip = await loader.main()
       if (!String(chip).includes('ESP32-S3')) throw new Error(`not an ESP32-S3 (${chip}): refusing to flash`)

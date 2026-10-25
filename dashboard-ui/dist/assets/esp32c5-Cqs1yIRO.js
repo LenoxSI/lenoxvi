@@ -1,0 +1,1 @@
+import{o as e}from"./lib-CRVNiAef.js";export{e as ESP32C5ROM};
