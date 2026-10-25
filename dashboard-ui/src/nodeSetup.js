@@ -12,6 +12,9 @@ const BAUD = 115200
 const enc = new TextEncoder()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** The node's link states, in boot order (firmware link_state.h). */
+const LINK_STAGES = ['boot', 'wifi_connecting', 'wifi_up', 'bot']
+
 /** Resolve with `p`, or with `fallback` after `ms`. */
 function within(p, ms, fallback) {
   let t
@@ -252,13 +255,40 @@ export class NodeLink {
   }
 
   /** `set` -> resolves with reply.saved; throws Error(reply.error) when !ok. */
-  async save(fields) {
+  async save(fields, { timeoutMs = 45000 } = {}) {
     const bad = validateSettings(fields)
     if (bad) throw new Error(bad)
     this.log(`saving ${Object.keys(fields).join(', ')}`) // field names only, never values
-    const reply = await this._request('set', fields, 10000)
+    const reply = await this._requestFollowing('set', fields, timeoutMs)
     if (!reply.ok) throw Object.assign(new Error(reply.error), { saved: reply.saved ?? [] })
     return reply.saved
+  }
+
+  /** The board dropped off USB (it reset): close our side, reopen it when it comes back. */
+  async _follow(deadline) {
+    await this._release()
+    await this.port.close().catch(() => {})
+    await this._reopen(deadline)
+  }
+
+  /** Send until the node answers, following it across resets: a node that can't reach its host
+   *  restarts in a loop, so one send can land in a reboot. Idempotent requests only (set). */
+  async _requestFollowing(cmd, fields, timeoutMs) {
+    const deadline = Date.now() + timeoutMs
+    for (let left = timeoutMs; left > 0; left = deadline - Date.now()) {
+      if (!this._alive) {
+        if (!(await this._follow(deadline).then(() => true, () => false))) break
+        this.log(`the board reset, sending ${cmd} again`)
+      }
+      const gone = this._loop.then(() => null)
+      const sent = this._request(cmd, fields, Math.min(3000, left)).catch((err) => {
+        if (/too long/.test(err.message)) throw err
+        return null // no reply in time, or the port went away mid-send
+      })
+      const reply = await Promise.race([sent, gone])
+      if (reply) return reply
+    }
+    throw new Error(`no reply to ${cmd}`)
   }
 
   /** `restart`, then wait for the port to re-enumerate and reopen it. */
@@ -280,12 +310,13 @@ export class NodeLink {
   async watchLink({ timeoutMs = 90000, onState = () => {} } = {}) {
     const deadline = Date.now() + timeoutMs
     let link = null
+    // Judge by the furthest stage reached, not the last one: a node that can't reach its host
+    // restarts in a loop, so the watch often ends while it is booting or joining Wi-Fi again.
+    let best = -1
     for (let left = timeoutMs; left > 0; left = deadline - Date.now()) {
       if (!this._alive) {
         // The board reset (a node that can't reach its host restarts in a loop): follow it back.
-        await this._release()
-        await this.port.close().catch(() => {})
-        if (!(await this._reopen(deadline).then(() => true, () => false))) break
+        if (!(await this._follow(deadline).then(() => true, () => false))) break
       }
       // Only silence keeps us polling; another board, protocol or !ok reply ends the watch as is.
       const reply = await this.info({ timeoutMs: Math.min(3000, left) }).catch((err) => {
@@ -296,10 +327,11 @@ export class NodeLink {
         link = reply.link
         onState(link)
       }
+      best = Math.max(best, LINK_STAGES.indexOf(link))
       if (link === 'bot') return reply
       await sleep(Math.max(0, Math.min(500, deadline - Date.now())))
     }
-    if (link === 'wifi_up') throw new Error('Wi-Fi is up but the host never answered: check the host address')
+    if (best === LINK_STAGES.indexOf('wifi_up')) throw new Error('Wi-Fi is up but the host never answered: check the host address')
     if (link === null) throw new Error('the board stopped answering over USB')
     throw new Error('Wi-Fi never connected: check the network name and password')
   }
