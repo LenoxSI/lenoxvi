@@ -569,3 +569,38 @@ test('flash: a failed write disconnects, reopens the link and rethrows the origi
   assert.equal((await link.info({ timeoutMs: 1000 })).track, 'flex')
   await link.close()
 })
+
+test('the post-flash hard reset really pulses RTS with DTR low (real esptool-js)', async () => {
+  // What flash() hands esptool-js ...
+  const { port, link } = await openLink(simpleNode())
+  await link.info({ timeoutMs: 1000 })
+  const set = await flashSet('flex')
+  const calls = []
+  await link.flash('flex', { fetchFn: set.fetchFn, loadEsptool: async () => fakeEsptool(port, calls) })
+  await link.close()
+  const { resetConstructors } = calls.find((c) => c[0] === 'ESPLoader')[1]
+  assert.equal(resetConstructors, ns.RESET_CONSTRUCTORS)
+  // ... run through the REAL esptool-js after('hard_reset'), on a transport that records the lines.
+  const { ESPLoader } = await import('esptool-js')
+  const run = async (opts) => {
+    const sig = []
+    const transport = { setRTS: async (v) => { sig.push(`RTS=${+v}`) }, setDTR: async (v) => { sig.push(`DTR=${+v}`) }, getInfo: () => 'test', tracing: false }
+    const quiet = { clean() {}, write() {}, writeLine() {} }
+    await new ESPLoader({ transport, baudrate: 460800, terminal: quiet, ...opts }).after('hard_reset', false)
+    return sig
+  }
+  assert.deepEqual(await run({ resetConstructors }), ['DTR=0', 'RTS=1', 'RTS=0'], 'chip held in reset, then a normal boot')
+  // Canary: esptool-js 0.7.0's own hard reset never raises RTS, the bug the override fixes.
+  // If an upgrade changes this, check whether the override is still needed.
+  assert.deepEqual(await run({}), ['RTS=0'])
+})
+
+test('the reset still finishes when the board drops off USB mid-reset', async () => {
+  const sig = []
+  const transport = {
+    setDTR: async (v) => { sig.push(`DTR=${+v}`) },
+    setRTS: async (v) => { sig.push(`RTS=${+v}`); if (!v) throw new Error('device lost') },
+  }
+  await new ns.PulseReset(transport).reset()
+  assert.deepEqual(sig, ['DTR=0', 'RTS=1', 'RTS=0'])
+})
