@@ -9419,6 +9419,34 @@ def main():
           ".save(fields)" in _svNS and "setInfo(" in _svNS and ".restart()" in _svNS
           and _svNS.find(".save(fields)") < _svNS.find("setInfo(") < _svNS.find(".restart()"),
           _svNS[:400] or "no save()")
+    # ── node setup ui: the audio chip (XMOS) step ──
+    _wNS = _nsUI[_nsUI.find("const watch = async"):_nsUI.find("const save = async")] if _nsUI else ""
+    check("node setup ui: the sound check runs only after the node is reported online",
+          "is online on" in _wNS and "checkSound(" in _wNS and _wNS.find("is online on") < _wNS.find("checkSound("),
+          _wNS[:300] or "no watch()")
+    _csNS = _nsUI[_nsUI.find("const checkSound = async"):_nsUI.find("const connect = async")] if _nsUI else ""
+    check("node setup ui: only array and flex boards get the sound check",
+          "if (!['array', 'flex'].includes(track)) return" in _csNS, _csNS[:300] or "no checkSound()")
+    check("node setup ui: no sound points at the audio chip step",
+          "its audio chip sends no sound. Flash the audio chip to fix it." in _csNS
+          and "['silent', 'wrong'].includes(chip.state) ? BTN_PRIMARY : BTN_DEFAULT" in _nsUI, _csNS[:300] or "no checkSound()")
+    check("node setup ui: the audio chip board choice has no default",
+          '<option value="" disabled>pick a board…</option>' in _nsUI and "disabled={!dfu.line" in _nsUI,
+          _nsUI[:200] or "no NodeSetupPanel")
+    _cfNS = _nsUI[_nsUI.find("const chipFlash = async"):_nsUI.find("const busy = [")] if _nsUI else ""
+    check("node setup ui: an audio chip flash downloads and checks before it asks, and asks before it writes",
+          "fetchXmosImage(" in _cfNS and "window.confirm(" in _cfNS and ".flash(" in _cfNS
+          and _cfNS.find("fetchXmosImage(") < _cfNS.find("window.confirm(") < _cfNS.find(".flash("),
+          _cfNS[:400] or "no chipFlash()")
+    check("node setup ui: the audio chip confirmation names the board's line",
+          "line.toUpperCase()" in _cfNS[:_cfNS.find(".flash(")] if _cfNS else False, _cfNS[:300] or "no chipFlash()")
+    _cfiNS = _nsUI[_nsUI.find("const chipFile = async"):_nsUI.find("const chipFlash = async")] if _nsUI else ""
+    check("node setup ui: a file instead is held to the same image check",
+          "checkXmosImage(" in _cfiNS, _cfiNS[:300] or "no chipFile()")
+    check("node setup ui: Windows shows the one-time driver step before Connect",
+          "platformOf() === 'windows'" in _nsUI and "Zadig" in _appsrc, "no Windows driver step")
+    check("node setup ui: the audio chip module is imported up front, not as a lazy chunk",
+          "from './xmosDfu.js'" in _appsrc and "import('./xmosDfu.js')" not in _appsrc, "xmosDfu import")
     check("node setup ui: a new network without its password is refused before anything is sent",
           "'wifi_ssid' in fields && !fields.wifi_pass" in _svNS and ".save(" in _svNS
           and _svNS.find("'wifi_ssid' in fields && !fields.wifi_pass") < _svNS.find(".save("), _svNS[:300] or "no save()")
@@ -9427,6 +9455,30 @@ def main():
     _cssNS = (REPO_CORE.parent / "dashboard-ui" / "src" / "index.css").read_text()
     check("node setup ui: the USB module stays out of the CSS scan (its words would add rules)",
           '@source not "./nodeSetup.js";' in _cssNS)
+    check("node setup ui: the audio chip module stays out of the CSS scan (its words would add rules)",
+          '@source not "./xmosDfu.js";' in _cssNS)
+    # ── node setup ui: audio chip review fixes ──
+    _cnNS = _nsUI[_nsUI.find("const connect = async"):_nsUI.find("const watch = async")] if _nsUI else ""
+    _dcNS = _nsUI[_nsUI.find("const disconnect = async"):_nsUI.find("const openChip")] if _nsUI else ""
+    check("node setup ui: a finished audio chip flash closes the serial link so Connect shows (the cable moved)",
+          ".flash(" in _cfNS and "linkRef.current = null" in _cfNS and "setPhase('idle')" in _cfNS
+          and "setChip({ state: '', ver: '' })" in _cfNS and _cfNS.find(".flash(") < _cfNS.find("setPhase('idle')"),
+          _cfNS[:400] or "no chipFlash()")
+    check("node setup ui: the finished audio chip step says what comes next, not the safe-mode steps",
+          "dfu.phase === 'done' ? XMOS_DONE : XMOS_STEPS[dfu.line]" in _nsUI, "no done text in the step")
+    check("node setup ui: only the latest sound check reports (a newer check, Connect and Disconnect drop it)",
+          "const gen = ++checkGen.current" in _csNS and "gen !== checkGen.current" in _csNS
+          and "checkGen.current++" in _cnNS and "checkGen.current++" in _dcNS, _csNS[:300] or "no checkSound()")
+    check("node setup ui: Connect and Disconnect clear the last board's sound check",
+          "setChip({ state: '', ver: '' })" in _cnNS and "setChip({ state: '', ver: '' })" in _dcNS,
+          "connect/disconnect keep the old chip state")
+    check("node setup ui: a refused dashboard token ends the sound check instead of asking again",
+          "e.status === 401" in _csNS and "stop: () =>" in _csNS and "denied" in _csNS, _csNS[:300] or "no checkSound()")
+    check("node setup ui: the check after an audio chip flash expects the node's own line's version",
+          "expectVersion(" in _csNS and "checkSound(i.name, i.track, true)" in _cnNS and "wrong: 'wrong image'" in _appsrc,
+          _csNS[:300] or "no checkSound()")
+    check("node setup ui: the file row names the expected image and its hash",
+          "xmosImageName(dfu.line)" in _nsUI and "sha256.slice(0, 12)" in _nsUI, "no expected file shown")
 
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
