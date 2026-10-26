@@ -1213,7 +1213,7 @@ TTS_CATALOG = {
 class TTSPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     provider: str = Field(default="elevenlabs",
-                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket|kokoro)$")
+                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket|kokoro|localai)$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
     # Model trim: flash for reliability/speed, v4
     # turbo for expressiveness — v2/v3/v4-regular have no use case in a
@@ -1246,7 +1246,7 @@ class TTSPayload(BaseModel):
     kokoro_speed: float | None = Field(default=None, ge=0.5, le=1.5)
     # Local hot standby behind a cloud provider. "off" clears it; None =
     # leave as-is (partial update).
-    fallback: str | None = Field(default=None, pattern="^(pocket|off)$")
+    fallback: str | None = Field(default=None, pattern="^(pocket|kokoro|off)$")
 
 
 def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> None:
@@ -1274,6 +1274,10 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
         problem = tts_kokoro.setup_problem()
         if problem:
             raise HTTPException(status_code=422, detail=problem)
+    elif p.provider == "localai":
+        problem = _localai_problem()
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
     if p.kokoro_voice is not None and p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
         raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
     if p.kokoro_speed is not None and abs(p.kokoro_speed * 20 - round(p.kokoro_speed * 20)) > 1e-9:
@@ -1282,6 +1286,14 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
     # fallback's voice): only the presets are dashboard-settable.
     if p.pocket_voice is not None and p.pocket_voice not in tts_pocket.POCKET_VOICES:
         raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
+    if p.fallback == "kokoro":
+        if p.provider == "kokoro":
+            raise HTTPException(status_code=422, detail="the fallback can't be the primary (Kokoro is already the provider)")
+        # Install check only when TURNING IT ON (same rule as Pocket below).
+        if saved_fallback != "kokoro":
+            problem = tts_kokoro.setup_problem()
+            if problem:
+                raise HTTPException(status_code=422, detail=problem)
     if p.fallback == "pocket":
         if p.provider == "pocket":
             raise HTTPException(status_code=422, detail="the fallback can't be the primary (Pocket is already the provider)")
@@ -1342,6 +1354,8 @@ async def get_tts():
         "kokoro_installed": kokoro_problem is None,
         "kokoro_files_missing": tts_kokoro.kokoro_available() and kokoro_problem is not None,
         "kokoro_problem": kokoro_problem,
+        # LocalAI: the provider is offered once its URL and key are saved.
+        "localai_problem": _localai_problem(),
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
@@ -1391,7 +1405,9 @@ async def put_tts(payload: TTSPayload):
             current["deepgram_flux_speed"] = payload.deepgram_flux_speed
         if payload.deepgram_flux_expressivity is not None:
             current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
-    if payload.fallback == "pocket" and payload.provider != "pocket":
+    if payload.fallback == "kokoro" and payload.provider != "kokoro":
+        current["fallback"] = "kokoro"
+    elif payload.fallback == "pocket" and payload.provider != "pocket":
         current["fallback"] = "pocket"
         # The fallback's voice (same tts.pocket_voice key Pocket-as-primary
         # uses) rides with the fallback; ignored when the fallback is off.
@@ -1533,6 +1549,15 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
     return {"ok": True, "api_key_set": True, "replaced": replaced}
 
 
+@router.put("/localai/key", dependencies=GUARD)
+async def put_localai_key(payload: TTSKeyPayload):
+    """LocalAI API key → .env (LVI_LOCALAI_KEY; never echoed). Saved from the
+    Keys card, like every other key."""
+    replaced = await _write_env_key("LVI_LOCALAI_KEY", payload.api_key)
+    logger.info("dashboard: LVI_LOCALAI_KEY written to .env (value never logged)")
+    return {"ok": True, "api_key_set": True, "replaced": replaced, "var": "LVI_LOCALAI_KEY"}
+
+
 # ── Keys card: every API key in one place ──
 # Presence + masked hint only; values never leave the server. Saving goes
 # through the existing kind-aware routes above (one write path, one set of
@@ -1597,6 +1622,16 @@ def _key_test_inner(row: dict, key: str) -> dict:
         # Each lane knows how to check its own key against its SAVED URL.
         icfg = dict(config_store.read_section("intelligence") or {})
         return lane.key_test(row, key, icfg, probe=_intelligence_probe, http=_keys_http, scrub=scrub)
+    if row["kind"] == "localai":
+        import localai
+        url = _localai_saved()["url"]
+        if not url:
+            return {"ok": False, "status": "unreachable", "detail": "Set the LocalAI URL on the LocalAI card first"}
+        ok, _ms, why = localai.probe(url=url, key=key)
+        if ok:
+            return {"ok": True, "status": "ok", "detail": "LocalAI accepted the key"}
+        status = "rejected" if "refused the key" in (why or "") else "unreachable"
+        return {"ok": False, "status": status, "detail": scrub(why or "LocalAI did not answer")}
     if row["kind"] == "deepgram":
         req = ("GET", "https://api.deepgram.com/v1/projects", {"Authorization": f"Token {key}"})
     else:
@@ -1676,6 +1711,113 @@ async def delete_key(var: str):
         raise HTTPException(status_code=404, detail=f"{var} is not in .env")
     logger.info(f"dashboard: {var} removed from .env (backup kept; value never logged)")
     return {"ok": True, "var": var, "removed": True}
+
+
+# ── LocalAI (System — speech models on a LAN server) ──
+# The URL and model picks live in config.yaml (localai:), the key in .env
+# (LVI_LOCALAI_KEY, Keys card only). The client module is imported lazily so
+# this file stays light; nothing here installs or edits models on LocalAI.
+
+_LOCALAI_URL_RE = re.compile(r"^https?://[A-Za-z0-9._-]+(:\d{1,5})?$")
+_LOCALAI_NAME = r"^[A-Za-z0-9._:/@+-]*$"
+
+
+def _localai_saved() -> dict:
+    """The LocalAI settings the bot will boot with (config.yaml, then env)."""
+    sec = config_store.read_section("localai") or {}
+
+    def pick(key, env, default=""):
+        v = sec.get(key)
+        return v if v not in (None, "") else os.getenv(env, default)
+
+    return {"url": pick("url", "LVI_LOCALAI_URL") or None,
+            "model_stt": str(pick("model_stt", "LVI_LOCALAI_MODEL_STT") or ""),
+            "model_tts": str(pick("model_tts", "LVI_LOCALAI_MODEL_TTS") or ""),
+            "voice": str(pick("voice", "LVI_LOCALAI_VOICE") or ""),
+            "speed": pick("speed", "LVI_LOCALAI_SPEED", None)}
+
+
+def _localai_problem() -> str | None:
+    """Why LocalAI can't be picked yet (None = it can)."""
+    if not _localai_saved()["url"]:
+        return "Set the LocalAI URL on the LocalAI card first"
+    if not _key_saved_value("LVI_LOCALAI_KEY"):
+        return "Add the LocalAI key on System · Keys first"
+    return None
+
+
+class LocalAIPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
+    url: str | None = Field(default=None, max_length=200)
+    model_stt: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
+    model_tts: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
+    voice: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
+    speed: float | None = Field(default=None, ge=0.5, le=1.5)
+
+    @model_validator(mode="after")
+    def _url_ok(self):
+        if self.url is not None and self.url.strip():
+            import localai
+            url = localai.normalize_url(self.url)
+            if not url or not _LOCALAI_URL_RE.match(url):
+                raise ValueError("url must be host:port or http(s)://host:port")
+            try:
+                urllib.parse.urlsplit(url).port
+            except ValueError:
+                raise ValueError("url has an invalid port") from None
+            self.url = url
+        return self
+
+
+@router.get("/localai")
+async def get_localai():
+    """Saved LocalAI settings + whether its key is saved. Never the key."""
+    s = _localai_saved()
+    return {**s, "key_set": bool(_key_saved_value("LVI_LOCALAI_KEY")), "problem": _localai_problem()}
+
+
+@router.put("/localai", dependencies=GUARD)
+async def put_localai(payload: LocalAIPayload):
+    """Save the URL / model picks (None = leave as-is, "" = clear).
+    Applies on the next bot restart, like every provider setting."""
+    current = dict(config_store.read_section("localai") or {})
+    for field in ("url", "model_stt", "model_tts", "voice", "speed"):
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        if value == "":
+            current.pop(field, None)
+        else:
+            current[field] = value
+    try:
+        config_store.write_section("localai", current)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    logger.info("dashboard: localai settings saved — applies on next restart")
+    return {"ok": True, "restart": True, **_localai_saved()}
+
+
+@router.post("/localai/test", dependencies=GUARD)
+async def post_localai_test():
+    """Reach the SAVED LocalAI with the SAVED key: answer time + the
+    speech-to-text and voice models it serves. A result, never a 500."""
+    import localai
+    s = _localai_saved()
+    key = _key_saved_value("LVI_LOCALAI_KEY")
+    out = {"ok": False, "ms": None, "reason": None, "stt": [], "tts": []}
+    if not s["url"]:
+        return {**out, "reason": "Set the LocalAI URL first"}
+    if not key:
+        return {**out, "reason": localai.NO_KEY}
+    try:
+        ok, ms, why = await asyncio.to_thread(localai.probe, url=s["url"], key=key)
+        if not ok:
+            return {**out, "reason": localai.redact(why or "LocalAI did not answer", key)}
+        found = await asyncio.to_thread(localai.discover, url=s["url"], key=key)
+    except Exception as e:  # noqa: BLE001 — the contract is a result, never a 500
+        return {**out, "reason": localai.redact(f"LocalAI test failed ({type(e).__name__})", key)}
+    return {"ok": True, "ms": round(ms, 1) if ms is not None else None, "reason": None,
+            "stt": found["stt"], "tts": found["tts"]}
 
 
 # ── Intelligence (Settings — provider picker) ──
@@ -2226,6 +2368,8 @@ def _stt_providers() -> list:
         item = dict(p, available=True)
         if p["name"] == "deepgram" and not _stt_deepgram_sdk():
             item.update(available=False, reason="deepgram-sdk is not installed (pip install deepgram-sdk)")
+        if p["name"] == "localai" and _localai_problem():
+            item.update(available=False, reason=_localai_problem())
         out.append(item)
     return out
 
@@ -2392,6 +2536,8 @@ async def put_stt(payload: SttPayload):
         err = err or stt_catalog.validate_provider(payload.provider)
         if not err and payload.provider == "deepgram" and not _stt_deepgram_sdk():
             err = "deepgram-sdk is not installed on this machine (pip install deepgram-sdk)"
+        if not err and payload.provider == "localai":
+            err = _localai_problem()
     if err:
         raise HTTPException(status_code=422, detail=err)
     if payload.model is not None:

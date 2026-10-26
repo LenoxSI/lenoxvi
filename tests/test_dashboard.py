@@ -1238,6 +1238,139 @@ def main():
           not [p for p, _ in PIPECAT_HANDLER_HITS if p.startswith("/api/dashboard")],
           f"hits={[p for p, _ in PIPECAT_HANDLER_HITS][:5]}")
 
+    # ── LocalAI card: settings, Test, key route, provider gates ──
+    import http.server as _la_hs
+    import tts_kokoro as _la_tk
+    import threading as _la_th
+    _la_seen = []
+
+    class _LaFake(_la_hs.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            _la_seen.append((self.path, self.headers.get("Authorization")))
+            if self.headers.get("Authorization") != "Bearer la-good-SECRET-7777":
+                body, code = b'{"error":{"message":"unauthorized"}}', 401
+            elif self.path == "/v1/models":
+                body, code = json.dumps({"data": [{"id": "fw-small"}, {"id": "kokoro"}, {"id": "llm"}]}).encode(), 200
+            elif self.path == "/api/models/config-json/fw-small":
+                body, code = b'{"backend":"faster-whisper","known_usecases":["FLAG_TRANSCRIPT"]}', 200
+            elif self.path == "/api/models/config-json/kokoro":
+                body, code = b'{"backend":"kokoro","known_usecases":["FLAG_TTS"]}', 200
+            else:
+                body, code = b'{"backend":"llama","known_usecases":null}', 200
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    _la_srv = _la_hs.ThreadingHTTPServer(("127.0.0.1", 0), _LaFake)
+    _la_th.Thread(target=_la_srv.serve_forever, daemon=True).start()
+    _la_env = SCRATCH / "localai.env"
+    _la_env.write_text("")
+    _la_saved_env = {k: os.environ.get(k) for k in ("LVI_ENV_FILE", "LVI_LOCALAI_KEY", "LVI_LOCALAI_URL")}
+    os.environ["LVI_ENV_FILE"] = str(_la_env)
+    os.environ.pop("LVI_LOCALAI_KEY", None)
+    os.environ.pop("LVI_LOCALAI_URL", None)
+    _la_tts_before = dict(config_store.read_section("tts") or {})
+    _la_stt_before = dict(config_store.read_section("stt") or {})
+    try:
+        r = client.get("/api/dashboard/localai")
+        check("localai card: GET shape, nothing saved yet -> the URL is what's missing",
+              r.status_code == 200 and set(r.json()) >= {"url", "model_stt", "model_tts", "voice", "key_set", "problem"}
+              and r.json()["url"] is None and r.json()["key_set"] is False and "URL" in (r.json()["problem"] or ""),
+              r.text[:200])
+        r = client.put("/api/dashboard/tts", json={"provider": "localai"})
+        check("localai card: TTS can't pick LocalAI before its URL is saved (422 says so)",
+              r.status_code == 422 and "URL" in r.text, r.text[:160])
+        r = client.put("/api/dashboard/localai", json={"url": "192.0.2.50:8080/", "model_stt": "fw-small"})
+        check("localai card: PUT normalises and saves the URL and model",
+              r.status_code == 200 and config_store.read_section("localai").get("url") == "http://192.0.2.50:8080"
+              and config_store.read_section("localai").get("model_stt") == "fw-small", r.text[:200])
+        for _bad in ("http://x\nLVI_RESTART_COMMAND=boom", "ftp://x:21", "http://x:99999", "http://x/v2/thing"):
+            r = client.put("/api/dashboard/localai", json={"url": _bad})
+            check(f"localai card: a bad URL is refused (422) [{_bad[:18]}]", r.status_code == 422, r.text[:120])
+        r = client.put("/api/dashboard/localai", json={"nope": 1})
+        check("localai card: an unknown field is refused (422)", r.status_code == 422)
+        r = client.put("/api/dashboard/localai", json={"model_stt": "bad name; rm"})
+        check("localai card: a model name with odd characters is refused (422)", r.status_code == 422)
+        r = client.put("/api/dashboard/stt", json={"provider": "localai"})
+        check("localai card: STT can't pick LocalAI without its key (422 names System · Keys)",
+              r.status_code == 422 and "System · Keys" in r.text, r.text[:160])
+        _g = client.get("/api/dashboard/stt").json()
+        _lp = next((p for p in _g.get("providers", []) if p.get("name") == "localai"), {})
+        check("localai card: the STT card offers LocalAI as unavailable with the reason",
+              _lp.get("available") is False and "System · Keys" in (_lp.get("reason") or ""), str(_lp))
+        r = client.post("/api/dashboard/localai/test")
+        check("localai card: Test without a key answers ok=false naming System · Keys (no request sent)",
+              r.status_code == 200 and r.json()["ok"] is False and "System · Keys" in (r.json()["reason"] or ""), r.text[:200])
+        r = client.put("/api/dashboard/localai/key", json={"api_key": "x\nLVI_RESTART_COMMAND=evil"})
+        check("localai key: newline-injected key refused (422)", r.status_code == 422)
+        r = client.put("/api/dashboard/localai/key", json={"api_key": "la-bad-SECRET-6666"})
+        check("localai key: saved to .env as LVI_LOCALAI_KEY, value never echoed",
+              r.status_code == 200 and "LVI_LOCALAI_KEY=la-bad-SECRET-6666" in _la_env.read_text()
+              and "la-bad-SECRET" not in r.text, r.text[:160])
+        r = client.post("/api/dashboard/localai/test")
+        check("localai card: Test against a dead host -> ok=false with a reason, never a 500 or the key",
+              r.status_code == 200 and r.json()["ok"] is False and r.json()["reason"] and "SECRET" not in r.text, r.text[:200])
+        client.put("/api/dashboard/localai", json={"url": f"127.0.0.1:{_la_srv.server_port}"})
+        r = client.post("/api/dashboard/localai/test")
+        check("localai card: a wrong key -> ok=false, the reason says the key was refused, key never shown",
+              r.status_code == 200 and r.json()["ok"] is False and "key" in (r.json()["reason"] or "").lower()
+              and "SECRET" not in r.text, r.text[:200])
+        _kt = client.post("/api/dashboard/keys/test", json={"var": "LVI_LOCALAI_KEY"})
+        check("localai key: Keys-card Test reports the refusal as 'rejected'",
+              _kt.status_code == 200 and _kt.json().get("status") == "rejected" and "SECRET" not in _kt.text, _kt.text[:200])
+        client.put("/api/dashboard/localai/key", json={"api_key": "la-good-SECRET-7777"})
+        r = client.post("/api/dashboard/localai/test")
+        _j = r.json()
+        check("localai card: Test with the right key lists STT and voice models, hides the unflagged one",
+              r.status_code == 200 and _j["ok"] is True and _j["ms"] is not None and _j["stt"] == ["fw-small"]
+              and _j["tts"] == [{"id": "kokoro", "backend": "kokoro"}] and "SECRET" not in r.text, r.text[:300])
+        check("localai card: Test sends the SAVED key as a Bearer token",
+              ("/v1/models", "Bearer la-good-SECRET-7777") in _la_seen)
+        _kt = client.post("/api/dashboard/keys/test", json={"var": "LVI_LOCALAI_KEY"})
+        check("localai key: Keys-card Test says LocalAI accepted the key", _kt.json().get("ok") is True, _kt.text[:200])
+        r = client.put("/api/dashboard/tts", json={"provider": "localai"})
+        check("localai card: with URL + key saved, TTS can pick LocalAI", r.status_code == 200, r.text[:160])
+        check("localai card: GET /tts says nothing is missing for LocalAI",
+              client.get("/api/dashboard/tts").json().get("localai_problem") is None)
+        r = client.put("/api/dashboard/localai", json={"model_stt": ""})
+        check("localai card: an empty value clears that setting", r.status_code == 200
+              and "model_stt" not in (config_store.read_section("localai") or {}))
+        # Kokoro as the fallback
+        _tk_saved = _la_tk.setup_problem
+        _la_tk.setup_problem = lambda: None
+        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
+        check("tts card: Kokoro accepted as the fallback behind ElevenLabs",
+              r.status_code == 200 and config_store.read_section("tts").get("fallback") == "kokoro", r.text[:160])
+        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart", "fallback": "kokoro"})
+        check("tts card: Kokoro can't be its own fallback (422)", r.status_code == 422, r.text[:160])
+        _la_tk.setup_problem = lambda: "Kokoro model files are missing"
+        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
+        check("tts card: re-sending a saved Kokoro fallback never locks the card when Kokoro went missing",
+              r.status_code == 200, r.text[:160])
+        config_store.write_section("tts", {**_la_tts_before, "fallback": None})
+        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
+                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
+        check("tts card: turning the Kokoro fallback ON needs Kokoro installed (422 with the reason)",
+              r.status_code == 422 and "missing" in r.text, r.text[:160])
+        _la_tk.setup_problem = _tk_saved
+    finally:
+        _la_srv.shutdown()
+        config_store.write_section("tts", _la_tts_before)
+        config_store.write_section("stt", _la_stt_before)
+        config_store.write_section("localai", {})
+        for _k, _v in _la_saved_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+
     # Key-route hardening: the character-class
     # pattern must reject newline injection (the old code-exec lane) and
     # accept well-formed keys. LVI_ENV_FILE points the writer at a scratch
@@ -5224,9 +5357,13 @@ def main():
                   if isinstance(n, _astR.AsyncFunctionDef) and n.name == "run_bot"), None)
     _rbKKsrc = _astR.unparse(_rbKK) if _rbKK else ""
     _kkBranch = _rbKKsrc.find("tts_provider == 'kokoro'")
-    _kkWarm, _kkMake = _rbKKsrc.find("await tts_kokoro.warm()"), _rbKKsrc.find("tts_kokoro.make_service(")
+    # The primary branch alone (up to the next provider): one warm, one build.
+    # Kokoro is also built as a fallback (`_fallback == 'kokoro'`), checked below.
+    _kkEnd = _rbKKsrc.find("elif tts_provider ==", _kkBranch + 1)
+    _kkPrim = _rbKKsrc[_kkBranch:_kkEnd] if 0 <= _kkBranch < _kkEnd else ""
+    _kkWarm, _kkMake = _kkPrim.find("await tts_kokoro.warm()"), _kkPrim.find("tts_kokoro.make_service(")
     check("kokoro bot.py: tts.provider kokoro warms the shared model off the loop, then builds the service",
-          0 <= _kkBranch < _kkWarm < _kkMake and _rbKKsrc.count("tts_kokoro.make_service(") == 1,
+          0 <= _kkWarm < _kkMake and _kkPrim.count("tts_kokoro.make_service(") == 1,
           f"branch={_kkBranch} warm={_kkWarm} make={_kkMake}")
     check("kokoro bot.py: voice + speed via cfg/env with the module defaults",
           "cfg_env('tts', 'kokoro_voice', 'LVI_TTS_KOKORO_VOICE', tts_kokoro.DEFAULT_VOICE)" in _rbKKsrc
@@ -5237,21 +5374,34 @@ def main():
           and _rbKKsrc.count("tts_kokoro.INSTALL_HINT") >= 2)
     check("kokoro bot.py: Kokoro is a primary in the same dispatch, before the Pocket fallback wrap",
           0 <= _kkBranch < _rbKKsrc.find("tts_primary = tts") < _rbKKsrc.find("if _fallback == 'pocket':"))
+    # Kokoro is imported only where it is used: its own branch, LocalAI's
+    # branch (Kokoro is LocalAI's fallback) and the Kokoro fallback block.
+    _kkGuards = ["tts_provider == 'kokoro'", "tts_provider == 'localai'", "if _fallback == 'kokoro':"]
+    _kkImports = [i for i in range(len(_rbKKsrc)) if _rbKKsrc.startswith("import tts_kokoro", i)]
+    _kkGuardPos = sorted(_rbKKsrc.find(g) for g in _kkGuards)
     check("kokoro bot.py: another provider never imports Kokoro (only inside its branch and the startup preload)",
           not any(isinstance(n, (_astR.Import, _astR.ImportFrom))
                   and "tts_kokoro" in _astR.unparse(n) for n in _botR.body)
-          and _rbKKsrc.count("import tts_kokoro") == 1
-          and _rbKKsrc.find("import tts_kokoro") > _kkBranch)
+          and len(_kkImports) == 3 and min(_kkGuardPos) >= 0
+          and all(g < i for g, i in zip(_kkGuardPos, _kkImports)), f"imports={_kkImports} guards={_kkGuardPos}")
+    _kkFb = _rbKKsrc.find("if _fallback == 'kokoro':")
+    _kkFbSrc = _rbKKsrc[_kkFb:_rbKKsrc.find("EchoGate()", _kkFb)] if _kkFb >= 0 else ""
+    check("kokoro bot.py: tts.fallback kokoro warms Kokoro, builds it with the Kokoro voice/speed, warns when it can't",
+          "await tts_kokoro.warm()" in _kkFbSrc and "tts_kokoro.make_service(" in _kkFbSrc
+          and "cfg_env('tts', 'kokoro_voice', 'LVI_TTS_KOKORO_VOICE', tts_kokoro.DEFAULT_VOICE)" in _kkFbSrc
+          and "running WITHOUT a fallback" in _kkFbSrc)
+    check("tts fallback bot.py: the switcher is told which standby it holds",
+          "standby_name=_fallback" in _rbKKsrc)
     _kkPre = _main_src.find("tts_kokoro.preload()")
     check("kokoro bot.py: Kokoro preload at startup when it's the provider, before main(), non-fatal",
           0 <= _kkPre < _main_src.rfind("main()") and "kokoro preload failed" in _main_src
-          and "if _tp == 'kokoro':" in _main_src)
+          and "if _tp in ('kokoro', 'localai') or _fb == 'kokoro':" in _main_src)
     # Must still hold: the number pass is for the local voices only. A custom
     # speller in front of ElevenLabs' own normalizer once garbled times.
     _numUsers = sorted(p.relative_to(REPO_CORE).as_posix() for p in REPO_CORE.rglob("*.py")
                        if "spell_numbers" in p.read_text() and p.name != "tts_numbers.py")
-    check("number pass: only the Pocket and Kokoro modules call spell_numbers (never bot.py or a cloud lane)",
-          _numUsers == ["tts_kokoro.py", "tts_pocket.py"]
+    check("number pass: only the local-voice modules (Pocket, Kokoro, LocalAI) call spell_numbers (never bot.py or a cloud lane)",
+          _numUsers == ["tts_kokoro.py", "tts_localai.py", "tts_pocket.py"]
           and "spell_numbers" not in _main_src and "tts_numbers" not in _main_src, f"users={_numUsers}")
     check("number pass: the ElevenLabs and Deepgram services keep pipecat's own run_tts",
           _bot13.TrackedElevenLabsTTSService.run_tts is _bot13.ElevenLabsTTSService.run_tts
@@ -6714,7 +6864,8 @@ def main():
         _kr = client.get("/api/dashboard/keys")
         _kk = {r["var"]: r for r in (_kr.json().get("keys") or [])} if _kr.status_code == 200 else {}
         check("keys GET: static rows in order, then agent rows found in .env",
-              [r["var"] for r in _kr.json().get("keys", [])] == ["ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_HERMES_KEY",
+              [r["var"] for r in _kr.json().get("keys", [])] == ["ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_LOCALAI_KEY",
+                                                                 "LVI_HERMES_KEY",
                                                                  "LVI_OPENCLAW_KEY", "LVI_NANOBOT_KEY",
                                                                  "LVI_HERMES_KEY_HA_BUTLER"]
               if _kr.status_code == 200 else False, _kr.text[:300])
@@ -6751,6 +6902,20 @@ def main():
         config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "deepgram-flux"})
         _kk3 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
         check("keys GET: deepgram-flux TTS counts as using the Deepgram key", _kk3["DEEPGRAM_API_KEY"]["in_use"])
+        check("keys GET: LocalAI row — not in use while no card picks LocalAI, says it serves STT and TTS",
+              not _kk3["LVI_LOCALAI_KEY"]["in_use"] and _kk3["LVI_LOCALAI_KEY"]["used_by"] == ["STT", "TTS"]
+              and _kk3["LVI_LOCALAI_KEY"]["label"] == "LocalAI" and _kk3["LVI_LOCALAI_KEY"]["set"] is False,
+              str(_kk3.get("LVI_LOCALAI_KEY")))
+        config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "localai"})
+        _kk5 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
+        check("keys GET: LocalAI STT alone -> the LocalAI key is in use, by STT only",
+              _kk5["LVI_LOCALAI_KEY"]["in_use"] and _kk5["LVI_LOCALAI_KEY"]["used_by"] == ["STT"], str(_kk5.get("LVI_LOCALAI_KEY")))
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "localai"})
+        _kk5 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
+        check("keys GET: LocalAI on both cards -> used by STT and TTS",
+              _kk5["LVI_LOCALAI_KEY"]["in_use"] and _kk5["LVI_LOCALAI_KEY"]["used_by"] == ["STT", "TTS"])
+        config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "whisper"})
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "deepgram-flux"})
 
         # Test: server-side, with the SAVED key, mocked providers.
         _hcalls = []
@@ -7454,7 +7619,7 @@ def main():
         check("cloud stt GET: provider defaults to whisper; providers listed with availability",
               _g.get("current", {}).get("provider") == "whisper"
               and [(p["name"], p.get("available")) for p in _g.get("providers", [])]
-              == [("whisper", True), ("deepgram", True), ("elevenlabs", True)],
+              == [("whisper", True), ("localai", False), ("deepgram", True), ("elevenlabs", True)],
               str({k: _g.get(k) for k in ("providers",)}) + str(_g.get("current")))
         check("cloud stt GET: deepgram_key_set true, and the key value never appears",
               _g.get("deepgram_key_set") is True and "dg-secret-xyz123" not in _gr.text, str(_g.get("deepgram_key_set")))
