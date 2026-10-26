@@ -15,16 +15,19 @@ What LocalAI actually does (checked against v4.12.1):
 """
 from __future__ import annotations
 
+import array
 import http.client
 import io
 import json
+import math
 import os
 import socket
+import struct
+import sys
 import threading
 import time
 import urllib.parse
 import uuid
-import wave
 
 from loguru import logger
 
@@ -213,25 +216,67 @@ def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=No
 
 def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None,
            timeout=None) -> tuple[bytes, int]:
-    """Text -> (16-bit mono PCM, sample rate). Anything that isn't a mono
-    16-bit WAV is an error, never noise."""
+    """Text -> (16-bit mono PCM, sample rate). Mono 16-bit PCM passes through;
+    mono 32-bit float (what LocalAI's Pocket backend sends) is converted.
+    Anything else is an error, never noise."""
     body = json.dumps({"model": model, "input": text, "voice": voice, "speed": speed,
                        "response_format": "wav"}).encode()
     data = _request("POST", "/v1/audio/speech", body=body, ctype="application/json",
                     total=timeout or TTS_TIMEOUT, url=url, key=key)
     try:
-        with wave.open(io.BytesIO(data), "rb") as w:
-            channels, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
-            pcm = w.readframes(w.getnframes())
-    except Exception:  # noqa: BLE001 — wave.Error, EOFError, struct errors
+        fmt, channels, rate, bits, raw = _parse_wav(data)
+    except Exception:  # noqa: BLE001 — struct errors, missing chunks
         raise LocalAIError("LocalAI sent audio that isn't a WAV", box_down=False) from None
-    if channels != 1 or width != 2:
-        raise LocalAIError(f"LocalAI audio is {channels}-channel {8 * width}-bit; need mono 16-bit", box_down=False)
+    if channels == 1 and fmt == _WAV_PCM and bits == 16:
+        pcm = raw[:len(raw) - len(raw) % 2]
+    elif channels == 1 and fmt == _WAV_FLOAT and bits == 32:
+        pcm = _float32_to_pcm16(raw[:len(raw) - len(raw) % 4])
+    else:
+        kind = "float" if fmt == _WAV_FLOAT else "PCM" if fmt == _WAV_PCM else f"format {fmt}"
+        raise LocalAIError(f"LocalAI audio is {channels}-channel {bits}-bit {kind}; need mono 16-bit PCM or "
+                           "32-bit float", box_down=False)
     if not 8000 <= rate <= 48000:
         raise LocalAIError(f"LocalAI audio has an odd sample rate ({rate} Hz)", box_down=False)
     if not pcm or len(pcm) % 2:
         raise LocalAIError("LocalAI sent an empty or cut-off clip", box_down=False)
     return pcm, rate
+
+
+_WAV_PCM, _WAV_FLOAT, _WAV_EXTENSIBLE = 1, 3, 0xFFFE
+
+
+def _parse_wav(data: bytes) -> tuple[int, int, int, int, bytes]:
+    """(format, channels, rate, bits, sample bytes) of a RIFF/WAVE clip.
+    Reads the chunks itself: the stdlib `wave` module refuses float WAVs."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError("not RIFF/WAVE")
+    fmt = channels = rate = bits = None
+    i = 12
+    while i + 8 <= len(data):
+        cid, size = data[i:i + 4], struct.unpack("<I", data[i + 4:i + 8])[0]
+        body = data[i + 8:i + 8 + size]
+        if cid == b"fmt ":
+            fmt, channels, rate, _br, _ba, bits = struct.unpack("<HHIIHH", body[:16])
+            if fmt == _WAV_EXTENSIBLE and len(body) >= 26:
+                fmt = struct.unpack("<H", body[24:26])[0]  # the sub-format GUID's first 2 bytes
+        elif cid == b"data":
+            if fmt is None:
+                raise ValueError("data before fmt")
+            return fmt, channels, rate, bits, body
+        i += 8 + size + (size & 1)
+    raise ValueError("no data chunk")
+
+
+def _float32_to_pcm16(raw: bytes) -> bytes:
+    """Little-endian float32 samples (-1..1) -> 16-bit PCM, clipped; NaN = 0."""
+    f = array.array("f")
+    f.frombytes(raw)
+    if sys.byteorder == "big":
+        f.byteswap()
+    out = array.array("h", (0 if math.isnan(x) else int(max(-1.0, min(1.0, x)) * 32767) for x in f))
+    if sys.byteorder == "big":
+        out.byteswap()
+    return out.tobytes()
 
 
 def discover(*, url=None, key=None) -> dict:
