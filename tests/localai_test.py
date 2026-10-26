@@ -201,6 +201,19 @@ dt = time.monotonic() - t0
 check("localai: a server trickling bytes still ends at the total budget (not per read)",
       e is not None and e.box_down and dt < 1.8, f"{dt:.2f}s {e and e.reason}")
 _tls.close()
+BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":"late"}', 2.0)
+t0 = time.monotonic()
+e = err(lambda: la.transcribe(b"x", "m", "en", url=URL, key=KEY, timeout=1.0))
+check("localai: a raised/lowered budget is honoured (timeout=1 gives up near 1 s)",
+      e is not None and time.monotonic() - t0 < 1.8, f"{time.monotonic() - t0:.2f}s")
+for _var, _val, _want in (("LVI_LOCALAI_STT_TIMEOUT", "15", 15.0), ("LVI_LOCALAI_STT_TIMEOUT", "99", 30.0),
+                          ("LVI_LOCALAI_STT_TIMEOUT", "junk", la.STT_TIMEOUT), ("LVI_LOCALAI_TTS_TIMEOUT", "0.2", 1.0)):
+    os.environ[_var] = _val
+    _got = la.settings()["stt_timeout" if "STT" in _var else "tts_timeout"]
+    os.environ.pop(_var, None)
+    check(f"localai: timeout knob {_var}={_val} -> {_want} s (1-30, junk = default)", _got == _want, str(_got))
+check("localai: unset timeout knobs keep the 6 s / 5 s defaults",
+      la.settings()["stt_timeout"] == 6.0 and la.settings()["tts_timeout"] == 5.0)
 for bad in ("http://127.0.0.1:99999", "http://ho st:80"):
     e = err(lambda: la.transcribe(b"x", "m", "en", url=bad, key=KEY))
     check(f"localai: an invalid URL ({bad.split('//')[1]}) is a LocalAIError, never another exception",
@@ -350,11 +363,11 @@ la.transcribe = _real_tr
 check("stt localai: any other exception still hands the clip to the appliance model",
       fw.calls and fw.calls[0][0] == b"WAV7" and [s.text for s in segs] == [" local words "])
 _seen_url = []
-la.transcribe = lambda wav, model, language, url=None, key=None: _seen_url.append(url) or "ok"
-sla.LocalAIWhisper("m", lambda: fw, url="http://192.0.2.9:8080").transcribe(io.BytesIO(b"WAV8"), language="en")
+la.transcribe = lambda wav, model, language, url=None, key=None, timeout=None: _seen_url.append((url, timeout)) or "ok"
+sla.LocalAIWhisper("m", lambda: fw, url="http://192.0.2.9:8080", timeout=15.0).transcribe(io.BytesIO(b"WAV8"), language="en")
 la.transcribe = _real_tr
-check("stt localai: requests use the URL the session was built with (a later save applies next session)",
-      _seen_url == ["http://192.0.2.9:8080"], str(_seen_url))
+check("stt localai: requests use the URL and budget the session was built with (a later save applies next session)",
+      _seen_url == [("http://192.0.2.9:8080", 15.0)], str(_seen_url))
 la._reset_for_tests()
 os.environ.pop(la.KEY_VAR, None)
 n = len(SEEN)
@@ -520,13 +533,15 @@ if HAVE_PIPECAT:
     check("tts localai: any other exception -> Kokoro speaks, never silence",
           any(isinstance(f, TTSAudioRawFrame) for f in frames) and not any(isinstance(f, ErrorFrame) for f in frames))
     _urls = []
-    la.speech = lambda text, model, voice, speed, url=None, key=None: (_urls.append(url), (LA_WAV[44:], 24000))[1]
+    la.speech = lambda text, model, voice, speed, url=None, key=None, timeout=None: (
+        _urls.append((url, timeout)), (LA_WAV[44:], 24000))[1]
     s1 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0, standby_voice="af_heart",
-                                  url="http://192.0.2.9:8080")
+                                  url="http://192.0.2.9:8080", timeout=12.0)
     s1._sample_rate = 24000
     asyncio.run(drain(s1, "Bound to its URL."))
     la.speech = _real_sp
-    check("tts localai: requests use the URL the session was built with", _urls == ["http://192.0.2.9:8080"], str(_urls))
+    check("tts localai: requests use the URL and budget the session was built with",
+          _urls == [("http://192.0.2.9:8080", 12.0)], str(_urls))
     s2 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=9.0, standby_voice="af_heart")
     s2._sample_rate = 24000
     la.mark_down("LocalAI unreachable")
