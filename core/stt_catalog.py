@@ -55,7 +55,7 @@ LANGUAGE_CODES = [lang["code"] for lang in LANGUAGES]
 PROVIDERS = [
     {"name": "whisper", "label": "Local — Whisper", "cloud": False},
     # LocalAI on the LAN: audio stays in the house, so it is not cloud.
-    {"name": "localai", "label": "LocalAI", "cloud": False},
+    {"name": "localai", "label": "LocalAI (Host)", "cloud": False},
     {"name": "deepgram", "label": "Deepgram Nova-3 (cloud)", "cloud": True},
     {"name": "elevenlabs", "label": "ElevenLabs Scribe v2 (cloud)", "cloud": True},
 ]

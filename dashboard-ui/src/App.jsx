@@ -2664,7 +2664,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               </option>
               <option value="localai" disabled={!!tts?.localai_problem && provider !== 'localai'}
                 title={tts?.localai_problem || undefined}>
-                LocalAI{tts?.localai_problem ? ' — set it up on System' : ''}
+                LocalAI (Host){tts?.localai_problem ? ' — set it up on System' : ''}
               </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
