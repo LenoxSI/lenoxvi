@@ -313,6 +313,111 @@ if HAVE_PIPECAT:
 else:
     print("SKIP stt localai: pipecat not importable here (run on the host)")
 
+# ── tts localai (host: pipecat + kokoro) ────────────────────────────
+if HAVE_PIPECAT:
+    import asyncio
+    import tts_kokoro
+    import tts_localai
+    from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame
+    check("tts localai: the standby voice is the LocalAI voice when it is a Kokoro voice",
+          tts_localai.standby_voice_for("af_heart", "am_adam") == "af_heart"
+          and tts_localai.standby_voice_for("alba", "am_adam") == "am_adam"
+          and tts_localai.standby_voice_for("alba", None) == tts_kokoro.DEFAULT_VOICE
+          and tts_localai.standby_voice_for("alba", "not-a-voice") == tts_kokoro.DEFAULT_VOICE)
+    assert tts_kokoro.preload(), "Kokoro must load on the host for these checks"
+    NOTES = []
+    import dashboard.registry as _reg
+    _real_note = _reg.note_tts
+    _reg.note_tts = lambda room, provider, usable: NOTES.append((room, provider, usable))
+
+    class Mixin:
+        _tts_room = "Kitchen"
+
+    def make():
+        s = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0,
+                                     standby_voice="af_heart")
+        s._sample_rate = 24000  # what StartFrame sets inside a pipeline
+        return s
+
+    async def drain(s, text):
+        return [f async for f in s.run_tts(text, "ctx")]
+
+    os.environ[la.KEY_VAR] = KEY
+    la._reset_for_tests()
+    la.set_cooldown(60)
+    LA_WAV = wav_bytes(24000, frames=4800)
+    BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
+    svc = make()
+    check("tts localai: is a TTS service with the provider name and a raised stop timeout",
+          svc._tts_provider == "localai" and svc._stop_frame_timeout_s == tts_kokoro.STOP_FRAME_TIMEOUT_S)
+    n0 = len(SEEN)
+    frames = asyncio.run(drain(svc, "The first sentence is here. The second one has 3 apples."))
+    reqs = [json.loads(s[3]) for s in SEEN[n0:] if s[1] == "/v1/audio/speech"]
+    check("tts localai: one request per sentence, numbers spelled before sending",
+          len(reqs) == 2 and "three" in reqs[1]["input"] and "3" not in reqs[1]["input"], str(reqs))
+    audio = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
+    check("tts localai: LocalAI audio comes through untouched at the same rate",
+          len(audio) == 2 and audio[0].audio == LA_WAV[44:] and audio[0].sample_rate == 24000,
+          f"{len(audio)} {len(audio[0].audio) if audio else 0}")
+    # fail on the SECOND sentence: first from LocalAI, the rest from Kokoro
+    calls = {"n": 0}
+    real_speech = la.speech
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise la.LocalAIError("LocalAI error 500", 500)
+        return real_speech(*a, **k)
+
+    la.speech = flaky
+    NOTES.clear()
+    svc = make()
+    frames = asyncio.run(drain(svc, "This is sentence number one. This is sentence number two. This is sentence number three."))
+    la.speech = real_speech
+    audio = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
+    check("tts localai: a failed sentence and the rest of the reply are spoken by Kokoro (LocalAI not asked again)",
+          calls["n"] == 2 and la.down_reason() == "LocalAI error 500" and audio and audio[0].audio == LA_WAV[44:]
+          and len(audio) >= 3 and all(f.audio != LA_WAV[44:] for f in audio[1:]), f"calls={calls['n']} frames={len(audio)}")
+    check("tts localai: the dashboard hears 'kokoro (fallback)' once", NOTES == [("Kitchen", "kokoro (fallback)", True)], str(NOTES))
+    n1 = len(SEEN)
+    frames = asyncio.run(drain(make(), "The next reply sentence."))
+    check("tts localai: while down, later replies skip LocalAI (no request) and still speak",
+          not any(s[1] == "/v1/audio/speech" for s in SEEN[n1:]) and any(isinstance(f, TTSAudioRawFrame) for f in frames))
+    la.mark_up()
+    NOTES.clear()
+    svc = make()
+    svc._noted_engine = "kokoro"
+    asyncio.run(drain(svc, "LocalAI is back now."))
+    check("tts localai: when LocalAI is back the dashboard hears 'localai' again", NOTES == [("Kitchen", "localai", True)], str(NOTES))
+    for label, payload in [("an html page", b"<html>err</html>"), ("a stereo wav", wav_bytes(ch=2))]:
+        la._reset_for_tests()
+        BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", payload, 0)
+        frames = asyncio.run(drain(make(), "Garbage comes back for this one."))
+        check(f"tts localai: {label} back -> Kokoro speaks it, none of LocalAI's bytes are played",
+              la.down_reason() is not None and any(isinstance(f, TTSAudioRawFrame) for f in frames)
+              and all(payload[:16] not in getattr(f, "audio", b"") for f in frames))
+    la._reset_for_tests()
+    BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
+    n2 = len(SEEN)
+    s0 = tts_localai.make_service(mixin=Mixin, model="", voice="af_heart", speed=1.0, standby_voice="af_heart")
+    s0._sample_rate = 24000
+    frames = asyncio.run(drain(s0, "No model was picked for this."))
+    check("tts localai: no model picked -> Kokoro, nothing sent, reason says so",
+          len(SEEN) == n2 and "model" in (la.down_reason() or "") and any(isinstance(f, TTSAudioRawFrame) for f in frames))
+    la._reset_for_tests()
+    _saved_k = tts_kokoro._kokoro
+    tts_kokoro._kokoro = None
+    la.mark_down("LocalAI unreachable")
+    frames = asyncio.run(drain(make(), "Nobody can speak this."))
+    tts_kokoro._kokoro = _saved_k
+    check("tts localai: LocalAI down AND no Kokoro -> an error frame, never a crash",
+          any(isinstance(f, ErrorFrame) for f in frames) and not any(isinstance(f, TTSAudioRawFrame) for f in frames))
+    _reg.note_tts = _real_note
+    os.environ.pop(la.KEY_VAR, None)
+    la._reset_for_tests()
+else:
+    print("SKIP tts localai: pipecat not importable here (run on the host)")
+
 srv.shutdown()
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)
