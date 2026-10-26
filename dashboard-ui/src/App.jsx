@@ -365,12 +365,31 @@ function MissingKey({ label }) {
   )
 }
 
+// LocalAI's speech models, asked of the server (POST /localai/test reaches
+// the SAVED LocalAI with the SAVED key; keys never reach the browser).
+// `on` = only ask while a card has LocalAI picked. Refreshes after any save.
+function useLocalAIModels(on) {
+  const [found, setFound] = useState(null)   // { ok, ms, reason, stt, tts } | null
+  useEffect(() => {
+    if (!on) return
+    let alive = true
+    const get = () => api('/api/dashboard/localai/test', { method: 'POST' })
+      .then(r => { if (alive) setFound(r) })
+      .catch(e => { if (alive) setFound({ ok: false, reason: e.message, stt: [], tts: [] }) })
+    get()
+    window.addEventListener('lenoxvi:reload-all', get)
+    return () => { alive = false; window.removeEventListener('lenoxvi:reload-all', get) }
+  }, [on])
+  return found
+}
+
 // The save route for a row: the existing kind-aware routes (one write path).
 // A catalog key with no route here can't be saved from the card (null) —
 // never sent through another kind's route.
 function keyRoute(row) {
   if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
   if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
+  if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]
   const lane = laneOf(row.kind)
   if (!lane) return null
   const named = lane.per_agent_keys && row.agent && row.agent !== lane.default_agent
@@ -699,7 +718,7 @@ function useDraft(saved, { scope = '', blank = {} } = {}) {
 const UnsavedCtx = createContext(() => {})
 // The bar's order = page order, tab by tab. Keys are the cards' section ids,
 // so each label links to its card (and opens its tab).
-const UNSAVED_ORDER = ['rooms', 'voice', 'stt', 'tuning', 'wake-name-card', 'wake-model', 'intelligence']
+const UNSAVED_ORDER = ['rooms', 'voice', 'stt', 'tuning', 'wake-name-card', 'wake-model', 'localai', 'intelligence']
 
 // card: { label, count, save, discard }. save(say) is the card's own save,
 // reporting through say (the bar sums them up) and returning true once saved.
@@ -943,7 +962,7 @@ function nodesChip(rooms, mapping) {
   return { tone: 'warning', text, title: `${down.join(', ')} offline` }
 }
 
-const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket', kokoro: 'Kokoro' }
+const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', pocket: 'Pocket', kokoro: 'Kokoro', localai: 'LocalAI' }
 const ttsName = p => TTS_NAMES[p] || p
 
 // TTS: the voice service the rooms are actually using (each online room
@@ -1001,6 +1020,12 @@ function sttChip(st, configuredModel) {
       title: `${st.fallback_reason || `${cloud.name} unreachable`}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
   }
   if (cloud) return { text: cloud.chip(st) }
+  if (st.provider === 'localai') {
+    if (st.active === 'whisper')
+      return { tone: 'warning', text: 'whisper fallback', href: '#localai',
+        title: `${st.fallback_reason || 'LocalAI unreachable'}: Whisper base on this appliance is listening` }
+    return { text: `localai ${st.model || ''}`.trim() }
+  }
   if (st.state === 'loading') return { text: 'loading', muted: true, title: `${whisper} is loading` }
   return { text: whisper.toLowerCase() }
 }
@@ -2508,7 +2533,8 @@ const kokoroLabel = v => {
 // the first Save 422'd.
 const savedFor = (t, p) =>
   p === 'elevenlabs' ? t?.model : p === 'deepgram' ? t?.deepgram_voice
-  : p === 'pocket' ? t?.pocket_voice : p === 'kokoro' ? t?.kokoro_voice : t?.deepgram_flux_voice
+  : p === 'pocket' ? t?.pocket_voice : p === 'kokoro' ? t?.kokoro_voice
+  : p === 'localai' ? t?.localai_model_tts : t?.deepgram_flux_voice
 
 function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const catalog = tts?.catalog || {}
@@ -2533,8 +2559,9 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
     flux_expr: num(tts?.deepgram_flux_expressivity, v => parseInt(v, 10)),
     // Unset = the bot's default 1.0, so the slider at 1.0 is not a change.
     kokoro_speed: num(tts?.kokoro_speed, parseFloat) ?? 1.0,
-    fallback: tts?.fallback === 'pocket' ? 'pocket' : 'off',
+    fallback: ['pocket', 'kokoro'].includes(tts?.fallback) ? tts.fallback : 'off',
     pocket_voice: tts?.pocket_voice || 'alba',
+    la_voice: tts?.localai_voice || '',
   }, { blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 } })
   const provider = t.val('provider')
   const model = t.val(`model:${provider}`)
@@ -2543,17 +2570,26 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const fluxSpeed = t.val('flux_speed') ?? 1.0, fluxExpr = t.val('flux_expr') ?? 1
   const fallback = t.val('fallback'), pocketVoice = t.val('pocket_voice')
   const kokoroSpeed = t.val('kokoro_speed') ?? 1.0
+  const laVoice = t.val('la_voice') || ''
+  // LocalAI: its voice models come from the server; the voice list follows
+  // the backend that runs the picked model (Kokoro / Pocket presets, else
+  // free text).
+  const laFound = useLocalAIModels(provider === 'localai')
+  const laBackend = (laFound?.tts || []).find(m => m.id === model)?.backend
+  const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null
   // What Save sends for this provider, so the count matches the save.
   const ttsFields = ['provider', `model:${provider}`,
     ...(provider === 'elevenlabs' ? ['voice_id', 'el_speed', 'el_stab', 'el_norm'] : []),
     ...(provider === 'deepgram-flux' ? ['flux_speed', 'flux_expr'] : []),
     ...(provider === 'kokoro' ? ['kokoro_speed'] : []),
-    ...(provider !== 'pocket' ? ['fallback', ...(fallback === 'pocket' ? ['pocket_voice'] : [])] : [])]
+    ...(provider === 'localai' ? ['la_voice'] : []),
+    ...(provider !== 'pocket' && provider !== 'localai'
+      ? ['fallback', ...(fallback === 'pocket' ? ['pocket_voice'] : [])] : [])]
 
   // Switching provider resets the model menu to that
   // provider's own list — and lands on THAT provider's saved
   // value when it has one, not blindly on the first entry.
-  const options = catalog[provider] || []
+  const options = provider === 'localai' ? (laFound?.tts || []).map(m => m.id) : (catalog[provider] || [])
   const onProviderChange = p => t.set({ provider: p, [`model:${p}`]: undefined })
 
   const saveTTS = async say => {
@@ -2586,11 +2622,14 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
       if (t.changed('kokoro_speed') || tts?.kokoro_speed != null) body.kokoro_speed = kokoroSpeed
     }
     // The fallback rides with a cloud or Kokoro primary; the server drops
-    // it when Pocket itself is the provider.
-    if (provider !== 'pocket') body.fallback = fallback
+    // it when Pocket itself is the provider. LocalAI has its own (Kokoro).
+    if (provider !== 'pocket' && provider !== 'localai') body.fallback = fallback
     if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
     const sent = t.snap(ttsFields)
     try {
+      // LocalAI's model and voice live with the LocalAI settings.
+      if (provider === 'localai')
+        await api('/api/dashboard/localai', { method: 'PUT', json: { model_tts: model || '', voice: laVoice.trim() } })
       await api('/api/dashboard/tts', { method: 'PUT', json: body })
       say('Saved — restart to apply.', 'ok', 'TTS')
       await reloadAll()
@@ -2618,16 +2657,31 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                 title={tts?.kokoro_problem || undefined}>
                 Kokoro (local){tts?.kokoro_installed ? '' : tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'}
               </option>
+              <option value="localai" disabled={!!tts?.localai_problem && provider !== 'localai'}
+                title={tts?.localai_problem || undefined}>
+                LocalAI{tts?.localai_problem ? ' — set it up on System' : ''}
+              </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => t.set({ [`model:${provider}`]: e.target.value })}>
               {/* A saved value the catalog doesn't carry (hand-edited config)
                   shows honestly instead of faking the first entry. */}
-              {model && !options.includes(model) &&
-                <option value={model} disabled>{ttsLabel(model)} (not accepted)</option>}
-              {!options.length && <option value="" disabled>loading…</option>}
+              {model && !options.includes(model) && (provider !== 'localai' || laFound) &&
+                <option value={model} disabled>
+                  {provider === 'localai' ? `${model} — not served by LocalAI` : `${ttsLabel(model)} (not accepted)`}</option>}
+              {!options.length && <option value="" disabled>
+                {provider === 'localai' && laFound ? 'no voice models on LocalAI' : 'loading…'}</option>}
               {options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}
             </select>
+            {provider === 'localai' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
+            {provider === 'localai' && (laVoices
+              ? <select id="tts-localai-voice" className={`${INPUT_CLS} w-[200px]`} value={laVoice}
+                  onChange={e => t.set({ la_voice: e.target.value })} aria-label="LocalAI voice">
+                  {!laVoices.includes(laVoice) && <option value={laVoice} disabled>{laVoice || 'pick a voice'}</option>}
+                  {laVoices.map(v => <option key={v} value={v}>{laBackend === 'kokoro' ? kokoroLabel(v) : v}</option>)}
+                </select>
+              : <input id="tts-localai-voice" value={laVoice} onChange={e => t.set({ la_voice: e.target.value })}
+                  placeholder="Voice name" className={`${INPUT_CLS} w-[200px] font-mono`} aria-label="LocalAI voice" />)}
             {provider === 'elevenlabs' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
             {provider === 'elevenlabs' &&
               <input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
@@ -2683,18 +2737,26 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               </span>
             </Field>
           )}
-          {provider !== 'pocket' && (
+          {provider === 'localai' && (
+            <span className="text-[12px] text-[var(--muted)]">If LocalAI is down: Kokoro on this appliance.</span>
+          )}
+          {provider === 'localai' && laFound && !laFound.ok && (
+            <span className="text-[13px] text-[var(--danger)]">LocalAI: {laFound.reason}</span>
+          )}
+          {provider !== 'pocket' && provider !== 'localai' && (
             <Field label="Fallback">
               <select id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
                 onChange={e => t.set({ fallback: e.target.value })}
-                // Stays usable while it holds 'pocket', so a fallback saved
-                // before Pocket went missing can always be turned off.
-                disabled={!tts?.pocket_installed && fallback !== 'pocket'}
-                title={tts?.pocket_installed
-                  ? 'Speak with Pocket TTS (local) while this provider is down.'
-                  : 'Install Pocket TTS to enable a local fallback.'}>
+                title="Speak with a local voice while this provider is down.">
                 <option value="off">Off</option>
-                <option value="pocket">Pocket TTS</option>
+                {/* Each stays pickable while it's the saved one, so a fallback
+                    saved before it went missing can always be turned off. */}
+                <option value="kokoro" disabled={(!tts?.kokoro_installed || provider === 'kokoro') && fallback !== 'kokoro'}>
+                  Kokoro{tts?.kokoro_installed ? '' : ' — not installed'}
+                </option>
+                <option value="pocket" disabled={!tts?.pocket_installed && fallback !== 'pocket'}>
+                  Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
+                </option>
               </select>
               {fallback === 'pocket' && (
                 <select id="tts-fallback-voice" className={`${INPUT_CLS} w-[200px]`} value={pocketVoice}
@@ -2782,9 +2844,21 @@ function SttCard({ status, setMsg }) {
   const pendingModel = downloading ? data.download.model : null   // already on its way
   // Drafts against the saved selects (useDraft): a refetch never clobbers
   // a pick in progress. A model already downloading shows as the saved one.
+  // LocalAI's saved model (it lives with the LocalAI settings, not stt:).
+  const [laSaved, setLaSaved] = useState(null)
+  useEffect(() => {
+    const get = () => api('/api/dashboard/localai').then(setLaSaved).catch(() => {})
+    get()
+    window.addEventListener('lenoxvi:reload-all', get)
+    return () => window.removeEventListener('lenoxvi:reload-all', get)
+  }, [])
   const s = useDraft({ model: pendingModel || data?.current?.model, language: data?.current?.language,
-    provider: data?.current?.provider })
+    provider: data?.current?.provider, la_model: laSaved?.model_stt || '' })
   const model = s.val('model'), language = s.val('language'), provider = s.val('provider')
+  const laModel = s.val('la_model') || ''
+  const onLocalAIPick = provider === 'localai'
+  const laFound = useLocalAIModels(onLocalAIPick)
+  const laModels = laFound?.stt || []
   // What Save sends: the picks that differ from the saved config.
   const sttBody = () => {
     const body = {}
@@ -2792,6 +2866,9 @@ function SttCard({ status, setMsg }) {
     if (model !== data.current.model && model !== pendingModel) body.model = model
     if (language !== data.current.language) body.language = language
     if (provider && provider !== data.current.provider) body.provider = provider
+    // LocalAI's model is saved with the LocalAI settings (its own route;
+    // save() takes it out of the /stt body).
+    if (onLocalAIPick && laSaved != null && laModel !== (laSaved.model_stt || '')) body.la_model = laModel
     return body
   }
   const [finished, setFinished] = useState(null)   // { model, bytes } during the 100% beat
@@ -2839,10 +2916,18 @@ function SttCard({ status, setMsg }) {
     // One download at a time: a new model waits for the one on its way.
     if (downloading && body.model) { say(`${pendingModel} is still downloading — save once it's done.`, 'err', 'STT'); return false }
     const sent = s.snap(['model', 'language', 'provider'])
+    const laSent = s.snap(['la_model'])
+    const laPick = body.la_model
+    delete body.la_model
     try {
-      const r = await api('/api/dashboard/stt', { method: 'PUT', json: body })
+      if (laPick !== undefined) await api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })
+      const r = Object.keys(body).length
+        ? await api('/api/dashboard/stt', { method: 'PUT', json: body })
+        : { restart_needed: true }
       await load()
+      if (laPick !== undefined) setLaSaved(await api('/api/dashboard/localai'))
       s.settle(sent)
+      s.settle(laSent)
       if (r.download === 'started') {
         say(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
@@ -2862,6 +2947,9 @@ function SttCard({ status, setMsg }) {
   const cloud = STT_CLOUD[st?.provider]
   const onCloud = !!cloud && st.active === st.provider
   const onFallback = !!cloud && st.active === 'whisper'
+  // LocalAI: same chips, its own names (Whisper base is its fallback).
+  const onLocalAI = st?.provider === 'localai' && st.active === 'localai'
+  const onLocalAIFallback = st?.provider === 'localai' && st.active === 'whisper'
   const cloudPick = STT_CLOUD[provider]
   const ms = st?.latency_ms_median
   const models = data?.models || []
@@ -2871,10 +2959,15 @@ function SttCard({ status, setMsg }) {
     <Section id="stt" title="STT" note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
         <div className="flex flex-wrap items-center gap-2" id="stt-chips">
-          {onFallback
+          {onFallback || onLocalAIFallback
             ? <span className={WARN_CHIP_CLS} title={st.fallback_reason}>whisper fallback</span>
             : <span className={state.cls} title={state.title}>{state.text}</span>}
-          {onCloud ? (
+          {onLocalAI ? (
+            <>
+              <span className={CHIP_CLS}>localai</span>
+              {st.model && <span className={CHIP_CLS}>{st.model}</span>}
+            </>
+          ) : onCloud ? (
             <>
               <span className={CHIP_CLS}>{cloud.chip(st)}</span>
               <span className={CHIP_CLS}>cloud</span>
@@ -2916,7 +3009,17 @@ function SttCard({ status, setMsg }) {
               ))}
             </select>
           </Field>
-          <Field label={cloudPick ? 'Fallback model' : 'Model'}>
+          {onLocalAIPick && (
+            <Field label="Model">
+              <select id="stt-localai-model" className={`${INPUT_CLS} w-auto`} value={laModel}
+                onChange={e => s.set({ la_model: e.target.value })}>
+                {!laModels.includes(laModel) && <option value={laModel} disabled>
+                  {!laFound ? 'loading…' : laModel ? `${laModel} — not served by LocalAI` : 'pick a model'}</option>}
+                {laModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Field>
+          )}
+          {!onLocalAIPick && <Field label={cloudPick ? 'Fallback model' : 'Model'}>
             <select id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
               onChange={e => s.set({ model: e.target.value })} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
@@ -2927,7 +3030,7 @@ function SttCard({ status, setMsg }) {
                 </option>
               ))}
             </select>
-          </Field>
+          </Field>}
           <Field label="Language">
             <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
               onChange={e => s.set({ language: e.target.value })} disabled={!data}>
@@ -2938,6 +3041,12 @@ function SttCard({ status, setMsg }) {
           </Field>
         </div>
         {cloudPick && data && !data[cloudPick.key] && <MissingKey label={cloudPick.name} />}
+        {onLocalAIPick && (
+          <span className="text-[12px] text-[var(--muted)]">If LocalAI is down: Whisper base on this appliance.</span>
+        )}
+        {onLocalAIPick && laFound && !laFound.ok && (
+          <span className="text-[13px] text-[var(--danger)]">LocalAI: {laFound.reason}</span>
+        )}
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] text-[var(--muted)]">
@@ -3028,6 +3137,74 @@ function Tuning({ tuning, reloadAll }) {
 }
 
 /* ── System: Intelligence ─────────────────────────────────── */
+// LocalAI on the LAN: its address (the key lives on the Keys card), a Test
+// that lists the models it serves, and nothing else — models are added on
+// LocalAI itself, never from here.
+function LocalAICard({ setMsg }) {
+  const [saved, setSaved] = useState(null)
+  const [url, setUrl] = useState('')
+  const [test, setTest] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const msgRef = useRef(setMsg)
+  useEffect(() => { msgRef.current = setMsg })
+  const load = () => api('/api/dashboard/localai')
+    .then(d => { setSaved(d); setUrl(shortUrl(d.url) || ''); return d })
+    .catch(e => { msgRef.current('LocalAI load failed: ' + e.message, 'err', 'LocalAI'); return null })
+  useEffect(() => {
+    api('/api/dashboard/localai')
+      .then(d => { setSaved(d); setUrl(shortUrl(d.url) || '') })
+      .catch(e => msgRef.current('LocalAI load failed: ' + e.message, 'err', 'LocalAI'))
+    const h = () => api('/api/dashboard/localai').then(setSaved).catch(() => {})
+    window.addEventListener('lenoxvi:reload-all', h)
+    return () => window.removeEventListener('lenoxvi:reload-all', h)
+  }, [])
+  const changed = !!saved && (url.trim() || '') !== (shortUrl(saved.url) || '')
+  // Saved from the unsaved-changes bar, like every settings card.
+  const save = async say => {
+    try {
+      await api('/api/dashboard/localai', { method: 'PUT', json: { url: url.trim() } })
+      await load()
+      setTest(null)
+      say('Saved — restart to apply.', 'ok', 'LocalAI')
+      window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
+      return true
+    } catch (e) { say('Save failed: ' + e.message, 'err', 'LocalAI'); return false }
+  }
+  useUnsaved('localai', { label: 'localai', count: changed ? 1 : 0, save,
+    discard: () => setUrl(shortUrl(saved?.url) || '') })
+  const runTest = async () => {
+    setBusy(true)
+    try { setTest(await api('/api/dashboard/localai/test', { method: 'POST' })) }
+    catch (e) { setTest({ ok: false, reason: e.message, stt: [], tts: [] }) }
+    finally { setBusy(false) }
+  }
+  return (
+    <Section id="localai" title="LocalAI" note="">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <Field label="Address">
+          <input id="localai-url" value={url} onChange={e => setUrl(e.target.value)} placeholder="192.0.2.50:8080"
+            className={`${INPUT_CLS} w-[260px] font-mono`} disabled={!saved} />
+          <button className={BTN_DEFAULT} disabled={busy || !saved?.url || changed} onClick={runTest}
+            title={changed ? 'Save the address first' : undefined}>{busy ? 'Testing…' : 'Test'}</button>
+        </Field>
+        {saved && !saved.key_set && <MissingKey label="LocalAI" />}
+        {test && (test.ok ? (
+          <div id="localai-test" className="grid gap-1 text-[13px]">
+            <span><span className={OK_CHIP_CLS}>ok</span> <span className="font-mono">{test.ms} ms</span></span>
+            <span>Speech-to-text: {test.stt.length ? test.stt.join(', ') : 'none'}</span>
+            <span>Voices: {test.tts.length ? test.tts.map(m => m.id).join(', ') : 'none'}</span>
+          </div>
+        ) : (
+          <div id="localai-test" className="text-[13px] text-[var(--danger)]">{test.reason || 'LocalAI did not answer'}</div>
+        ))}
+        <span className="text-[12px] text-[var(--muted)]">
+          Pick LocalAI on the STT or TTS card. If it's down, this appliance listens with Whisper base and speaks with Kokoro.
+        </span>
+      </div>
+    </Section>
+  )
+}
+
 function System({ intelligence, status, setMsg, reloadAll }) {
   // Agents: per-kind selection (like URLs) + the provider's discovered
   // list. Discovery runs server-side (keys never reach the browser) on
@@ -3144,6 +3321,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   return (
     <>
     <KeysCard setMsg={setMsg} />
+    <LocalAICard setMsg={setMsg} />
     <Section id="intelligence" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">

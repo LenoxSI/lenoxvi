@@ -9059,9 +9059,10 @@ def main():
           and "data-tab" not in _appsrc.replace('<div data-tab="', "").replace("[data-tab]", ""), str(_gotTB))
     _linksTB = set(_reui.findall(r"href: '#([\w-]+)'", _appsrc)) | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))
     check("tabs: the warning chips' links and the missing-key link land on the tab with their card",
-          _linksTB == {"intelligence", "keys", "rooms", "system"}
+          _linksTB == {"intelligence", "keys", "localai", "rooms", "system"}
           and all(_tabTB(i) in ("rooms", "voice", "system") for i in _linksTB)
-          and _tabTB("keys") == _tabTB("system") == _tabTB("intelligence") == "system" and _tabTB("rooms") == "rooms",
+          and _tabTB("keys") == _tabTB("system") == _tabTB("intelligence") == _tabTB("localai") == "system"
+          and _tabTB("rooms") == "rooms",
           f"{sorted(_linksTB)} -> {[(i, _tabTB(i)) for i in sorted(_linksTB)]}")
     _wkTB = _fnUI("function WakeNameField({ setMsg }) {")
     check("tabs: the wake name card keeps its id while loading, so #wake-name-card finds its tab on a fresh load",
@@ -9150,16 +9151,16 @@ def main():
     _regUS = _reui.findall(r"useUnsaved\('([\w-]+)', \{\s*label: '([\w ]+)'", _appsrc)
     _orderUS = _reui.search(r"const UNSAVED_ORDER = \[(.*?)\]", _appsrc)
     _orderUS = _reui.findall(r"'([\w-]+)'", _orderUS.group(1)) if _orderUS else []
-    check("unsaved: the seven settings cards register once each, under their section id and lowercase label",
+    check("unsaved: the eight settings cards register once each, under their section id and lowercase label",
           sorted(_regUS) == sorted([("rooms", "room mapping"), ("voice", "tts"), ("stt", "stt"), ("tuning", "voice tuning"),
                                     ("wake-name-card", "wake name"), ("wake-model", "wake model"),
-                                    ("intelligence", "intelligence")])
+                                    ("localai", "localai"), ("intelligence", "intelligence")])
           and all(_appsrc.count(f'id="{k}"') >= 1 for k, _ in _regUS), str(_regUS))
     check("unsaved: the bar lists and saves cards in page order, tab by tab",
-          _orderUS == ["rooms", "voice", "stt", "tuning", "wake-name-card", "wake-model", "intelligence"]
+          _orderUS == ["rooms", "voice", "stt", "tuning", "wake-name-card", "wake-model", "localai", "intelligence"]
           and "const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)" in _barUS, str(_orderUS))
     _wantUS = {"rooms": "rooms", "voice": "voice", "stt": "voice", "tuning": "voice", "wake-name-card": "voice",
-               "wake-model": "voice", "intelligence": "system"}
+               "wake-model": "voice", "localai": "system", "intelligence": "system"}
     check("unsaved: each label links to its card's hash, which the tab router already resolves (still holds)",
           {k: _tabTB(k) for k in _orderUS} == _wantUS and "<a href={`#${k}`}" in _barUS
           and "scrollToCard(k)" in _barUS,
@@ -9276,7 +9277,7 @@ def main():
               "if (elNorm != null) body.elevenlabs_text_normalization = elNorm", "body.deepgram_voice = model",
               "body.deepgram_flux_voice = model", "body.deepgram_flux_speed = parseFloat(fluxSpeed)",
               "body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)", "body.pocket_voice = model",
-              "if (provider !== 'pocket') body.fallback = fallback",
+              "if (provider !== 'pocket' && provider !== 'localai') body.fallback = fallback",
               "if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice")), _ttsUS[:300])
     # Kokoro on the TTS card: provider option (disabled like Pocket's when not
     # installed), a voice select with readable labels, a speed slider; all on
@@ -9559,6 +9560,42 @@ def main():
     check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
           "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
           and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
+
+    # ── localai ui (App.jsx) ──
+    _laCard = _fnUI("function LocalAICard({ setMsg }) {")
+    _laHook = _fnUI("function useLocalAIModels(on) {")
+    _laVo = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
+    _laSt = _fnUI("function SttCard({ status, setMsg }) {")
+    check("localai ui: the LocalAI card sits on the System tab after Keys, saves through the unsaved bar, never edits models",
+          "<KeysCard setMsg={setMsg} />\n    <LocalAICard setMsg={setMsg} />" in _appsrc
+          and "useUnsaved('localai', { label: 'localai'" in _laCard
+          and "api('/api/dashboard/localai', { method: 'PUT', json: { url: url.trim() } })" in _laCard
+          and "/api/dashboard/localai/test" in _laCard and "models/apply" not in _appsrc, _laCard[:200])
+    check("localai ui: no key saved -> the card links to System · Keys; Keys saves the LocalAI key on its own route",
+          "{saved && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _laCard
+          and "if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]" in _appsrc)
+    check("localai ui: model lists come from the server's Test (keys never reach the browser), refreshed after saves",
+          "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
+          and "useLocalAIModels(provider === 'localai')" in _laVo and "useLocalAIModels(onLocalAIPick)" in _laSt)
+    check("localai ui: TTS card offers LocalAI (disabled with the reason until set up), hides the fallback picker for it",
+          "<option value=\"localai\" disabled={!!tts?.localai_problem && provider !== 'localai'}" in _laVo
+          and "{provider !== 'pocket' && provider !== 'localai' && (" in _laVo
+          and "If LocalAI is down: Kokoro on this appliance." in _laVo)
+    check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, else free text)",
+          "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null" in _laVo
+          and 'id="tts-localai-voice"' in _laVo)
+    check("tts ui: the fallback picker offers Kokoro and Pocket, each pickable while saved",
+          "<option value=\"kokoro\" disabled={(!tts?.kokoro_installed || provider === 'kokoro') && fallback !== 'kokoro'}>" in _laVo
+          and "<option value=\"pocket\" disabled={!tts?.pocket_installed && fallback !== 'pocket'}>" in _laVo
+          and "fallback: ['pocket', 'kokoro'].includes(tts?.fallback) ? tts.fallback : 'off'," in _laVo)
+    check("localai ui: the STT card's LocalAI model saves on the LocalAI route, never inside the /stt body",
+          "body.la_model = laModel" in _laSt and "delete body.la_model" in _laSt
+          and "api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })" in _laSt
+          and "If LocalAI is down: Whisper base on this appliance." in _laSt)
+    _laChip = _fnUI("function sttChip(st, configuredModel) {")
+    check("localai ui: the STT chip says 'localai <model>', and 'whisper fallback' linking to the LocalAI card when it's down",
+          "return { text: `localai ${st.model || ''}`.trim() }" in _laChip and "href: '#localai'" in _laChip
+          and "localai: 'LocalAI'" in _appsrc)
 
     # ── node setup ui (App.jsx): the System tab's USB setup panel ──
     _nsUI = _fnUI("function NodeSetupPanel({ setMsg }) {")

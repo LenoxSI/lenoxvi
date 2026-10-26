@@ -1356,6 +1356,8 @@ async def get_tts():
         "kokoro_problem": kokoro_problem,
         # LocalAI: the provider is offered once its URL and key are saved.
         "localai_problem": _localai_problem(),
+        "localai_model_tts": _localai_saved()["model_tts"],
+        "localai_voice": _localai_saved()["voice"],
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
