@@ -1,4 +1,7 @@
-"""TTS hot standby: primary cloud TTS -> Pocket (local) on hard failure.
+"""TTS hot standby: primary cloud TTS -> a local standby on hard failure.
+
+The standby is Pocket or Kokoro (tts.fallback); the text below says Pocket,
+and the same holds for Kokoro (its own GEN_LOCK is the idle check).
 
 pipecat's ServiceSwitcherStrategyFailover switches when the active service
 pushes an ErrorFrame AND is_usable is False (pipecat flips usability
@@ -82,6 +85,19 @@ def _pocket_idle_default() -> bool:
         return True
 
 
+def _kokoro_idle() -> bool:
+    try:
+        import tts_kokoro
+        return not tts_kokoro.GEN_LOCK.locked()
+    except Exception:
+        return True
+
+
+# Standby name -> its label in logs. Pocket's idle check stays recover()'s
+# default (looked up at call time); Kokoro passes its own.
+_LABELS = {"pocket": "Pocket", "kokoro": "Kokoro"}
+
+
 async def recover(primary, request_switch: Callable, cooldown: float,
                   sleep=asyncio.sleep, *, reachable=_DEFAULT, pocket_idle=None,
                   is_active=None, closed=None, confirm_secs: float = 5.0) -> bool:
@@ -158,19 +174,21 @@ async def on_primary_connection_error(switcher, error) -> None:
 async def on_switched(switcher, service) -> None:
     primary = switcher._lenoxvi_primary
     room = switcher._lenoxvi_room
+    name = getattr(switcher, "_lenoxvi_standby_name", "pocket")
+    label = _LABELS.get(name, name)
     if service is primary:
         cancel_recovery(switcher)
         primary._tts_note_suppressed = False
         logger.warning(f"tts fallback: {primary._tts_provider} is back, "
-                       "switching off Pocket")
+                       f"switching off {label}")
         _note(room, primary._tts_provider, True)
         return
     # While Pocket speaks, the primary's own health notes (a probe's
     # set_usable(True)) must not paint the dashboard chip green early.
     primary._tts_note_suppressed = True
     logger.warning(f"tts fallback: {primary._tts_provider} is down, "
-                   "Pocket (local) is speaking")
-    _note(room, "pocket (fallback)", True)
+                   f"{label} (local) is speaking")
+    _note(room, f"{name} (fallback)", True)
     cancel_recovery(switcher)
 
     async def _request(svc):
@@ -181,12 +199,13 @@ async def on_switched(switcher, service) -> None:
                  if strategy is not None else None)
     switcher._lenoxvi_recovery = asyncio.create_task(recover(
         primary, _request, switcher._lenoxvi_cooldown, is_active=is_active,
-        closed=lambda: getattr(switcher, "_lenoxvi_closed", False)))
+        closed=lambda: getattr(switcher, "_lenoxvi_closed", False),
+        pocket_idle=_kokoro_idle if name == "kokoro" else None))
 
 
 def wrap_with_fallback(primary, pocket, *, room,
                        queue_frame: Callable[..., Awaitable[None]],
-                       cooldown: float) -> ServiceSwitcher:
+                       cooldown: float, standby_name: str = "pocket") -> ServiceSwitcher:
     """ServiceSwitcher([primary, pocket], Failover) + the escalation hook +
     the switch-back loop."""
     switcher = ServiceSwitcher(services=[primary, pocket],
@@ -200,6 +219,7 @@ def wrap_with_fallback(primary, pocket, *, room,
         switcher._lenoxvi_cooldown = 30.0
     switcher._lenoxvi_recovery = None
     switcher._lenoxvi_closed = False
+    switcher._lenoxvi_standby_name = standby_name
 
     @switcher.strategy.event_handler("on_service_switched")
     async def _h(strategy, service):

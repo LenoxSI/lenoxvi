@@ -321,6 +321,83 @@ check("pocket wrap_with_fallback: real switcher, Failover, [primary, pocket], pr
 check("pocket wrap_with_fallback: switch event reaches on_switched", wired)
 
 
+# ── tts fallback: Kokoro as the standby ──────────────────────────────────
+
+
+async def _kokoro_standby():
+    import dashboard.registry as reg
+    notes, seen = [], {}
+    orig_note, orig_recover = reg.note_tts, tf.recover
+    reg.note_tts = lambda room, prov, ok: notes.append((room, prov, ok))
+
+    async def spy_recover(*a, **k):
+        seen.update(k)
+        return True
+
+    tf.recover = spy_recover
+    try:
+        p, k = FakeSvc("el", "elevenlabs"), FakeSvc("kk", "kokoro")
+
+        async def q(f):
+            pass
+
+        sw = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_room="den", _lenoxvi_queue=q,
+                                   _lenoxvi_cooldown=30.0, _lenoxvi_recovery=None,
+                                   _lenoxvi_standby_name="kokoro")
+        await tf.on_switched(sw, k)
+        await asyncio.sleep(0)
+        kokoro_idle = seen.get("pocket_idle")
+        tf.cancel_recovery(sw)
+        await tf.on_switched(sw, p)
+        seen.clear()
+        sw_p = types.SimpleNamespace(_lenoxvi_primary=p, _lenoxvi_room="den", _lenoxvi_queue=q,
+                                     _lenoxvi_cooldown=30.0, _lenoxvi_recovery=None)
+        await tf.on_switched(sw_p, k)
+        await asyncio.sleep(0)
+        pocket_idle = seen.get("pocket_idle", "missing")
+        tf.cancel_recovery(sw_p)
+        return notes, kokoro_idle, pocket_idle
+    finally:
+        reg.note_tts, tf.recover = orig_note, orig_recover
+
+
+notes, kokoro_idle, pocket_idle = asyncio.run(_kokoro_standby())
+check("tts fallback: a Kokoro standby notes 'kokoro (fallback)', then the primary on switch back",
+      notes[:2] == [("den", "kokoro (fallback)", True), ("den", "elevenlabs", True)], f"notes={notes}")
+check("tts fallback: Kokoro's recovery waits on Kokoro's own lock, Pocket keeps the default",
+      kokoro_idle is tf._kokoro_idle and pocket_idle is None, f"{kokoro_idle} {pocket_idle}")
+check("tts fallback: no standby name = Pocket (old switchers unchanged)",
+      notes[2:3] == [("den", "pocket (fallback)", True)], f"notes={notes}")
+
+
+async def _kokoro_idle_lock():
+    import tts_kokoro
+    free = tf._kokoro_idle()
+    async with tts_kokoro.GEN_LOCK:
+        busy = tf._kokoro_idle()
+    return free, busy
+
+
+free, busy = asyncio.run(_kokoro_idle_lock())
+check("tts fallback: Kokoro counts as busy while it generates", free is True and busy is False)
+
+
+async def _wrap_kokoro():
+    prim = tp.make_service(mixin=Mixin, voice="alba", provider_label="elevenlabs")
+    stand = tp.make_service(mixin=Mixin, voice="alba")
+
+    async def q(f):
+        pass
+
+    w = tf.wrap_with_fallback(prim, stand, room="kitchen", queue_frame=q, cooldown=30.0, standby_name="kokoro")
+    w2 = tf.wrap_with_fallback(prim, stand, room="kitchen", queue_frame=q, cooldown=30.0)
+    return w._lenoxvi_standby_name, w2._lenoxvi_standby_name
+
+
+check("tts fallback: wrap_with_fallback records the standby name (default pocket)",
+      asyncio.run(_wrap_kokoro()) == ("kokoro", "pocket"))
+
+
 # ── Pocket review fixes ──────────────────────────────────────────────────
 
 
