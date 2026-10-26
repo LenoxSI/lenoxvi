@@ -9594,7 +9594,7 @@ def main():
           and "If LocalAI is down: Whisper base on this appliance." in _laSt)
     _laChip = _fnUI("function sttChip(st, configuredModel) {")
     check("localai ui: the STT chip says 'localai <model>', and 'whisper fallback' linking to the LocalAI card when it's down",
-          "return { text: `localai ${st.model || ''}`.trim() }" in _laChip and "href: '#localai'" in _laChip
+          "return { text: `localai ${st.localai_model || ''}`.trim() }" in _laChip and "href: '#localai'" in _laChip
           and "localai: 'LocalAI'" in _appsrc)
 
     # ── node setup ui (App.jsx): the System tab's USB setup panel ──

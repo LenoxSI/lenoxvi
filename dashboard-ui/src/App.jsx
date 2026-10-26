@@ -1024,7 +1024,7 @@ function sttChip(st, configuredModel) {
     if (st.active === 'whisper')
       return { tone: 'warning', text: 'whisper fallback', href: '#localai',
         title: `${st.fallback_reason || 'LocalAI unreachable'}: Whisper base on this appliance is listening` }
-    return { text: `localai ${st.model || ''}`.trim() }
+    return { text: `localai ${st.localai_model || ''}`.trim() }
   }
   if (st.state === 'loading') return { text: 'loading', muted: true, title: `${whisper} is loading` }
   return { text: whisper.toLowerCase() }
@@ -1636,7 +1636,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                           )}
                           {r.online && r.tts_usable !== false && String(r.tts_provider || '').endsWith('(fallback)') && (
                             <span
-                              title="The cloud TTS is down — this room is speaking with local Pocket TTS until it comes back."
+                              title={`The TTS provider is down — this room is speaking with the local ${ttsName(String(r.tts_provider).replace(/\s*\(fallback\)$/, ''))} voice until it comes back.`}
                               className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STAT_TONE.warning}`}>
                               tts fallback
                             </span>
@@ -2965,7 +2965,7 @@ function SttCard({ status, setMsg }) {
           {onLocalAI ? (
             <>
               <span className={CHIP_CLS}>localai</span>
-              {st.model && <span className={CHIP_CLS}>{st.model}</span>}
+              {st.localai_model && <span className={CHIP_CLS}>{st.localai_model}</span>}
             </>
           ) : onCloud ? (
             <>
@@ -3004,7 +3004,7 @@ function SttCard({ status, setMsg }) {
               onChange={e => s.set({ provider: e.target.value })} disabled={!data}>
               {(data?.providers || [{ name: 'whisper', label: 'Local — Whisper', available: true }]).map(p => (
                 <option key={p.name} value={p.name} disabled={!p.available} title={p.reason || ''}>
-                  {p.label}{p.available ? '' : ' — not installed'}
+                  {p.label}{p.available ? '' : p.name === 'localai' ? ' — set it up on System' : ' — not installed'}
                 </option>
               ))}
             </select>

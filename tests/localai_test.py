@@ -251,7 +251,7 @@ check("stt localai: up -> the text comes from LocalAI and the appliance model is
       and info.language == "en")
 os.environ["LVI_LOCALAI_MODEL_STT"] = "faster-whisper-small"
 check("stt localai: status while up says localai + the configured model",
-      sla.status() == {"provider": "localai", "model": "faster-whisper-small", "active": "localai"}, str(sla.status()))
+      sla.status() == {"provider": "localai", "localai_model": "faster-whisper-small", "active": "localai"}, str(sla.status()))
 os.environ.pop("LVI_LOCALAI_MODEL_STT", None)
 BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json", b'{"error":{"message":"boom"}}', 0)
 segs, info = standin.transcribe(io.BytesIO(b"WAV2"), language="en", beam_size=1, vad_filter=False)

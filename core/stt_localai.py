@@ -47,7 +47,9 @@ def status() -> dict:
         model = localai.settings().get("model_stt") or None
     except Exception:  # noqa: BLE001 — status must never raise
         model = None
-    out = {"provider": "localai", "model": model}
+    # localai_model, not model: the dashboard merges this over Whisper's own
+    # status, whose `model` is the fallback actually loaded (base).
+    out = {"provider": "localai", "localai_model": model}
     reason = localai.down_reason()
     if reason:
         out.update(active="whisper", fallback_reason=reason, fallback_rooms=[])
