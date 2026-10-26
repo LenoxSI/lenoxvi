@@ -7966,7 +7966,7 @@ def main():
           "Not in use yet: switching to it marks a restart pending." in _appsrc
           and "Nothing uses it, so no restart is needed." in _appsrc)
     check("dashboard ui: a key Test whose setup isn't finished shows an info note, not a red failure",
-          "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'ⓘ '" in _kc)
+          "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'note — '" in _kc)
 
     _sm = _jsbody(_appsrc, "const saveMapping = async say => {")
     check("dashboard ui: a mapping save keeps its draft until the saved map is reloaded (no flick back, no revert)",
@@ -8496,7 +8496,7 @@ def main():
     check("intelligence ui: hermes and openclaw keep their saved-then-first-listed fallback",
           _selUI == f"{_NB_FREE} {_oldFallback}"
           and _lanesUI.LANES["hermes"].agent_required and _lanesUI.LANES["openclaw"].agent_required, _selUI[:160])
-    _optUI = _reui.search(r'<select id="int-agent".*?</select>', _sysUI, _reui.DOTALL)
+    _optUI = _reui.search(r'<select (?:aria-label="[^"]*" )?id="int-agent".*?</select>', _sysUI, _reui.DOTALL)
     _optUI = _ws(_optUI.group(0)) if _optUI else ""
     check("intelligence ui: nanobot always offers 'nanobot's own model' (value '') first; other kinds unchanged",
           "laneOf(intKind)?.agent_required === false ? <option value=\"\">{laneOf(intKind).no_agent_label}</option> "
@@ -8627,7 +8627,7 @@ def main():
           f"⚠ present: {'⚠' in _appsrc}")
     check("dashboard ui: the wake name has no 'Set wake word' button (the unsaved bar saves it)",
           'Set wake word' not in _appsrc
-          and "useUnsaved('wake-name-card', { label: 'wake name'" in _appsrc,
+          and "useUnsaved('wake-name-card', { label: 'Wake name'" in _appsrc,
           f"Set wake word: {'Set wake word' in _appsrc}")
 
     # ── restart pending: one Overview state instead of per-save restart
@@ -9191,13 +9191,13 @@ def main():
     _regUS = _reui.findall(r"useUnsaved\('([\w-]+)', \{\s*label: '([\w ]+)'", _appsrc)
     _orderUS = _reui.search(r"const UNSAVED_ORDER = \[(.*?)\]", _appsrc)
     _orderUS = _reui.findall(r"'([\w-]+)'", _orderUS.group(1)) if _orderUS else []
-    check("unsaved: the eight settings cards register once each, under their section id and lowercase label",
-          sorted(_regUS) == sorted([("rooms", "room mapping"), ("voice", "tts"), ("stt", "stt"), ("tuning", "voice tuning"),
-                                    ("wake-name-card", "wake name"), ("wake-model", "wake model"),
-                                    ("localai", "localai"), ("intelligence", "intelligence")])
+    check("unsaved: the eight settings cards register once each, under their section id and card title",
+          sorted(_regUS) == sorted([("rooms", "Room mapping"), ("voice", "TTS"), ("stt", "STT"), ("tuning", "Voice tuning"),
+                                    ("wake-name-card", "Wake name"), ("wake-model", "Wake model"),
+                                    ("localai", "LocalAI"), ("intelligence", "Intelligence")])
           and all(_appsrc.count(f'id="{k}"') >= 1 for k, _ in _regUS), str(_regUS))
     check("unsaved: the bar lists and saves cards in page order, tab by tab",
-          _orderUS == ["rooms", "voice", "stt", "tuning", "wake-name-card", "wake-model", "localai", "intelligence"]
+          _orderUS == ["rooms", "wake-name-card", "wake-model", "stt", "voice", "tuning", "localai", "intelligence"]
           and "const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)" in _barUS, str(_orderUS))
     _wantUS = {"rooms": "rooms", "voice": "voice", "stt": "voice", "tuning": "voice", "wake-name-card": "voice",
                "wake-model": "voice", "localai": "system", "intelligence": "system"}
@@ -9277,7 +9277,7 @@ def main():
           and "return () => window.removeEventListener('beforeunload', warn)" in _appTB and "}, [unsaved])" in _appTB)
     check("unsaved: TTS fields follow the server until edited; the voice id is a draft, not a DOM read",
           "fluxTouched" not in _voUS and "document.getElementById('tts-voice')" not in _appsrc
-          and '<input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })}' in _voUS
+          and '<input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })}' in _voUS
           and "blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 }" in _voUS
           and "const onProviderChange = p => t.set({ provider: p, [`model:${p}`]: undefined })" in _voUS)
     check("unsaved: STT picks follow the server until changed; a model already downloading counts as saved",
@@ -9288,7 +9288,7 @@ def main():
           "[`url:${k}`, shortUrl(savedUrls[k])]" in _syUS and "const switchKind = kind => {" in _syUS
           and "d.set({ kind })" in _jsbody(_syUS, "const switchKind = kind => {")
           and "urlEl.value" not in _syUS
-          and "<input id=\"int-url\" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}"
+          and "<input aria-label=\"Intelligence URL\" id=\"int-url\" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}"
           in _syUS)
     _uoUS = _saveUS["intelligence"]
     _uoUS = _uoUS[_uoUS.find("if (r?.url_only) {"):_uoUS.find("return true")]
@@ -9304,7 +9304,8 @@ def main():
           "const body = { room_zones: { ...liveMap, ...liveZones(stillLive(mapDraft)), ...Object.fromEntries(picked) } }"
           in _smUS and "const liveAgentDraft = stillLive(agentDraft)" in _smUS
           and "if (agentEdits) body.room_agents = { [agentKind]: { ...savedAgents, ...liveAgentDraft } }" in _smUS
-          and "if (picked.some(([, z]) => !z || !liveZone(z))) { say('Pick a zone first.'" in _smUS
+          and "const unzoned = picked.find(([, z]) => !z || !liveZone(z))" in _smUS
+          and "say(`Pick a zone for ${unzoned[0]} first.`" in _smUS
           and _smUS.count("await api('/api/dashboard/mapping', { method: 'PUT', json: body })") == 1, _smUS[:300])
     check("unsaved: voice tuning still sends only the changed knobs (still holds)",
           "for (const f of dirtyFields) body[f] = parseFloat(vals.val(f))" in _saveUS["voice tuning"]
@@ -9599,7 +9600,7 @@ def main():
           "say(r.key_needed ? `No ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key yet — add it on System · Keys, then restart.`"
           in _svEL and ": 'Saved — restart to apply.', 'ok', 'STT')" in _svEL, _svEL[:400])
     check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
-          "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
+          "useUnsaved('stt', { label: 'STT', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
           and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
 
     # ── base install: Kokoro ships with it, new configs fall back to it ──
@@ -9610,6 +9611,62 @@ def main():
           (_ex_la.get("tts") or {}).get("fallback") == "kokoro" and "kokoro-onnx==0.4.7" in _req_la
           and "-r requirements.txt" in (REPO_CORE.parent / "requirements-kokoro.txt").read_text().splitlines(),
           str((_ex_la.get("tts") or {}).get("fallback")))
+    # ── ux polish (App.jsx): names, lines, order, phones, copy ──
+    def _tagsUX(src):
+        out = []
+        for m in _reui.finditer(r"<(select|input)\b", src):
+            i = j = m.start()
+            depth = 0
+            while j < len(src):
+                c = src[j]
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                elif c == ">" and depth == 0 and src[j - 1] != "=":
+                    break
+                j += 1
+            out.append(src[i:j + 1])
+        return out
+    _unnamedUX = [_ws(x)[:80] for x in _tagsUX(_appsrc)
+                  if "aria-label" not in x and 'type="file"' not in x and 'type="checkbox"' not in x]
+    check("a11y: every select and text/range input carries an accessible name (aria-label)",
+          _unnamedUX == [], str(_unnamedUX[:5]))
+    check("a11y: table-row selects name their room",
+          'aria-label={`Zone for ${room}`}' in _appsrc and 'aria-label={`Agent for ${room}`}' in _appsrc)
+    _fwUX = _fnUI("function FirmwarePanel(")
+    _nsUX = _fnUI("function NodeSetupPanel({ setMsg }) {")
+    check("firmware ui: one name for one thing — 'Line' everywhere, lowercase as the system names it",
+          ">Track</span>" not in _appsrc and ">Board</span>" not in _appsrc and "pick a board" not in _appsrc
+          and "const trackLabel = t => (t || '').toLowerCase()" in _fwUX and "toUpperCase()" not in _fwUX
+          and "toUpperCase()" not in _nsUX.replace("name[0].toUpperCase()", "")
+          and "track.`" not in _fwUX and " track?" not in _fwUX, _fwUX[:200])
+    check("firmware ui: after a push only nodes on that line (or of unknown line) are offered, none pre-checked",
+          ".filter(n => n.online && (!n.line || n.line === upj.track))" in _fwUX
+          and "Object.fromEntries(online.map(n => [n.room, false]))" in _fwUX
+          and "others would just reboot for nothing" not in _appsrc)
+    _vtUX = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
+    _poUX = [_vtUX.find(s) for s in ("<OwwPanel setMsg={setMsg} reloadAll={reloadAll} />", "<SttCard status={status} setMsg={setMsg} />",
+                                     '<Section id="voice" title="TTS"', "<Tuning tuning={tuning} reloadAll={reloadAll} />")]
+    check("voice tab: cards in pipeline order — wake word, STT, TTS, voice tuning",
+          all(p >= 0 for p in _poUX) and _poUX == sorted(_poUX), str(_poUX))
+    check("voice tab: the wake name hints it must match the model and applies live",
+          'placeholder="Jarvis (for hey_jarvis)" title="Must match the wake model. Applies live."' in _ws(_appsrc))
+    _fdUX = _fnUI("function Field({ label, children, right, between }) {")
+    check("phone: a Field can't grow past its row (one column, minWidth 0); cards are one-column grids",
+          '<div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>' in _fdUX
+          and 'p-4 grid gap-4"' not in _appsrc and _appsrc.count('p-4 grid grid-cols-1 gap-4"') >= 9
+          and '<div className="overflow-x-auto">\n        <table id="stt-models"' in _appsrc, _fdUX[:200])
+    check("tts ui: fallback options carry the (local) tag; Kokoro says why when it's the main voice",
+          "Kokoro (local){provider === 'kokoro' ? ' — main voice' : tts?.kokoro_installed ? '' : ' — not installed'}" in _vtUX
+          and "Pocket TTS (local){tts?.pocket_installed ? '' : ' — not installed'}" in _vtUX)
+    check("copy: the STT models table says 'Whisper model'; LocalAI Test says why it's off; no glyph status marks",
+          '<th className="text-left px-4 py-2">Whisper model</th>' in _appsrc
+          and "!saved?.url ? 'Save an address first.'" in _appsrc
+          and not any(g in _appsrc for g in ("✓", "✗", "ⓘ")))
+    check("brand: Add and Push firmware stay grey until they can run (one lime per view)",
+          "className={pickValue && !stale ? BTN_PRIMARY : BTN_DEFAULT}" in _appsrc
+          and "className={fwFile && fwTrack ? BTN_PRIMARY : BTN_DEFAULT}" in _appsrc)
     # ── review batch (App.jsx): zones, next steps, restart, key links ──
     _zlRB = _fnUI("function ZoneList({ mapping, setMsg, reloadAll }) {")
     check("zones ui: each zone has a Remove button (confirm, DELETE, says which rooms lost their zone) and shows its IP",
@@ -9634,7 +9691,7 @@ def main():
     _laSt = _fnUI("function SttCard({ status, setMsg }) {")
     check("localai ui: the LocalAI card sits on the System tab after Keys, saves through the unsaved bar, never edits models",
           "<KeysCard setMsg={setMsg} />\n    <LocalAICard setMsg={setMsg} />" in _appsrc
-          and "useUnsaved('localai', { label: 'localai'" in _laCard
+          and "useUnsaved('localai', { label: 'LocalAI'" in _laCard
           and "api('/api/dashboard/localai', { method: 'PUT', json: { url: url.trim() } })" in _laCard
           and "/api/dashboard/localai/test" in _laCard and "models/apply" not in _appsrc, _laCard[:200])
     check("localai ui: no key saved -> the card links to System · Keys; Keys saves the LocalAI key on its own route",
@@ -9710,7 +9767,7 @@ def main():
           "its audio chip sends no sound. Flash the audio chip to fix it." in _csNS
           and "['silent', 'wrong'].includes(chip.state) ? BTN_PRIMARY : BTN_DEFAULT" in _nsUI, _csNS[:300] or "no checkSound()")
     check("node setup ui: the audio chip board choice has no default",
-          '<option value="" disabled>pick a board…</option>' in _nsUI and "disabled={!dfu.line" in _nsUI,
+          '<option value="" disabled>pick a line…</option>' in _nsUI and "disabled={!dfu.line" in _nsUI,
           _nsUI[:200] or "no NodeSetupPanel")
     _cfNS = _nsUI[_nsUI.find("const chipFlash = async"):_nsUI.find("const busy = [")] if _nsUI else ""
     check("node setup ui: an audio chip flash downloads and checks before it asks, and asks before it writes",
@@ -9718,7 +9775,7 @@ def main():
           and _cfNS.find("fetchXmosImage(") < _cfNS.find("window.confirm(") < _cfNS.find(".flash("),
           _cfNS[:400] or "no chipFlash()")
     check("node setup ui: the audio chip confirmation names the board's line",
-          "line.toUpperCase()" in _cfNS[:_cfNS.find(".flash(")] if _cfNS else False, _cfNS[:300] or "no chipFlash()")
+          "`Flash the ${line} audio chip firmware" in _cfNS[:_cfNS.find(".flash(")] if _cfNS else False, _cfNS[:300] or "no chipFlash()")
     _cfiNS = _nsUI[_nsUI.find("const chipFile = async"):_nsUI.find("const chipFlash = async")] if _nsUI else ""
     check("node setup ui: a file instead is held to the same image check",
           "checkXmosImage(" in _cfiNS, _cfiNS[:300] or "no chipFile()")
