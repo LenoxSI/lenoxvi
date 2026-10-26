@@ -223,7 +223,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         _la_stt = localai.settings()
         localai.bind(_la_stt["url"])
         _stt_override = stt_localai.LocalAIWhisper(_la_stt["model_stt"], stt_localai.whisper_base,
-                                                   url=_la_stt["url"])
+                                                   url=_la_stt["url"], timeout=_la_stt["stt_timeout"])
         logger.info(f"stt: localai {_la_stt['model_stt'] or '(no model picked)'} (Whisper base standby)")
     stt = LocalWhisperSTTService(
         model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
@@ -284,7 +284,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             mixin=TTSTracked, model=_la_tts["model_tts"], voice=_la_tts["voice"], speed=_la_tts["speed"],
             standby_voice=tts_localai.standby_voice_for(
                 _la_tts["voice"], cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", None)),
-            url=_la_tts["url"])
+            url=_la_tts["url"], timeout=_la_tts["tts_timeout"])
         logger.info(f"tts backend: localai {_la_tts['model_tts'] or '(no model picked)'} (Kokoro standby)")
     elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).

@@ -47,7 +47,7 @@ def _service_class(mixin: type) -> type:
         _tts_provider = "localai"
 
         def __init__(self, *, model: str, voice: str, speed: float, standby_voice: str,
-                     url: str | None = None, **kwargs):
+                     url: str | None = None, timeout: float | None = None, **kwargs):
             # Whole clips per sentence: a slow one must not trip pipecat's
             # 3 s idle stop (same reason as Kokoro).
             kwargs.setdefault("stop_frame_timeout_s", tts_kokoro.STOP_FRAME_TIMEOUT_S)
@@ -57,6 +57,7 @@ def _service_class(mixin: type) -> type:
             self._la_voice = voice
             self._la_speed = float(speed)
             self._la_url = url  # fixed when the session was built
+            self._la_timeout = timeout  # None = the default TTS budget
             self._standby_voice = standby_voice
             # One resampler per source: LocalAI's rate and Kokoro's can differ.
             self._la_resampler = create_stream_resampler()
@@ -65,7 +66,8 @@ def _service_class(mixin: type) -> type:
 
         async def _localai_frame(self, part: str, context_id: str):
             pcm, rate = await asyncio.to_thread(localai.speech, part, self._la_model,
-                                                self._la_voice, self._la_speed, url=self._la_url)
+                                                self._la_voice, self._la_speed, url=self._la_url,
+                                                timeout=self._la_timeout)
             audio = await self._la_resampler.resample(pcm, rate, self.sample_rate)
             return TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1,
                                     context_id=context_id)
@@ -128,7 +130,8 @@ def _service_class(mixin: type) -> type:
 
 
 def make_service(*, mixin: type, model: str, voice: str, speed: float, standby_voice: str,
-                 url: str | None = None):
+                 url: str | None = None, timeout: float | None = None):
     """A per-session LocalAI TTS service (the Kokoro fallback uses the
     process's shared Kokoro model, loaded by tts_kokoro.warm/preload)."""
-    return _service_class(mixin)(model=model, voice=voice, speed=speed, standby_voice=standby_voice, url=url)
+    return _service_class(mixin)(model=model, voice=voice, speed=speed, standby_voice=standby_voice, url=url,
+                                   timeout=timeout)

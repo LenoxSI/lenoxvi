@@ -85,10 +85,12 @@ def status() -> dict:
 class LocalAIWhisper:
     """faster-whisper-shaped model object that asks LocalAI first."""
 
-    def __init__(self, model: str, fallback: Callable[[], Any], url: str | None = None):
+    def __init__(self, model: str, fallback: Callable[[], Any], url: str | None = None,
+                 timeout: float | None = None):
         self.model = model
         self._fallback = fallback
         self._url = url  # fixed when the session was built (None = read settings)
+        self._timeout = timeout  # None = the default STT budget
 
     def transcribe(self, audio, language=None, beam_size=1, vad_filter=False):
         data = audio.read() if hasattr(audio, "read") else bytes(audio)
@@ -96,7 +98,7 @@ class LocalAIWhisper:
         # never mark the shared box down (the TTS card may use it fine).
         if self.model and localai.should_try():
             try:
-                text = localai.transcribe(data, self.model, language, url=self._url)
+                text = localai.transcribe(data, self.model, language, url=self._url, timeout=self._timeout)
             except localai.LocalAIError as e:
                 if e.box_down:
                     localai.mark_down(e.reason)

@@ -88,7 +88,20 @@ def settings() -> dict:
         "model_tts": str(cfg_env("localai", "model_tts", "LVI_LOCALAI_MODEL_TTS", "") or ""),
         "voice": str(cfg_env("localai", "voice", "LVI_LOCALAI_VOICE", "") or ""),
         "speed": _speed(cfg_env("localai", "speed", "LVI_LOCALAI_SPEED", 1.0)),
+        # Per-request budgets: the defaults suit a GPU host; a slow CPU box
+        # can raise them (a longer wait before the fallback takes over).
+        "stt_timeout": _secs(cfg_env("localai", "stt_timeout", "LVI_LOCALAI_STT_TIMEOUT", STT_TIMEOUT), STT_TIMEOUT),
+        "tts_timeout": _secs(cfg_env("localai", "tts_timeout", "LVI_LOCALAI_TTS_TIMEOUT", TTS_TIMEOUT), TTS_TIMEOUT),
     }
+
+
+def _secs(value, default: float) -> float:
+    """A timeout knob: 1–30 s; anything unreadable is the default."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(30.0, max(1.0, v)) if v == v else default
 
 
 def _request(method: str, path: str, *, body: bytes | None = None, ctype: str | None = None,
@@ -182,14 +195,14 @@ def _multipart(fields: dict, file_bytes: bytes) -> tuple[bytes, str]:
     return out.getvalue(), f"multipart/form-data; boundary={b}"
 
 
-def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=None) -> str:
+def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=None, timeout=None) -> str:
     """Speech -> text. `language` None = let the server detect it."""
     fields = {"model": model}
     if language:
         fields["language"] = language
     body, ctype = _multipart(fields, wav)
     data = _request("POST", "/v1/audio/transcriptions", body=body, ctype=ctype,
-                    total=STT_TIMEOUT, url=url, key=key)
+                    total=timeout or STT_TIMEOUT, url=url, key=key)
     try:
         reply = json.loads(data)
         text = reply["text"]
@@ -198,13 +211,14 @@ def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=No
     return str(text or "").strip()
 
 
-def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None) -> tuple[bytes, int]:
+def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None,
+           timeout=None) -> tuple[bytes, int]:
     """Text -> (16-bit mono PCM, sample rate). Anything that isn't a mono
     16-bit WAV is an error, never noise."""
     body = json.dumps({"model": model, "input": text, "voice": voice, "speed": speed,
                        "response_format": "wav"}).encode()
     data = _request("POST", "/v1/audio/speech", body=body, ctype="application/json",
-                    total=TTS_TIMEOUT, url=url, key=key)
+                    total=timeout or TTS_TIMEOUT, url=url, key=key)
     try:
         with wave.open(io.BytesIO(data), "rb") as w:
             channels, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()

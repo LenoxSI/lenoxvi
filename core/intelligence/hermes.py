@@ -71,6 +71,13 @@ class HermesLane(Lane):
         # visible and auditable. Requires API_SERVER_KEY on the
         # intelligence (present on this install).
         headers["X-Hermes-Session-Key"] = ctx.conversation
+        # X-Hermes-Session-Id names the session itself. Without it the
+        # api_server derives the session from the opening (system prompt +
+        # first user line), so every fresh room that opens with the same
+        # question lands on ONE stored session and is refused (409
+        # admission_conflict). With it, each conversation is its own session
+        # and the server keeps its history.
+        headers["X-Hermes-Session-Id"] = ctx.conversation
         return payload, headers
 
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
