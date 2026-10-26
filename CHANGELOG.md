@@ -8,6 +8,8 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-26 — LocalAI on your network, node setup over USB
+
 ### Added
 - LocalAI as a speech-to-text and text-to-speech provider: speech models on a LocalAI server on your network. A
   System · LocalAI card (address, Test listing the models it serves), the key on System · Keys (`LVI_LOCALAI_KEY`,
@@ -15,6 +17,10 @@ The two version streams are independent.
   utterance goes to Whisper base on the appliance and the rest of a reply is spoken by Kokoro; a background check
   switches back when it answers. No LocalAI code loads unless a card picks it.
 - Kokoro can be the TTS fallback behind any provider (`tts.fallback: kokoro`), next to Pocket.
+- LocalAI request budgets are settings: `localai.stt_timeout` and `localai.tts_timeout` (seconds, 1–30, default 6
+  and 5; `LVI_LOCALAI_STT_TIMEOUT` / `LVI_LOCALAI_TTS_TIMEOUT`), for a slower LocalAI box.
+- Rooms tab: each zone has a Remove button (it names any rooms the removal leaves without a speaker) and shows
+  its IP.
 
 - System tab: a Node setup panel sets up and flashes nodes over USB from Chrome or Edge (Web Serial): new boards, a
   node moving to a new host address, a node whose Wi-Fi changed. It saves Wi-Fi, room name and host address straight
@@ -43,7 +49,34 @@ The two version streams are independent.
 - The bot learns that a node echoes request ids from the firmware version it reports on connect (1.2.37+), so its
   first command already skips the settling window; the first id-bearing reply still teaches it as before.
 
+- Provider dropdowns say where each one runs, in lowercase: "(cloud)", "(local)" or "(host)" (LocalAI). LocalAI's
+  Kokoro and Pocket models get their voice lists as dropdowns; other LocalAI voices stay a text box. The TTS card
+  shows "pick a model" until one is picked, and a save refuses an empty model or voice.
+- Voice tab cards follow the pipeline: Wake word, STT, TTS, Voice tuning. The unsaved bar lists cards by their
+  titles ("TTS", "Wake name") in page order.
+- Firmware and Node setup call a hardware line "Line" everywhere (no more "Track" or "Board"), in lowercase. After
+  a firmware push the restart list shows only nodes on that line (or of unknown line), none pre-checked.
+- Dashboard: every dropdown, field and slider has an accessible name; "No key" links open the Keys card; a missing
+  key after a save says which key and where to add it; Restart warns when there are unsaved changes; a LocalAI save
+  marks a restart pending while a card uses LocalAI; the TTS fallback options carry the (local) tag; the STT models
+  table says "Whisper model"; status marks are words, not ✓/✗ glyphs; taller tab and Details tap targets.
+
 ### Fixed
+- Hermes: the intelligence call names its session (`X-Hermes-Session-Id`), so a repeated opener on a fresh voice
+  session ("What time is it?") no longer gets a 409 from the Hermes API server and the "can't reach my
+  intelligence" reply.
+- LocalAI: Pocket voices from LocalAI play (its 32-bit float WAVs are converted to 16-bit PCM; before, every Pocket
+  reply fell back to Kokoro). A 500 that says what failed (a voice the backend can't load) falls back for that
+  reply only instead of marking LocalAI down for both cards; the reply budget can't be cut short by pipecat's idle
+  stop.
+- A slow second stretch of a question (local Whisper or LocalAI) joins the turn that's still thinking instead of
+  being dropped, also after a bare wake phrase.
+- Sonos: clips load one at a time in order and an older, slower clip (a filler) never replaces a newer reply (WiiM
+  too); the music duck covers the speech, not the silent tail; setup no longer fails a session when Sonos is off or
+  the host IP is wrong.
+- Wake models saved relative to `LVI_STATE_DIR` resolve there. Adding a Sonos zone turns Sonos on. Saving LocalAI
+  on the TTS card keeps the Deepgram Flux voice.
+- Phones: a long dropdown no longer widens the Voice tab past the screen.
 - The pipeline runs without pipecat's RTVI layer (`enable_rtvi=False`): nodes no longer receive pipecat's own
   speaking, TTS and transcript messages, which drove the LED ring outside the bot's own LED logic, and the
   "Ignoring not RTVI message" log on every node reply is gone.
