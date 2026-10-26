@@ -2620,6 +2620,10 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
       body.kokoro_voice = model
       // Same rule as the Flux knobs: an untouched unset speed writes nothing.
       if (t.changed('kokoro_speed') || tts?.kokoro_speed != null) body.kokoro_speed = kokoroSpeed
+    } else if (provider === 'localai') {
+      // An empty pick would leave every reply on the Kokoro fallback.
+      if (!model) { say('Pick a LocalAI voice model first.', 'err', 'TTS'); return false }
+      if (laVoices && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }
     }
     // The fallback rides with a cloud or Kokoro primary; the server drops
     // it when Pocket itself is the provider. LocalAI has its own (Kokoro).
@@ -2672,6 +2676,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                   {provider === 'localai' ? `${model} — not served by LocalAI` : `${ttsLabel(model)} (not accepted)`}</option>}
               {!options.length && <option value="" disabled>
                 {provider === 'localai' && laFound ? 'no voice models on LocalAI' : 'loading…'}</option>}
+              {provider === 'localai' && !model && options.length > 0 && <option value="" disabled>pick a model</option>}
               {options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}
             </select>
             {provider === 'localai' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
