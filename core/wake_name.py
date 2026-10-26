@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 
 # Pre-trained wake models registered in openwakeword 0.4.0's own `models`
 # table (bundled in its wheel; CC BY-NC-SA 4.0, non-commercial). LenoxVI never
@@ -54,6 +55,14 @@ def resolve_model(value: str | None = None) -> str:
     if v in STOCK_MODELS:
         import openwakeword
         return openwakeword.models[v]["model_path"]
+    # The dashboard stores uploads relative to the state root ("models/x.onnx"):
+    # anchor them there, not on the working directory (LVI_STATE_DIR installs).
+    p = Path(v)
+    if not p.is_absolute():
+        from paths import state_root
+        anchored = state_root() / p
+        if anchored.exists():
+            return str(anchored)
     return v
 
 

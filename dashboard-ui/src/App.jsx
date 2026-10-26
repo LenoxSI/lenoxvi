@@ -359,7 +359,7 @@ const shortUrl = u => (u || '').match(/^http:\/\/([^/]+)(\/v1)?\/?$/)?.[1] || u 
 // entered there only).
 function MissingKey({ label }) {
   return (
-    <a href="#system" className="text-[13px] text-[var(--danger)] hover:underline">
+    <a href="#keys" className="text-[13px] text-[var(--warning-soft-foreground)] hover:underline">
       No {label} key → System · Keys
     </a>
   )
@@ -849,7 +849,9 @@ function RestartButton({ status, setMsg, setRebooting, rebooting, unsaved }) {
     <button className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}
       title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}
       onClick={() => {
-        if (window.confirm('Restart the bot? Every node reboots and reconnects.')) {
+        if (window.confirm(unsaved
+          ? "You have unsaved changes. They won't apply. Restart anyway? Every node reboots and reconnects."
+          : 'Restart the bot? Every node reboots and reconnects.')) {
           restartBot(setMsg, setRebooting)
         }
       }}>
@@ -1769,6 +1771,18 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
     } catch (e) { setMsg('Test clip failed: ' + e.message, 'err', 'Zones') }
   }
 
+  // A mistyped IP or a replaced player: remove the zone and add it again.
+  const removeZone = async name => {
+    if (!window.confirm(`Remove zone ${name}? Rooms mapped to it lose their zone.`)) return
+    try {
+      const r = await api(`/api/dashboard/zones/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      const dropped = r?.dropped_room_mappings || []
+      setMsg(`Removed ${name}.` + (dropped.length ? ` ${dropped.join(', ')} ${dropped.length === 1 ? 'is' : 'are'} now unmapped.` : ''),
+        'ok', 'Zones')
+      reloadAll()
+    } catch (e) { setMsg('Remove failed: ' + e.message, 'err', 'Zones') }
+  }
+
   return (
     <Section title="Zones"
       note="">
@@ -1785,7 +1799,10 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
           <tbody>
             {Object.entries(mapping?.zones || {}).map(([name, z]) => (
               <tr key={name} className="border-t border-[var(--separator)]">
-                <td className="px-4 py-2">{esc(name)}</td>
+                <td className="px-4 py-2">
+                  <div>{esc(name)}</div>
+                  {z?.ip && <div className="font-mono text-[12px] text-[var(--muted)]">{esc(z.ip)}</div>}
+                </td>
                 <td className="px-4 py-2">
                   <span className="inline-block rounded-full bg-[var(--default)] px-2.5 py-0.5 text-[12px] font-medium">
                     {esc(z?.backend) || '—'}
@@ -1796,6 +1813,8 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button className={BTN_DEFAULT} onClick={() => testClip(name)}>Play test clip</button>
+                  <button className={`${BTN_DANGER} ml-2`} onClick={() => removeZone(name)}
+                    aria-label={`Remove zone ${name}`}>Remove</button>
                 </td>
               </tr>
             ))}
@@ -2939,7 +2958,7 @@ function SttCard({ status, setMsg }) {
       if (r.download === 'started') {
         say(`Downloading ${model} — restart to apply once it's on disk.`, 'ok', 'STT')
       } else if (r.restart_needed) {
-        say(r.key_needed ? `Saved — add your ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key below, then restart.`
+        say(r.key_needed ? `No ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key yet — add it on System · Keys, then restart.`
           : 'Saved — restart to apply.', 'ok', 'STT')
         window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))
       } else {

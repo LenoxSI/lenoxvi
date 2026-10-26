@@ -96,6 +96,12 @@ _INTEL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="lvi-intel")
 # Segmented STT: after VAD stop + lull, how much longer to wait for a
 # stretch's transcript before closing on what's already buffered.
 SEGMENT_TRANSCRIPT_GRACE = 1.5
+# A transcript that lands after the turn closed, while that turn is still
+# thinking (no reply yet) and within this window, is the rest of the same
+# question (a slow STT stretch outlived the grace): the turn restarts on the
+# joined text, silently. Later than this, or once she has replied, it's
+# dropped as before.
+LATE_JOIN_WINDOW = 20.0
 
 
 def _filler_tiers() -> list[tuple[float, list[str]]]:
@@ -378,6 +384,11 @@ class IntelligenceAgent(FrameProcessor):
         # that yields no text).
         self._saw_interim = False
         self._segmented_final = False
+        self._last_flushed_text = ""  # what the last closed turn asked (late-tail join)
+        self._last_flush_at = 0.0
+        self._joining = False
+        self._last_flush_wake_only = False  # the last close was a bare "Hey <name>"
+        self._last_close_segmented = False  # closed by the segmented-STT grace (Whisper/LocalAI)
         # Dedup: same utterance re-heard inside this window is treated as an
         # echo/repeat (observed live: the lull-timer can double-fire while the
         # bot is still speaking a slow reply).
@@ -634,6 +645,23 @@ class IntelligenceAgent(FrameProcessor):
                     logger.debug(f"intelligence_agent: echo-gate dropped [{frame.text.strip()}]")
                 elif self._is_own_echo(frame.text):
                     logger.info(f"intelligence_agent: containment dropped echo [{frame.text.strip()[:60]}]")
+                elif (self._flushed and not self._speaking and self._last_flushed_text
+                      and self._last_close_segmented and not self._saw_interim
+                      and (self._last_flush_wake_only
+                           or (self._turn_task is not None and not self._turn_task.done()))
+                      and time.monotonic() - self._last_flush_at < LATE_JOIN_WINDOW):
+                    # The rest of the question the turn closed on (a slow
+                    # STT stretch): reopen it with both parts; the close
+                    # below supersedes the thinking turn without the ack.
+                    logger.info(f"intelligence_agent: late transcript joins the open turn "
+                                f"[{frame.text.strip()[:60]}]")
+                    self._buffer[:] = [self._last_flushed_text, frame.text.strip()]
+                    self._speaking = True
+                    self._flushed = False
+                    self._joining = True
+                    self._last_user_text = ""  # the joined text is new, never a dedup repeat
+                    self._last_transcription = time.monotonic()
+                    final_now = True
                 elif self._flushed and not self._speaking:
                     # The turn already closed: a late STT tail (busy GPU,
                     # Deepgram finalize). Kept, it would sit in the buffer
@@ -667,12 +695,16 @@ class IntelligenceAgent(FrameProcessor):
             and not self._vad_active
             and (final_now or lull_done)
         ):
+            self._last_close_segmented = (self._segmented_final and not final_now) or self._joining
             self._speaking = False
             self._flushed = True
             self._saw_interim = False
             self._segmented_final = False
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
+            joining, self._joining = self._joining, False
+            self._last_flushed_text, self._last_flush_at = text, time.monotonic()
+            self._last_flush_wake_only = bool(text) and _is_wake_phrase_only(text)
             if text:
                 if _is_wake_phrase_only(text):
                     logger.info(f"intelligence_agent: dropped wake-phrase-only [{text}]")
@@ -710,7 +742,9 @@ class IntelligenceAgent(FrameProcessor):
                         self._turn_started = time.monotonic()
                         self._turn_task = asyncio.create_task(
                             self._run_turn(text, epoch))
-                        if superseded:
+                        if superseded and joining:
+                            pass  # same question, more words: no "switching" ack
+                        elif superseded:
                             from config import cfg_env as _cfg_env
                             ack = str(_cfg_env("intelligence", "supersede_ack",
                                                "LVI_SUPERSEDE_ACK",

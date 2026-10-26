@@ -296,6 +296,11 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         # snapshot: re-snapshotting would save the filler's voice volume as
         # the music level, and the filler's restore would dip the reply.
         async with _vol_lock(ip):
+            # Clips play in lock order; one whose generation is no longer
+            # current is dropped, so a slow filler can't replace the reply.
+            if epoch != self._speech_epoch:
+                logger.info("wiim_output: a newer reply is already queued, older clip dropped")
+                return
             need_snap = ip not in _VOL_SAVED
             saved = _VOL_SAVED.get(ip)
 

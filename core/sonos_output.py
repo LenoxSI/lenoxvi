@@ -329,6 +329,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         self._sample_rate = 24000
         self._channels = 1
         self._speech_epoch = 0  # generation stamp; load-anchored timers re-anchor only while current
+        self._play_lock: asyncio.Lock | None = None  # one load at a time, in order (made on the loop)
         # Bumped ONLY by a barge-in (a new generation must not kill an older
         # clip still loading). A speak task that sees it move drops its clip.
         self._barge_epoch = 0
@@ -366,8 +367,14 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # Singleton lane: one server
         # per process, shared with WiiMOutput + the dashboard. Constructed
         # and bound HERE (or reused if WiiM/setup already bound it) —
-        # never a second bind on the port.
-        self._clip_server = await shared_clip_server()
+        # never a second bind on the port. Only when Sonos is on, and never
+        # fatal: a bad host_ip must not fail setup for every room (speaking
+        # binds lazily and reports its own error).
+        if self._enabled:
+            try:
+                self._clip_server = await shared_clip_server()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"sonos_output: clip server not ready ({e}) — will retry when speaking")
         # Startup prune pass, off the event loop.
         try:
             removed = await asyncio.to_thread(_prune_clips, clips_dir(), self._retention_days)
@@ -722,8 +729,24 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         url = server.url_for(filename)
         logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {volume}")
 
+        # Loads go one at a time, in order, and a clip whose generation is
+        # no longer current is dropped: a filler whose connect was slow must
+        # never load AFTER the reply and replace it (a load replaces the
+        # active clip).
+        if self._play_lock is None:
+            self._play_lock = asyncio.Lock()
+        async with self._play_lock:
+            await self._load_clip(zone, zone_name, url, volume, duration, epoch, barge)
+
+    def _stale(self, epoch: int) -> bool:
+        return epoch != self._speech_epoch
+
+    async def _load_clip(self, zone, zone_name, url, volume, duration, epoch, barge) -> None:
         from sonos_websocket import SonosWebsocket
 
+        if self._stale(epoch):
+            logger.info("sonos_output: a newer reply is already queued, older clip dropped")
+            return
         sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
         # From connect until the load returns this reply owns the player: the
         # duck holder skips its silence loads (one racing in replaced the
@@ -733,6 +756,9 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
             await asyncio.wait_for(sw.connect(), timeout=5.0)  # bounded
             if self._barged(barge):
                 logger.info("sonos_output: barge-in before play, clip dropped")
+                return
+            if self._stale(epoch):
+                logger.info("sonos_output: a newer reply arrived during connect, older clip dropped")
                 return
             resp = await asyncio.wait_for(
                 sw.play_clip(url, volume=volume), timeout=5.0
@@ -766,12 +792,13 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                         self._wake_gate.note_speech(duration)
                     except Exception:
                         pass  # gate hint must never break the reply
-            # Duck ownership starts HERE — the clip is
-            # actually sounding on the player now, so this is the honest
-            # start of the "reply owns the duck" window. (duration counts
-            # the tail too, which is exactly what the player will play.)
-            clip_len = len(pcm) / (2 * self._sample_rate * max(self._channels, 1))
-            self._clip_active_until = time.monotonic() + clip_len + 0.7
+            # Duck ownership starts HERE — the clip is actually sounding on
+            # the player now. It covers her SPEECH only (`duration`, unpadded):
+            # the holder's next refresh then lands inside the 8 s silence
+            # tail, silence-on-silence. Timing it on the padded clip let the
+            # tail run out first and the music swell before the refresh.
+            # +1.0 s covers the player's start lag; the tail is 8 s of silence.
+            self._clip_active_until = time.monotonic() + duration + 1.0
             self._reply_clip_id = _extract_clip_id(resp)
         except Exception as e:
             logger.warning(f"sonos_output: play failed on {zone_name}: {e} — generation-anchored fallback timers stand")

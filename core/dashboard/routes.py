@@ -264,6 +264,13 @@ def _restart_pending() -> list:
         stt_keys.append("language")
     if differs("stt", stt_keys):
         out.append("stt")
+    # LocalAI settings matter only while a card uses LocalAI (an address
+    # saved ahead of time needs no restart).
+    def _uses_localai(c):
+        return any(str(pick(c, s).get("provider") or os.getenv(env) or "").lower() == "localai"
+                   for s, env in (("stt", "LVI_STT_PROVIDER"), ("tts", "LVI_TTS_PROVIDER")))
+    if any(_uses_localai(c) for c in (boot, saved)) and differs("localai"):
+        out.append("localai")
     # A key nothing uses yet needs no restart.
     for row in keys_catalog.rows(_saved_env(), dict(os.environ), _keys_cfg(), file_env=_file_env()):
         if row["in_use"] and row["pending_restart"]:
@@ -661,7 +668,8 @@ async def add_zone(payload: ZonePayload):
             else:
                 zones = dict(sonos.get("zones") or {})
                 zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
-                config_store.write_section("sonos", {**sonos, "zones": zones})
+                # Adding a zone turns its backend on (same as WiiM above).
+                config_store.write_section("sonos", {**sonos, "enabled": True, "zones": zones})
             return zones
 
     try:
@@ -1399,7 +1407,7 @@ async def put_tts(payload: TTSPayload):
         current["kokoro_voice"] = payload.kokoro_voice
         if payload.kokoro_speed is not None:   # None = leave as-is
             current["kokoro_speed"] = payload.kokoro_speed
-    else:
+    elif payload.provider == "deepgram-flux":
         current["deepgram_flux_voice"] = payload.deepgram_flux_voice
         # Flux knobs ride along — None means "leave as-is" (partial update
         # semantics: the panel always sends current values, but a bare

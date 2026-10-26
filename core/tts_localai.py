@@ -49,8 +49,9 @@ def _service_class(mixin: type) -> type:
         def __init__(self, *, model: str, voice: str, speed: float, standby_voice: str,
                      url: str | None = None, timeout: float | None = None, **kwargs):
             # Whole clips per sentence: a slow one must not trip pipecat's
-            # 3 s idle stop (same reason as Kokoro).
-            kwargs.setdefault("stop_frame_timeout_s", tts_kokoro.STOP_FRAME_TIMEOUT_S)
+            # idle stop (same reason as Kokoro). The idle window must outlast
+            # the per-sentence budget plus the Kokoro fallback after it.
+            kwargs.setdefault("stop_frame_timeout_s", stop_timeout_for(timeout))
             TTSService.__init__(self, push_start_frame=True, push_stop_frames=True,
                                 settings=TTSSettings(model=model, voice=voice, language=None), **kwargs)
             self._la_model = model
@@ -127,6 +128,13 @@ def _service_class(mixin: type) -> type:
 
     _service_cls = TrackedLocalAITTSService
     return _service_cls
+
+
+def stop_timeout_for(timeout: float | None) -> float:
+    """pipecat's idle stop for a LocalAI session: the LocalAI budget plus
+    10 s for the Kokoro fallback, never under Kokoro's own window."""
+    budget = float(timeout or localai.TTS_TIMEOUT)
+    return max(tts_kokoro.STOP_FRAME_TIMEOUT_S, budget + 10.0)
 
 
 def make_service(*, mixin: type, model: str, voice: str, speed: float, standby_voice: str,
