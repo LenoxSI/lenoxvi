@@ -26,9 +26,9 @@ def check(name, cond, detail=""):
 import stt_catalog as cat
 
 # ── catalog ──────────────────────────────────────────────────────────
-check("provider catalog: Local — Whisper first, then LocalAI, then Deepgram Nova-3 (cloud), then ElevenLabs Scribe v2 (cloud)",
+check("provider catalog: Whisper (local) first, then LocalAI, then Deepgram Nova-3 (cloud), then ElevenLabs Scribe v2 (cloud)",
       [(p["name"], p["label"]) for p in getattr(cat, "PROVIDERS", [])]
-      == [("whisper", "Local — Whisper"), ("localai", "LocalAI (Host)"), ("deepgram", "Deepgram Nova-3 (cloud)"),
+      == [("whisper", "Whisper (local)"), ("localai", "LocalAI (host)"), ("deepgram", "Deepgram Nova-3 (cloud)"),
           ("elevenlabs", "ElevenLabs Scribe v2 (cloud)")],
       str(getattr(cat, "PROVIDERS", None)))
 check("deepgram language: auto -> multi, a code passes through, empty -> multi",

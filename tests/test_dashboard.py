@@ -9587,10 +9587,12 @@ def main():
     check("localai ui: model lists come from the server's Test (keys never reach the browser), refreshed after saves",
           "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
           and "useLocalAIModels(provider === 'localai')" in _laVo and "useLocalAIModels(onLocalAIPick)" in _laSt)
-    check("localai ui: both provider dropdowns read 'LocalAI (Host)'",
-          "LocalAI (Host){tts?.localai_problem ? ' — set it up on System' : ''}" in _laVo
-          and any(p["name"] == "localai" and p["label"] == "LocalAI (Host)"
-                  for p in client.get("/api/dashboard/stt").json().get("providers", [])))
+    _provLabels = {p["name"]: p["label"] for p in client.get("/api/dashboard/stt").json().get("providers", [])}
+    check("provider ui: every TTS and STT provider says where it runs — (cloud), (local) or (host), lowercase",
+          all(s in _laVo for s in ('>ElevenLabs (cloud)<', '>Deepgram Aura (cloud)<', '>Deepgram Flux (cloud)<',
+                                   "Pocket TTS (local){", "Kokoro (local){", "LocalAI (host){"))
+          and _provLabels.get("whisper") == "Whisper (local)" and _provLabels.get("localai") == "LocalAI (host)"
+          and all(lbl.endswith(("(cloud)", "(local)", "(host)")) for lbl in _provLabels.values()), str(_provLabels))
     check("localai ui: TTS card offers LocalAI (disabled with the reason until set up), hides the fallback picker for it",
           "<option value=\"localai\" disabled={!!tts?.localai_problem && provider !== 'localai'}" in _laVo
           and "{provider !== 'pocket' && provider !== 'localai' && (" in _laVo
@@ -9601,6 +9603,7 @@ def main():
           and "if (laVoices && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }" in _laVo)
     check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, else free text)",
           "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null" in _laVo
+          and "laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw" in _laVo
           and 'id="tts-localai-voice"' in _laVo)
     check("tts ui: the fallback picker offers Kokoro and Pocket, each pickable while saved",
           "<option value=\"kokoro\" disabled={(!tts?.kokoro_installed || provider === 'kokoro') && fallback !== 'kokoro'}>" in _laVo
