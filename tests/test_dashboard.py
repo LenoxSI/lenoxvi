@@ -9591,6 +9591,10 @@ def main():
           "<option value=\"localai\" disabled={!!tts?.localai_problem && provider !== 'localai'}" in _laVo
           and "{provider !== 'pocket' && provider !== 'localai' && (" in _laVo
           and "If LocalAI is down: Kokoro on this appliance." in _laVo)
+    check("localai ui: the TTS card never shows a model it isn't holding ('pick a model'), and Save refuses an empty model or voice",
+          "{provider === 'localai' && !model && options.length > 0 && <option value=\"\" disabled>pick a model</option>}" in _laVo
+          and "if (!model) { say('Pick a LocalAI voice model first.', 'err', 'TTS'); return false }" in _laVo
+          and "if (laVoices && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }" in _laVo)
     check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, else free text)",
           "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null" in _laVo
           and 'id="tts-localai-voice"' in _laVo)
