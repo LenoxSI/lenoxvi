@@ -177,6 +177,71 @@ first, turns = asyncio.run(late_probe())
 check("agent: a transcript after the turn closed is dropped, the next question stands alone",
       first == ["turn on the lights"] and turns == ["turn on the lights", "what's the weather"], str(turns))
 
+# ── segmented STT: a slow second stretch joins the open turn ───────
+LIVE["wake"] = {"name": "Jarvis"}  # so "Hey Jarvis." is a bare wake phrase
+async def join_probe(case):
+    ag = IntelligenceAgent(echo_gate=EchoGate(), room=f"suite-join-{case}", session_mode="fresh")
+    ag._lull_secs = 0.2
+    turns, spoken = [], []
+    hold = asyncio.Event()
+
+    async def rec(text, epoch):
+        turns.append(text)
+        if case != "replied":
+            await hold.wait()  # still thinking: no reply yet
+    ag._run_turn = rec
+
+    async def push(frame, direction=None):
+        if getattr(frame, "text", None) and type(frame).__name__ == "TTSSpeakFrame":
+            spoken.append(frame.text)
+    ag.push_frame = push
+
+    def final(text):
+        return TranscriptionFrame(text, "", 0, 0, 0, finalized=True) if case != "streaming" \
+            else TranscriptionFrame(text, "", 0)
+
+    async def tick(secs):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            await ag.process_frame(TranscriptionFrame("", "", 0), D)
+            await asyncio.sleep(0.02)
+    first = "Hey Jarvis." if case == "wake" else "Can you check the weather"
+    await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+    await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+    await tick(0.05)
+    await ag.process_frame(final(first), D)
+    await ag.process_frame(VADUserStartedSpeakingFrame(), D)   # part two, still talking
+    await tick(0.1)
+    await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+    await tick(0.2 + 1.5 + 0.4)   # lull + grace pass: closes on part one
+    closed_on = list(turns)
+    await ag.process_frame(final("for tomorrow in Boston"), D)   # the slow stretch lands
+    await tick(0.4)
+    hold.set()
+    await asyncio.sleep(0.05)
+    return closed_on, turns, spoken
+
+
+for case, want_closed, want_turns in (
+        ("thinking", ["Can you check the weather"],
+         ["Can you check the weather", "Can you check the weather for tomorrow in Boston"]),
+        ("wake", [], ["Hey Jarvis. for tomorrow in Boston"]),
+        ("replied", ["Can you check the weather"], ["Can you check the weather"]),
+        ("streaming", None, None)):
+    closed_on, turns_j, spoken_j = asyncio.run(join_probe(case))
+    if case == "thinking":
+        check("agent: a slow second stretch joins the thinking turn (both parts asked, silently)",
+              closed_on == want_closed and turns_j == want_turns and not spoken_j, f"{turns_j} {spoken_j}")
+    elif case == "wake":
+        check("agent: a slow stretch after a bare wake phrase is asked with it, not dropped",
+              closed_on == want_closed and turns_j == want_turns, str(turns_j))
+    elif case == "replied":
+        check("agent: once she has replied, a late stretch is still dropped",
+              turns_j == want_turns, str(turns_j))
+    else:
+        check("agent: a streaming STT's late tail is never joined (only segmented STT)",
+              "for tomorrow in Boston" not in " ".join(turns_j), str(turns_j))
+
 # ── A #4: the room-agent lookup follows a rename ───────────────────
 LIVE.clear()
 LIVE.update({"intelligence": {"kind": "hermes", "url": "http://hm.test:8642/v1"},

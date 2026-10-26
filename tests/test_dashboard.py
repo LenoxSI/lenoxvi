@@ -246,6 +246,20 @@ def main():
     check("zone add ok", r.status_code == 200, f"status={r.status_code}")
     m = client.get("/api/dashboard/mapping").json()
     check("new zone visible in mapping GET", "test_zone" in m["zones"], f"zones={list(m['zones'])}")
+    _sonos_b = dict(config_store.read_section("sonos") or {})
+    config_store.write_section("sonos", {**_sonos_b, "enabled": False})
+    r = client.post("/api/dashboard/zones", json={
+        "name": "suite_enable_zone", "ip": "192.0.2.223", "player_uid": "RINCON_TEST2"})
+    check("zones: adding a Sonos zone turns Sonos on (same as WiiM)",
+          r.status_code == 200 and (config_store.read_section("sonos") or {}).get("enabled") is True,
+          f"{r.status_code} {config_store.read_section('sonos')}")
+    client.delete("/api/dashboard/zones/suite_enable_zone")
+    _sonos_a = dict(config_store.read_section("sonos") or {})
+    if "enabled" in _sonos_b:
+        _sonos_a["enabled"] = _sonos_b["enabled"]
+    else:
+        _sonos_a.pop("enabled", None)
+    config_store.write_section("sonos", _sonos_a)
     # A '/' in a zone name broke every per-zone route (volume, test, delete
     # take the name as one path segment): refused at add, with a reason.
     r = client.post("/api/dashboard/zones", json={
@@ -1333,8 +1347,31 @@ def main():
               ("/v1/models", "Bearer la-good-SECRET-7777") in _la_seen)
         _kt = client.post("/api/dashboard/keys/test", json={"var": "LVI_LOCALAI_KEY"})
         check("localai key: Keys-card Test says LocalAI accepted the key", _kt.json().get("ok") is True, _kt.text[:200])
+        config_store.write_section("tts", {**(config_store.read_section("tts") or {}),
+                                           "deepgram_flux_voice": "flux-suite-voice"})
         r = client.put("/api/dashboard/tts", json={"provider": "localai"})
         check("localai card: with URL + key saved, TTS can pick LocalAI", r.status_code == 200, r.text[:160])
+        check("tts card: saving LocalAI keeps the saved Deepgram Flux voice",
+              (config_store.read_section("tts") or {}).get("deepgram_flux_voice") == "flux-suite-voice",
+              str(config_store.read_section("tts")))
+        # Restart pending: LocalAI settings count only while a card uses LocalAI.
+        import config as _cfgLAP
+        from dashboard import routes as _rLAP
+
+        def _la_pending(boot, saved):
+            _rb, _rl = _cfgLAP.boot_config, _cfgLAP._load
+            _cfgLAP.boot_config, _cfgLAP._load = (lambda: boot), (lambda: saved)
+            try:
+                return _rLAP._restart_pending()
+            finally:
+                _cfgLAP.boot_config, _cfgLAP._load = _rb, _rl
+        _laB = {"stt": {"provider": "localai"}, "localai": {"url": "http://192.0.2.50:8080", "voice": "af_heart"}}
+        _laS = {"stt": {"provider": "localai"}, "localai": {"url": "http://192.0.2.50:8080", "voice": "af_bella"}}
+        _laN = {"stt": {"provider": "whisper"}, "localai": {"url": "http://192.0.2.50:8080"}}
+        _laN2 = {"stt": {"provider": "whisper"}, "localai": {"url": "http://192.0.2.51:8080"}}
+        check("restart pending: a LocalAI change lists 'localai' while a card uses LocalAI, never before",
+              "localai" in _la_pending(_laB, _laS) and "localai" not in _la_pending(_laN, _laN2)
+              and "localai" not in _la_pending(_laB, _laB), f"{_la_pending(_laB, _laS)} {_la_pending(_laN, _laN2)}")
         check("localai card: GET /tts says nothing is missing for LocalAI",
               client.get("/api/dashboard/tts").json().get("localai_problem") is None)
         r = client.put("/api/dashboard/localai", json={"model_stt": ""})
@@ -9061,7 +9098,7 @@ def main():
           and "data-tab" not in _appsrc.replace('<div data-tab="', "").replace("[data-tab]", ""), str(_gotTB))
     _linksTB = set(_reui.findall(r"href: '#([\w-]+)'", _appsrc)) | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))
     check("tabs: the warning chips' links and the missing-key link land on the tab with their card",
-          _linksTB == {"intelligence", "keys", "localai", "rooms", "system"}
+          _linksTB == {"intelligence", "keys", "localai", "rooms"}
           and all(_tabTB(i) in ("rooms", "voice", "system") for i in _linksTB)
           and _tabTB("keys") == _tabTB("system") == _tabTB("intelligence") == _tabTB("localai") == "system"
           and _tabTB("rooms") == "rooms",
@@ -9083,7 +9120,8 @@ def main():
           "const pending = status?.restart_pending || []" in _rbtTB
           and "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT} disabled={rebooting}" in _rbtTB
           and "title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}" in _rbtTB
-          and "if (window.confirm('Restart the bot? Every node reboots and reconnects.')) { "
+          and "if (window.confirm(unsaved ? \"You have unsaved changes. They won't apply. Restart anyway? "
+              "Every node reboots and reconnects.\" : 'Restart the bot? Every node reboots and reconnects.')) { "
               "restartBot(setMsg, setRebooting) }" in _rbtTB
           and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
           and _rbtTB.count("window.confirm(") == 1
@@ -9323,7 +9361,8 @@ def main():
           and '<button id="btn-int-test" className={BTN_DEFAULT}' in _syUS and ">Test saved config</button>" in _syUS)
     check("unsaved: restartBot's latch and the Restart confirm are unchanged (still holds)",
           "if (_botRestarting) return false" in _rb and _rb.count("_botRestarting = false") == 2
-          and "if (window.confirm('Restart the bot? Every node reboots and reconnects.')) { "
+          and "if (window.confirm(unsaved ? \"You have unsaved changes. They won't apply. Restart anyway? "
+              "Every node reboots and reconnects.\" : 'Restart the bot? Every node reboots and reconnects.')) { "
               "restartBot(setMsg, setRebooting) }" in _rbtTB
           and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
           and "title={pending.length ? `Pending: ${pending.join(', ')}` : undefined}" in _rbtTB)
@@ -9557,7 +9596,7 @@ def main():
           and "{cloudPick && data && !data[cloudPick.key] && <MissingKey label={cloudPick.name} />}" in _scEL
           and "'deepgram'" not in _scEL and 'label="Deepgram"' not in _scEL, _scEL[:300])
     check("elevenlabs ui: 'add your key' names the saved provider; the restart message is unchanged",
-          "say(r.key_needed ? `Saved — add your ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key below, then restart.`"
+          "say(r.key_needed ? `No ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key yet — add it on System · Keys, then restart.`"
           in _svEL and ": 'Saved — restart to apply.', 'ok', 'STT')" in _svEL, _svEL[:400])
     check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
           "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
@@ -9571,6 +9610,23 @@ def main():
           (_ex_la.get("tts") or {}).get("fallback") == "kokoro" and "kokoro-onnx==0.4.7" in _req_la
           and "-r requirements.txt" in (REPO_CORE.parent / "requirements-kokoro.txt").read_text().splitlines(),
           str((_ex_la.get("tts") or {}).get("fallback")))
+    # ── review batch (App.jsx): zones, next steps, restart, key links ──
+    _zlRB = _fnUI("function ZoneList({ mapping, setMsg, reloadAll }) {")
+    check("zones ui: each zone has a Remove button (confirm, DELETE, says which rooms lost their zone) and shows its IP",
+          "window.confirm(`Remove zone ${name}? Rooms mapped to it lose their zone.`)" in _zlRB
+          and "api(`/api/dashboard/zones/${encodeURIComponent(name)}`, { method: 'DELETE' })" in _zlRB
+          and "r?.dropped_room_mappings" in _zlRB and "onClick={() => removeZone(name)}" in _zlRB
+          and "{z?.ip && <div className=\"font-mono text-[12px] text-[var(--muted)]\">{esc(z.ip)}</div>}" in _zlRB)
+    check("stt ui: a missing cloud key is a next step that survives the unsaved bar and names System · Keys",
+          "`No ${STT_CLOUD[r.current?.provider]?.name || 'cloud'} key yet — add it on System · Keys, then restart.`" in _appsrc
+          and "key below, then restart" not in _appsrc)
+    _rbRB = _fnUI("function RestartButton(")
+    check("restart ui: restarting with unsaved edits warns they won't apply",
+          "You have unsaved changes. They won't apply. Restart anyway? Every node reboots and reconnects." in _rbRB
+          and "window.confirm(unsaved" in _rbRB)
+    _mkRB = _fnUI("function MissingKey({ label }) {")
+    check("keys ui: 'No key' links land on the Keys card, in the warning tone",
+          'href="#keys"' in _mkRB and "warning-soft-foreground" in _mkRB and "--danger" not in _mkRB)
     # ── localai ui (App.jsx) ──
     _laCard = _fnUI("function LocalAICard({ setMsg }) {")
     _laHook = _fnUI("function useLocalAIModels(on) {")

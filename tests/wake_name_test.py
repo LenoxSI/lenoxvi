@@ -3,7 +3,10 @@
 Patches wake_name._wake instead of touching config files.
 Run: cd tests && ~/venvs/lenoxvi/bin/python wake_name_test.py <path-to-core>
 """
+import os
 import sys
+import tempfile
+from pathlib import Path
 
 CORE = sys.argv[1] if len(sys.argv) > 1 else "../core"
 sys.path.insert(0, CORE)
@@ -77,6 +80,22 @@ check("wake name: config change applies with no restart",
 check("wake name: stock key resolves to the bundled file",
       wn.resolve_model("hey_jarvis").endswith("hey_jarvis_v0.1.onnx"), wn.resolve_model("hey_jarvis"))
 check("wake name: custom path passes through", wn.resolve_model("models/x.onnx") == "models/x.onnx")
+_st_wm = tempfile.mkdtemp(prefix="lvi-wake-")
+(Path(_st_wm) / "models").mkdir()
+(Path(_st_wm) / "models" / "house.onnx").write_bytes(b"onnx")
+_prev_wm = os.environ.get("LVI_STATE_DIR")
+os.environ["LVI_STATE_DIR"] = _st_wm
+try:
+    _got_wm = wn.resolve_model("models/house.onnx")
+    _abs_wm = wn.resolve_model("/opt/elsewhere/x.onnx")
+finally:
+    if _prev_wm is None:
+        os.environ.pop("LVI_STATE_DIR", None)
+    else:
+        os.environ["LVI_STATE_DIR"] = _prev_wm
+check("wake name: a dashboard upload saved relative to LVI_STATE_DIR resolves there, not the working directory",
+      _got_wm == str(Path(_st_wm) / "models" / "house.onnx"), _got_wm)
+check("wake name: an absolute custom path is left alone", _abs_wm == "/opt/elsewhere/x.onnx", _abs_wm)
 CFG["wake"] = {}
 check("wake name: absent model -> hey_jarvis bundled", wn.resolve_model().endswith("hey_jarvis_v0.1.onnx"))
 

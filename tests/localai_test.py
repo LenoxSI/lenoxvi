@@ -501,7 +501,12 @@ if HAVE_PIPECAT:
     BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
     svc = make()
     check("tts localai: is a TTS service with the provider name and a raised stop timeout",
-          svc._tts_provider == "localai" and svc._stop_frame_timeout_s == tts_kokoro.STOP_FRAME_TIMEOUT_S)
+          svc._tts_provider == "localai" and svc._stop_frame_timeout_s >= tts_kokoro.STOP_FRAME_TIMEOUT_S)
+    _s12 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0,
+                                    standby_voice="af_heart", timeout=12.0)
+    check("tts localai: pipecat's idle stop outlasts the LocalAI budget plus the Kokoro fallback",
+          _s12._stop_frame_timeout_s == 22.0 and svc._stop_frame_timeout_s == 15.0,
+          f"{_s12._stop_frame_timeout_s} {svc._stop_frame_timeout_s}")
     n0 = len(SEEN)
     frames = asyncio.run(drain(svc, "The first sentence is here. The second one has 3 apples."))
     reqs = [json.loads(s[3]) for s in SEEN[n0:] if s[1] == "/v1/audio/speech"]
