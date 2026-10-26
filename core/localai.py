@@ -1,0 +1,288 @@
+"""LocalAI client: speech-to-text and text-to-speech over LocalAI's OpenAI
+audio API, plus model discovery and ONE up/down state shared by STT and TTS.
+
+Imported only when a card picks the `localai` provider. Stdlib HTTP only.
+The key (LVI_LOCALAI_KEY) is required: without it no request is sent at all.
+It never appears in any error, log or status text.
+
+What LocalAI actually does (checked against v4.12.1):
+- /v1/audio/transcriptions answers verbose JSON; `text` has a leading space.
+- /v1/audio/speech ignores response_format=pcm and always sends a WAV, and
+  sends the whole clip at once (no streaming), so we ask for wav and read the
+  sample rate from its header.
+- /v1/models lists ids only; /api/models/config-json/<id> says what a model
+  is for (known_usecases) and which backend runs it.
+"""
+from __future__ import annotations
+
+import http.client
+import io
+import json
+import os
+import threading
+import time
+import urllib.parse
+import uuid
+import wave
+
+from loguru import logger
+
+KEY_VAR = "LVI_LOCALAI_KEY"
+CONNECT_TIMEOUT = 1.0
+STT_TIMEOUT = 6.0
+TTS_TIMEOUT = 5.0
+PROBE_TIMEOUT = 3.0
+NO_KEY = "no LocalAI key — add it on System · Keys"
+_FLAGS = {"FLAG_TRANSCRIPT": "stt", "FLAG_TTS": "tts"}
+
+
+class LocalAIError(Exception):
+    """A LocalAI call that didn't produce a usable answer. `reason` is short,
+    human and key-free (it lands on the dashboard chip)."""
+
+    def __init__(self, reason: str, status: int | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+
+
+def redact(text, key: str | None = None) -> str:
+    s = str(text)
+    for k in filter(None, (key, os.environ.get(KEY_VAR))):
+        s = s.replace(k, "***")
+    return s[:160]
+
+
+def normalize_url(raw) -> str | None:
+    """`host:port` -> `http://host:port`; a trailing `/` or `/v1` is dropped
+    (the paths below carry /v1 themselves)."""
+    url = str(raw or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        url = "http://" + url
+    url = url.rstrip("/")
+    if url.endswith("/v1"):
+        url = url[:-3]
+    return url
+
+
+def _speed(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def settings() -> dict:
+    from config import cfg_env
+    return {
+        "url": normalize_url(cfg_env("localai", "url", "LVI_LOCALAI_URL")),
+        "model_stt": str(cfg_env("localai", "model_stt", "LVI_LOCALAI_MODEL_STT", "") or ""),
+        "model_tts": str(cfg_env("localai", "model_tts", "LVI_LOCALAI_MODEL_TTS", "") or ""),
+        "voice": str(cfg_env("localai", "voice", "LVI_LOCALAI_VOICE", "") or ""),
+        "speed": _speed(cfg_env("localai", "speed", "LVI_LOCALAI_SPEED", 1.0)),
+    }
+
+
+def _request(method: str, path: str, *, body: bytes | None = None, ctype: str | None = None,
+             total: float, url: str | None = None, key: str | None = None) -> bytes:
+    url = normalize_url(url) if url else settings()["url"]
+    if not url:
+        raise LocalAIError("no LocalAI URL set")
+    key = os.environ.get(KEY_VAR) if key is None else key
+    if not key:
+        raise LocalAIError(NO_KEY)
+    u = urllib.parse.urlsplit(url)
+    if not u.hostname:
+        raise LocalAIError("the LocalAI URL has no host")
+    conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    deadline = time.monotonic() + total
+    conn = conn_cls(u.hostname, u.port, timeout=CONNECT_TIMEOUT)
+    try:
+        try:
+            conn.connect()
+        except OSError as e:
+            raise LocalAIError(f"LocalAI unreachable ({type(e).__name__})") from None
+        headers = {"Accept": "*/*", "Authorization": f"Bearer {key}"}
+        if ctype:
+            headers["Content-Type"] = ctype
+        try:
+            conn.sock.settimeout(max(0.05, deadline - time.monotonic()))
+            conn.request(method, path, body=body, headers=headers)
+            resp = conn.getresponse()
+            chunks = []
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError
+                if conn.sock is not None:
+                    conn.sock.settimeout(max(0.05, left))
+                part = resp.read(65536)
+                if not part:
+                    break
+                chunks.append(part)
+        except (TimeoutError, OSError, http.client.HTTPException) as e:
+            raise LocalAIError(f"LocalAI timed out or dropped the connection ({type(e).__name__})") from None
+        data = b"".join(chunks)
+        if resp.status == 401:
+            raise LocalAIError("LocalAI refused the key (check it on System · Keys)", 401)
+        if resp.status >= 400:
+            msg = ""
+            try:
+                err = json.loads(data).get("error")
+                msg = (err.get("message") if isinstance(err, dict) else err) or ""
+            except Exception:  # noqa: BLE001 — a non-JSON error body is fine
+                pass
+            raise LocalAIError(redact(f"LocalAI error {resp.status}" + (f": {msg}" if msg else ""), key),
+                               resp.status)
+        return data
+    finally:
+        conn.close()
+
+
+def _multipart(fields: dict, file_bytes: bytes) -> tuple[bytes, str]:
+    b = uuid.uuid4().hex
+    out = io.BytesIO()
+    for name, value in fields.items():
+        out.write(f'--{b}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+    out.write(f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\n'
+              "Content-Type: audio/wav\r\n\r\n".encode())
+    out.write(file_bytes)
+    out.write(f"\r\n--{b}--\r\n".encode())
+    return out.getvalue(), f"multipart/form-data; boundary={b}"
+
+
+def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=None) -> str:
+    """Speech -> text. `language` None = let the server detect it."""
+    fields = {"model": model}
+    if language:
+        fields["language"] = language
+    body, ctype = _multipart(fields, wav)
+    data = _request("POST", "/v1/audio/transcriptions", body=body, ctype=ctype,
+                    total=STT_TIMEOUT, url=url, key=key)
+    try:
+        return str(json.loads(data).get("text") or "").strip()
+    except Exception:  # noqa: BLE001
+        raise LocalAIError("LocalAI sent an unreadable transcript") from None
+
+
+def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None) -> tuple[bytes, int]:
+    """Text -> (16-bit mono PCM, sample rate). Anything that isn't a mono
+    16-bit WAV is an error, never noise."""
+    body = json.dumps({"model": model, "input": text, "voice": voice, "speed": speed,
+                       "response_format": "wav"}).encode()
+    data = _request("POST", "/v1/audio/speech", body=body, ctype="application/json",
+                    total=TTS_TIMEOUT, url=url, key=key)
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            channels, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
+            pcm = w.readframes(w.getnframes())
+    except Exception:  # noqa: BLE001 — wave.Error, EOFError, struct errors
+        raise LocalAIError("LocalAI sent audio that isn't a WAV") from None
+    if channels != 1 or width != 2:
+        raise LocalAIError(f"LocalAI audio is {channels}-channel {8 * width}-bit; need mono 16-bit")
+    if not pcm or len(pcm) % 2:
+        raise LocalAIError("LocalAI sent an empty or cut-off clip")
+    return pcm, rate
+
+
+def discover(*, url=None, key=None) -> dict:
+    """{"stt": [id...], "tts": [{"id", "backend"}...]} — only models LocalAI
+    says are for transcription or speech; anything unflagged is left out."""
+    raw = json.loads(_request("GET", "/v1/models", total=PROBE_TIMEOUT, url=url, key=key))
+    ids = [m.get("id") for m in (raw.get("data") or []) if isinstance(m, dict)]
+    out: dict = {"stt": [], "tts": []}
+    for mid in filter(None, ids):
+        try:
+            conf = json.loads(_request("GET", f"/api/models/config-json/{urllib.parse.quote(str(mid))}",
+                                       total=PROBE_TIMEOUT, url=url, key=key))
+        except (LocalAIError, ValueError):
+            continue
+        kinds = {_FLAGS.get(f) for f in (conf.get("known_usecases") or [])} - {None}
+        if "stt" in kinds:
+            out["stt"].append(mid)
+        if "tts" in kinds:
+            out["tts"].append({"id": mid, "backend": str(conf.get("backend") or "")})
+    return out
+
+
+def probe(*, url=None, key=None) -> tuple[bool, float | None, str | None]:
+    """(answered, round-trip ms, reason when not)."""
+    t0 = time.monotonic()
+    try:
+        _request("GET", "/v1/models", total=PROBE_TIMEOUT, url=url, key=key)
+    except LocalAIError as e:
+        return False, None, e.reason
+    return True, (time.monotonic() - t0) * 1000, None
+
+
+# ── one up/down state for the box: STT and TTS share it ──
+_LOCK = threading.Lock()
+_STATE: dict = {"down": None, "since": None, "last_probe": 0.0, "probing": False, "cooldown": 30.0}
+
+
+def _reset_for_tests() -> None:
+    with _LOCK:
+        _STATE.update(down=None, since=None, last_probe=0.0, probing=False, cooldown=30.0)
+
+
+def set_cooldown(secs) -> None:
+    try:
+        _STATE["cooldown"] = max(0.1, float(secs))
+    except (TypeError, ValueError):
+        _STATE["cooldown"] = 30.0
+
+
+def mark_down(reason: str) -> None:
+    with _LOCK:
+        if _STATE["down"] is None:
+            logger.warning(f"localai: down ({reason}) — using the appliance fallback")
+            _STATE["since"] = time.time()
+            _STATE["last_probe"] = time.monotonic()
+        _STATE["down"] = reason
+
+
+def mark_up() -> None:
+    with _LOCK:
+        if _STATE["down"] is not None:
+            logger.warning("localai: back — switching off the appliance fallback")
+        _STATE.update(down=None, since=None)
+
+
+def down_reason() -> str | None:
+    return _STATE["down"]
+
+
+def _probe_thread() -> None:
+    try:
+        ok, _ms, _why = probe()
+        if ok:
+            mark_up()
+    except Exception:  # noqa: BLE001 — a probe must never kill anything
+        logger.opt(exception=True).debug("localai: probe failed")
+    finally:
+        with _LOCK:
+            _STATE["probing"] = False
+            _STATE["last_probe"] = time.monotonic()
+
+
+def should_try() -> bool:
+    """True when LocalAI is up. When it's down, start at most ONE background
+    probe per cooldown and answer False: a live turn never waits on it."""
+    if _STATE["down"] is None:
+        return True
+    with _LOCK:
+        due = time.monotonic() - _STATE["last_probe"] >= _STATE["cooldown"]
+        if due and not _STATE["probing"]:
+            _STATE["probing"] = True
+            threading.Thread(target=_probe_thread, name="localai-probe", daemon=True).start()
+    return False
+
+
+def status() -> dict:
+    try:
+        url = settings()["url"]
+    except Exception:  # noqa: BLE001 — status must never raise
+        url = None
+    return {"url": url, "down": _STATE["down"], "since": _STATE["since"]}
