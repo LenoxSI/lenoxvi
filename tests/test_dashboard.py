@@ -9587,6 +9587,10 @@ def main():
     check("localai ui: model lists come from the server's Test (keys never reach the browser), refreshed after saves",
           "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
           and "useLocalAIModels(provider === 'localai')" in _laVo and "useLocalAIModels(onLocalAIPick)" in _laSt)
+    check("localai ui: both provider dropdowns read 'LocalAI (Host)'",
+          "LocalAI (Host){tts?.localai_problem ? ' — set it up on System' : ''}" in _laVo
+          and any(p["name"] == "localai" and p["label"] == "LocalAI (Host)"
+                  for p in client.get("/api/dashboard/stt").json().get("providers", [])))
     check("localai ui: TTS card offers LocalAI (disabled with the reason until set up), hides the fallback picker for it",
           "<option value=\"localai\" disabled={!!tts?.localai_problem && provider !== 'localai'}" in _laVo
           and "{provider !== 'pocket' && provider !== 'localai' && (" in _laVo
