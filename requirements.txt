@@ -38,6 +38,11 @@ ruamel.yaml==0.19.1
 openai==3.14.0
 loguru==0.7.3
 python-dotenv==1.2.3
+# Kokoro (82M, Apache-2.0): the local voice every install ships with, the
+# default TTS fallback, and LocalAI's fallback. CPU via onnxruntime (already
+# here through openWakeWord); phonemes from the bundled espeakng-loader
+# wheel. Model files: bash scripts/fetch_kokoro_models.sh
+kokoro-onnx==0.4.7
 PyYAML==6.0.3
 numpy==2.5.3
 # Bench scripts only (scripts/serial_watch.py and friends) — not imported

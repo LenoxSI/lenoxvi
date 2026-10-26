@@ -1,12 +1,6 @@
-# Optional: Kokoro TTS (82M, Apache-2.0), fully local, CPU-only text-to-speech.
-# Enables tts.provider: kokoro.
+# Kokoro is part of the base install now (requirements.txt). This file stays
+# so older instructions keep working:
 #
 #   pip install -r requirements-kokoro.txt
 #   bash scripts/fetch_kokoro_models.sh
-#
-# onnxruntime is already installed through openWakeWord, and so is the
-# requests package pipecat's Kokoro module imports. kokoro-onnx phonemizes
-# with espeak-ng through the bundled espeakng-loader wheel, so no system
-# package is needed. The model files are not in this package: the fetch
-# script downloads them and checks their sha256.
-kokoro-onnx==0.4.7
+-r requirements.txt

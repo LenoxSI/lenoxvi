@@ -9561,6 +9561,14 @@ def main():
           "useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
           and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
 
+    # ── base install: Kokoro ships with it, new configs fall back to it ──
+    import yaml as _yaml_la
+    _ex_la = _yaml_la.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
+    _req_la = (REPO_CORE.parent / "requirements.txt").read_text().splitlines()
+    check("tts card: the example config ships the Kokoro fallback; requirements.txt installs kokoro-onnx",
+          (_ex_la.get("tts") or {}).get("fallback") == "kokoro" and "kokoro-onnx==0.4.7" in _req_la
+          and "-r requirements.txt" in (REPO_CORE.parent / "requirements-kokoro.txt").read_text().splitlines(),
+          str((_ex_la.get("tts") or {}).get("fallback")))
     # ── localai ui (App.jsx) ──
     _laCard = _fnUI("function LocalAICard({ setMsg }) {")
     _laHook = _fnUI("function useLocalAIModels(on) {")

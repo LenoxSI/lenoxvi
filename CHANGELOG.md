@@ -9,6 +9,13 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- LocalAI as a speech-to-text and text-to-speech provider: speech models on a LocalAI server on your network. A
+  System · LocalAI card (address, Test listing the models it serves), the key on System · Keys (`LVI_LOCALAI_KEY`,
+  required), and LocalAI on the STT and TTS cards with their model and voice. If LocalAI stops answering, the same
+  utterance goes to Whisper base on the appliance and the rest of a reply is spoken by Kokoro; a background check
+  switches back when it answers. No LocalAI code loads unless a card picks it.
+- Kokoro can be the TTS fallback behind any provider (`tts.fallback: kokoro`), next to Pocket.
+
 - System tab: a Node setup panel sets up and flashes nodes over USB from Chrome or Edge (Web Serial): new boards, a
   node moving to a new host address, a node whose Wi-Fi changed. It saves Wi-Fi, room name and host address straight
   to the node (the password never reaches the bot), restarts it and follows it until it's online, and flashes the
@@ -31,6 +38,8 @@ The two version streams are independent.
   the turn over, and speech replaces it (firmware 1.2.41+ shows it; older firmware ignores the message).
 
 ### Changed
+- Kokoro is part of the base install (`requirements.txt`); `requirements-kokoro.txt` now points there. The example
+  config starts with `tts.fallback: kokoro`. Existing configs are unchanged.
 - The bot learns that a node echoes request ids from the firmware version it reports on connect (1.2.37+), so its
   first command already skips the settling window; the first id-bearing reply still teaches it as before.
 

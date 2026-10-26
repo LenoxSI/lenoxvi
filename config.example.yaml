@@ -72,12 +72,24 @@ tts:
   # kokoro_voice: af_heart                # used when provider: kokoro (28 English voices;
   #                                       # af_/am_ American, bf_/bm_ British)
   # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
-  #                                       # (needs requirements-kokoro.txt)
-  # fallback: pocket                     # local hot standby behind a cloud provider
-  #                                       # (needs requirements-pocket.txt)
+  #                                       # (model files: scripts/fetch_kokoro_models.sh)
+  fallback: kokoro                        # local hot standby behind a cloud provider:
+  #                                       # kokoro (ships with every install) | pocket
+  #                                       # (needs requirements-pocket.txt) | off
   # revive_cooldown_secs: 30   # min seconds between websocket retries once the
   #                             # TTS service is marked dead (revive fires on the
   #                             # next speak; one retry per window, 0 = every utterance)
+
+# ── LocalAI (optional: speech models on a LAN server) ──────────────────────────
+# Pick "LocalAI" on the STT and/or TTS card. The key goes in .env as
+# LVI_LOCALAI_KEY (System · Keys). If LocalAI is down, this appliance listens
+# with Whisper base and speaks with Kokoro until it answers again.
+# localai:
+#   url: 192.0.2.50:8080                 # host:port (http:// is filled in)
+#   model_stt: faster-whisper-small      # a LocalAI model flagged for transcription
+#   model_tts: kokoro                    # a LocalAI model flagged for speech
+#   voice: af_heart                      # that model's voice
+#   speed: 1.0
 
 # ── Intelligence (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
 intelligence:

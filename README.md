@@ -34,7 +34,7 @@ Python 3.12+. From the repo root:
 | Wake gate | "Hey Jarvis" out of the box. Train your own. |
 | Turn-taking | Optional wake-word barge-in, echo containment, and filler lines while the agent thinks. |
 | Rooms | Each mic node maps to a speaker zone and can use its own agent. Sessions are sticky or fresh per room. |
-| Local or cloud | Whisper, Pocket and Kokoro run on your hardware. Cloud providers can fall back to local ones. |
+| Local or cloud | Whisper, Pocket and Kokoro run on your hardware, or on a LocalAI server on your network. Cloud providers can fall back to local ones. |
 | Firmware | Push node images over the air from the dashboard. |
 | Dashboard | LAN-only. Keys, zones, voices and models in one place. |
 
@@ -79,19 +79,43 @@ Turbo and Medium need a GPU.
 
 | Provider | Local | Fallback |
 |---|---|---|
-| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Pocket, if installed |
-| Deepgram Flux or Aura-2 | ❌ | Pocket, if installed |
+| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Kokoro or Pocket |
+| Deepgram Flux or Aura-2 | ❌ | Kokoro or Pocket |
 | Pocket | ✅ | — |
 | Kokoro | ✅ | Pocket, if installed |
+| LocalAI (your network) | ✅ | Kokoro, always |
 
 ### Local voices
 
-Pocket and Kokoro run on the CPU with no API key:
+Kokoro ships with every install (`requirements.txt`); fetch its model files once:
+
+    bash scripts/fetch_kokoro_models.sh
+
+Pocket is optional:
 
     pip install -r requirements-pocket.txt && bash scripts/fetch_pocket_weights.sh
-    pip install -r requirements-kokoro.txt && bash scripts/fetch_kokoro_models.sh
 
-Pick one in the dashboard's TTS panel, or set Pocket as the fallback behind a cloud voice. Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
+Pick one in the dashboard's TTS panel, or set either as the fallback behind a cloud voice (new configs start with Kokoro). Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
+
+## LocalAI
+
+Run speech models on another machine on your network (a GPU box, say) with [LocalAI](https://github.com/mudler/LocalAI). Audio stays in the house. Pick **LocalAI** on the STT card, the TTS card, or both.
+
+1. On the LocalAI host: install `ffmpeg` (LocalAI needs it for every transcription), and set an API key (`LOCALAI_API_KEY`).
+2. Add a faster-whisper model, e.g. `faster-whisper-small.yaml` in LocalAI's models folder:
+
+       name: faster-whisper-small
+       backend: faster-whisper
+       known_usecases:
+         - transcript
+       parameters:
+         model: small        # or large-v3-turbo on a GPU
+       # cuda: true          # on a GPU
+
+   Restart LocalAI after adding a model so it shows in its model list. A Kokoro model from LocalAI's gallery covers speech.
+3. On the dashboard: System · LocalAI → the address (`192.0.2.50:8080`), System · Keys → the LocalAI key, **Test** to see what it serves, then pick its models on the STT and TTS cards and restart.
+
+If LocalAI stops answering, this appliance listens with Whisper base and speaks with Kokoro, sentence by sentence, and goes back to LocalAI once it answers again. LenoxVI never installs or changes models on LocalAI.
 
 ## Speakers
 
