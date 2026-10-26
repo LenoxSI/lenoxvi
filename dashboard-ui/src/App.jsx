@@ -2575,7 +2575,9 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   // the backend that runs the picked model (Kokoro / Pocket presets, else
   // free text).
   const laFound = useLocalAIModels(provider === 'localai')
-  const laBackend = (laFound?.tts || []).find(m => m.id === model)?.backend
+  // LocalAI names backends its own way ('pocket-tts', 'kokoro'): match the family.
+  const laRaw = String((laFound?.tts || []).find(m => m.id === model)?.backend || '').toLowerCase()
+  const laBackend = laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw
   const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null
   // What Save sends for this provider, so the count matches the save.
   const ttsFields = ['provider', `model:${provider}`,
@@ -2652,11 +2654,11 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
           <Field label="Provider / model">
             <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
-              <option value="elevenlabs">ElevenLabs</option>
-              <option value="deepgram">Deepgram Aura</option>
-              <option value="deepgram-flux">Deepgram Flux</option>
+              <option value="elevenlabs">ElevenLabs (cloud)</option>
+              <option value="deepgram">Deepgram Aura (cloud)</option>
+              <option value="deepgram-flux">Deepgram Flux (cloud)</option>
               <option value="pocket" disabled={!tts?.pocket_installed && provider !== 'pocket'}>
-                Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
+                Pocket TTS (local){tts?.pocket_installed ? '' : ' — not installed'}
               </option>
               <option value="kokoro" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}
                 title={tts?.kokoro_problem || undefined}>
@@ -2664,7 +2666,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               </option>
               <option value="localai" disabled={!!tts?.localai_problem && provider !== 'localai'}
                 title={tts?.localai_problem || undefined}>
-                LocalAI (Host){tts?.localai_problem ? ' — set it up on System' : ''}
+                LocalAI (host){tts?.localai_problem ? ' — set it up on System' : ''}
               </option>
             </select>
             <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
@@ -3008,7 +3010,7 @@ function SttCard({ status, setMsg }) {
           <Field label="Provider">
             <select id="stt-provider" className={`${INPUT_CLS} w-auto`} value={provider || 'whisper'}
               onChange={e => s.set({ provider: e.target.value })} disabled={!data}>
-              {(data?.providers || [{ name: 'whisper', label: 'Local — Whisper', available: true }]).map(p => (
+              {(data?.providers || [{ name: 'whisper', label: 'Whisper (local)', available: true }]).map(p => (
                 <option key={p.name} value={p.name} disabled={!p.available} title={p.reason || ''}>
                   {p.label}{p.available ? '' : p.name === 'localai' ? ' — set it up on System' : ' — not installed'}
                 </option>
