@@ -15,6 +15,11 @@ The two version streams are independent.
   full image set without touching the node's settings. Saving needs firmware 1.2.47+; any board can be flashed.
   `deploy_firmware.sh` now publishes that set (bootloader, partition table, OTA data, `flash.json`) next to each
   line's image, and `GET /api/dashboard/firmware/{track}/flash` serves it.
+- Node setup flashes the audio chip (XMOS) of array and Flex boards from the browser over WebUSB: guided safe
+  mode, the image fetched from GitHub pinned to a commit and checked by SHA-256 before anything is written, writes
+  to the upgrade slot only (the chip's recovery copy is never touched), and a downloaded file as the fallback.
+  After setup the panel reads the node's audio counters and points at the step when the audio chip sends no sound;
+  after a chip flash it also checks the chip reports its board's version.
 - Nodes table: a "rollback <version>" chip when a node refused a firmware version that failed its health check and
   rolled back, and a "wifi rolled back" chip when its last Wi-Fi change never reached the bot and it went back to the
   previous network (from the node's connect report; `/status` rooms carry `fw_rejected` and `wifi_rollback`).

@@ -7,6 +7,8 @@
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink } from './nodeSetup.js'
+import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
+         xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
 /* ── API layer ─────────────────────────────────────────────── */
 const TOKEN_KEY = 'lenoxvi-dashboard-token'
@@ -2011,6 +2013,16 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
 }
 const NS_LINK = { boot: 'starting', wifi_connecting: 'joining wi-fi', wifi_up: 'no host yet', bot: 'online' }
 const NS_STAGE = { boot: 'Restarting…', wifi_connecting: 'Joining Wi-Fi…', wifi_up: 'Wi-Fi up, reaching the host…', bot: 'Online.' }
+const NS_CHIP = { checking: 'checking…', ok: 'sound ok', silent: 'no sound', unknown: 'unknown', wrong: 'wrong image' }
+const XMOS_STEPS = {
+  array: 'Unplug the board. Hold Mute and plug the port next to the headphone jack into this computer; let go when the red light blinks.',
+  flex: 'Unplug the board. Hold Boot and plug the core board’s USB-C (next to RST) into this computer; let go after 3 seconds.',
+}
+const XMOS_DONE = 'Done. Move the cable back to the XIAO’s USB-C port and click Connect to check the sound.'
+const XMOS_HELP = {
+  windows: 'Windows needs a one-time driver: download Zadig (zadig.akeo.ie), choose Options → List All Devices, pick the reSpeaker safe-mode entry, select WinUSB and click Replace Driver.',
+  linux: 'Linux needs a udev rule: add SUBSYSTEM=="usb", ATTRS{idVendor}=="2886", MODE="0666" to /etc/udev/rules.d/99-respeaker.rules, run sudo udevadm control --reload, then replug.',
+}
 
 function NodeSetupPanel({ setMsg }) {
   const linkRef = useRef(null)
@@ -2020,6 +2032,13 @@ function NodeSetupPanel({ setMsg }) {
   const [pickTrack, setPickTrack] = useState('')    // unknown boards only, no default
   const [progress, setProgress] = useState(null)    // { part, pct } while flashing
   const [stage, setStage] = useState('')
+  const [chip, setChip] = useState({ state: '', ver: '' })   // sound check: '' | checking | ok | silent | unknown
+  const [dfu, setDfu] = useState(null)                       // audio chip step; null = closed
+  const dfuRef = useRef(null)
+  const recheck = useRef(false)                              // after an audio chip flash, the next Connect checks the sound
+  const checkGen = useRef(0)                                 // only the latest sound check may report
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false; dfuRef.current?.close() }, [])
   const M = (text, kind) => setMsg(text, kind, 'Node setup')
   useEffect(() => () => { linkRef.current?.close() }, [])
 
@@ -2032,13 +2051,37 @@ function NodeSetupPanel({ setMsg }) {
     if (form.wifi_pass || (info && form.wifi_ssid !== info.wifi_ssid)) { f.wifi_ssid = form.wifi_ssid; f.wifi_pass = form.wifi_pass }
     return f
   }
+  const checkSound = async (name, track, expect = false) => {
+    if (!['array', 'flex'].includes(track)) return
+    const gen = ++checkGen.current
+    let denied = false   // a cancelled or refused token: asking again every read would nag
+    setChip({ state: 'checking', ver: '' })
+    const got = await watchSound({
+      read: async () => {
+        try { return await api(`/api/dashboard/nodes/${encodeURIComponent(name)}/info`, { promptForToken: true }) }
+        catch (e) { if (e.status === 401) denied = true; throw e }
+      },
+      sleep: ms => new Promise(res => setTimeout(res, ms)),
+      stop: () => denied || gen !== checkGen.current || !alive.current,
+    })
+    if (!alive.current || gen !== checkGen.current) return
+    if (denied) { setChip({ state: 'unknown', ver: '' }); M('The sound check needs the dashboard token.', 'muted'); return }
+    const r = expect ? expectVersion(got, track) : got
+    setChip({ state: r.state, ver: r.ver })
+    if (r.state === 'wrong') M(`The audio chip reads v${r.ver}, not v${r.expected} for this ${track} board. Flash it again with the ${track} image.`, 'err')
+    else if (r.state === 'silent') M('The node is online but its audio chip sends no sound. Flash the audio chip to fix it.', 'err')
+    else if (r.state === 'unknown') M('Couldn’t read the node’s audio. Check it on the Rooms tab.', 'muted')
+    else M(`${name}’s audio chip sends sound${r.ver ? ` (v${r.ver})` : ''}.`, 'ok')
+  }
   const connect = async () => {
+    checkGen.current++; setChip({ state: '', ver: '' })   // a new board: the last one's sound check is not its own
     setPhase('connecting'); M('Pick the node’s USB port…', 'pulse')
     try {
       const link = await NodeLink.request(); linkRef.current = link
       M('Asking the node who it is…', 'pulse')
       try {
         const i = await link.info(); setInfo(i); fill(i); setPhase('ready')
+        if (recheck.current) { recheck.current = false; void checkSound(i.name, i.track, true) }
         M(`Connected: ${i.name} (${i.track}, ${i.fw}).`, 'ok')
       } catch {
         setInfo(null); setForm(f => ({ ...f, bot_url: hostOfferUrl(window.location.origin) })); setPhase('unknown')
@@ -2054,6 +2097,7 @@ function NodeSetupPanel({ setMsg }) {
       let host = i.bot_url
       try { host = new URL(i.bot_url).host } catch { host = i.bot_url }
       M(`${i.name} is online on ${host}.`, 'ok')
+      void checkSound(i.name, i.track)
     } catch (e) { setPhase('ready'); M(e.message, 'err') }
   }
   const save = async () => {
@@ -2094,10 +2138,60 @@ function NodeSetupPanel({ setMsg }) {
     finally { setProgress(null) }
   }
   const disconnect = async () => {
+    checkGen.current++; setChip({ state: '', ver: '' })
     await linkRef.current?.close(); linkRef.current = null
     setInfo(null); setPhase('idle'); M('Disconnected.', 'muted')
   }
+  const openChip = () => setDfu({ line: ['array', 'flex'].includes(info?.track) ? info.track : '', phase: 'pick', pct: 0, file: null, fileObj: null, help: '' })
+  const closeChip = async () => { await dfuRef.current?.close(); dfuRef.current = null; setDfu(null) }
+  const chipConnect = async () => {
+    setDfu(s => ({ ...s, phase: 'connecting', help: '' })); M('Pick the audio chip in the USB list…', 'pulse')
+    try {
+      const d = await XmosDfu.request()
+      await d.open(); dfuRef.current = d
+      setDfu(s => ({ ...s, phase: 'ready' })); M('Audio chip found in safe mode.', 'ok')
+    } catch (e) {
+      const help = e.code === 'access-denied' ? (XMOS_HELP[platformOf()] || '') : ''
+      setDfu(s => ({ ...s, phase: 'pick', help })); M('Audio chip: ' + e.message, 'err')
+    }
+  }
+  const chipFile = async f => {
+    if (!f) { setDfu(s => ({ ...s, file: null, fileObj: null })); return }
+    if (!dfu?.line) { M('Pick the board first.', 'err'); return }
+    try {
+      const bytes = await checkXmosImage(new Uint8Array(await f.arrayBuffer()), dfu.line)
+      setDfu(s => ({ ...s, file: bytes, fileObj: f })); M('File checked: it matches the pinned image.', 'ok')
+    } catch (err) { setDfu(s => ({ ...s, file: null, fileObj: null })); M(err.message, 'err') }
+  }
+  const chipFlash = async () => {
+    const line = dfu.line, im = XMOS_IMAGES[line]
+    try {
+      setDfu(s => ({ ...s, phase: 'downloading' }))
+      if (!dfu.file) M('Downloading the audio chip firmware from GitHub…', 'pulse')
+      const bytes = dfu.file || await fetchXmosImage(line)
+      if (!window.confirm(`Flash the ${line.toUpperCase()} audio chip firmware v${im.version}?\n\nThe chip keeps its recovery copy.`)) {
+        setDfu(s => ({ ...s, phase: 'ready' })); return
+      }
+      setDfu(s => ({ ...s, phase: 'flashing', pct: 0 }))
+      await dfuRef.current.flash(bytes, { onProgress: pct => setDfu(s => s && { ...s, pct }) })
+      await dfuRef.current.close(); dfuRef.current = null
+      // The cable moved to the audio chip's port, so the serial link is gone: back to Connect,
+      // which checks the sound (and this line's version) once the cable is back.
+      checkGen.current++; setChip({ state: '', ver: '' })
+      const link = linkRef.current; linkRef.current = null; void link?.close().catch(() => {})
+      setInfo(null); setPhase('idle')
+      recheck.current = true
+      setDfu(s => ({ ...s, phase: 'done' }))
+      M('Done. Move the cable back to the XIAO port and click Connect to check the sound.', 'ok')
+    } catch (e) {
+      const before = ['fetch-failed', 'hash-mismatch', 'size-mismatch'].includes(e.code)   // nothing was written
+      if (!before) { await dfuRef.current?.close(); dfuRef.current = null }
+      setDfu(s => s && { ...s, phase: before ? 'ready' : 'pick' })
+      M(before ? e.message : 'Audio chip flash failed: ' + e.message + ' Unplug, enter safe mode again and retry; the chip keeps its recovery copy.', 'err')
+    }
+  }
   const busy = ['connecting', 'saving', 'flashing', 'watching'].includes(phase)
+  const chipBusy = !!dfu && ['connecting', 'downloading', 'flashing'].includes(dfu.phase)
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
   return (
@@ -2150,6 +2244,60 @@ function NodeSetupPanel({ setMsg }) {
               <button className={BTN_DEFAULT} style={{ marginLeft: 'auto' }} disabled={busy} onClick={disconnect}>Disconnect</button>
             </div>
           </>
+        )}
+        {isSupported() && (!info || ['array', 'flex'].includes(info.track)) && (
+          <div className="grid gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[12px] font-medium text-[var(--muted)]">Audio chip</span>
+              {chip.state && <span className={CHIP_CLS}>{NS_CHIP[chip.state]}</span>}
+              {chip.ver && <span className="text-[13px] font-mono">v{esc(chip.ver)}</span>}
+              {!dfu && (
+                <button className={['silent', 'wrong'].includes(chip.state) ? BTN_PRIMARY : BTN_DEFAULT} style={{ marginLeft: 'auto' }}
+                        disabled={busy || !isUsbSupported()} onClick={openChip}>Flash audio chip…</button>
+              )}
+            </div>
+            {dfu && (
+              <div className="grid gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] font-medium text-[var(--muted)]">Board</span>
+                  <select className={`${INPUT_CLS} w-[150px]`} value={dfu.line} disabled={dfu.phase !== 'pick'}
+                          onChange={e => setDfu(s => ({ ...s, line: e.target.value, file: null, fileObj: null }))}>
+                    <option value="" disabled>pick a board…</option>
+                    <option value="array">array</option>
+                    <option value="flex">flex</option>
+                  </select>
+                </div>
+                {dfu.line && <span className="text-[13px]">{dfu.phase === 'done' ? XMOS_DONE : XMOS_STEPS[dfu.line]}</span>}
+                {(dfu.help || platformOf() === 'windows') && <span className="text-[13px]">{dfu.help || XMOS_HELP.windows}</span>}
+                {dfu.phase === 'flashing' && <span className="text-[13px]">Flashing the audio chip… {dfu.pct}%</span>}
+                {['pick', 'ready'].includes(dfu.phase) && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12px] font-medium text-[var(--muted)]">Or a downloaded file</span>
+                    <FilePick accept=".bin" file={dfu.fileObj} onPick={chipFile} />
+                  </div>
+                )}
+                {['pick', 'ready'].includes(dfu.phase) && dfu.line && (
+                  <span className="text-[13px] font-mono text-[var(--muted)]">
+                    <a href={xmosImageUrl(dfu.line)} target="_blank" rel="noreferrer" className="hover:underline">{xmosImageName(dfu.line)}</a>
+                    {' · sha256 '}{XMOS_IMAGES[dfu.line].sha256.slice(0, 12)}…
+                  </span>
+                )}
+                <div className="flex gap-2 flex-wrap">
+                  {(dfu.phase === 'pick' || dfu.phase === 'connecting') && (
+                    <button className={BTN_PRIMARY} disabled={!dfu.line || busy || chipBusy} onClick={chipConnect}>
+                      {dfu.phase === 'connecting' ? 'Connecting…' : 'Connect audio chip'}
+                    </button>
+                  )}
+                  {['ready', 'downloading', 'flashing'].includes(dfu.phase) && (
+                    <button className={BTN_PRIMARY} disabled={busy || chipBusy} onClick={chipFlash}>
+                      {dfu.phase === 'ready' ? 'Flash audio chip' : dfu.phase === 'downloading' ? 'Downloading…' : 'Flashing…'}
+                    </button>
+                  )}
+                  <button className={BTN_DEFAULT} style={{ marginLeft: 'auto' }} disabled={chipBusy} onClick={closeChip}>Close</button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </Section>
