@@ -10,6 +10,7 @@ import io
 import json
 import os
 import socket
+import struct
 import sys
 import threading
 import time
@@ -231,6 +232,36 @@ e = err(lambda: la.transcribe(b"x", "m", "en", url=URL, key=KEY))
 check("localai: a reply with no text field is an error (Whisper gets the clip), not silent empty words",
       e is not None and not e.box_down, str(e))
 BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", wav_bytes(rate=4000), 0)
+def float_wav(samples, rate=24000, ch=1, extensible=False, fact=True):
+    """A float32 WAV the way LocalAI's Pocket backend writes it (fmt 3 + fact)."""
+    _st = struct
+    data = _st.pack(f"<{len(samples)}f", *samples)
+    if extensible:
+        fmt = _st.pack("<HHIIHHHHI", 0xFFFE, ch, rate, rate * 4 * ch, 4 * ch, 32, 22, 32, 0) + \
+            _st.pack("<H", 3) + b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xaa\x00\x38\x9b\x71"
+    else:
+        fmt = _st.pack("<HHIIHHH", 3, ch, rate, rate * 4 * ch, 4 * ch, 32, 0)
+    chunks = b"fmt " + _st.pack("<I", len(fmt)) + fmt
+    if fact:
+        chunks += b"fact" + _st.pack("<II", 4, len(samples) // ch)
+    chunks += b"data" + _st.pack("<I", len(data)) + data
+    return b"RIFF" + _st.pack("<I", 4 + len(chunks)) + b"WAVE" + chunks
+
+
+for label, payload in [("plain", float_wav([0.0, 0.5, -0.5, 1.5, -1.5, float("nan")])),
+                       ("extensible", float_wav([0.0, 0.5, -0.5, 1.5, -1.5, float("nan")], extensible=True))]:
+    BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", payload, 0)
+    try:
+        pcm, rate = la.speech("x", "pocket-tts", "alba", 1.0, url=URL, key=KEY)
+        vals = list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+    except la.LocalAIError as e:
+        vals, rate = str(e), None
+    check(f"localai: a mono float32 WAV ({label}, Pocket's format) becomes 16-bit PCM, clipped, NaN silent",
+          vals == [0, 16383, -16383, 32767, -32767, 0] and rate == 24000, str(vals))
+BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", float_wav([0.1, 0.2, 0.3, 0.4], ch=2), 0)
+check("localai: a stereo float WAV is still refused",
+      err(lambda: la.speech("x", "pocket-tts", "alba", 1.0, url=URL, key=KEY)) is not None)
+
 check("localai: speech refuses a WAV with an odd sample rate",
       err(lambda: la.speech("x", "kokoro", "af_heart", 1.0, url=URL, key=KEY)) is not None)
 
