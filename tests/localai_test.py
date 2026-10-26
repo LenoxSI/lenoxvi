@@ -391,8 +391,6 @@ if HAVE_PIPECAT:
     asyncio.run(svc.cleanup())
     os.environ.pop(la.KEY_VAR, None)
     la._reset_for_tests()
-else:
-    print("SKIP stt localai: pipecat not importable here (run on the host)")
     _real_pre = stt_local.preload_shared_model
     _loads = []
 
@@ -420,6 +418,8 @@ else:
     stt_local.LocalWhisperSTTService._shared_model = _shared_before
     sla._reset_for_tests()
     check("stt localai: a failed Whisper base load isn't retried on every turn", len(_fails) == 1, str(_fails))
+else:
+    print("SKIP stt localai: pipecat not importable here (run on the host)")
 
 # ── tts localai (host: pipecat + kokoro) ────────────────────────────
 if HAVE_PIPECAT:
