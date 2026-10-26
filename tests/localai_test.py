@@ -418,6 +418,19 @@ if HAVE_PIPECAT:
 else:
     print("SKIP tts localai: pipecat not importable here (run on the host)")
 
+# ── import pin: no LocalAI code unless a card picks it ───────────────
+if HAVE_PIPECAT:
+    import subprocess
+    REPO = os.path.dirname(os.path.abspath(CORE))
+    code = ("import sys, bot; print(sorted(m for m in sys.modules "
+            "if m in ('localai', 'stt_localai', 'tts_localai')))")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LVI_LOCALAI", "LVI_STT_PROVIDER", "LVI_TTS_PROVIDER"))}
+    env["LVI_TEST_CONFIG"] = os.path.join(REPO, "tests", "fixtures", "config.yaml")
+    r = subprocess.run([sys.executable, "-c", code], cwd=REPO, capture_output=True, text=True, env=env, timeout=180)
+    last = (r.stdout.strip().splitlines() or [""])[-1]
+    check("localai: importing bot with no LocalAI provider loads no LocalAI module",
+          r.returncode == 0 and last == "[]", r.stdout[-200:] + r.stderr[-400:])
+
 srv.shutdown()
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

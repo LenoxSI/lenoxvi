@@ -208,15 +208,34 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             f"tts.provider is {tts_provider!r} but {_need_secret} is not set — "
             f"add it to .env (see .env.example). No TTS can be constructed.")
 
+    # stt.provider: whisper (local, default), localai (LAN), or a cloud
+    # provider with this Whisper service as its fallback (wired below, once
+    # the task exists).
+    stt_provider = str(cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "whisper").strip().lower()
+    # LocalAI: the same Whisper service with LocalAI standing in for its
+    # model; a failed call sends the same clip to Whisper base on this
+    # appliance (preloaded at startup). Nothing LocalAI is imported otherwise.
+    _stt_override = None
+    if stt_provider == "localai":
+        import localai
+        import stt_local as _stl
+        import stt_localai
+
+        def _whisper_base():
+            if _stl.LocalWhisperSTTService._shared_model is None:
+                _stl.preload_shared_model("base", "cpu", "int8")
+            return _stl.LocalWhisperSTTService._shared_model
+
+        _la_stt = localai.settings()
+        _stt_override = stt_localai.LocalAIWhisper(_la_stt["model_stt"], _whisper_base)
+        logger.info(f"stt: localai {_la_stt['model_stt'] or '(no model picked)'} (Whisper base standby)")
     stt = LocalWhisperSTTService(
         model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
         device=cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
         compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
+        model_override=_stt_override,
     )
-    # stt.provider: whisper (local, default) or a cloud provider with this
-    # Whisper service as its fallback (wired below, once the task exists).
-    stt_provider = str(cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "whisper").strip().lower()
     # TTS provider dispatch: tts.provider
     # selects the engine; each provider's knobs live under its own config
     # key. ElevenLabs stays the default (a config without tts.provider —
@@ -253,6 +272,22 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             raise RuntimeError("tts.provider=kokoro but the Kokoro model failed to load — "
                                f"run: {tts_kokoro.INSTALL_HINT}")
         logger.info("tts backend: kokoro (local)")
+    elif tts_provider == "localai":
+        # LocalAI on the LAN: one request per sentence; a failed sentence and
+        # the rest of its reply go to Kokoro on this appliance (warmed here).
+        import localai
+        import tts_kokoro
+        import tts_localai
+        _la_tts = localai.settings()
+        if tts_kokoro.kokoro_available():
+            await tts_kokoro.warm()
+        else:
+            logger.warning(f"tts: LocalAI has no Kokoro fallback — {tts_kokoro.INSTALL_HINT}")
+        tts = tts_localai.make_service(
+            mixin=TTSTracked, model=_la_tts["model_tts"], voice=_la_tts["voice"], speed=_la_tts["speed"],
+            standby_voice=tts_localai.standby_voice_for(
+                _la_tts["voice"], cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", None)))
+        logger.info(f"tts backend: localai {_la_tts['model_tts'] or '(no model picked)'} (Kokoro standby)")
     elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).
         # Verified against developers.deepgram.com/docs/tts-models. Key is
@@ -352,6 +387,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         tts_pocket.warn_once("fallback-ignored",
                              "tts.fallback: pocket ignored — Pocket is already the primary")
         _fallback = ""
+    if (_fallback == "kokoro" and tts_provider == "kokoro") or (
+            _fallback in ("pocket", "kokoro") and tts_provider == "localai"):
+        # Kokoro can't stand in for itself, and LocalAI falls back to Kokoro
+        # by itself (per sentence).
+        logger.info(f"tts.fallback: {_fallback} not used — {tts_provider} has its own")
+        _fallback = ""
     tts_pocket_standby = None
     if _fallback == "pocket":
         import tts_pocket
@@ -366,6 +407,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             tts_pocket.warn_once("fallback-unavailable",
                                  "tts.fallback: pocket requested but Pocket can't load — "
                                  f"running WITHOUT a fallback ({tts_pocket.INSTALL_HINT})")
+    if _fallback == "kokoro":
+        import tts_kokoro
+        if tts_kokoro.kokoro_available():
+            await tts_kokoro.warm()
+            tts_pocket_standby = tts_kokoro.make_service(
+                mixin=TTSTracked,
+                voice=cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", tts_kokoro.DEFAULT_VOICE),
+                speed=cfg_env("tts", "kokoro_speed", "LVI_TTS_KOKORO_SPEED", tts_kokoro.DEFAULT_SPEED))
+        if tts_pocket_standby is None:
+            logger.warning("tts.fallback: kokoro requested but Kokoro can't load — "
+                           f"running WITHOUT a fallback ({tts_kokoro.INSTALL_HINT})")
     gate = EchoGate()
     # Multi-node fix: EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global
@@ -528,8 +580,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             await _task_ref["task"].queue_frame(frame)
 
         tts = wrap_with_fallback(tts_primary, tts_pocket_standby, room=_room,
-                                 queue_frame=_queue, cooldown=_cool)
-        logger.info(f"tts fallback: pocket armed behind {tts_provider}")
+                                 queue_frame=_queue, cooldown=_cool, standby_name=_fallback)
+        logger.info(f"tts fallback: {_fallback} armed behind {tts_provider}")
 
     # Cloud STT: ServiceSwitcher([cloud, whisper], Failover). Deepgram or
     # ElevenLabs Scribe marks itself down on a bad key / dead network and the
@@ -735,15 +787,21 @@ if __name__ == "__main__":
     # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
     # step"): same model/device/precision run_bot uses. Non-fatal — a failure
     # leaves the lazy load in LocalWhisperSTTService.ensure_model() in charge.
+    # With LocalAI as the STT provider the appliance only keeps its fallback
+    # warm: Whisper base on the CPU (the configured model isn't loaded).
     try:
         from stt_local import preload_shared_model
         from config import cfg_env as _cfg_env
 
-        preload_shared_model(
-            _cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
-            _cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
-            _cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
-        )
+        if str(_cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "").strip().lower() == "localai":
+            import stt_local as _stl_boot
+            _stl_boot.preload_shared_model("base", "cpu", "int8")
+        else:
+            preload_shared_model(
+                _cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
+                _cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
+                _cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
+            )
     except Exception as e:
         logger.warning(f"whisper preload failed ({e}) — will load lazily on the first voice turn")
 
@@ -768,14 +826,17 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning(f"pocket preload failed ({e}) — running without Pocket")
 
-    # Kokoro at STARTUP when it's the provider: one model per process, so
-    # sessions never load it mid-wake. Non-fatal: a failure means a loud
-    # construction error per session (missing files are retried there).
+    # Kokoro at STARTUP when it's the provider, the fallback, or LocalAI's
+    # fallback: one model per process, so sessions never load it mid-wake.
+    # Non-fatal: a failure means a loud construction error per session
+    # (missing files are retried there) or no fallback.
     try:
+        from config import cfg as _cfg
         from config import cfg_env as _cfg_env
 
         _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
-        if _tp == "kokoro":
+        _fb = str(_cfg("tts", "fallback") or "").strip().lower()
+        if _tp in ("kokoro", "localai") or _fb == "kokoro":
             import tts_kokoro
             if tts_kokoro.kokoro_available():
                 tts_kokoro.preload()
@@ -783,5 +844,17 @@ if __name__ == "__main__":
                 logger.warning(f"kokoro tts not installed — {tts_kokoro.INSTALL_HINT}")
     except Exception as e:  # noqa: BLE001 — boot must survive any preload failure
         logger.warning(f"kokoro preload failed ({e}) — sessions will retry the load")
+
+    # LocalAI's background probe runs at the STT revive cadence.
+    try:
+        from config import cfg_env as _cfg_env
+
+        _la_cards = (str(_cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "").strip().lower(),
+                     str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "").strip().lower())
+        if "localai" in _la_cards:
+            import localai
+            localai.set_cooldown(_cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"localai setup failed ({e}) — using the default probe cadence")
 
     main()

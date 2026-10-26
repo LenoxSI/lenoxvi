@@ -18,6 +18,7 @@ from intelligence import target as intelligence_target
 STATIC = [
     {"var": "ELEVENLABS_API_KEY", "label": "ElevenLabs", "used_by": ["TTS"], "kind": "elevenlabs"},
     {"var": "DEEPGRAM_API_KEY", "label": "Deepgram", "used_by": ["TTS", "STT"], "kind": "deepgram"},
+    {"var": "LVI_LOCALAI_KEY", "label": "LocalAI", "used_by": ["STT", "TTS"], "kind": "localai"},
     *({"var": lane.base_key_var, "label": lane.label, "used_by": ["Intelligence"], "kind": lane.kind,
        **({"agent": lane.default_agent} if lane.per_agent_keys else {})}
       for lane in intelligence.LANES.values()),
@@ -100,7 +101,16 @@ def _stt_provider(cfg: dict) -> str:
     return str((cfg.get("stt") or {}).get("provider") or "whisper").strip().lower()
 
 
+def _tts_provider(cfg: dict) -> str:
+    return str((cfg.get("tts") or {}).get("provider") or "elevenlabs").strip().lower()
+
+
 def _used_by(row: dict, cfg: dict) -> list:
+    # The LocalAI key serves whichever cards pick LocalAI (both when neither
+    # does, so the row still says what it's for).
+    if row["var"] == "LVI_LOCALAI_KEY":
+        cards = [c for c, p in (("STT", _stt_provider(cfg)), ("TTS", _tts_provider(cfg))) if p == "localai"]
+        return cards or row["used_by"]
     # The ElevenLabs key serves STT only while Scribe is the STT provider.
     if row["var"] == "ELEVENLABS_API_KEY" and _stt_provider(cfg) == "elevenlabs":
         return [*row["used_by"], "STT"]
@@ -115,6 +125,8 @@ def _in_use(row: dict, cfg: dict) -> bool:
         return tts_provider == "elevenlabs" or _stt_provider(cfg) == "elevenlabs"
     if row["var"] == "DEEPGRAM_API_KEY":
         return tts_provider in ("deepgram", "deepgram-flux") or _stt_provider(cfg) == "deepgram"
+    if row["var"] == "LVI_LOCALAI_KEY":
+        return tts_provider == "localai" or _stt_provider(cfg) == "localai"
     kind = str(icfg.get("kind") or intelligence.DEFAULT_KIND).strip().lower()
     if row["kind"] != kind:
         return False

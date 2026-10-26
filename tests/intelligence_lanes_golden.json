@@ -4738,6 +4738,15 @@
     "kind": "deepgram"
    },
    {
+    "var": "LVI_LOCALAI_KEY",
+    "label": "LocalAI",
+    "used_by": [
+     "STT",
+     "TTS"
+    ],
+    "kind": "localai"
+   },
+   {
     "var": "LVI_HERMES_KEY",
     "label": "Hermes",
     "used_by": [
