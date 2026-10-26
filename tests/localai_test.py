@@ -227,6 +227,25 @@ e0 = err(lambda: la.transcribe(b"x", "m", "en", url=f"http://127.0.0.1:{dead_por
 check("localai: a 4xx is about this request (box stays up); 5xx, refused and 401 are about the box",
       e4 is not None and not e4.box_down and e5 is not None and e5.box_down and e0 is not None and e0.box_down
       and err(lambda: la.transcribe(b"x", "m", "en", url=URL, key="")).box_down)
+_VOICE_ERR = b'{"error":{"code":500,"message":"error during TTS: Voice not found or failed to load: nosuchvoice."}}'
+_cls = {}
+for _st, _ct, _body in ((500, "application/json", _VOICE_ERR), (500, "text/plain", b"oops"),
+                        (500, "application/json", b'{"error":{"message":"  "}}'), (500, "application/json", b"{}"),
+                        (502, "application/json", _VOICE_ERR), (503, "application/json", _VOICE_ERR),
+                        (504, "application/json", _VOICE_ERR)):
+    BEHAVIOUR["/v1/audio/speech"] = (_st, _ct, _body, 0)
+    _e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", 1.0, url=URL, key=KEY))
+    _cls[(_st, _body[:12])] = None if _e is None else _e.box_down
+check("localai: a 500 that names what failed (bad voice) is about this request; the box stays up",
+      _cls[(500, _VOICE_ERR[:12])] is False, str(_cls))
+check("localai: a bare 500 (no JSON, blank or missing message) and 502/503/504 are about the box",
+      _cls[(500, b"oops")] is True and _cls[(500, b'{"error":{"m')] is True and _cls[(500, b"{}")] is True
+      and _cls[(502, _VOICE_ERR[:12])] is True and _cls[(503, _VOICE_ERR[:12])] is True
+      and _cls[(504, _VOICE_ERR[:12])] is True, str(_cls))
+BEHAVIOUR["/v1/audio/speech"] = (500, "application/json", _VOICE_ERR, 0)
+_e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", 1.0, url=URL, key=KEY))
+check("localai: the bad-voice reason carries the server's words for the log",
+      _e is not None and "Voice not found" in _e.reason and _e.status == 500, str(_e and _e.reason))
 BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"segments":[]}', 0)
 e = err(lambda: la.transcribe(b"x", "m", "en", url=URL, key=KEY))
 check("localai: a reply with no text field is an error (Whisper gets the clip), not silent empty words",
@@ -356,18 +375,18 @@ check("stt localai: up -> the text comes from LocalAI and the appliance model is
 os.environ["LVI_LOCALAI_MODEL_STT"] = "faster-whisper-small"
 check("stt localai: status while up says localai + the configured model",
       sla.status() == {"provider": "localai", "localai_model": "faster-whisper-small", "active": "localai"}, str(sla.status()))
-BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json", b'{"error":{"message":"boom"}}', 0)
+BEHAVIOUR["/v1/audio/transcriptions"] = (503, "application/json", b'{"error":{"message":"boom"}}', 0)
 segs, info = standin.transcribe(io.BytesIO(b"WAV2"), language="en", beam_size=1, vad_filter=False)
 check("stt localai: a LocalAI error sends the SAME clip to the appliance model",
       fw.calls == [(b"WAV2", "en", 1, False)] and [s.text for s in segs] == [" local words "], str(fw.calls))
-check("stt localai: then LocalAI is marked down with the reason", "500" in (la.down_reason() or ""))
+check("stt localai: then LocalAI is marked down with the reason", "503" in (la.down_reason() or ""))
 n = len(SEEN)
 standin.transcribe(io.BytesIO(b"WAV3"), language=None)
 check("stt localai: while down, later turns skip LocalAI entirely (no request sent)",
       len(SEEN) == n and fw.calls[-1][0] == b"WAV3" and sla.active() == "whisper")
 st = sla.status()
 check("stt localai: status says whisper fallback + the reason",
-      st.get("active") == "whisper" and "500" in (st.get("fallback_reason") or "") and st.get("fallback_rooms") == [])
+      st.get("active") == "whisper" and "503" in (st.get("fallback_reason") or "") and st.get("fallback_rooms") == [])
 la.mark_up()
 check("stt localai: status goes back to localai as soon as LocalAI is up", sla.status().get("active") == "localai")
 os.environ.pop("LVI_LOCALAI_MODEL_STT", None)
@@ -379,6 +398,18 @@ sla.LocalAIWhisper("", lambda: fw).transcribe(io.BytesIO(b"WAV4"), language="en"
 check("stt localai: no model picked -> appliance model, nothing sent, the shared box NOT marked down, status says why",
       len(SEEN) == n and fw.calls and la.down_reason() is None
       and "model" in (sla.status().get("fallback_reason") or ""), str(sla.status()))
+la._reset_for_tests()
+BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json",
+                                         b'{"error":{"code":500,"message":"rpc error: failed to transcribe"}}', 0)
+fw.calls.clear()
+standin.transcribe(io.BytesIO(b"WAV5"), language="en")
+check("stt localai: a 500 that names what failed -> that clip goes to the appliance model, the box stays up",
+      fw.calls and fw.calls[-1][0] == b"WAV5" and la.down_reason() is None, str(la.down_reason()))
+BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":"remote words"}', 0)
+n = len(SEEN)
+segs, _info = standin.transcribe(io.BytesIO(b"WAV6"), language="en")
+check("stt localai: the next turn asks LocalAI again",
+      len(SEEN) == n + 1 and [s.text for s in segs] == ["remote words"] and sla.active() == "localai")
 la._reset_for_tests()
 BEHAVIOUR["/v1/audio/transcriptions"] = (404, "application/json", b'{"error":{"message":"model gone"}}', 0)
 fw.calls.clear()
@@ -553,6 +584,20 @@ if HAVE_PIPECAT:
         check(f"tts localai: {label} back -> Kokoro speaks it, none of LocalAI's bytes are played (box not marked down)",
               la.down_reason() is None and any(isinstance(f, TTSAudioRawFrame) for f in frames)
               and all(payload[:16] not in getattr(f, "audio", b"") for f in frames))
+    la._reset_for_tests()
+    BEHAVIOUR["/v1/audio/speech"] = (500, "application/json", _VOICE_ERR, 0)
+    nv = len(SEEN)
+    frames = asyncio.run(drain(make(), "A voice it cannot load. Then a second sentence."))
+    sentv = [s for s in SEEN[nv:] if s[1] == "/v1/audio/speech"]
+    check("tts localai: a voice LocalAI can't load -> Kokoro speaks the reply, the box is NOT marked down",
+          la.down_reason() is None and len(sentv) == 1 and any(isinstance(f, TTSAudioRawFrame) for f in frames)
+          and all(_VOICE_ERR[:16] not in getattr(f, "audio", b"") for f in frames), f"sent={len(sentv)} {la.down_reason()}")
+    BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
+    nv = len(SEEN)
+    frames = asyncio.run(drain(make(), "The voice is fixed now."))
+    audio = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
+    check("tts localai: the next reply asks LocalAI again (nothing waits on a probe)",
+          any(s[1] == "/v1/audio/speech" for s in SEEN[nv:]) and audio and audio[0].audio == LA_WAV[44:])
     la._reset_for_tests()
     BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
     n2 = len(SEEN)

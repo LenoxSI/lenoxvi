@@ -43,10 +43,10 @@ _FLAGS = {"FLAG_TRANSCRIPT": "stt", "FLAG_TTS": "tts"}
 class LocalAIError(Exception):
     """A LocalAI call that didn't produce a usable answer. `reason` is short,
     human and key-free (it lands on the dashboard chip). `box_down` says
-    whether it is about the whole server (unreachable, timed out, 5xx, the
-    key, no URL) — callers mark LocalAI down for everyone only then; a
-    per-request problem (unknown model, bad voice, a garbled answer) just
-    falls back for that one call."""
+    whether it is about the whole server (unreachable, timed out, a bare or
+    gateway 5xx, the key, no URL) — callers mark LocalAI down for everyone
+    only then; a per-request problem (unknown model, a voice the backend
+    can't load, a garbled answer) just falls back for that one call."""
 
     def __init__(self, reason: str, status: int | None = None, box_down: bool = True):
         super().__init__(reason)
@@ -177,9 +177,13 @@ def _request(method: str, path: str, *, body: bytes | None = None, ctype: str | 
                 msg = (err.get("message") if isinstance(err, dict) else err) or ""
             except Exception:  # noqa: BLE001 — a non-JSON error body is fine
                 pass
-            # 5xx = the server is in trouble; any other 4xx is about this request.
+            # A 4xx is about this request. So is a 500 that names what failed
+            # (a voice the backend can't load, a model error for this input):
+            # the server answered, so fall back for this call only. A bare 5xx
+            # or a gateway error (502/503/504) means the box is in trouble.
+            explained = status == 500 and bool(str(msg).strip())
             raise LocalAIError(redact(f"LocalAI error {status}" + (f": {msg}" if msg else ""), key),
-                               status, box_down=status >= 500)
+                               status, box_down=status >= 500 and not explained)
         return data
     finally:
         timer.cancel()
