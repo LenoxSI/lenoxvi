@@ -263,8 +263,10 @@ function Section({ id, title, note, action, children }) {
 }
 
 function Field({ label, children, right, between }) {
+  // grid-cols-1 + minWidth 0: a long select can't widen the field past its
+  // row (an implicit grid track grows to the content on phones).
   return (
-    <div className="grid gap-1">
+    <div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>
       <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span>
       <div className={`flex items-center gap-2 flex-wrap${right ? ' justify-end' : ''}${between ? ' justify-between' : ''}`}>
         {children}
@@ -618,7 +620,7 @@ function KeysCard({ setMsg }) {
                           <td colSpan={5} data-role="test"
                             className={`px-4 py-2 text-[13px] ${t.status === 'ok' ? 'text-[var(--success)]'
                               : t.status === 'needs_setup' ? 'text-[var(--muted)]' : 'text-[var(--danger)]'}`}>
-                            {t.status === 'ok' ? '✓ ' : t.status === 'needs_setup' ? 'ⓘ ' : '✗ '}{t.detail || t.status}
+                            {t.status === 'ok' ? 'ok — ' : t.status === 'needs_setup' ? 'note — ' : 'failed — '}{t.detail || t.status}
                           </td>
                         </tr>
                       )}
@@ -653,7 +655,7 @@ function KeysCard({ setMsg }) {
                 )}
               </select>
               <KeyInput id="keyin-add" key={`add-${epoch}-${addEpoch}`} hint="" placeholder="paste the key…" label="New key" />
-              <button className={BTN_PRIMARY} disabled={busy || !pickValue || stale} onClick={add}>Add</button>
+              <button className={pickValue && !stale ? BTN_PRIMARY : BTN_DEFAULT} disabled={busy || !pickValue || stale} onClick={add}>Add</button>
               {agentNote && agents.length === 0 && <span className="text-[13px] text-[var(--muted)]">{agentNote}</span>}
             </>
           )}
@@ -718,7 +720,7 @@ function useDraft(saved, { scope = '', blank = {} } = {}) {
 const UnsavedCtx = createContext(() => {})
 // The bar's order = page order, tab by tab. Keys are the cards' section ids,
 // so each label links to its card (and opens its tab).
-const UNSAVED_ORDER = ['rooms', 'voice', 'stt', 'tuning', 'wake-name-card', 'wake-model', 'localai', 'intelligence']
+const UNSAVED_ORDER = ['rooms', 'wake-name-card', 'wake-model', 'stt', 'voice', 'tuning', 'localai', 'intelligence']
 
 // card: { label, count, save, discard }. save(say) is the card's own save,
 // reporting through say (the bar sums them up) and returning true once saved.
@@ -864,7 +866,7 @@ function RestartButton({ status, setMsg, setRebooting, rebooting, unsaved }) {
 // chip row would fill a phone screen.
 function Overview({ status, tts, intelligence, mapping }) {
   return (
-    <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4">
+    <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4" style={{ rowGap: '12px' }}>
       <Stat label="Uptime">
         <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
       </Stat>
@@ -1474,7 +1476,8 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   // One save for every changed row.
   const saveMapping = async say => {
     const picked = changedRooms.map(r => [r, zones.val(r)])
-    if (picked.some(([, z]) => !z || !liveZone(z))) { say('Pick a zone first.', 'muted', 'Room → zone mapping'); return false }
+    const unzoned = picked.find(([, z]) => !z || !liveZone(z))
+    if (unzoned) { say(`Pick a zone for ${unzoned[0]} first.`, 'muted', 'Room → zone mapping'); return false }
     // PUT /mapping takes the FULL room_zones dict WRAPPED in a
     // room_zones key (MappingPayload contract, routes.py) — a bare
     // merged dict 422s (or worse: pre-forbid, silently wiped the
@@ -1514,7 +1517,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
     } catch (e) { say('Mapping save failed: ' + e.message, 'err', 'Room → zone mapping'); return false }
   }
   useUnsaved('rooms', {
-    label: 'room mapping', count: changedRooms.length, save: saveMapping,
+    label: 'Room mapping', count: changedRooms.length, save: saveMapping,
     discard: () => { zones.discard(); agents.discard() },
   })
 
@@ -1549,7 +1552,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                     {/* Empty placeholder: without it an unmapped row
                         DISPLAYS the first zone while its value is '' — a
                         fake selection that Save would reject as "pick a zone". */}
-                    <select value={zone}
+                    <select aria-label={`Zone for ${room}`} value={zone}
                       onChange={e => zones.set({ [room]: e.target.value })}
                       className={`${INPUT_CLS} w-[200px]`}>
                       {(zone === '' || (!zoneNames.includes(zone) && !(hasSpeaker && zone === BUILTIN))) &&
@@ -1561,7 +1564,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                   </td>
                   <td className="px-4 py-2">
                     <div className="grid gap-1">
-                      <select value={agent} data-agent-room={room}
+                      <select aria-label={`Agent for ${room}`} value={agent} data-agent-room={room}
                         onChange={e => agents.set({ [room]: e.target.value })}
                         className={`${INPUT_CLS} w-[200px]`}>
                         <option value="">{defaultAgentLabel(defaultAgent)}</option>
@@ -1612,6 +1615,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
                         {r.online && (
                           <button aria-expanded={!!openDetails[r.room]}
                             className="ml-2 font-sans text-[12px] text-[var(--muted)] hover:text-[var(--foreground)] cursor-pointer"
+                            style={{ paddingTop: '4px', paddingBottom: '4px' }}
                             onClick={() => setOpenDetails(o => ({ ...o, [r.room]: !o[r.room] }))}
                             title="Boot, Wi-Fi, update and audio health, read from the node.">
                             {openDetails[r.room] ? 'Hide details' : 'Details'}
@@ -1872,21 +1876,21 @@ function ZoneList({ mapping, setMsg, reloadAll }) {
         </div>
       )}
 
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <input className={`${INPUT_CLS} w-[170px]`} placeholder="zone name"
+          <input aria-label="Zone name" className={`${INPUT_CLS} w-[170px]`} placeholder="zone name"
             value={newZone.name} onChange={e => setNewZone({ ...newZone, name: e.target.value })} />
-          <select className={`${INPUT_CLS} w-[110px]`} value={newZone.backend}
+          <select aria-label="Zone backend" className={`${INPUT_CLS} w-[110px]`} value={newZone.backend}
             onChange={e => setNewZone({ ...newZone, backend: e.target.value })}>
             <option value="sonos">sonos</option>
             <option value="wiim">wiim</option>
           </select>
-          <input className={`${INPUT_CLS} w-[185px] font-mono`} placeholder="ip"
+          <input aria-label="Zone IP address" className={`${INPUT_CLS} w-[185px] font-mono`} placeholder="ip"
             value={newZone.ip} onChange={e => setNewZone({ ...newZone, ip: e.target.value })} />
           {/* Sonos only: WiiM zones have no player UID, so the field is
               not shown at all (a greyed-out box read as "fill me in"). */}
           {newZone.backend === 'sonos' && (
-            <input className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… player UID"
+            <input aria-label="Sonos player UID" className={`${INPUT_CLS} flex-1 min-w-[230px] font-mono`} placeholder="RINCON_… player UID"
               title="Sonos RINCON player UID"
               value={newZone.player_uid} onChange={e => setNewZone({ ...newZone, player_uid: e.target.value })} />
           )}
@@ -1954,11 +1958,12 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
   // so it never guesses; restarting the other line's node is harmless
   // (it reads its own track) but costs that room its voice for ~15s.
   const [pickup, setPickup] = useState(null)  // {version, track, rooms: {room: bool}}
-  const trackLabel = t => (t || '').toUpperCase()
+  // Lines are named as the system names them (array, flex, waveshare).
+  const trackLabel = t => (t || '').toLowerCase()
 
   const push = async () => {
     if (!fwFile) { setMsg('Pick a .bin to push.', 'err', 'Firmware'); return }
-    if (!fwTrack) { setMsg('Pick the hardware line (track) this .bin is for.', 'err', 'Firmware'); return }
+    if (!fwTrack) { setMsg('Pick the line this .bin is for.', 'err', 'Firmware'); return }
     // Filename hint: warn (never block) when the name says the other line.
     const fname = fwFile.name.toLowerCase()
     // (node_esp32.bin was BOTH XVF lines' build name before 1.2.9 — never a hint.)
@@ -1967,26 +1972,28 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
       : /array|respeaker-xvf/.test(fname) ? 'array' : null
     const mismatch = hinted !== null && hinted !== fwTrack
     if (!window.confirm(
-      `Push ${fwFile.name} to the ${trackLabel(fwTrack)} track?\n\n` +
-      `Every ${trackLabel(fwTrack).toLowerCase()} node OTAs this image on its next check. ` +
+      `Push ${fwFile.name} to the ${trackLabel(fwTrack)} line?\n\n` +
+      `Every ${trackLabel(fwTrack)} node OTAs this image on its next check. ` +
       `Wrong line = dead node (USB rescue).` +
       (mismatch ? `\n\nThe filename looks like a ${trackLabel(hinted)} build, but you picked ${trackLabel(fwTrack)}.` : '')))
       return
     setPushing(true)
     setPickup(null)
-    setMsg(`Uploading ${fwFile.name} to the ${trackLabel(fwTrack).toLowerCase()} track…`, 'pulse', 'Firmware')
+    setMsg(`Uploading ${fwFile.name} to the ${trackLabel(fwTrack)} line…`, 'pulse', 'Firmware')
     let upj = null
     try {
       const fd = new FormData()
       fd.append('file', fwFile, fwFile.name)
       fd.append('track', fwTrack)
       upj = await api('/api/dashboard/firmware/upload', { method: 'POST', body: fd })
-      setMsg(`Firmware ${upj.version} served (${trackLabel(upj.track).toLowerCase()} track).`, 'ok', 'Firmware')
+      setMsg(`Firmware ${upj.version} served (${trackLabel(upj.track)} line).`, 'ok', 'Firmware')
     } catch (e) {
       setMsg('Firmware push failed: ' + e.message, 'err', 'Firmware')
       return
     } finally { setPushing(false) }
-    const online = (status?.rooms || []).filter(n => n.online)
+    // Only nodes on this line (or whose line isn't known yet) are offered;
+    // nothing is pre-checked.
+    const online = (status?.rooms || []).filter(n => n.online && (!n.line || n.line === upj.track))
     if (online.length) {
       setPickup({ version: upj.version, track: upj.track,
                   rooms: Object.fromEntries(online.map(n => [n.room, false])) })
@@ -2013,28 +2020,28 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
   return (
     <Section title="Firmware"
       note="Push a firmware .bin — nodes pick it up over OTA on their next boot.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[12px] font-medium text-[var(--muted)]">Track</span>
-          <select className={`${INPUT_CLS} w-[150px]`} value={fwTrack}
+          <span className="text-[12px] font-medium text-[var(--muted)]">Line</span>
+          <select aria-label="Firmware line" className={`${INPUT_CLS} w-[150px]`} value={fwTrack}
             onChange={e => setFwTrack(e.target.value)}
-            title="Which hardware line this .bin is for — the image and manifest go to that track's directory only. Cross-flashing the other line kills its node.">
+            title="Which hardware line this .bin is for — the image and manifest go to that line's folder only. Cross-flashing the other line kills its node.">
             <option value="" disabled>pick a line…</option>
             <option value="array">array</option>
             <option value="flex">flex</option>
             <option value="waveshare">waveshare</option>
           </select>
           <FilePick accept=".bin" file={fwFile} onPick={setFwFile} />
-          <button className={BTN_PRIMARY} style={{ marginLeft: 'auto' }} disabled={pushing || !fwFile || !fwTrack} onClick={push}
-            title={!fwTrack ? 'Pick the track first.' : !fwFile ? 'Pick a .bin first.' : ''}>
+          <button className={fwFile && fwTrack ? BTN_PRIMARY : BTN_DEFAULT} style={{ marginLeft: 'auto' }} disabled={pushing || !fwFile || !fwTrack} onClick={push}
+            title={!fwTrack ? 'Pick the line first.' : !fwFile ? 'Pick a .bin first.' : ''}>
             {pushing ? 'Uploading…' : 'Push firmware'}
           </button>
         </div>
         {pickup && (
           <div className="grid gap-2 border-t border-[var(--separator)] pt-3">
             <span className="text-[13px]">
-              {pickup.version} is on the {trackLabel(pickup.track).toLowerCase()} track. Restart nodes now so they grab it
-              (check only {trackLabel(pickup.track).toLowerCase()} nodes — others would just reboot for nothing):
+              {pickup.version} is on the {trackLabel(pickup.track)} line. Restart {trackLabel(pickup.track)} nodes now so
+              they grab it (other lines aren't listed):
             </span>
             <div className="flex gap-4 flex-wrap">
               {Object.entries(pickup.rooms).map(([room, on]) => (
@@ -2112,7 +2119,7 @@ function NodeSetupPanel({ setMsg }) {
     if (denied) { setChip({ state: 'unknown', ver: '' }); M('The sound check needs the dashboard token.', 'muted'); return }
     const r = expect ? expectVersion(got, track) : got
     setChip({ state: r.state, ver: r.ver })
-    if (r.state === 'wrong') M(`The audio chip reads v${r.ver}, not v${r.expected} for this ${track} board. Flash it again with the ${track} image.`, 'err')
+    if (r.state === 'wrong') M(`The audio chip reads v${r.ver}, not v${r.expected} for this ${track} line. Flash it again with the ${track} image.`, 'err')
     else if (r.state === 'silent') M('The node is online but its audio chip sends no sound. Flash the audio chip to fix it.', 'err')
     else if (r.state === 'unknown') M('Couldn’t read the node’s audio. Check it on the Rooms tab.', 'muted')
     else M(`${name}’s audio chip sends sound${r.ver ? ` (v${r.ver})` : ''}.`, 'ok')
@@ -2168,7 +2175,7 @@ function NodeSetupPanel({ setMsg }) {
   const flash = async () => {
     const track = info?.track || pickTrack
     if (!track) { M('Pick the board’s line first.', 'err'); return }
-    if (!window.confirm(`Flash the ${track.toUpperCase()} firmware to this board?\n\n` +
+    if (!window.confirm(`Flash the ${track} firmware to this board?\n\n` +
         'Wi-Fi, name and host address are kept. Wrong line = dead node (USB rescue).')) return
     setPhase('flashing'); setProgress({ part: '', pct: 0 })
     try {
@@ -2213,7 +2220,7 @@ function NodeSetupPanel({ setMsg }) {
       setDfu(s => ({ ...s, phase: 'downloading' }))
       if (!dfu.file) M('Downloading the audio chip firmware from GitHub…', 'pulse')
       const bytes = dfu.file || await fetchXmosImage(line)
-      if (!window.confirm(`Flash the ${line.toUpperCase()} audio chip firmware v${im.version}?\n\nThe chip keeps its recovery copy.`)) {
+      if (!window.confirm(`Flash the ${line} audio chip firmware v${im.version}?\n\nThe chip keeps its recovery copy.`)) {
         setDfu(s => ({ ...s, phase: 'ready' })); return
       }
       setDfu(s => ({ ...s, phase: 'flashing', pct: 0 }))
@@ -2240,7 +2247,7 @@ function NodeSetupPanel({ setMsg }) {
 
   return (
     <Section title="Node setup" note="Flash and set up a node over USB: new boards, a new host, a changed Wi-Fi.">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         {!isSupported() ? (
           <span className="text-[13px]">Node setup needs Chrome or Edge on a desktop computer.</span>
         ) : phase === 'idle' || phase === 'connecting' ? (
@@ -2264,7 +2271,7 @@ function NodeSetupPanel({ setMsg }) {
             {phase === 'unknown' && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[12px] font-medium text-[var(--muted)]">Line</span>
-                <select className={`${INPUT_CLS} w-[150px]`} value={pickTrack} onChange={e => setPickTrack(e.target.value)}>
+                <select aria-label="Node line" className={`${INPUT_CLS} w-[150px]`} value={pickTrack} onChange={e => setPickTrack(e.target.value)}>
                   <option value="" disabled>pick a line…</option>
                   <option value="array">array</option>
                   <option value="flex">flex</option>
@@ -2274,10 +2281,10 @@ function NodeSetupPanel({ setMsg }) {
             )}
             {info && (
               <div className="grid gap-2">
-                <Field label="Wi-Fi network"><input className={INPUT_CLS} value={form.wifi_ssid} onChange={set('wifi_ssid')} /></Field>
-                <Field label="Wi-Fi password"><input className={INPUT_CLS} type="password" autoComplete="new-password" placeholder="unchanged" value={form.wifi_pass} onChange={set('wifi_pass')} /></Field>
-                <Field label="Room name"><input className={INPUT_CLS} value={form.name} onChange={set('name')} /></Field>
-                <Field label="Host address"><input className={INPUT_CLS} value={form.bot_url} onChange={set('bot_url')} /></Field>
+                <Field label="Wi-Fi network"><input aria-label="Wi-Fi network" className={INPUT_CLS} value={form.wifi_ssid} onChange={set('wifi_ssid')} /></Field>
+                <Field label="Wi-Fi password"><input aria-label="Wi-Fi password" className={INPUT_CLS} type="password" autoComplete="new-password" placeholder="unchanged" value={form.wifi_pass} onChange={set('wifi_pass')} /></Field>
+                <Field label="Room name"><input aria-label="Room name" className={INPUT_CLS} value={form.name} onChange={set('name')} /></Field>
+                <Field label="Host address"><input aria-label="Host address" className={INPUT_CLS} value={form.bot_url} onChange={set('bot_url')} /></Field>
               </div>
             )}
             {progress && <span className="text-[13px]">Flashing {esc(progress.part)}… {Math.round(progress.pct)}%</span>}
@@ -2303,10 +2310,10 @@ function NodeSetupPanel({ setMsg }) {
             {dfu && (
               <div className="grid gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[12px] font-medium text-[var(--muted)]">Board</span>
-                  <select className={`${INPUT_CLS} w-[150px]`} value={dfu.line} disabled={dfu.phase !== 'pick'}
+                  <span className="text-[12px] font-medium text-[var(--muted)]">Line</span>
+                  <select aria-label="Audio chip line" className={`${INPUT_CLS} w-[150px]`} value={dfu.line} disabled={dfu.phase !== 'pick'}
                           onChange={e => setDfu(s => ({ ...s, line: e.target.value, file: null, fileObj: null }))}>
-                    <option value="" disabled>pick a board…</option>
+                    <option value="" disabled>pick a line…</option>
                     <option value="array">array</option>
                     <option value="flex">flex</option>
                   </select>
@@ -2379,7 +2386,7 @@ function WakeNameField({ setMsg }) {
     if (ok) name.settle(sent)
     return ok
   }
-  useUnsaved('wake-name-card', { label: 'wake name', count: name.changed('name') ? 1 : 0, save: saveName, discard: name.discard })
+  useUnsaved('wake-name-card', { label: 'Wake name', count: name.changed('name') ? 1 : 0, save: saveName, discard: name.discard })
   // Not loaded yet: the field keeps its place (rendering nothing made the
   // card jump when it arrived) and its id, so #wake-name-card finds its tab.
   if (!w) return (
@@ -2390,7 +2397,8 @@ function WakeNameField({ setMsg }) {
   return (
     <div id="wake-name-card">
       <Field label="Wake name">
-        <input id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30} placeholder="not set"
+        <input aria-label="Wake name" id="wake-name" className={`${INPUT_CLS} w-[180px]`} maxLength={30}
+          placeholder="Jarvis (for hey_jarvis)" title="Must match the wake model. Applies live."
           value={name.val('name') ?? ''} onChange={e => name.set({ name: e.target.value })} />
       </Field>
     </div>
@@ -2438,7 +2446,7 @@ function OwwPanel({ setMsg, reloadAll }) {
       return true
     } catch (e) { say('Select failed: ' + e.message, 'err', 'Wake word model'); return false }
   }
-  useUnsaved('wake-model', { label: 'wake model', count: pick.changed('model') ? 1 : 0, save: select, discard: pick.discard })
+  useUnsaved('wake-model', { label: 'Wake model', count: pick.changed('model') ? 1 : 0, save: select, discard: pick.discard })
 
   const del = async (name, source) => {
     if (!window.confirm(`Delete model '${name}' (${source})?`)) return
@@ -2467,11 +2475,11 @@ function OwwPanel({ setMsg, reloadAll }) {
   return (
     <Section id="wake-model" title="Wake word"
       note="">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <WakeNameField setMsg={setMsg} />
         <Field label="Active model / upload" between>
           <div className="flex items-center gap-2 flex-wrap">
-            <select className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
+            <select aria-label="Wake word model" className={`${INPUT_CLS} w-[260px] max-w-full`} value={sel}
               onChange={e => pick.set({ model: e.target.value })}>
               {/* No listed model is active (e.g. the active one lives outside
                   the list): without this the browser SHOWS the first model
@@ -2663,15 +2671,18 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
       return true
     } catch (e) { say('Save failed: ' + e.message, 'err', 'TTS'); return false }
   }
-  useUnsaved('voice', { label: 'tts', count: ttsFields.filter(t.changed).length, save: saveTTS, discard: t.discard })
+  useUnsaved('voice', { label: 'TTS', count: ttsFields.filter(t.changed).length, save: saveTTS, discard: t.discard })
 
+  // Pipeline order: wake word, STT, TTS, then tuning.
   return (
     <>
+      <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
+      <SttCard status={status} setMsg={setMsg} />
       <Section id="voice" title="TTS"
         note="">
-        <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+        <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
           <Field label="Provider / model">
-            <select className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
+            <select aria-label="TTS provider" className={`${INPUT_CLS} w-[200px]`} value={provider || 'elevenlabs'}
               onChange={e => onProviderChange(e.target.value)}>
               <option value="elevenlabs">ElevenLabs (cloud)</option>
               <option value="deepgram">Deepgram Aura (cloud)</option>
@@ -2688,7 +2699,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                 LocalAI (host){tts?.localai_problem ? ' — set it up on System' : ''}
               </option>
             </select>
-            <select className={`${INPUT_CLS} w-[200px]`} value={model || ''}
+            <select aria-label="TTS model or voice" className={`${INPUT_CLS} w-[200px]`} value={model || ''}
               onChange={e => t.set({ [`model:${provider}`]: e.target.value })}>
               {/* A saved value the catalog doesn't carry (hand-edited config)
                   shows honestly instead of faking the first entry. */}
@@ -2711,7 +2722,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                   placeholder="Voice name" className={`${INPUT_CLS} w-[200px] font-mono`} aria-label="LocalAI voice" />)}
             {provider === 'elevenlabs' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
             {provider === 'elevenlabs' &&
-              <input id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
+              <input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
             {provider === 'deepgram-flux' && (
               <>
@@ -2772,17 +2783,17 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
           )}
           {provider !== 'pocket' && provider !== 'localai' && (
             <Field label="Fallback">
-              <select id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
+              <select aria-label="TTS fallback" id="tts-fallback" className={`${INPUT_CLS} w-[200px]`} value={fallback}
                 onChange={e => t.set({ fallback: e.target.value })}
                 title="Speak with a local voice while this provider is down.">
                 <option value="off">Off</option>
                 {/* Each stays pickable while it's the saved one, so a fallback
                     saved before it went missing can always be turned off. */}
                 <option value="kokoro" disabled={(!tts?.kokoro_installed || provider === 'kokoro') && fallback !== 'kokoro'}>
-                  Kokoro{tts?.kokoro_installed ? '' : ' — not installed'}
+                  Kokoro (local){provider === 'kokoro' ? ' — main voice' : tts?.kokoro_installed ? '' : ' — not installed'}
                 </option>
                 <option value="pocket" disabled={!tts?.pocket_installed && fallback !== 'pocket'}>
-                  Pocket TTS{tts?.pocket_installed ? '' : ' — not installed'}
+                  Pocket TTS (local){tts?.pocket_installed ? '' : ' — not installed'}
                 </option>
               </select>
               {fallback === 'pocket' && (
@@ -2803,9 +2814,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
         </div>
       </Section>
 
-      <SttCard status={status} setMsg={setMsg} />
       <Tuning tuning={tuning} reloadAll={reloadAll} />
-      <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
     </>
   )
 }
@@ -2864,7 +2873,7 @@ function SttCard({ status, setMsg }) {
 
   // While a download runs — started by Save, or already in progress when the
   // page loaded — poll every 0.5 s. When it lands, the bar fills to 100%
-  // "Downloaded ✓" and holds a beat before "restart to apply", so even a
+  // "Downloaded" and holds a beat before "restart to apply", so even a
   // 4-second download visibly finishes. A failed poll just tries again; the
   // cleanup stops polling when the state flips.
   const downloading = data?.download?.state === 'downloading'
@@ -2967,7 +2976,7 @@ function SttCard({ status, setMsg }) {
       return true
     } catch (e) { say('Save failed: ' + e.message, 'err', 'STT'); return false }
   }
-  useUnsaved('stt', { label: 'stt', count: Object.keys(sttBody()).length, save, discard: s.discard })
+  useUnsaved('stt', { label: 'STT', count: Object.keys(sttBody()).length, save, discard: s.discard })
 
   const st = status?.stt || data?.status
   const state = sttStateChip(st, data?.download)
@@ -2984,7 +2993,7 @@ function SttCard({ status, setMsg }) {
   const customLang = data?.current?.custom_language
   return (
     <Section id="stt" title="STT" note="">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <div className="flex flex-wrap items-center gap-2" id="stt-chips">
           {onFallback || onLocalAIFallback
             ? <span className={WARN_CHIP_CLS} title={st.fallback_reason}>whisper fallback</span>
@@ -3018,7 +3027,7 @@ function SttCard({ status, setMsg }) {
             </div>
             <span className="text-[12px] text-[var(--muted)]">
               {finished
-                ? `Downloaded ✓${finished.bytes ? ` · ${fmtBytes(finished.bytes)}` : ''}`
+                ? `Downloaded${finished.bytes ? ` · ${fmtBytes(finished.bytes)}` : ''}`
                 : data.download.total_bytes
                   ? `${fmtBytes(data.download.done_bytes || 0)} / ${fmtBytes(data.download.total_bytes)}`
                   : 'Starting download…'}
@@ -3027,7 +3036,7 @@ function SttCard({ status, setMsg }) {
         )}
         <div className="flex flex-wrap items-end gap-4">
           <Field label="Provider">
-            <select id="stt-provider" className={`${INPUT_CLS} w-auto`} value={provider || 'whisper'}
+            <select aria-label="STT provider" id="stt-provider" className={`${INPUT_CLS} w-auto`} value={provider || 'whisper'}
               onChange={e => s.set({ provider: e.target.value })} disabled={!data}>
               {(data?.providers || [{ name: 'whisper', label: 'Whisper (local)', available: true }]).map(p => (
                 <option key={p.name} value={p.name} disabled={!p.available} title={p.reason || ''}>
@@ -3038,7 +3047,7 @@ function SttCard({ status, setMsg }) {
           </Field>
           {onLocalAIPick && (
             <Field label="Model">
-              <select id="stt-localai-model" className={`${INPUT_CLS} w-auto`} value={laModel}
+              <select aria-label="LocalAI speech-to-text model" id="stt-localai-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={laModel}
                 onChange={e => s.set({ la_model: e.target.value })}>
                 {!laModels.includes(laModel) && <option value={laModel} disabled>
                   {!laFound ? 'loading…' : laModel ? `${laModel} — not served by LocalAI` : 'pick a model'}</option>}
@@ -3047,7 +3056,7 @@ function SttCard({ status, setMsg }) {
             </Field>
           )}
           {!onLocalAIPick && <Field label={cloudPick ? 'Fallback model' : 'Model'}>
-            <select id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
+            <select aria-label="Whisper model" id="stt-model" className={`${INPUT_CLS} w-auto`} style={{ maxWidth: '100%' }} value={model || ''}
               onChange={e => s.set({ model: e.target.value })} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
               {custom && <option value={data.current.model} disabled>{data.current.model} (set in config)</option>}
@@ -3059,7 +3068,7 @@ function SttCard({ status, setMsg }) {
             </select>
           </Field>}
           <Field label="Language">
-            <select id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
+            <select aria-label="STT language" id="stt-language" className={`${INPUT_CLS} w-[200px]`} value={language || ''}
               onChange={e => s.set({ language: e.target.value })} disabled={!data}>
               {!data && <option value="" disabled>loading…</option>}
               {customLang && <option value={data.current.language} disabled>{data.current.language} (set in config)</option>}
@@ -3074,10 +3083,11 @@ function SttCard({ status, setMsg }) {
         {onLocalAIPick && laFound && !laFound.ok && (
           <span className="text-[13px] text-[var(--danger)]">LocalAI: {laFound.reason}</span>
         )}
+        <div className="overflow-x-auto">
         <table id="stt-models" className="w-full text-[14px]">
           <thead>
             <tr className="text-[12px] text-[var(--muted)]">
-              <th className="text-left px-4 py-2">Model</th>
+              <th className="text-left px-4 py-2">Whisper model</th>
               <th className="text-left px-4 py-2">On disk</th>
               <th className="text-left px-4 py-2"></th>
             </tr>
@@ -3097,6 +3107,7 @@ function SttCard({ status, setMsg }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </Section>
   )
@@ -3138,12 +3149,12 @@ function Tuning({ tuning, reloadAll }) {
       return true
     } catch (e) { say('Tuning save failed: ' + e.message, 'err', 'Voice tuning'); return false }
   }
-  useUnsaved('tuning', { label: 'voice tuning', count: dirtyFields.length, save, discard: vals.discard })
+  useUnsaved('tuning', { label: 'Voice tuning', count: dirtyFields.length, save, discard: vals.discard })
 
   return (
     <Section id="tuning" title="Voice tuning"
       note="">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
           {TUNING_FIELDS.map(([f, label, min, max, step, hint]) => (
             <div key={f} className="grid gap-1">
@@ -3197,7 +3208,7 @@ function LocalAICard({ setMsg }) {
       return true
     } catch (e) { say('Save failed: ' + e.message, 'err', 'LocalAI'); return false }
   }
-  useUnsaved('localai', { label: 'localai', count: changed ? 1 : 0, save,
+  useUnsaved('localai', { label: 'LocalAI', count: changed ? 1 : 0, save,
     discard: () => setUrl(shortUrl(saved?.url) || '') })
   const runTest = async () => {
     setBusy(true)
@@ -3207,12 +3218,12 @@ function LocalAICard({ setMsg }) {
   }
   return (
     <Section id="localai" title="LocalAI" note="">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <Field label="Address">
-          <input id="localai-url" value={url} onChange={e => setUrl(e.target.value)} placeholder="192.0.2.50:8080"
+          <input aria-label="LocalAI address" id="localai-url" value={url} onChange={e => setUrl(e.target.value)} placeholder="192.0.2.50:8080"
             className={`${INPUT_CLS} w-[260px] font-mono`} disabled={!saved} />
           <button className={BTN_DEFAULT} disabled={busy || !saved?.url || changed} onClick={runTest}
-            title={changed ? 'Save the address first' : undefined}>{busy ? 'Testing…' : 'Test'}</button>
+            title={changed ? 'Save the address first.' : !saved?.url ? 'Save an address first.' : undefined}>{busy ? 'Testing…' : 'Test'}</button>
         </Field>
         {saved && !saved.key_set && <MissingKey label="LocalAI" />}
         {test && (test.ok ? (
@@ -3344,20 +3355,20 @@ function System({ intelligence, status, setMsg, reloadAll }) {
       return true
     } catch (e) { say('Save failed: ' + e.message, 'err', 'Intelligence'); return false }
   }
-  useUnsaved('intelligence', { label: 'intelligence', count: intFields.filter(d.changed).length, save, discard: d.discard })
+  useUnsaved('intelligence', { label: 'Intelligence', count: intFields.filter(d.changed).length, save, discard: d.discard })
   return (
     <>
     <KeysCard setMsg={setMsg} />
     <LocalAICard setMsg={setMsg} />
     <Section id="intelligence" title="Intelligence"
       note="">
-      <div className="rounded-2xl bg-[var(--surface)] p-4 grid gap-4">
+      <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <Field label="Provider / agent / API URL">
-          <select id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
+          <select aria-label="Intelligence provider" id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
             className={`${INPUT_CLS} w-[160px]`}>
             {LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}
           </select>
-          <select id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
+          <select aria-label="Intelligence agent" id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
             title={laneOf(intKind)?.agent_help}
             className={`${INPUT_CLS} w-[220px] font-mono`}>
             {laneOf(intKind)?.agent_required === false
@@ -3378,7 +3389,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
             {found[intKind]?.loading ? '…' : '⟳'}
           </button>
           <span className="text-[12px] font-medium text-[var(--muted)]">URL</span>
-          <input id="int-url" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}
+          <input aria-label="Intelligence URL" id="int-url" value={intUrl || ''} onChange={e => d.set({ [`url:${intKind}`]: e.target.value })}
             placeholder={laneOf(intKind)?.url_placeholder}
             title="Host:port is enough: http:// and /v1 are filled in. Type a full URL for https or another path."
             onBlur={e => {
@@ -3401,7 +3412,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
                 try {
                   const r = await api('/api/dashboard/intelligence/test', { method: 'POST', json: {} })
                   if (r.ok) {
-                    setMsg(`✓ ${r.model || '?'} — ${r.latency_ms ?? '?'} ms — "${(r.reply || '').slice(0, 40)}"`, 'ok', 'Intelligence')
+                    setMsg(`ok — ${r.model || '?'} — ${r.latency_ms ?? '?'} ms — "${(r.reply || '').slice(0, 40)}"`, 'ok', 'Intelligence')
                   } else {
                     setMsg('Test failed: ' + (r.error || 'unknown'), 'err', 'Intelligence')
                   }
@@ -3520,6 +3531,7 @@ export default function App() {
               <nav className="flex gap-2" aria-label="Tabs">
                 {TABS.map(t => (
                   <a key={t.id} href={`#${t.id}`} aria-current={tab === t.id ? 'page' : undefined}
+                    style={{ paddingTop: '10px', paddingBottom: '10px' }}
                     className={`rounded-lg px-2.5 py-1.5 text-[13px] no-underline
                       ${tab === t.id
                         ? 'text-[var(--accent)] font-semibold'
