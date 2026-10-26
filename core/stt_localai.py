@@ -10,11 +10,34 @@ answer again.
 from __future__ import annotations
 
 import io
+import threading
 from typing import Any, Callable
 
 import localai
+from loguru import logger
 
 _ACTIVE = {"engine": "localai"}
+_BASE_LOCK = threading.Lock()
+_BASE = {"failed": None}
+
+
+def whisper_base():
+    """The appliance fallback model (Whisper base, CPU int8), loaded once:
+    normally at startup; if that failed, at most once more here (two rooms
+    can't load it twice, and a failed load isn't retried on every turn)."""
+    import stt_local
+    if stt_local.LocalWhisperSTTService._shared_model is not None:
+        return stt_local.LocalWhisperSTTService._shared_model
+    with _BASE_LOCK:
+        if stt_local.LocalWhisperSTTService._shared_model is None:
+            if _BASE["failed"]:
+                raise RuntimeError(f"Whisper base failed to load: {_BASE['failed']}")
+            try:
+                stt_local.preload_shared_model("base", "cpu", "int8")
+            except Exception as e:  # noqa: BLE001
+                _BASE["failed"] = type(e).__name__
+                raise
+    return stt_local.LocalWhisperSTTService._shared_model
 
 
 class _Segment:
@@ -33,6 +56,7 @@ class _Info:
 
 def _reset_for_tests() -> None:
     _ACTIVE["engine"] = "localai"
+    _BASE["failed"] = None
 
 
 def active() -> str:
@@ -50,7 +74,7 @@ def status() -> dict:
     # localai_model, not model: the dashboard merges this over Whisper's own
     # status, whose `model` is the fallback actually loaded (base).
     out = {"provider": "localai", "localai_model": model}
-    reason = localai.down_reason()
+    reason = localai.down_reason() or (None if model else "no LocalAI speech-to-text model picked")
     if reason:
         out.update(active="whisper", fallback_reason=reason, fallback_rooms=[])
     else:
@@ -61,19 +85,25 @@ def status() -> dict:
 class LocalAIWhisper:
     """faster-whisper-shaped model object that asks LocalAI first."""
 
-    def __init__(self, model: str, fallback: Callable[[], Any]):
+    def __init__(self, model: str, fallback: Callable[[], Any], url: str | None = None):
         self.model = model
         self._fallback = fallback
+        self._url = url  # fixed when the session was built (None = read settings)
 
     def transcribe(self, audio, language=None, beam_size=1, vad_filter=False):
         data = audio.read() if hasattr(audio, "read") else bytes(audio)
-        if not self.model:
-            localai.mark_down("no LocalAI speech-to-text model picked")
-        elif localai.should_try():
+        # No model picked = a config gap on THIS card: fall back for the turn,
+        # never mark the shared box down (the TTS card may use it fine).
+        if self.model and localai.should_try():
             try:
-                text = localai.transcribe(data, self.model, language)
+                text = localai.transcribe(data, self.model, language, url=self._url)
             except localai.LocalAIError as e:
-                localai.mark_down(e.reason)
+                if e.box_down:
+                    localai.mark_down(e.reason)
+                else:
+                    logger.warning(f"stt localai: {e.reason} — Whisper base takes this turn")
+            except Exception as e:  # noqa: BLE001 — never lose the clip to a client bug
+                logger.warning(f"stt localai: {type(e).__name__} — Whisper base takes this turn")
             else:
                 _ACTIVE["engine"] = "localai"
                 return [_Segment(text)], _Info(language)

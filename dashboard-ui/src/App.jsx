@@ -970,7 +970,7 @@ const ttsName = p => TTS_NAMES[p] || p
 // reported — config edits apply on the next restart. Offline rooms don't
 // count: their last report is stale. A configured cloud voice with no saved
 // key (GET /tts) is a warning: it can't speak after the next restart.
-const TTS_KEY_HINT = { elevenlabs: 'elevenlabs_key_hint', deepgram: 'deepgram_key_hint', 'deepgram-flux': 'deepgram_key_hint' }
+const TTS_KEY_HINT = { elevenlabs: 'elevenlabs_key_hint', deepgram: 'deepgram_key_hint', 'deepgram-flux': 'deepgram_key_hint', localai: 'localai_key_hint' }
 function ttsChip(status, tts) {
   if (!status) return { text: '—', muted: true }
   const live = (status.rooms || []).filter(r => r.online)
@@ -2627,10 +2627,11 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
     if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice
     const sent = t.snap(ttsFields)
     try {
-      // LocalAI's model and voice live with the LocalAI settings.
+      // LocalAI's model and voice live with the LocalAI settings, saved after
+      // /tts accepts the provider (a refused save changes nothing).
+      await api('/api/dashboard/tts', { method: 'PUT', json: body })
       if (provider === 'localai')
         await api('/api/dashboard/localai', { method: 'PUT', json: { model_tts: model || '', voice: laVoice.trim() } })
-      await api('/api/dashboard/tts', { method: 'PUT', json: body })
       say('Saved — restart to apply.', 'ok', 'TTS')
       await reloadAll()
       t.settle(sent)
@@ -2771,7 +2772,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
             </Field>
           )}
           {TTS_KEY_HINT[provider] && tts && !tts[TTS_KEY_HINT[provider]] && (
-            <MissingKey label={provider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram'} />
+            <MissingKey label={provider === 'elevenlabs' ? 'ElevenLabs' : provider === 'localai' ? 'LocalAI' : 'Deepgram'} />
           )}
         </div>
       </Section>

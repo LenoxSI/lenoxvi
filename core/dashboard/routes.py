@@ -1362,6 +1362,7 @@ async def get_tts():
         "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
         "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
+        "localai_key_hint": intelligence_target.key_hint(_saved_env().get("LVI_LOCALAI_KEY")),
         "deepgram_key_hint": intelligence_target.key_hint(_saved_env().get("DEEPGRAM_API_KEY")),
         # The accepted values per provider — the UI's only source
         # for its pick-lists (elevenlabs = model ids; deepgram* = voices).

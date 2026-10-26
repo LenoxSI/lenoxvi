@@ -218,16 +218,12 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     _stt_override = None
     if stt_provider == "localai":
         import localai
-        import stt_local as _stl
         import stt_localai
 
-        def _whisper_base():
-            if _stl.LocalWhisperSTTService._shared_model is None:
-                _stl.preload_shared_model("base", "cpu", "int8")
-            return _stl.LocalWhisperSTTService._shared_model
-
         _la_stt = localai.settings()
-        _stt_override = stt_localai.LocalAIWhisper(_la_stt["model_stt"], _whisper_base)
+        localai.bind(_la_stt["url"])
+        _stt_override = stt_localai.LocalAIWhisper(_la_stt["model_stt"], stt_localai.whisper_base,
+                                                   url=_la_stt["url"])
         logger.info(f"stt: localai {_la_stt['model_stt'] or '(no model picked)'} (Whisper base standby)")
     stt = LocalWhisperSTTService(
         model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
@@ -279,6 +275,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         import tts_kokoro
         import tts_localai
         _la_tts = localai.settings()
+        localai.bind(_la_tts["url"])
         if tts_kokoro.kokoro_available():
             await tts_kokoro.warm()
         else:
@@ -286,7 +283,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         tts = tts_localai.make_service(
             mixin=TTSTracked, model=_la_tts["model_tts"], voice=_la_tts["voice"], speed=_la_tts["speed"],
             standby_voice=tts_localai.standby_voice_for(
-                _la_tts["voice"], cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", None)))
+                _la_tts["voice"], cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", None)),
+            url=_la_tts["url"])
         logger.info(f"tts backend: localai {_la_tts['model_tts'] or '(no model picked)'} (Kokoro standby)")
     elif tts_provider == "deepgram":
         # Deepgram Aura-2: model name IS the voice (aura-2-thalia-en shape).

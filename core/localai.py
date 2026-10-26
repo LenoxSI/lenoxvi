@@ -19,6 +19,7 @@ import http.client
 import io
 import json
 import os
+import socket
 import threading
 import time
 import urllib.parse
@@ -38,12 +39,17 @@ _FLAGS = {"FLAG_TRANSCRIPT": "stt", "FLAG_TTS": "tts"}
 
 class LocalAIError(Exception):
     """A LocalAI call that didn't produce a usable answer. `reason` is short,
-    human and key-free (it lands on the dashboard chip)."""
+    human and key-free (it lands on the dashboard chip). `box_down` says
+    whether it is about the whole server (unreachable, timed out, 5xx, the
+    key, no URL) — callers mark LocalAI down for everyone only then; a
+    per-request problem (unknown model, bad voice, a garbled answer) just
+    falls back for that one call."""
 
-    def __init__(self, reason: str, status: int | None = None):
+    def __init__(self, reason: str, status: int | None = None, box_down: bool = True):
         super().__init__(reason)
         self.reason = reason
         self.status = status
+        self.box_down = box_down
 
 
 def redact(text, key: str | None = None) -> str:
@@ -87,22 +93,42 @@ def settings() -> dict:
 
 def _request(method: str, path: str, *, body: bytes | None = None, ctype: str | None = None,
              total: float, url: str | None = None, key: str | None = None) -> bytes:
+    """One HTTP call bounded by `total` seconds end to end (a timer shuts the
+    socket at the deadline, so a server trickling bytes can't stretch it).
+    Every failure is a LocalAIError — nothing else ever escapes."""
     url = normalize_url(url) if url else settings()["url"]
     if not url:
         raise LocalAIError("no LocalAI URL set")
     key = os.environ.get(KEY_VAR) if key is None else key
     if not key:
         raise LocalAIError(NO_KEY)
-    u = urllib.parse.urlsplit(url)
-    if not u.hostname:
-        raise LocalAIError("the LocalAI URL has no host")
-    conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    try:
+        u = urllib.parse.urlsplit(url)
+        host, port = u.hostname, u.port
+        if not host:
+            raise ValueError("no host")
+        conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+        conn = conn_cls(host, port, timeout=CONNECT_TIMEOUT)
+    except Exception:  # noqa: BLE001 — bad port, bad host, odd scheme
+        raise LocalAIError("the LocalAI URL is not valid") from None
     deadline = time.monotonic() + total
-    conn = conn_cls(u.hostname, u.port, timeout=CONNECT_TIMEOUT)
+    expired = threading.Event()
+
+    def _cut():
+        expired.set()
+        try:
+            if conn.sock is not None:
+                conn.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    timer = threading.Timer(total, _cut)
+    timer.daemon = True
+    timer.start()
     try:
         try:
             conn.connect()
-        except OSError as e:
+        except Exception as e:  # noqa: BLE001
             raise LocalAIError(f"LocalAI unreachable ({type(e).__name__})") from None
         headers = {"Accept": "*/*", "Authorization": f"Bearer {key}"}
         if ctype:
@@ -113,31 +139,34 @@ def _request(method: str, path: str, *, body: bytes | None = None, ctype: str | 
             resp = conn.getresponse()
             chunks = []
             while True:
-                left = deadline - time.monotonic()
-                if left <= 0:
+                if expired.is_set() or time.monotonic() > deadline:
                     raise TimeoutError
-                if conn.sock is not None:
-                    conn.sock.settimeout(max(0.05, left))
-                part = resp.read(65536)
+                part = resp.read1(65536)
                 if not part:
                     break
                 chunks.append(part)
-        except (TimeoutError, OSError, http.client.HTTPException) as e:
-            raise LocalAIError(f"LocalAI timed out or dropped the connection ({type(e).__name__})") from None
+            if expired.is_set():
+                raise TimeoutError
+            status = resp.status
+        except Exception as e:  # noqa: BLE001 — timeouts, resets, protocol errors
+            name = "TimeoutError" if expired.is_set() else type(e).__name__
+            raise LocalAIError(f"LocalAI timed out or dropped the connection ({name})") from None
         data = b"".join(chunks)
-        if resp.status == 401:
+        if status == 401:
             raise LocalAIError("LocalAI refused the key (check it on System · Keys)", 401)
-        if resp.status >= 400:
+        if status >= 400:
             msg = ""
             try:
                 err = json.loads(data).get("error")
                 msg = (err.get("message") if isinstance(err, dict) else err) or ""
             except Exception:  # noqa: BLE001 — a non-JSON error body is fine
                 pass
-            raise LocalAIError(redact(f"LocalAI error {resp.status}" + (f": {msg}" if msg else ""), key),
-                               resp.status)
+            # 5xx = the server is in trouble; any other 4xx is about this request.
+            raise LocalAIError(redact(f"LocalAI error {status}" + (f": {msg}" if msg else ""), key),
+                               status, box_down=status >= 500)
         return data
     finally:
+        timer.cancel()
         conn.close()
 
 
@@ -162,9 +191,11 @@ def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=No
     data = _request("POST", "/v1/audio/transcriptions", body=body, ctype=ctype,
                     total=STT_TIMEOUT, url=url, key=key)
     try:
-        return str(json.loads(data).get("text") or "").strip()
-    except Exception:  # noqa: BLE001
-        raise LocalAIError("LocalAI sent an unreadable transcript") from None
+        reply = json.loads(data)
+        text = reply["text"]
+    except Exception:  # noqa: BLE001 — not JSON, not a dict, or no text at all
+        raise LocalAIError("LocalAI sent an unreadable transcript", box_down=False) from None
+    return str(text or "").strip()
 
 
 def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None) -> tuple[bytes, int]:
@@ -179,11 +210,13 @@ def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=Non
             channels, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
             pcm = w.readframes(w.getnframes())
     except Exception:  # noqa: BLE001 — wave.Error, EOFError, struct errors
-        raise LocalAIError("LocalAI sent audio that isn't a WAV") from None
+        raise LocalAIError("LocalAI sent audio that isn't a WAV", box_down=False) from None
     if channels != 1 or width != 2:
-        raise LocalAIError(f"LocalAI audio is {channels}-channel {8 * width}-bit; need mono 16-bit")
+        raise LocalAIError(f"LocalAI audio is {channels}-channel {8 * width}-bit; need mono 16-bit", box_down=False)
+    if not 8000 <= rate <= 48000:
+        raise LocalAIError(f"LocalAI audio has an odd sample rate ({rate} Hz)", box_down=False)
     if not pcm or len(pcm) % 2:
-        raise LocalAIError("LocalAI sent an empty or cut-off clip")
+        raise LocalAIError("LocalAI sent an empty or cut-off clip", box_down=False)
     return pcm, rate
 
 
@@ -195,7 +228,7 @@ def discover(*, url=None, key=None) -> dict:
     out: dict = {"stt": [], "tts": []}
     for mid in filter(None, ids):
         try:
-            conf = json.loads(_request("GET", f"/api/models/config-json/{urllib.parse.quote(str(mid))}",
+            conf = json.loads(_request("GET", f"/api/models/config-json/{urllib.parse.quote(str(mid), safe='')}",
                                        total=PROBE_TIMEOUT, url=url, key=key))
         except (LocalAIError, ValueError):
             continue
@@ -219,12 +252,19 @@ def probe(*, url=None, key=None) -> tuple[bool, float | None, str | None]:
 
 # ── one up/down state for the box: STT and TTS share it ──
 _LOCK = threading.Lock()
-_STATE: dict = {"down": None, "since": None, "last_probe": 0.0, "probing": False, "cooldown": 30.0}
+_STATE: dict = {"down": None, "since": None, "last_probe": 0.0, "probing": False, "cooldown": 30.0,
+                "url": None}
 
 
 def _reset_for_tests() -> None:
     with _LOCK:
-        _STATE.update(down=None, since=None, last_probe=0.0, probing=False, cooldown=30.0)
+        _STATE.update(down=None, since=None, last_probe=0.0, probing=False, cooldown=30.0, url=None)
+
+
+def bind(url: str | None) -> None:
+    """The URL sessions were built with: the background probe checks THIS one
+    (a URL saved since applies at the next session, like every setting)."""
+    _STATE["url"] = normalize_url(url) if url else None
 
 
 def set_cooldown(secs) -> None:
@@ -256,11 +296,12 @@ def down_reason() -> str | None:
 
 def _probe_thread() -> None:
     try:
-        ok, _ms, _why = probe()
+        ok, _ms, _why = probe(url=_STATE["url"])
         if ok:
             mark_up()
-    except Exception:  # noqa: BLE001 — a probe must never kill anything
-        logger.opt(exception=True).debug("localai: probe failed")
+    except Exception as e:  # noqa: BLE001 — a probe must never kill anything
+        # Type only: a traceback with locals could carry the key.
+        logger.debug(f"localai: probe failed ({type(e).__name__})")
     finally:
         with _LOCK:
             _STATE["probing"] = False
