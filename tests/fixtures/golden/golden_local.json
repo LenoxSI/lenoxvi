@@ -1,0 +1,21 @@
+{
+ "kokoro": {
+  "It is 9:15 in the morning, and the high today is 72 degrees.": "a276e3c48bf6ed973dc83b9573695f78eff6cd52cbd1fa917aa4b0764882b4fb",
+  "The kitchen lights are now off.": "53568a4990b48da7605f83d704323b5274fe62ef2e0005b606bda3ad97147f32",
+  "Your timer for 10 minutes has started.": "9c6ac6bad6c28ff878b92d2959e9ea0bb6e561d8e1cf5e32105f49c20b447627"
+ },
+ "whisper": {
+  "clip1": {
+   "base": "Turn on the kitchen lights.",
+   "medium": "Turn on the kitchen lights."
+  },
+  "clip2": {
+   "base": "Set a timer for 10 minutes.",
+   "medium": "Set a timer for 10 minutes."
+  },
+  "clip3": {
+   "base": "What is the weather tomorrow in the morning?",
+   "medium": "What is the weather tomorrow in the morning?"
+  }
+ }
+}
