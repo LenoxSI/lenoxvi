@@ -217,7 +217,101 @@ check("localai: status never raises and has its shape", set(la.status()) == {"ur
 la._reset_for_tests()
 
 # ── stt localai ─────────────────────────────────────────────────────
-# (added in the STT task)
+import stt_localai as sla  # noqa: E402
+
+
+class FakeFW:
+    """The appliance model: records what it was asked to transcribe."""
+
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio, language=None, beam_size=1, vad_filter=False):
+        self.calls.append((audio.read(), language, beam_size, vad_filter))
+
+        class S:
+            text = " local words "
+
+        class I:
+            language = "en"
+        return [S()], I()
+
+
+fw = FakeFW()
+la._reset_for_tests()
+la.set_cooldown(60)
+sla._reset_for_tests()
+os.environ[la.KEY_VAR] = KEY
+os.environ["LVI_LOCALAI_URL"] = URL
+BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" remote words"}', 0)
+standin = sla.LocalAIWhisper("faster-whisper-small", lambda: fw)
+segs, info = standin.transcribe(io.BytesIO(b"WAV1"), language="en", beam_size=1, vad_filter=False)
+check("stt localai: up -> the text comes from LocalAI and the appliance model is untouched",
+      [s.text for s in segs] == ["remote words"] and fw.calls == [] and sla.active() == "localai"
+      and info.language == "en")
+os.environ["LVI_LOCALAI_MODEL_STT"] = "faster-whisper-small"
+check("stt localai: status while up says localai + the configured model",
+      sla.status() == {"provider": "localai", "model": "faster-whisper-small", "active": "localai"}, str(sla.status()))
+os.environ.pop("LVI_LOCALAI_MODEL_STT", None)
+BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json", b'{"error":{"message":"boom"}}', 0)
+segs, info = standin.transcribe(io.BytesIO(b"WAV2"), language="en", beam_size=1, vad_filter=False)
+check("stt localai: a LocalAI error sends the SAME clip to the appliance model",
+      fw.calls == [(b"WAV2", "en", 1, False)] and [s.text for s in segs] == [" local words "], str(fw.calls))
+check("stt localai: then LocalAI is marked down with the reason", "500" in (la.down_reason() or ""))
+n = len(SEEN)
+standin.transcribe(io.BytesIO(b"WAV3"), language=None)
+check("stt localai: while down, later turns skip LocalAI entirely (no request sent)",
+      len(SEEN) == n and fw.calls[-1][0] == b"WAV3" and sla.active() == "whisper")
+st = sla.status()
+check("stt localai: status says whisper fallback + the reason",
+      st.get("active") == "whisper" and "500" in (st.get("fallback_reason") or "") and st.get("fallback_rooms") == [])
+la.mark_up()
+check("stt localai: status goes back to localai as soon as LocalAI is up", sla.status().get("active") == "localai")
+la._reset_for_tests()
+BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":"x"}', 0)
+n = len(SEEN)
+fw.calls.clear()
+sla.LocalAIWhisper("", lambda: fw).transcribe(io.BytesIO(b"WAV4"), language="en")
+check("stt localai: no model picked -> appliance model, nothing sent, reason says so",
+      len(SEEN) == n and fw.calls and "model" in (la.down_reason() or ""))
+la._reset_for_tests()
+os.environ.pop(la.KEY_VAR, None)
+n = len(SEEN)
+fw.calls.clear()
+sla.LocalAIWhisper("m", lambda: fw).transcribe(io.BytesIO(b"WAV5"), language="en")
+check("stt localai: no key -> appliance model, nothing sent, reason names System · Keys",
+      len(SEEN) == n and fw.calls and "System · Keys" in (la.down_reason() or ""))
+la._reset_for_tests()
+
+try:
+    import pipecat  # noqa: F401
+    HAVE_PIPECAT = True
+except Exception:  # noqa: BLE001
+    HAVE_PIPECAT = False
+
+if HAVE_PIPECAT:
+    import asyncio
+    import stt_local
+    os.environ[la.KEY_VAR] = KEY
+    stt_local._language_hook = lambda: "en"
+    _shared_before = stt_local.LocalWhisperSTTService._shared_model
+    svc = stt_local.LocalWhisperSTTService(model="base", device="cpu", compute_type="int8", language="en",
+                                           model_override=sla.LocalAIWhisper("faster-whisper-small", lambda: fw))
+    BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Turn on the lights."}', 0)
+    out = asyncio.run(svc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: through LocalWhisperSTTService the LocalAI text comes out cleaned",
+          out.text == "Turn on the lights.", repr(out.text))
+    check("stt localai: model_override replaces the shared model and loads nothing",
+          svc._fw_model is not None and isinstance(svc._fw_model, sla.LocalAIWhisper)
+          and stt_local.LocalWhisperSTTService._shared_model is _shared_before)
+    BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Thanks for watching!"}', 0)
+    out = asyncio.run(svc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: the phantom-transcript filter still runs on LocalAI text", out.text == "", repr(out.text))
+    asyncio.run(svc.cleanup())
+    os.environ.pop(la.KEY_VAR, None)
+    la._reset_for_tests()
+else:
+    print("SKIP stt localai: pipecat not importable here (run on the host)")
 
 srv.shutdown()
 print(f"\n{len(FAILS)} failed")

@@ -202,6 +202,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         device: str = "cuda",
         compute_type: str = "float16",
         language: Optional[str] = None,
+        model_override=None,
         **kwargs,
     ):
         super().__init__(api_key="sk-local-not-used", **kwargs)
@@ -210,9 +211,15 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         self._compute_type = compute_type
         self._language = language
         self._fw_model = None
+        # A stand-in with faster-whisper's transcribe() shape (LocalAI): used
+        # instead of the shared model, which is then never loaded here.
+        self._model_override = model_override
 
     async def ensure_model(self):
         """Load the model once per process, shared across pipelines."""
+        if self._model_override is not None:
+            self._fw_model = self._model_override
+            return
         async with self._shared_lock:
             if LocalWhisperSTTService._shared_model is not None:
                 self._fw_model = LocalWhisperSTTService._shared_model

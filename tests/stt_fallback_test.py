@@ -26,9 +26,9 @@ def check(name, cond, detail=""):
 import stt_catalog as cat
 
 # ── catalog ──────────────────────────────────────────────────────────
-check("provider catalog: Local — Whisper first, then Deepgram Nova-3 (cloud), then ElevenLabs Scribe v2 (cloud)",
+check("provider catalog: Local — Whisper first, then LocalAI, then Deepgram Nova-3 (cloud), then ElevenLabs Scribe v2 (cloud)",
       [(p["name"], p["label"]) for p in getattr(cat, "PROVIDERS", [])]
-      == [("whisper", "Local — Whisper"), ("deepgram", "Deepgram Nova-3 (cloud)"),
+      == [("whisper", "Local — Whisper"), ("localai", "LocalAI"), ("deepgram", "Deepgram Nova-3 (cloud)"),
           ("elevenlabs", "ElevenLabs Scribe v2 (cloud)")],
       str(getattr(cat, "PROVIDERS", None)))
 check("deepgram language: auto -> multi, a code passes through, empty -> multi",
@@ -399,7 +399,9 @@ try:
     check("elevenlabs catalog: Scribe model scribe_v2_realtime; elevenlabs is a valid cloud provider",
           getattr(cat, "ELEVENLABS_MODEL", None) == "scribe_v2_realtime" and cat.validate_provider("elevenlabs") is None
           and getattr(cat, "is_cloud", lambda p: None)("elevenlabs") is True and cat.is_cloud("deepgram") is True
-          and cat.is_cloud("whisper") is False and cat.is_cloud("grok") is False, str(getattr(cat, "PROVIDERS", None)))
+          and cat.is_cloud("whisper") is False and cat.is_cloud("grok") is False
+          and cat.is_cloud("localai") is False and cat.validate_provider("localai") is None,
+          str(getattr(cat, "PROVIDERS", None)))
     check("elevenlabs language: auto or empty -> None (Scribe detects it), a code passes through to pipecat's mapping",
           getattr(cat, "elevenlabs_language", lambda c: "x")("auto") is None and cat.elevenlabs_language(None) is None
           and cat.elevenlabs_language("") is None and cat.elevenlabs_language("de") == "de")

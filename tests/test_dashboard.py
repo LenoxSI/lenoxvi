@@ -9209,8 +9209,8 @@ def main():
         _gr = client.get("/api/dashboard/stt")
         _g = _gr.json()
         _elp = next((p for p in _g.get("providers", []) if p.get("name") == "elevenlabs"), {})
-        check("elevenlabs stt GET: the third provider, 'ElevenLabs Scribe v2 (cloud)', available with no extra package",
-              [p.get("name") for p in _g.get("providers", [])] == ["whisper", "deepgram", "elevenlabs"]
+        check("elevenlabs stt GET: the last provider, 'ElevenLabs Scribe v2 (cloud)', available with no extra package",
+              [p.get("name") for p in _g.get("providers", [])] == ["whisper", "localai", "deepgram", "elevenlabs"]
               and _elp.get("label") == "ElevenLabs Scribe v2 (cloud)" and _elp.get("cloud") is True
               and _elp.get("available") is True, str(_g.get("providers")))
         check("elevenlabs stt GET: elevenlabs_key_set comes from the shared ElevenLabs key; the value never appears",

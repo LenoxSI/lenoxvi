@@ -97,6 +97,9 @@ def redact(text) -> str:
 
 def status() -> dict:
     provider = _STATE["provider"]
+    if provider == "localai":
+        import stt_localai
+        return stt_localai.status()
     if provider == "whisper":
         return {"provider": "whisper"}
     out = {"provider": provider, "cloud_model": stt_catalog.cloud_model(provider)}
