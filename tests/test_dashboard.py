@@ -8619,6 +8619,8 @@ def main():
           "'Wake threshold'" in _appsrc and "'Wake sensitivity'" not in _appsrc
           and 'Wake-word score needed to wake' in _appsrc and 'OWW score' not in _appsrc,
           f"old label: {'Wake sensitivity' in _appsrc}, old hint: {'OWW score' in _appsrc}")
+    check("dashboard ui: the wake threshold hint is one short line (no 'tune by ear' advice)",
+          "'Wake-word score needed to wake.']" in _appsrc and "tune by ear" not in _appsrc)
     check("dashboard ui: the Nodes table column reads 'Since', not 'Last seen'",
           '>Since<' in _appsrc and 'Last seen' not in _appsrc,
           f"Last seen: {'Last seen' in _appsrc}")

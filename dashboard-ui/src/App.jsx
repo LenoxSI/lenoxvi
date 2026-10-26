@@ -3115,7 +3115,7 @@ function SttCard({ status, setMsg }) {
 
 const TUNING_FIELDS = [
   ['wake_threshold', 'Wake threshold', 0.30, 0.60, 0.01,
-    'Wake-word score needed to wake. Real wakes usually score well above TV/ad audio — tune by ear.'],
+    'Wake-word score needed to wake.'],
   ['wake_awake_timeout', 'Awake timeout (s)', 5, 60, 1,
     'Seconds of silence before she stops listening.'],
   ['vad_confidence', 'VAD confidence', 0.30, 0.90, 0.05,
