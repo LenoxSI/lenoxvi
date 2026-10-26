@@ -8741,6 +8741,8 @@ def main():
           and _rb.count("_botRestarting = false") == 2 and "i < 45" in _rb, _rb[:200])
     for _whatRP, _fnRP, _pinRP in (
             ("tts", "function Voice(", ("await api('/api/dashboard/tts', { method: 'PUT', json: body }) "
+                                       "if (provider === 'localai') await api('/api/dashboard/localai', { method: 'PUT', "
+                                       "json: { model_tts: model || '', voice: laVoice.trim() } }) "
                                        "say('Saved — restart to apply.', 'ok', 'TTS') await reloadAll()")),
             ("voice tuning", "function Tuning(", ("say('Saved — restart to apply.', 'ok', 'Voice tuning') "
                                                  "await reloadAll() // pull the saved truth back")),
@@ -8783,7 +8785,7 @@ def main():
           and "if (hint && !tts[hint])" in _ttsHO
           and "tone: 'warning', text: 'no key', href: '#keys'" in _ws(_ttsHO), _ttsHO[:200])
     check("overview: the TTS chip reads key hints GET /tts really returns, for every cloud provider; pocket needs none",
-          set(_hintHO) == {"elevenlabs", "deepgram", "deepgram-flux"}
+          set(_hintHO) == {"elevenlabs", "deepgram", "deepgram-flux", "localai"}
           and all(v in _ttsGet for v in _hintHO.values()), f"{_hintHO} vs {sorted(_ttsGet)[:12]}")
     _intGet = client.get("/api/dashboard/intelligence").json()
     check("overview: the intelligence chip warns 'no url' (link to Intelligence), else 'no key' (link to Keys)",
