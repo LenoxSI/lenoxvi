@@ -22,6 +22,8 @@ The two version streams are independent.
   "Run from a clone (manual)".
 
 ### Changed
+- Default filler lines for slow replies are plainer: after 12 s "Almost there now.", "Still working on that.",
+  "Taking a minute."; after 25 s "This is taking a bit.", "Give me a few more seconds.", "Just hang tight.".
 - With `LVI_STATE_DIR` set, the secrets file (`.env`, written by System · Keys and loaded at boot) and the TLS certs
   (`certs/`, written by `scripts/make-cert.sh`) live there too, so the code folder can be read-only. `LVI_ENV_FILE`
   still names the secrets file directly. Without `LVI_STATE_DIR` nothing moves.

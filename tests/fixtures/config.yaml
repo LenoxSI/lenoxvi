@@ -128,14 +128,14 @@ intelligence:
     lines: ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]
   - after: 12.0
     lines:
-    - "Still on it — this one's a slow one."
-    - "Still working — it's a deep one."
-    - "Still with you — taking a minute."
+    - "Almost there now."
+    - "Still working on that."
+    - "Taking a minute."
   - after: 25.0
     lines:
-    - "Still here — it's a big one."
-    - "Still here — give me a few more seconds."
-    - "Not done yet — hang tight."
+    - "This is taking a bit."
+    - "Give me a few more seconds."
+    - "Just hang tight."
 
 # Session modes (fresh | sticky per node — dashboard checkbox). Sticky
 # rooms keep conversation memory across node reconnects and bot restarts

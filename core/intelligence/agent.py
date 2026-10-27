@@ -78,10 +78,8 @@ def _normalize(text: str) -> str:
 # fallback when config has no fillers key.
 _DEFAULT_TIERS = [
     (3.0, ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]),
-    (12.0, ["Still on it — this one's a slow one.", "Still working — it's a deep one.",
-            "Still with you — taking a minute."]),
-    (25.0, ["Still here — it's a big one.", "Still here — give me a few more seconds.",
-            "Not done yet — hang tight."]),
+    (12.0, ["Almost there now.", "Still working on that.", "Taking a minute."]),
+    (25.0, ["This is taking a bit.", "Give me a few more seconds.", "Just hang tight."]),
 ]
 
 _LAST_FILLER = ""
