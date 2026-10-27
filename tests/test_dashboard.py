@@ -8504,6 +8504,40 @@ def main():
           in _optUI and _lanesUI.LANES["nanobot"].ui_meta()["no_agent_label"] == "nanobot's own model"
           and _lanesUI.LANES["hermes"].ui_meta()["no_agent_label"] is None
           and _lanesUI.LANES["openclaw"].ui_meta()["no_agent_label"] is None, _optUI[:240])
+    # ── echo (intelligence.kind: stub): a fresh install's "no brain yet" ──
+    from dashboard import routes as _rEC
+    _icfg_EC = dict(config_store.read_section("intelligence") or {})
+    _env_kind_EC = os.environ.pop("LVI_INTELLIGENCE_KIND", None)
+    try:
+        config_store.write_section("intelligence", {**_icfg_EC, "kind": "stub"})
+        _lbl_EC, _def_EC = _rEC._intelligence_label(), _rEC._agent_default()
+        config_store.write_section("intelligence", {**_icfg_EC, "kind": "bogus"})
+        _lbl_bogus_EC = _rEC._intelligence_label()
+    finally:
+        config_store.write_section("intelligence", _icfg_EC)
+        if _env_kind_EC is not None:
+            os.environ["LVI_INTELLIGENCE_KIND"] = _env_kind_EC
+    check("echo: kind stub reads 'echo' on the status line (an unknown kind still shows the default lane)",
+          _lbl_EC == "echo" and _lbl_bogus_EC == _lanesUI.LANES[_lanesUI.DEFAULT_KIND].label
+          and _def_EC.get("agent_kind") == "stub", f"{_lbl_EC!r} {_lbl_bogus_EC!r} {_def_EC}")
+    _chipEC = _fnUI("function intelligenceChip(status, intel) {")
+    check("echo ui: the Intelligence chip says 'echo' (neutral, not a link: not a fault) before any url/key warning",
+          "const ECHO_KIND = 'stub'" in _appsrc
+          and 0 <= _chipEC.find("=== ECHO_KIND") < _chipEC.find("'no url'")
+          and "return { tone: 'neutral', text: 'echo', title: 'No brain picked yet" in _chipEC, _chipEC[:300])
+    check("echo ui: the Intelligence card shows 'None yet (echo)' only while saved, hides URL/agent/key/Test, never lists agents",
+          "{savedKind === ECHO_KIND && <option value={ECHO_KIND}>None yet (echo)</option>}" in _sysUI
+          and "{intKind === ECHO_KIND ? (" in _sysUI and "intKind !== ECHO_KIND && !(agentEntry" in _sysUI
+          and "{intKind !== ECHO_KIND && <div className=\"flex items-center justify-between gap-4 flex-wrap\">" in _sysUI
+          and "if (!laneOf(kind)) return  // echo: nothing to list" in _sysUI
+          and "if (!agentKind || !laneOf(agentKind)) return  // echo: no agents" in _appsrc)
+    import importlib as _ilEC
+    _stubEC = _ilEC.import_module("intelligence.stub").StubIntelligence()
+    _repliesEC = [_stubEC._reply(x) for x in ("Hey Jarvis, what time is it?", "hello", "who are you", "good night")]
+    check("echo: the stub's replies are true on any box (no GPU/ElevenLabs claims) and point at the dashboard, not YAML",
+          not any(w in r for r in _repliesEC for w in ("GPU", "ElevenLabs", "config.yaml", "intelligence.kind"))
+          and "I heard: Hey Jarvis, what time is it?" in _repliesEC[0]
+          and all("dashboard" in r for r in _repliesEC[:3]), str(_repliesEC))
     check("intelligence ui: Save always sends nanobot's pick ('' clears it); other kinds send an agent only when one is set",
           "if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel" in _sysUI
           and "if (agentSel) body.agent = agentSel" not in _sysUI and _nbFree)
