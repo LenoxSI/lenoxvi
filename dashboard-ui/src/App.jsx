@@ -3233,7 +3233,8 @@ function LocalAICard({ setMsg }) {
           <button className={BTN_DEFAULT} disabled={busy || !saved?.url || changed} onClick={runTest}
             title={changed ? 'Save the address first.' : !saved?.url ? 'Save an address first.' : undefined}>{busy ? 'Testing…' : 'Test'}</button>
         </Field>
-        {saved && !saved.key_set && <MissingKey label="LocalAI" />}
+        {/* Only once LocalAI is being set up: a fresh box that never uses it shouldn't nag. */}
+        {saved?.url && !saved.key_set && <MissingKey label="LocalAI" />}
         {test && (test.ok ? (
           <div id="localai-test" className="grid gap-1 text-[13px]">
             <span><span className={OK_CHIP_CLS}>ok</span> <span className="font-mono">{test.ms} ms</span></span>

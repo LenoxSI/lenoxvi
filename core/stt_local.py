@@ -8,6 +8,7 @@ and TranscriptionFrame plumbing for free.
 
 import asyncio
 import io
+import logging
 import re
 import statistics
 import time
@@ -20,6 +21,18 @@ from openai.types.audio import Transcription
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 import stt_catalog
+
+
+class _NoHFTokenNag(logging.Filter):
+    """Drop the Hugging Face Hub's "set a HF_TOKEN" server notice. Model
+    downloads work without an account; on a fresh box the notice reads like
+    an error. Every other Hub warning still logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "HF_TOKEN" not in record.getMessage()
+
+
+logging.getLogger("huggingface_hub.utils._http").addFilter(_NoHFTokenNag())
 
 # Whisper invents these from near-silence (caption-heavy training data).
 # Dropped only when the WHOLE utterance is one of them.

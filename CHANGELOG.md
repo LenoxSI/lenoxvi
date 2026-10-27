@@ -14,6 +14,10 @@ The two version streams are independent.
   still names the secrets file directly. Without `LVI_STATE_DIR` nothing moves.
 
 ### Fixed
+- First run: `config.example.yaml` has no `<PLACEHOLDER>` values left to fill (the voice, intelligence URL, speaker
+  host IP and room mapping are commented out and set on the dashboard; `room_zones: {}`); the Hub's "set a HF_TOKEN"
+  notice no longer shows on the first model download; the LocalAI card's "No LocalAI key" note waits until LocalAI
+  has an address.
 - No TLS cert: the bot logs a loud warning that it is serving plain HTTP and browsers will block the microphone,
   with the `make-cert.sh` command, instead of switching to HTTP silently.
 - A fresh install starts: `requirements.txt` now pulls pipecat's WebRTC extra (`pipecat-ai[webrtc]`); without it the
