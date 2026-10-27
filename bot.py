@@ -25,9 +25,12 @@ from loguru import logger
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
 
 # Load .env (secrets live only on the host, gitignored) before any env reads.
+# paths (core/, on sys.path just above) knows where it is: LVI_ENV_FILE, else
+# LVI_STATE_DIR/.env, else the repo's.
+import paths as _paths
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+load_dotenv(_paths.env_file())
 
 from intelligence.stub import StubIntelligence
 from echo_gate import EchoGate
@@ -780,7 +783,7 @@ if __name__ == "__main__":
     import uvicorn
     from serve_opts import wrap_uvicorn_run
 
-    wrap_uvicorn_run(uvicorn, os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"))
+    wrap_uvicorn_run(uvicorn, str(_paths.certs_dir()))
 
     # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
     # step"): same model/device/precision run_bot uses. Non-fatal — a failure

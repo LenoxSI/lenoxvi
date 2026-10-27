@@ -8,7 +8,14 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Changed
+- With `LVI_STATE_DIR` set, the secrets file (`.env`, written by System · Keys and loaded at boot) and the TLS certs
+  (`certs/`, written by `scripts/make-cert.sh`) live there too, so the code folder can be read-only. `LVI_ENV_FILE`
+  still names the secrets file directly. Without `LVI_STATE_DIR` nothing moves.
+
 ### Fixed
+- No TLS cert: the bot logs a loud warning that it is serving plain HTTP and browsers will block the microphone,
+  with the `make-cert.sh` command, instead of switching to HTTP silently.
 - A fresh install starts: `requirements.txt` now pulls pipecat's WebRTC extra (`pipecat-ai[webrtc]`); without it the
   bot crashed at import (`No module named 'aiortc'`). New `requirements-gpu.txt` lists the CUDA libraries Whisper
   needs on an NVIDIA GPU (pip never installed them); the Quick start creates a venv and mentions both.

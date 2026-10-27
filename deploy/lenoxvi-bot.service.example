@@ -22,6 +22,14 @@ WorkingDirectory=%h/projects/lenoxvi
 # read from the environment — the service loads them here. Never commit
 # your .env; see .env.example.
 EnvironmentFile=%h/projects/lenoxvi/.env
+# Optional: keep runtime state out of the code folder (a read-only install).
+# The bot then reads .env and certs/ from LVI_STATE_DIR (and clips, models,
+# firmware, sessions); point LVI_CONFIG at the config there too, run
+# scripts/make-cert.sh with the same LVI_STATE_DIR, and make EnvironmentFile
+# name the same .env:
+#   Environment=LVI_STATE_DIR=/var/lib/lenoxvi
+#   Environment=LVI_CONFIG=/var/lib/lenoxvi/config.yaml
+#   EnvironmentFile=/var/lib/lenoxvi/.env
 # CTranslate2 (whisper) needs libcublas/cudnn/nvrtc from the pip nvidia
 # wheels in requirements-gpu.txt — the NVIDIA driver alone does not provide
 # them (GPU hosts only; drop this line on a CPU host). The paths

@@ -7,9 +7,11 @@
 #   bash scripts/make-cert.sh <bot-host-LAN-IP>
 # The IP goes into the cert's subjectAltName — it must be the IP browsers
 # will actually load the client from, so it can't be baked in here.
+# Writes to $LVI_STATE_DIR/certs when LVI_STATE_DIR is set (where the bot
+# looks), else to certs/ in the repo.
 set -e
 IP="${1:?usage: make-cert.sh <bot-host-LAN-IP>}"
-cd "$(dirname "$0")/.."
+cd "${LVI_STATE_DIR:-$(dirname "$0")/..}"
 mkdir -p certs
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout certs/key.pem -out certs/cert.pem -days 825 \

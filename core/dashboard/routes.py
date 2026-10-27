@@ -1439,9 +1439,8 @@ async def put_tts(payload: TTSPayload):
 
 
 def _env_path():
-    from pathlib import Path as _Path
-    return _Path(os.getenv("LVI_ENV_FILE",
-                           _Path(__file__).resolve().parent.parent.parent / ".env"))
+    import paths as _paths
+    return _paths.env_file()
 
 
 def _file_env() -> dict:
@@ -1509,10 +1508,7 @@ async def _write_env_key(var: str, value: str) -> bool:
     TTSKeyPayload's character-class pattern is the upstream defense
     against newline smuggling — this is the belt to that suspenders.
     """
-    import os as _os
-    from pathlib import Path as _Path
-    env_path = _Path(_os.getenv("LVI_ENV_FILE",
-                                _Path(__file__).resolve().parent.parent.parent / ".env"))
+    env_path = _env_path()
     lines = env_path.read_text().splitlines() if env_path.is_file() else []
     out, replaced, changed = [], False, False
     for ln in lines:

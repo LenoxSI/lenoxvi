@@ -6,7 +6,8 @@ written relative to the cwd while the firmware server read from the repo,
 so they only lined up because systemd starts the bot in the repo. Every
 call reads the environment at call time (tests point LVI_STATE_DIR at a
 scratch folder). The older per-file overrides still win: LVI_MODELS_DIR,
-LVI_SESSIONS (and LVI_CAPTURES_DIR in room_recorder).
+LVI_SESSIONS, LVI_ENV_FILE (and LVI_CAPTURES_DIR in room_recorder).
+With LVI_STATE_DIR unset every path is exactly where it always was (the repo).
 """
 import os
 from pathlib import Path
@@ -39,6 +40,19 @@ def models_dir() -> Path:
 def wake_root() -> Path:
     """Where legacy wake models sit loose (the repo root)."""
     return state_root()
+
+
+def env_file() -> Path:
+    """The secrets file the Keys card writes and the bot loads (LVI_ENV_FILE
+    wins). An install that keeps the code read-only puts it in the state dir;
+    the service's EnvironmentFile must name the same file."""
+    env = os.getenv("LVI_ENV_FILE")
+    return Path(env) if env else state_root() / ".env"
+
+
+def certs_dir() -> Path:
+    """TLS cert + key (scripts/make-cert.sh writes them here)."""
+    return state_root() / "certs"
 
 
 def sessions_file() -> Path:

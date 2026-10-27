@@ -15,6 +15,8 @@
 """
 import os
 
+from loguru import logger
+
 SHUTDOWN_GRACE_S = 2
 
 
@@ -24,6 +26,13 @@ def run_kwargs(kw: dict, cert_dir: str) -> dict:
     if os.path.exists(os.path.join(cert_dir, "cert.pem")):
         out["ssl_certfile"] = os.path.join(cert_dir, "cert.pem")
         out["ssl_keyfile"] = os.path.join(cert_dir, "key.pem")
+    else:
+        # Plain HTTP works for the API, but browsers refuse the mic on an
+        # http:// LAN origin: say so loudly instead of failing quietly.
+        state = os.getenv("LVI_STATE_DIR")
+        cmd = f"{'LVI_STATE_DIR=' + state + ' ' if state else ''}bash scripts/make-cert.sh <this-host-LAN-IP>"
+        logger.warning(f"no TLS cert at {cert_dir}/cert.pem — serving plain HTTP, so browsers will block the "
+                       f"microphone. Create one with: {cmd}")
     return out
 
 
