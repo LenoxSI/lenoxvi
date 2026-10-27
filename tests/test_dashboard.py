@@ -9708,6 +9708,27 @@ def main():
           == ["nvidia-cublas-cu12", "nvidia-cuda-nvrtc-cu12", "nvidia-cudnn-cu12"]
           and all(d in (REPO_CORE.parent / "deploy" / "lenoxvi-bot.service.example").read_text()
                   for d in ("nvidia/cublas/lib", "nvidia/cudnn/lib", "nvidia/cuda_nvrtc/lib")), str(_gpu_in))
+    # ── install contract: what scripts/install.sh and the lenoxvi command
+    # rely on. A rename here breaks a test, not a user's install. ──
+    _icfg = _yaml_la.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
+    _ic_keys = [("tts", "provider"), ("stt", "model"), ("stt", "device"), ("stt", "compute_type"),
+                ("intelligence", "kind"), ("wake", "enabled")]
+    _ic_missing = [".".join(k) for k in _ic_keys if k[1] not in (_icfg.get(k[0]) or {})]
+    check("install contract: config.example.yaml has every key the installer writes (update scripts/installer too)",
+          not _ic_missing and "room_zones" in _icfg and "clip_server" in _icfg, str(_ic_missing))
+    _ic_paths = (REPO_CORE / "paths.py").read_text()
+    check("install contract: paths.py keeps state_root/env_file/certs_dir and LVI_STATE_DIR (the unit sets it)",
+          all(f"def {n}(" in _ic_paths for n in ("state_root", "env_file", "certs_dir")) and "LVI_STATE_DIR" in _ic_paths)
+    _ic_cert = (REPO_CORE.parent / "scripts" / "make-cert.sh").read_text()
+    _ic_kok = (REPO_CORE.parent / "scripts" / "fetch_kokoro_models.sh").read_text()
+    check("install contract: make-cert.sh honours LVI_STATE_DIR; Kokoro models land under the service user's HOME",
+          "LVI_STATE_DIR" in _ic_cert and "$HOME/.cache" in _ic_kok)
+    _ic_unit = (REPO_CORE.parent / "deploy" / "lenoxvi.service.in").read_text()
+    check("install contract: the unit template runs bot.py with --host/--port/--esp32 and the state dir",
+          "bot.py --host @HOST_IP@ --port 7860 --esp32" in _ic_unit and "LVI_STATE_DIR=/var/lib/lenoxvi" in _ic_unit
+          and "LVI_CONFIG=/var/lib/lenoxvi/config.yaml" in _ic_unit
+          and (REPO_CORE.parent / "requirements-gpu.txt").is_file()
+          and "LVI_DASHBOARD_TOKEN" in (REPO_CORE / "dashboard" / "guard.py").read_text())
     import re as _reF4
     _ex_src_F4 = (REPO_CORE.parent / "config.example.yaml").read_text()
     _ex_ph_F4 = [ln for ln in _ex_src_F4.splitlines()
