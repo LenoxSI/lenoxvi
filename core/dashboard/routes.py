@@ -149,6 +149,10 @@ def _intelligence_label() -> str:
     intelligence_cfg = config_store.read_section("intelligence") or {}
     default = intelligence.DEFAULT_KIND
     kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or default) or default)
+    # No brain picked yet: the bot answers from the echo stub, so say so
+    # (a fresh install runs this way until a lane is set up).
+    if kind.strip().lower() == "stub":
+        return "echo"
     # An unknown kind shows the default lane's label.
     lane = _lane(kind) or intelligence.LANES[default]
     agent = lane.agent_for(intelligence_cfg)

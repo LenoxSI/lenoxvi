@@ -1,8 +1,9 @@
-"""Static intelligence stub for LenoxVI (bench/dev echo intelligence).
+"""Echo intelligence for LenoxVI: no brain picked yet.
 
-Deterministic echo intelligence for bench and dev runs without the Hermes API
-(production uses IntelligenceAgent via config.yaml intelligence.kind: hermes; the stub
-is the code-default fallback when kind is unset).
+Runs when config.yaml says `intelligence.kind: stub` (a fresh install, or a
+bench run without an intelligence server). It repeats what it heard and
+points at the dashboard. Production uses IntelligenceAgent via a lane
+(hermes / openclaw / nanobot); an unset kind means hermes, not this.
 
 Frame timing (pipecat 1.11, segmented STT + VADProcessor):
   - VADUserStartedSpeakingFrame -> start buffering
@@ -43,16 +44,15 @@ class StubIntelligence(FrameProcessor):
 
     def _reply(self, text: str) -> str:
         t = text.lower()
-        if any(w in t for w in ("hello", "hi", "hey")):
-            return ("Hey! Stub intelligence here: audio round trip works — local GPU "
-                    "STT heard you and ElevenLabs is speaking this reply.")
+        # What a fresh install says before a brain is set up: true on any
+        # hardware or voice, and it points at the dashboard, not the YAML.
         if "your name" in t or "who are you" in t:
-            return ("I'm the LenoxVI stub intelligence — the bench stand-in while the "
-                    "Hermes intelligence is unset in config.")
+            return ("I'm LenoxVI, with no brain picked yet. Pick one on the "
+                    "dashboard's System tab.")
         if any(w in t for w in ("bye", "goodbye", "good night")):
-            return "Later! Set intelligence.kind: hermes in config.yaml for the real intelligence."
-        return (f"You said: {text.strip()}. I'm the stub intelligence — set "
-                "intelligence.kind: hermes for the real one.")
+            return "Bye!"
+        return (f"I heard: {text.strip()}. Pick a brain on the dashboard's System tab "
+                "to get real answers.")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

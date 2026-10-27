@@ -902,6 +902,10 @@ function Stat({ label, children }) {
 // are lowercase, even brand names — "sonos"); hover text is a sentence.
 // A setup gap (no key, no URL, an unmapped room) is a warning chip that links
 // to the card that fixes it; healthy chips are not links.
+// intelligence.kind for "no brain picked yet": the bot answers from its echo
+// stub. Not a lane (no URL, key or agents); a fresh install starts here.
+const ECHO_KIND = 'stub'
+
 const STAT_TONE = {
   success: 'bg-[var(--success-soft)] text-[var(--success-soft-foreground)]',
   warning: 'bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]',
@@ -923,6 +927,10 @@ function StatChip({ stat, tone = 'neutral', text, title, muted, href, className,
 // Intelligence: the brand the bot runs, unless the configured kind has no
 // URL or no key saved (the next restart can't reach it).
 function intelligenceChip(status, intel) {
+  // No brain picked yet (a fresh install): the bot echoes. Not a fault, so a
+  // plain chip (only setup warnings are links); the hover says what to do.
+  if ((intel?.kind || '') === ECHO_KIND || (!intel && status?.intelligence === 'echo'))
+    return { tone: 'neutral', text: 'echo', title: 'No brain picked yet: the bot repeats what it hears. Pick one on the Intelligence card.' }
   if (intel) {
     const label = laneLabel(intel.kind)
     if (!intel.url)
@@ -1411,7 +1419,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   useEffect(() => {
     discoverAgents.current = async () => {
       const seq = ++discSeq.current
-      if (!agentKind) return
+      if (!agentKind || !laneOf(agentKind)) return  // echo: no agents
       try {
         const r = await api('/api/dashboard/intelligence/agents', { method: 'POST', json: { kind: agentKind } })
         if (seq === discSeq.current) setFound(r)
@@ -3272,6 +3280,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   const lastDiscoverUrl = useRef({})
   const discSeq = useRef({})  // kind -> newest request; only its reply counts
   const discover = async (kind, url) => {
+    if (!laneOf(kind)) return  // echo: nothing to list
     lastDiscoverUrl.current[kind] = url || ''
     const seq = (discSeq.current[kind] || 0) + 1
     discSeq.current[kind] = seq
@@ -3367,7 +3376,13 @@ function System({ intelligence, status, setMsg, reloadAll }) {
           <select aria-label="Intelligence provider" id="int-kind" value={intKind} onChange={e => switchKind(e.target.value)}
             className={`${INPUT_CLS} w-[160px]`}>
             {LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}
+            {savedKind === ECHO_KIND && <option value={ECHO_KIND}>None yet (echo)</option>}
           </select>
+          {intKind === ECHO_KIND ? (
+            <span className="text-[13px] text-[var(--muted)]">
+              No brain picked yet: the bot repeats what it hears. Pick one to get real answers.
+            </span>
+          ) : <>
           <select aria-label="Intelligence agent" id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}
             title={laneOf(intKind)?.agent_help}
             className={`${INPUT_CLS} w-[220px] font-mono`}>
@@ -3397,14 +3412,15 @@ function System({ intelligence, status, setMsg, reloadAll }) {
               if (u !== (lastDiscoverUrl.current[intKind] || '')) discover(intKind, u)
             }}
             className={`${INPUT_CLS} flex-1 min-w-[280px] font-mono`} />
+          </>}
         </Field>
         {agentNote ? <div className="text-[12px] text-[var(--muted)] -mt-2">{agentNote}</div> : null}
-        {intelligence && !(agentEntry ? agentEntry.key_set : intelligence.keys_set?.[intKind]) && (
+        {intelligence && intKind !== ECHO_KIND && !(agentEntry ? agentEntry.key_set : intelligence.keys_set?.[intKind]) && (
           <MissingKey label={!laneOf(intKind)?.per_agent_keys ? laneLabel(intKind)
             : `${laneLabel(intKind)}${agentSel && agentSel !== laneOf(intKind).default_agent ? ` · ${agentSel}` : ''}`} />
         )}
         {/* Footer: the test reads the saved config; edits save from the bar at the page bottom */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        {intKind !== ECHO_KIND && <div className="flex items-center justify-between gap-4 flex-wrap">
             <button id="btn-int-test" className={BTN_DEFAULT}
               onClick={async ev => {
                 const btn = ev.currentTarget
@@ -3422,7 +3438,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
                   btn.disabled = false; btn.textContent = 'Test saved config'
                 }
               }} title="Tests the SAVED config on disk (config.yaml) — Save first if you edited kind, URL, or agent above.">Test saved config</button>
-        </div>
+        </div>}
       </div>
     </Section>
 
