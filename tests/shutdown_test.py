@@ -88,6 +88,15 @@ async def main():
           kw.get("timeout_graceful_shutdown") == serve_opts.SHUTDOWN_GRACE_S and "ssl_certfile" not in kw, str(kw))
     kw2 = serve_opts.run_kwargs({"timeout_graceful_shutdown": 9}, cert_dir="/nonexistent")
     check("serve options: an explicit deadline from the caller is kept", kw2["timeout_graceful_shutdown"] == 9, str(kw2))
+    from loguru import logger as _lg
+    _warns = []
+    _sink = _lg.add(lambda m: _warns.append(str(m)), level="WARNING")
+    try:
+        serve_opts.run_kwargs({}, cert_dir="/nonexistent")
+    finally:
+        _lg.remove(_sink)
+    check("serve options: no cert = a loud warning that browsers will block the mic, naming make-cert.sh",
+          any("plain HTTP" in w and "microphone" in w and "make-cert.sh" in w for w in _warns), str(_warns)[:300])
 
     done, dt, closed = await scenario({}, budget=4.0)
     check("control: WITHOUT a deadline the stop hangs on the pipeline task and the shutdown hook never runs",

@@ -1926,6 +1926,55 @@ def main():
           and paths.sessions_file() == SCRATCH / "data" / "sessions.json",
           f"clips={paths.clips_dir()} firmware={paths.firmware_dir()} "
           f"models={paths.models_dir()} sessions={paths.sessions_file()}")
+    # ── state dir: secrets file + TLS certs (a read-only code dir needs both
+    # outside the repo). LVI_ENV_FILE is parked so the writer under test goes
+    # to the scratch state dir — never the repo's (or the live) .env. ──
+    _envf_SD = os.environ.pop("LVI_ENV_FILE", None)
+    _repo_env_SD = paths.REPO / ".env"
+    _repo_env_mt_SD = _repo_env_SD.stat().st_mtime_ns if _repo_env_SD.exists() else None
+    _repo_cert_SD = paths.REPO / "certs" / "cert.pem"
+    _repo_cert_mt_SD = _repo_cert_SD.stat().st_mtime_ns if _repo_cert_SD.exists() else None
+    try:
+        check("paths: LVI_STATE_DIR anchors the secrets file and the TLS certs",
+              paths.env_file() == SCRATCH / ".env" and paths.certs_dir() == SCRATCH / "certs",
+              f"env={paths.env_file()} certs={paths.certs_dir()}")
+        os.environ["LVI_ENV_FILE"] = str(SCRATCH / "pinned.env")
+        _pinned_SD = paths.env_file()
+        os.environ.pop("LVI_ENV_FILE", None)
+        os.environ.pop("LVI_STATE_DIR", None)
+        _repo_default_SD = (paths.env_file(), paths.certs_dir())
+        os.environ["LVI_STATE_DIR"] = str(SCRATCH)
+        check("paths: LVI_ENV_FILE still wins; with no LVI_STATE_DIR both stay in the repo (existing installs unchanged)",
+              _pinned_SD == SCRATCH / "pinned.env"
+              and _repo_default_SD == (paths.REPO / ".env", paths.REPO / "certs"), f"{_pinned_SD} {_repo_default_SD}")
+        from dashboard import routes as _rSD
+        (SCRATCH / ".env").unlink(missing_ok=True)
+        import asyncio as _aSD
+        _aSD.run(_rSD._write_env_key("LVI_SUITE_STATE_KEY", "suite-not-a-key-123"))
+        _wrote_SD = (SCRATCH / ".env").read_text() if (SCRATCH / ".env").exists() else ""
+        _mode_SD = oct((SCRATCH / ".env").stat().st_mode & 0o777) if (SCRATCH / ".env").exists() else None
+        check("paths: a Keys save lands in the state dir's .env (0600), not the repo's",
+              "LVI_SUITE_STATE_KEY=suite-not-a-key-123" in _wrote_SD and _mode_SD == "0o600"
+              and _rSD._env_path() == SCRATCH / ".env"
+              and (_repo_env_SD.stat().st_mtime_ns if _repo_env_SD.exists() else None) == _repo_env_mt_SD,
+              f"mode={_mode_SD} wrote={'yes' if _wrote_SD else 'no'}")
+        import subprocess as _spSD
+        _mc_SD = SCRATCH / "mc"
+        _mc_SD.mkdir(exist_ok=True)
+        _r_SD = _spSD.run(["bash", str(paths.REPO / "scripts" / "make-cert.sh"), "192.0.2.10"],
+                          env={**os.environ, "LVI_STATE_DIR": str(_mc_SD)}, capture_output=True, text=True, timeout=60,
+                          check=False)
+        check("paths: make-cert.sh writes into $LVI_STATE_DIR/certs (key 0600) and leaves the repo's certs alone",
+              _r_SD.returncode == 0 and "CERT-OK" in _r_SD.stdout
+              and (_mc_SD / "certs" / "cert.pem").is_file()
+              and oct((_mc_SD / "certs" / "key.pem").stat().st_mode & 0o777) == "0o600"
+              and (_repo_cert_SD.stat().st_mtime_ns if _repo_cert_SD.exists() else None) == _repo_cert_mt_SD,
+              (_r_SD.stdout + _r_SD.stderr)[-200:])
+    finally:
+        (SCRATCH / ".env").unlink(missing_ok=True)
+        if _envf_SD is not None:
+            os.environ["LVI_ENV_FILE"] = _envf_SD
+        os.environ["LVI_STATE_DIR"] = str(SCRATCH)
     try:
         # (a) flex-declared upload → firmware/flex/
         _r = client.post("/api/dashboard/firmware/upload",
@@ -5350,6 +5399,9 @@ def main():
     check("fast restart: uvicorn.run is wrapped (TLS + graceful-shutdown deadline) before the runner starts",
           "wrap_uvicorn_run(uvicorn" in _main_src and _main_src.find("wrap_uvicorn_run(uvicorn") < _main_src.rfind("main()")
           and "_tls_run" not in _main_src, "wrapper missing / after main() / old TLS-only wrapper still there")
+    check("paths: bot.py loads the secrets file and the certs from paths (state dir aware), not repo-relative",
+          "load_dotenv(_paths.env_file())" in _main_src and "wrap_uvicorn_run(uvicorn, str(_paths.certs_dir()))" in _main_src
+          and "'.env')" not in _main_src and "'certs')" not in _main_src)
     _pw_call = next((n for n in _astR.walk(_botR) if isinstance(n, _astR.Call)
                      and getattr(n.func, "id", "") == "PipelineWorker"), None)
     _pw_rtvi = next((k.value for k in (_pw_call.keywords if _pw_call else [])
