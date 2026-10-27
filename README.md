@@ -15,9 +15,45 @@ The wake word always runs on your hardware. Speech and voice can stay local or g
 
 ![Rooms view of the dashboard, demo data](docs/readme/rooms.png)
 
-## Quick start
+## Install
 
-Python 3.12+. From the repo root:
+Ubuntu 22.04 / 24.04 / 26.04, Debian 12 / 13 or Raspberry Pi OS (64-bit), on x86_64 or arm64. No Docker.
+
+```bash
+sudo apt install git          # Debian and Raspberry Pi OS images may not have it
+git clone https://github.com/LenoxSI/lenoxvi.git
+cd lenoxvi
+sudo bash scripts/install.sh
+```
+
+The installer checks the machine, installs only the system packages that are missing (it asks first), and asks
+three questions: this machine's LAN address, whether speech-to-text runs on the GPU or the CPU, and whether to
+protect the dashboard with a token. Then it installs the newest release, downloads the speech models, starts the
+`lenoxvi` service and prints the dashboard address. A few minutes on a fresh box.
+
+It needs no keys: the voice is local (Kokoro) and the brain answers with an echo until you pick one on the
+dashboard. Keys, voices, rooms and speakers are all set there.
+
+- Code goes to `/opt/lenoxvi` (read-only to the bot). Settings, keys, certs and models go to `/var/lib/lenoxvi`.
+- It never installs GPU drivers, never reboots, and never overwrites an existing config or keys file. Running it
+  again is safe: it only fills in what's missing.
+- `--yes --host <ip>` answers every question with its default, `--dry-run` prints each step without doing it,
+  `--help` lists the rest.
+
+### The `lenoxvi` command
+
+| Command | What it does |
+|---|---|
+| `lenoxvi status` | Service state, version and dashboard address (add `sudo` for the address) |
+| `sudo lenoxvi logs [-f]` | The last 100 log lines; `-f` keeps following |
+| `sudo lenoxvi restart` | Restarts the bot and waits for the dashboard |
+| `sudo lenoxvi reconfigure` | Changes the LAN address, the speech-to-text profile or the dashboard token |
+| `sudo lenoxvi upgrade [--to vX.Y.Z]` | Moves to the newest release (or the one given); goes back on its own if it doesn't come up |
+| `sudo lenoxvi uninstall [--purge]` | Removes LenoxVI and keeps your data; `--purge` also deletes settings, keys and models |
+
+### Run from a clone (manual)
+
+For development. Python 3.12+. From the repo root:
 
 1. `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt` (on an NVIDIA GPU host add `-r requirements-gpu.txt`; Debian and Ubuntu need `sudo apt install python3-venv` first)
 2. `cp config.example.yaml config.yaml` (the voice, intelligence and speakers are set later on the dashboard)

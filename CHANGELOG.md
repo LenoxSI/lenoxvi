@@ -18,6 +18,8 @@ The two version streams are independent.
   file; re-running it is safe. `--yes --host <ip>` answers without questions, `--dry-run` prints every step.
 - `lenoxvi` command (installed with it): `status`, `logs`, `restart`, `reconfigure`, `upgrade` (to the newest
   release, back to the previous one if it doesn't come up) and `uninstall` (`--purge` also deletes the data).
+- README: an Install section (the installer) with a table of the `lenoxvi` commands; the old steps stay as
+  "Run from a clone (manual)".
 
 ### Changed
 - With `LVI_STATE_DIR` set, the secrets file (`.env`, written by System · Keys and loaded at boot) and the TLS certs
