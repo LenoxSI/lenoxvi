@@ -9609,6 +9609,21 @@ def main():
     import yaml as _yaml_la
     _ex_la = _yaml_la.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
     _req_la = (REPO_CORE.parent / "requirements.txt").read_text().splitlines()
+    _gpu_in = REPO_CORE.parent / "requirements-gpu.txt"
+    _gpu_in = _gpu_in.read_text().splitlines() if _gpu_in.is_file() else []
+    _readme_in = (REPO_CORE.parent / "README.md").read_text()
+    check("install: requirements.txt pulls pipecat's WebRTC extra (bot.py's SmallWebRTC transport needs aiortc)",
+          any(l.startswith("pipecat-ai[webrtc]==") for l in _req_la)
+          and not any(l.startswith("pipecat-ai==") for l in _req_la)
+          and "from pipecat.transports.smallwebrtc.transport import" in (REPO_CORE.parent / "bot.py").read_text(),
+          str([l for l in _req_la if l.startswith("pipecat-ai")]))
+    check("install: requirements-gpu.txt pins the three CUDA wheels the systemd unit's LD_LIBRARY_PATH points at",
+          sorted(l.split("==")[0] for l in _gpu_in if "==" in l and not l.startswith("#"))
+          == ["nvidia-cublas-cu12", "nvidia-cuda-nvrtc-cu12", "nvidia-cudnn-cu12"]
+          and all(d in (REPO_CORE.parent / "deploy" / "lenoxvi-bot.service.example").read_text()
+                  for d in ("nvidia/cublas/lib", "nvidia/cudnn/lib", "nvidia/cuda_nvrtc/lib")), str(_gpu_in))
+    check("install: the Quick start makes a venv and names requirements-gpu.txt",
+          "python3 -m venv" in _readme_in and "requirements-gpu.txt" in _readme_in)
     check("tts card: the example config ships the Kokoro fallback; requirements.txt installs kokoro-onnx",
           (_ex_la.get("tts") or {}).get("fallback") == "kokoro" and "kokoro-onnx==0.4.7" in _req_la
           and "-r requirements.txt" in (REPO_CORE.parent / "requirements-kokoro.txt").read_text().splitlines(),
