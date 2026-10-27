@@ -9708,6 +9708,35 @@ def main():
           == ["nvidia-cublas-cu12", "nvidia-cuda-nvrtc-cu12", "nvidia-cudnn-cu12"]
           and all(d in (REPO_CORE.parent / "deploy" / "lenoxvi-bot.service.example").read_text()
                   for d in ("nvidia/cublas/lib", "nvidia/cudnn/lib", "nvidia/cuda_nvrtc/lib")), str(_gpu_in))
+    import re as _reF4
+    _ex_src_F4 = (REPO_CORE.parent / "config.example.yaml").read_text()
+    _ex_ph_F4 = [ln for ln in _ex_src_F4.splitlines()
+                 if _reF4.search(r"<[A-Za-z_-]+>", ln.split("#", 1)[0])]
+    _ex_F4 = _yaml_la.safe_load(_ex_src_F4)
+    check("install: config.example.yaml has no live <PLACEHOLDER> values (the dashboard sets them); still parses",
+          _ex_ph_F4 == [] and _ex_F4.get("room_zones") == {} and "host_ip" not in (_ex_F4.get("clip_server") or {})
+          and "fill every" not in _readme_in, str(_ex_ph_F4[:4]))
+    import logging as _lgF4
+    sys.path.insert(0, str(REPO_CORE))
+    import stt_local as _slF4  # noqa: F401 — importing installs the filter
+    _seen_F4 = []
+
+    class _CapF4(_lgF4.Handler):
+        def emit(self, record):
+            _seen_F4.append(record.getMessage())
+    _hl_F4 = _lgF4.getLogger("huggingface_hub.utils._http")
+    _h_F4 = _CapF4()
+    _hl_F4.addHandler(_h_F4)
+    try:
+        _hl_F4.warning("Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits.")
+        _hl_F4.warning("This repository is deprecated, use another one.")
+    finally:
+        _hl_F4.removeHandler(_h_F4)
+    check("first run: the Hub's 'set a HF_TOKEN' notice is dropped; other Hub warnings still log",
+          _seen_F4 == ["This repository is deprecated, use another one."], str(_seen_F4))
+    check("localai ui: the 'No LocalAI key' note shows only once LocalAI has an address (a fresh box isn't nagged)",
+          "{saved?.url && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _appsrc
+          and "{saved && !saved.key_set && <MissingKey label=\"LocalAI\" />}" not in _appsrc)
     check("install: the Quick start makes a venv and names requirements-gpu.txt",
           "python3 -m venv" in _readme_in and "requirements-gpu.txt" in _readme_in)
     check("tts card: the example config ships the Kokoro fallback; requirements.txt installs kokoro-onnx",
@@ -9798,7 +9827,7 @@ def main():
           and "api('/api/dashboard/localai', { method: 'PUT', json: { url: url.trim() } })" in _laCard
           and "/api/dashboard/localai/test" in _laCard and "models/apply" not in _appsrc, _laCard[:200])
     check("localai ui: no key saved -> the card links to System · Keys; Keys saves the LocalAI key on its own route",
-          "{saved && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _laCard
+          "{saved?.url && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _laCard
           and "if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]" in _appsrc)
     check("localai ui: model lists come from the server's Test (keys never reach the browser), refreshed after saves",
           "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
