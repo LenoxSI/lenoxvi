@@ -2551,6 +2551,19 @@ def main():
           brain_after.get("max_tokens") == 300, f"intelligence keys={sorted(brain_after)}")
     import yaml as _yaml_fl  # the fixture's own fillers: no live-config count
     _fillers_in = (_yaml_fl.safe_load(cfg_src.read_text()).get("intelligence") or {}).get("fillers")
+    sys.path.insert(0, str(REPO_CORE))
+    from intelligence import agent as _ag_fl
+    _ex_fl = (_yaml_fl.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
+              .get("intelligence") or {}).get("fillers") or []
+    _ex_tiers_fl = [(float(x["after"]), list(x["lines"])) for x in _ex_fl]
+    _all_fl = [ln for _, lines in _ag_fl._DEFAULT_TIERS for ln in lines]
+    # The two 2-word acks predate the 3-word rule (the echo gate covers them).
+    _short_fl = [ln for ln in _all_fl if len(ln.split()) < 3 and ln not in ("On it.", "One moment.")]
+    check("fillers: the shipped lines are the example config's, 3+ words (the two old 2-word acks excepted), "
+          "and the retired ones are gone",
+          _ex_tiers_fl == [(a, list(lines)) for a, lines in _ag_fl._DEFAULT_TIERS] and not _short_fl
+          and not any(w in " ".join(_all_fl) for w in ("deep one", "big one", "slow one")),
+          f"short={_short_fl} example={_ex_tiers_fl}")
     check("tuning write preserves intelligence.fillers (merge, not replace)",
           isinstance(brain_after.get("fillers"), list) and brain_after["fillers"] == _fillers_in,
           f"fillers={str(brain_after.get('fillers'))[:80]}")
