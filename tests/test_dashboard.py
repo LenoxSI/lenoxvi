@@ -2191,6 +2191,77 @@ def main():
               and "Waveshare ESP32-S3-AUDIO track" in _xa.text,
               f"{_xw.status_code} {_xw.text[:140]} | {_xa.status_code} {_xa.text[:140]}")
 
+        # ── signed firmware (core/firmware_signing.py, note 071): the bot holds
+        # an RSA-3072 key and signs every image it serves. ──
+        import firmware_signing as _fsg
+        from loguru import logger as _lgSG
+        _logSG: list[str] = []
+        _hidSG = _lgSG.add(lambda m: _logSG.append(str(m)), level="DEBUG")
+        _psSG = os.environ.get("LVI_STATE_DIR")
+        os.environ["LVI_STATE_DIR"] = str(SCRATCH / "sgstate")
+        try:
+            _kNew = _fsg.ensure_key()
+            check("signing: a fresh state dir gets its own key at <state>/secrets/firmware-signing-key.pem, "
+                  "and creating it logs the fingerprint, not the key",
+                  _kNew == SCRATCH / "sgstate" / "secrets" / "firmware-signing-key.pem" and _kNew.is_file()
+                  and any("created a new signing key" in x for x in _logSG)
+                  and not any("PRIVATE KEY" in x for x in _logSG), str(_logSG)[-200:])
+        finally:
+            if _psSG is None:
+                os.environ.pop("LVI_STATE_DIR", None)
+            else:
+                os.environ["LVI_STATE_DIR"] = _psSG
+        _kSG = _fsg.key_path()
+        check("signing: the key is created on first use under the state dir's secrets/, owner-only (0600, dir 0700)",
+              _kSG.is_file() and _kSG.parent == paths.secrets_dir()
+              and (_kSG.stat().st_mode & 0o777) == 0o600 and (_kSG.parent.stat().st_mode & 0o777) == 0o700,
+              f"{_kSG} exists={_kSG.is_file()}")
+        _fpSG = _fsg.fingerprint()
+        _rSG = client.post("/api/dashboard/firmware/upload",
+                           files={"file": ("sg.bin", _fake_image5b("1.9.9", "array"), "application/octet-stream")},
+                           data={"track": "array"})
+        _servedSG = Path("firmware/array/array_esp32.bin")
+        check("signing: a dashboard upload is served signed by this bot's key, and the reply names the key",
+              _rSG.status_code == 200 and _fsg.file_has_signature(_servedSG)
+              and _fsg.signer_digest(_servedSG) == _fpSG and _rSG.json().get("signing_key") == _fpSG[:16]
+              and _servedSG.read_bytes().startswith(_fake_image5b("1.9.9", "array")),
+              f"{_rSG.status_code} {_rSG.text[:160]}")
+        _uSG = SCRATCH / "unsigned_esp32.bin"
+        _uSG.write_bytes(_fake_image5b("1.9.9", "array"))
+        _bSG = bytearray(_servedSG.read_bytes())
+        _bSG[-4096 + 40] ^= 0xFF  # inside the CRC span
+        check("signing: unsigned, truncated and corrupted images are not 'signed' (structure + CRC)",
+              not _fsg.file_has_signature(_uSG) and not _fsg.has_signature(_servedSG.read_bytes()[:-1])
+              and not _fsg.has_signature(bytes(_bSG)) and _fsg.has_signature(_servedSG.read_bytes()),
+              "")
+        _oSG = SCRATCH / "otherkey.pem"
+        subprocess.run([sys.executable, "-m", "espsecure", "generate-signing-key", "--version", "2", "--scheme",
+                        "rsa3072", str(_oSG)], capture_output=True, check=False)
+        _xSG = SCRATCH / "other_esp32.bin"
+        subprocess.run([sys.executable, "-m", "espsecure", "sign-data", "--version", "2", "--keyfile", str(_oSG),
+                        "--output", str(_xSG), str(_uSG)], capture_output=True, check=False)
+        _wasOther = _fsg.file_has_signature(_xSG) and _fsg.signer_digest(_xSG) != _fpSG
+        _chg1 = _fsg.sign_file(_xSG)
+        _chg2 = _fsg.sign_file(_xSG)
+        check("signing: an image signed by another key is re-signed with this bot's key; signing twice is a no-op",
+              _wasOther and _chg1 is True and _chg2 is False and _fsg.signer_digest(_xSG) == _fpSG
+              and _xSG.read_bytes().startswith(_uSG.read_bytes()), f"other={_wasOther} {_chg1} {_chg2}")
+        _lgSG.remove(_hidSG)
+        _logsSG = "\n".join(_logSG)
+        check("signing: the private key never appears in a reply or a log line",
+              "PRIVATE KEY" not in _rSG.text and "PRIVATE KEY" not in _logsSG
+              and "PRIVATE KEY" in _kSG.read_text(), "")
+        _shSG = subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts" / "sign_firmware.py"),
+                                str(_uSG)], capture_output=True, text=True, check=False)
+        check("signing: scripts/sign_firmware.py signs in place with the bot's key and prints only the fingerprint",
+              _shSG.returncode == 0 and "signed:" in _shSG.stdout and _fpSG[:16] in _shSG.stdout
+              and "PRIVATE" not in _shSG.stdout + _shSG.stderr and _fsg.signer_digest(_uSG) == _fpSG,
+              f"rc={_shSG.returncode} {_shSG.stdout[-160:]} {_shSG.stderr[-160:]}")
+        _depSG = (Path(__file__).resolve().parent.parent / "scripts" / "deploy_firmware.sh").read_text()
+        check("signing: deploy_firmware.sh signs on the host with scripts/sign_firmware.py and stops if that fails",
+              "scripts/sign_firmware.py" in _depSG and "signing failed" in _depSG and "exit 1" in _depSG.split("signing failed")[1][:200],
+              "")
+
         # ── node setup route: GET /api/dashboard/firmware/{track}/flash ──
         # The full flash set (boot files + app) the System tab's Node setup
         # page flashes over USB. Uses the waveshare track dir, restored after.
@@ -2216,6 +2287,12 @@ def main():
                            ("ota_data_initial.bin", b"O" * 200)):
                 (_fsNS / _n).write_bytes(_b)
             (_fsNS / "flash.json").write_text(json.dumps(_goodNS))
+            _rNSu = client.get("/api/dashboard/firmware/waveshare/flash")
+            check("signing: the Node setup flash set refuses an unsigned app image (409 naming it), so a USB flash "
+                  "can't leave a node that refuses every later update",
+                  _rNSu.status_code == 409 and "isn't signed" in _rNSu.text, f"{_rNSu.status_code} {_rNSu.text[:160]}")
+            import firmware_signing as _fsg
+            _fsg.sign_file(_fsNS / "waveshare_esp32.bin")
             _rNS = client.get("/api/dashboard/firmware/waveshare/flash")
             _jNS = _rNS.json() if _rNS.status_code == 200 else {}
             check("node setup route: full set -> 4 parts at the manifest offsets, app from version.json",
@@ -2304,6 +2381,29 @@ def main():
                   _cnm.get("/firmware/node/version").status_code == 404, "")
             check("firmware track OTA: path traversal out of a track dir 404s",
                   _cnm.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
+            # signing (note 071): unsigned app images never go out; boot files aren't app images
+            _flxSG = Path("firmware/flex/flex_esp32.bin")
+            _keepFlx = _flxSG.read_bytes() if _flxSG.is_file() else None
+            try:
+                _flxSG.write_bytes(_fake_image5b("1.9.9", "flex"))
+                Path("firmware/flex/bootloader.bin").write_bytes(b"B" * 1000)
+                _rUn = _cnm.get("/firmware/flex/flex_esp32.bin")
+                _rBoot = _cnm.get("/firmware/flex/bootloader.bin")
+                check("signing: the OTA server refuses an unsigned app image (409) but serves boot files",
+                      _rUn.status_code == 409 and "not signed" in _rUn.text and _rBoot.status_code == 200,
+                      f"{_rUn.status_code} ({len(_rUn.content)} bytes) boot={_rBoot.status_code}")
+                _app2 = _FAnm()
+                _fws.register_firmware_routes(_app2)
+                _rAfter = TestClient(_app2).get("/firmware/flex/flex_esp32.bin")
+                import firmware_signing as _fsg2
+                check("signing: at startup the bot signs an unsigned served image, which then serves",
+                      _rAfter.status_code == 200 and _fsg2.has_signature(_rAfter.content)
+                      and _fsg2.signer_digest(_flxSG) == _fsg2.fingerprint(),
+                      f"{_rAfter.status_code}")
+            finally:
+                Path("firmware/flex/bootloader.bin").unlink(missing_ok=True)
+                if _keepFlx is not None:
+                    _flxSG.write_bytes(_keepFlx)
         finally:
             _fws.FIRMWARE_TRACKS.clear()
             _fws.FIRMWARE_TRACKS.update(_saved_tracksnm)
@@ -7954,11 +8054,12 @@ def main():
         _res_cc = asyncio.run(_both())
         _served = Path("firmware/array/array_esp32.bin").read_bytes()
         _man_cc = json.loads(Path("firmware/array/version.json").read_text())
-        _want_ver = {_imgA: "1.9.9", _imgB: "1.9.8"}.get(_served)
+        # Served images are signed (padded + a signature sector), so match on the uploaded bytes as a prefix.
+        _want_ver = "1.9.9" if _served.startswith(_imgA) else "1.9.8" if _served.startswith(_imgB) else None
         check("firmware upload: concurrent uploads to one track each succeed and never mix their bytes",
               all(isinstance(r, dict) and r.get("ok") for r in _res_cc) and _want_ver is not None,
               f"results={[type(r).__name__ if not isinstance(r, dict) else r.get('version') for r in _res_cc]} "
-              f"served={len(_served)} bytes, matches={'A' if _served == _imgA else 'B' if _served == _imgB else 'neither'}")
+              f"served={len(_served)} bytes, matches={'A' if _served.startswith(_imgA) else 'B' if _served.startswith(_imgB) else 'neither'}")
         check("firmware upload: after concurrent uploads the manifest names the version actually served",
               _want_ver is not None and _man_cc.get("version") == _want_ver
               and _man_cc.get("filename") == "array_esp32.bin",
