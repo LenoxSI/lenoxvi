@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# lenoxvi — manage an installed LenoxVI (installed by scripts/install.sh
+# as /usr/local/bin/lenoxvi, a link to this file in /opt/lenoxvi/app).
+#
+#   lenoxvi status | logs [-f] | restart | reconfigure | upgrade [--to vX.Y.Z]
+#              | uninstall [--purge]
+set -euo pipefail
+
+LVI_SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=banner.sh
+source "$LVI_SCRIPT_DIR/banner.sh"
+# shellcheck source=lib.sh
+source "$LVI_SCRIPT_DIR/lib.sh"
+# shellcheck source=preflight.sh
+source "$LVI_SCRIPT_DIR/preflight.sh"
+# shellcheck source=deps.sh
+source "$LVI_SCRIPT_DIR/deps.sh"
+# shellcheck source=app.sh
+source "$LVI_SCRIPT_DIR/app.sh"
+# shellcheck source=state.sh
+source "$LVI_SCRIPT_DIR/state.sh"
+# shellcheck source=service.sh
+source "$LVI_SCRIPT_DIR/service.sh"
+
+LVI_UNIT_TEMPLATE=$LVI_APP/deploy/lenoxvi.service.in
+[[ -f $LVI_UNIT_TEMPLATE ]] || LVI_UNIT_TEMPLATE=$LVI_SCRIPT_DIR/../../deploy/lenoxvi.service.in
+
+usage() {
+  cat <<'EOF'
+Usage: lenoxvi <command>
+
+  status              service state, version, dashboard address
+  logs [-f]           the last 100 log lines (-f: keep following)
+  restart             restart the bot and wait for the dashboard
+  reconfigure         change the address, speech-to-text profile or token
+  upgrade [--to TAG]  move to the newest release (or TAG); rolls back on failure
+  uninstall [--purge] remove LenoxVI; --purge also deletes config, keys and models
+
+Options: --yes (defaults, no questions), --dry-run (print, change nothing)
+EOF
+}
+
+need_root() {
+  [[ $LVI_DRY_RUN == 1 || $EUID -eq 0 ]] || die "run it with sudo: sudo lenoxvi $CMD"
+}
+
+need_install() {
+  [[ -d $LVI_APP/.git ]] || die "LenoxVI isn't installed here ($LVI_APP_REAL is missing)"
+}
+
+# current_settings -> sets HOST_IP STT_PROFILE from the config
+current_settings() {
+  local got
+  got=$("$LVI_VENV/bin/python" "$LVI_SCRIPT_DIR/write_config.py" --get "$LVI_STATE/config.yaml")
+  HOST_IP=${got% *}
+  STT_PROFILE=${got#* }
+}
+
+version() { git -C "$LVI_APP" describe --tags 2>/dev/null || echo unknown; }
+
+cmd_status() {
+  need_install
+  local state
+  state=$(systemctl is-active lenoxvi 2>/dev/null || true)
+  printf 'service:   %s\n' "${state:-unknown}"
+  printf 'version:   %s\n' "$(version)"
+  if [[ -r $LVI_STATE/config.yaml ]]; then
+    current_settings
+    printf 'dashboard: https://%s:7860/dashboard\n' "$HOST_IP"
+    printf 'stt:       %s\n' "$STT_PROFILE"
+  else
+    printf 'dashboard: (sudo lenoxvi status shows the address)\n'
+  fi
+  printf 'data:      %s\n' "$LVI_STATE_REAL"
+}
+
+cmd_logs() {
+  if [[ ${1:-} == -f ]]; then run journalctl -u lenoxvi -f -n 100; else run journalctl -u lenoxvi -n 100 --no-pager; fi
+}
+
+cmd_restart() {
+  need_root; need_install; current_settings
+  run systemctl restart lenoxvi
+  wait_healthy "$HOST_IP" 300 && ok "restarted: https://$HOST_IP:7860/dashboard"
+}
+
+cmd_reconfigure() {
+  need_root; need_install; current_settings
+  ARCH=$(uname -m)
+  check_gpu
+  pick_ui
+  local old_ip=$HOST_IP old_stt=$STT_PROFILE
+  HOST_IP=$(ask_input "This machine's LAN address" "$old_ip")
+  [[ $HOST_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "\"$HOST_IP\" isn't an IPv4 address"
+  local def="CPU (Whisper base)"
+  [[ $old_stt == gpu ]] && def="GPU (Whisper large-v3-turbo)"
+  case $(ask_choice "Speech-to-text runs on" "$def" "GPU (Whisper large-v3-turbo)" "CPU (Whisper base)") in
+    GPU*) STT_PROFILE=gpu ;;
+    *) STT_PROFILE=cpu ;;
+  esac
+  local changed=no
+  if [[ $HOST_IP != "$old_ip" || $STT_PROFILE != "$old_stt" ]]; then
+    run_quiet runuser -u "$LVI_USER" -- "$LVI_VENV_REAL/bin/python" "$LVI_APP_REAL/scripts/installer/write_config.py" \
+      --update "$LVI_STATE_REAL/config.yaml" --host "$HOST_IP" --stt "$STT_PROFILE"
+    changed=yes
+  fi
+  if [[ $STT_PROFILE == gpu && $old_stt != gpu ]]; then
+    pip_sync
+    usermod_gpu
+  fi
+  if [[ $HOST_IP != "$old_ip" ]]; then
+    run mv "$LVI_STATE/certs" "$LVI_STATE/certs.old-$(date +%Y%m%d%H%M%S)"
+    run_quiet runuser -u "$LVI_USER" -- env LVI_STATE_DIR="$LVI_STATE_REAL" bash "$LVI_APP_REAL/scripts/make-cert.sh" "$HOST_IP"
+  fi
+  if ask_yes "Make a new dashboard token? (the old one stops working)" n; then
+    DASH_TOKEN=$(openssl rand -hex 32)
+    set_env_token "$DASH_TOKEN"
+    changed=yes
+  fi
+  install_unit "$HOST_IP" "$STT_PROFILE"
+  if [[ $changed == yes || $UNIT_CHANGED == yes ]]; then
+    run systemctl restart lenoxvi
+    wait_healthy "$HOST_IP" 300 || true
+    ok "reconfigured: https://$HOST_IP:7860/dashboard"
+    [[ -n ${DASH_TOKEN:-} ]] && printf '  New dashboard token (shown once): %s\n' "$DASH_TOKEN"
+  else
+    ok "nothing changed"
+  fi
+  return 0
+}
+
+usermod_gpu() {
+  local g groups=()
+  for g in video render; do getent group "$g" >/dev/null 2>&1 && groups+=("$g"); done
+  (( ${#groups[@]} )) && run usermod -aG "$(IFS=,; echo "${groups[*]}")" "$LVI_USER"
+  return 0
+}
+
+# set_env_token <token> — replace (or add) LVI_DASHBOARD_TOKEN, other lines kept.
+set_env_token() {
+  local f=$LVI_STATE/.env body=''
+  [[ -f $f ]] && body=$(grep -v '^LVI_DASHBOARD_TOKEN=' "$f" || true)
+  [[ -n $body ]] && body+=$'\n'
+  printf '%sLVI_DASHBOARD_TOKEN=%s\n' "$body" "$1" | write_file "$f" 0600 "$LVI_USER:$LVI_USER"
+}
+
+# _checkout <tag> — fetch one tag from origin (or --source) and switch to it.
+_checkout() {
+  local tag=$1 from=${LVI_SOURCE:-origin}
+  run git -C "$LVI_APP" fetch --quiet --depth 1 "$from" "refs/tags/$tag:refs/tags/$tag"
+  run git -C "$LVI_APP" -c advice.detachedHead=false checkout --quiet "$tag"
+}
+
+cmd_upgrade() {
+  need_root; need_install; current_settings
+  local to=${1:-} cur from=${LVI_SOURCE:-origin}
+  cur=$(git -C "$LVI_APP" describe --tags --exact-match 2>/dev/null || version)
+  if [[ -z $to ]]; then
+    to=$(git -C "$LVI_APP" ls-remote --tags --refs "$from" 'v*' | sed 's#.*refs/tags/##' | newest_tag)
+    [[ -n $to ]] || die "no release found at $from"
+  fi
+  if [[ $to == "$cur" ]]; then ok "already on $cur"; return 0; fi
+  if [[ $(printf '%s\n%s\n' "$cur" "$to" | sort -V | tail -1) == "$cur" && ${LVI_FORCE:-0} != 1 ]]; then
+    die "$to is older than $cur — pass --force to go back"
+  fi
+  ARCH=$(uname -m)
+  step "Upgrading $cur → $to"
+  _checkout "$to"
+  local rc=1
+  if pip_sync && install_unit "$HOST_IP" "$STT_PROFILE" && run systemctl restart lenoxvi; then
+    rc=0
+    wait_healthy "$HOST_IP" 300 || rc=$?
+  fi
+  if (( rc != 1 )); then
+    # rc 2 = still loading on a slow machine: running, not broken.
+    ok "upgraded to $to"
+    return 0
+  fi
+  warn "the upgrade to $to didn't come up — going back to $cur"
+  run git -C "$LVI_APP" -c advice.detachedHead=false checkout --quiet "$cur"
+  pip_sync
+  install_unit "$HOST_IP" "$STT_PROFILE"
+  run systemctl restart lenoxvi
+  wait_healthy "$HOST_IP" 300 || true
+  die "upgrade failed; back on $cur (see: lenoxvi logs)"
+}
+
+cmd_uninstall() {
+  need_root
+  local purge=no
+  [[ ${1:-} == --purge ]] && purge=yes
+  pick_ui
+  if [[ $purge == yes ]]; then
+    ask_yes "Remove LenoxVI AND delete its data ($LVI_STATE_REAL: config, keys, certs, models)?" n || die "nothing removed"
+  else
+    ask_yes "Remove LenoxVI? (your data in $LVI_STATE_REAL is kept)" y || die "nothing removed"
+  fi
+  if [[ -f $LVI_UNIT ]]; then
+    run systemctl disable --now --quiet lenoxvi || true
+    run rm -f "$LVI_UNIT"
+    run systemctl daemon-reload
+  fi
+  run rm -f "$LVI_CLI"
+  run rm -rf "$LVI_OPT" "$LVI_CACHE"
+  if git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$LVI_APP_REAL"; then
+    run git config --system --unset-all safe.directory "^$LVI_APP_REAL\$"
+  fi
+  if [[ $purge == yes ]]; then
+    run rm -rf "$LVI_STATE"
+    if id -u "$LVI_USER" >/dev/null 2>&1; then run userdel "$LVI_USER"; fi
+    ok "removed LenoxVI and its data"
+  else
+    ok "removed LenoxVI; kept $LVI_STATE_REAL (delete it with: sudo rm -rf $LVI_STATE_REAL)"
+  fi
+}
+
+ARGS=()
+while (( $# )); do
+  case $1 in
+    --yes|-y) LVI_YES=1 ;;
+    --dry-run) LVI_DRY_RUN=1 ;;
+    --force) LVI_FORCE=1 ;;
+    --source) LVI_SOURCE=${2:?}; shift ;;
+    --prefix) LVI_PREFIX=${2:?}; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) ARGS+=("$1") ;;
+  esac
+  shift
+done
+# Paths depend on LVI_PREFIX: re-source the path block.
+# shellcheck source=lib.sh
+source "$LVI_SCRIPT_DIR/lib.sh"
+LVI_APP_REAL=$LVI_OPT_REAL/app
+LVI_VENV_REAL=$LVI_OPT_REAL/venv
+LVI_UNIT_TEMPLATE=$LVI_APP/deploy/lenoxvi.service.in
+[[ -f $LVI_UNIT_TEMPLATE ]] || LVI_UNIT_TEMPLATE=$LVI_SCRIPT_DIR/../../deploy/lenoxvi.service.in
+
+CMD=${ARGS[0]:-}
+REST=("${ARGS[@]:1}")
+PY_OK=no
+case $CMD in
+  status) cmd_status ;;
+  logs) cmd_logs "${REST[@]}" ;;
+  restart) cmd_restart ;;
+  reconfigure) cmd_reconfigure ;;
+  upgrade)
+    to=''
+    if [[ ${REST[0]:-} == --to ]]; then to=${REST[1]:?--to needs a tag}; fi
+    cmd_upgrade "$to" ;;
+  uninstall) cmd_uninstall "${REST[@]}" ;;
+  ''|help) usage ;;
+  *) printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
+esac

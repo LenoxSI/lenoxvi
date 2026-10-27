@@ -8,6 +8,17 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- Installer: `sudo bash scripts/install.sh` from a clone takes a fresh Ubuntu 22.04/24.04, Debian 12/13 or
+  Raspberry Pi OS (64-bit) box (Ubuntu 26.04 too) to a running LenoxVI with no keys needed (local voice, echo brain). It checks
+  the machine, installs only the missing system packages (asked once), fetches pinned, checksum-checked tools,
+  asks three questions (address, speech-to-text on GPU or CPU, a dashboard token) and starts a system service.
+  Code lives in `/opt/lenoxvi` (read-only to the bot), settings, keys and models in `/var/lib/lenoxvi`.
+  It never asks for keys, never installs drivers, never reboots, and never overwrites an existing config or keys
+  file; re-running it is safe. `--yes --host <ip>` answers without questions, `--dry-run` prints every step.
+- `lenoxvi` command (installed with it): `status`, `logs`, `restart`, `reconfigure`, `upgrade` (to the newest
+  release, back to the previous one if it doesn't come up) and `uninstall` (`--purge` also deletes the data).
+
 ### Changed
 - With `LVI_STATE_DIR` set, the secrets file (`.env`, written by System · Keys and loaded at boot) and the TLS certs
   (`certs/`, written by `scripts/make-cert.sh`) live there too, so the code folder can be read-only. `LVI_ENV_FILE`

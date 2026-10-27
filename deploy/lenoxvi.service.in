@@ -1,0 +1,30 @@
+# LenoxVI system service — written by scripts/install.sh from
+# deploy/lenoxvi.service.in. Re-run the installer (or lenoxvi
+# reconfigure) instead of editing this file: it is regenerated.
+[Unit]
+Description=LenoxVI voice bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lenoxvi
+Group=lenoxvi
+WorkingDirectory=/opt/lenoxvi/app
+Environment=LVI_STATE_DIR=/var/lib/lenoxvi
+Environment=LVI_CONFIG=/var/lib/lenoxvi/config.yaml
+Environment=HOME=/var/lib/lenoxvi
+EnvironmentFile=-/var/lib/lenoxvi/.env
+@GPU_LD_LIBRARY_PATH@
+ExecStart=/opt/lenoxvi/venv/bin/python bot.py --host @HOST_IP@ --port 7860 --esp32
+Restart=on-failure
+RestartSec=5
+# A stop takes ~2 s (node sessions get a short grace); allow more before SIGKILL.
+TimeoutStopSec=20
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/lenoxvi
+
+[Install]
+WantedBy=multi-user.target
