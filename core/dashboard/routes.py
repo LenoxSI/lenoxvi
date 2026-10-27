@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from config import DEFAULT_CLIP_VOLUME, cfg, cfg_env
 import firmware_image
+import firmware_signing
 import intelligence
 from intelligence import target as intelligence_target
 import node_speaker
@@ -3071,6 +3072,13 @@ async def upload_firmware(
         finally:
             await asyncio.to_thread(f.close)
         version = await asyncio.to_thread(_check_firmware_image, tmp, size, track)
+        # Signed by this bot before anything serves it: nodes on 1.3+ accept
+        # only images signed with the key of the image they run.
+        try:
+            await asyncio.to_thread(firmware_signing.sign_file, tmp)
+        except Exception as e:  # a refused upload, never a half-served one
+            logger.warning(f"dashboard: firmware upload not signed: {e}")
+            raise HTTPException(status_code=500, detail=f"couldn't sign the image: {e}") from e
         # Swap + manifest as one step per track, so the served image and
         # the version that names it always come from the same upload.
         async with _FIRMWARE_SWAP_LOCKS[track]:
@@ -3081,7 +3089,7 @@ async def upload_firmware(
     logger.info(f"dashboard: firmware {version} served on track '{track}' "
                 f"({size} bytes) — nodes on this track pick it up on next check")
     return {"ok": True, "filename": dest.name, "size": size, "version": version,
-            "track": track}
+            "track": track, "signing_key": firmware_signing.fingerprint()[:16]}
 
 
 # The legacy POST /firmware/version route is
@@ -3124,6 +3132,11 @@ def _flash_set(track: str) -> dict:
         if p["offset"] < hi and p["offset"] + len(data) > lo:
             raise HTTPException(status_code=404,
                                 detail=f"flash set for '{track}' would write the node's settings region — refusing")
+        if p["name"] == "app" and not firmware_signing.has_signature(data):
+            # A node flashed over USB with an unsigned 1.3+ image would refuse
+            # every later update; the bot signs at upload/deploy/startup.
+            raise HTTPException(status_code=409,
+                                detail=f"the {track} app image isn't signed yet — re-deploy it or restart the bot to sign it")
         out.append({**p, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
     return {"track": track, "version": str(vm.get("version", "")), "flash": flash, "parts": out}
 

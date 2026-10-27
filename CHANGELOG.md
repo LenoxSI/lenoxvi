@@ -9,6 +9,10 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- Signed firmware updates: the bot creates its own RSA-3072 key (`secrets/firmware-signing-key.pem`) and signs
+  every node image it serves — dashboard uploads, images `deploy_firmware.sh` copies in (it signs on the host
+  with `scripts/sign_firmware.py`), and any unsigned image found at startup. Unsigned app images are never
+  served. Nodes on firmware 1.3+ accept only images signed with their bot's key. Back the key up.
 - Installer: `sudo bash scripts/install.sh` from a clone takes a fresh Ubuntu 22.04/24.04, Debian 12/13 or
   Raspberry Pi OS (64-bit) box (Ubuntu 26.04 too) to a running LenoxVI with no keys needed (local voice, echo brain). It checks
   the machine, installs only the missing system packages (asked once), fetches pinned, checksum-checked tools,

@@ -29,6 +29,7 @@ import json
 import os
 from pathlib import Path
 
+import firmware_signing
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
@@ -70,6 +71,16 @@ def _read_manifest(track: str | None = None) -> dict:
     return manifest
 
 
+def _refuse_unsigned_app(target: Path) -> None:
+    """App images (<line>_esp32.bin) go out signed or not at all: signed nodes
+    would refuse an unsigned one anyway, and nothing unsigned should reach a
+    node by accident. The flash set's boot files aren't app images."""
+    if target.name.endswith("_esp32.bin") and not firmware_signing.file_has_signature(target):
+        logger.warning(f"firmware_server: refusing to serve unsigned {target.parent.name}/{target.name} "
+                       f"— sign it (the bot signs uploads; deploy_firmware.sh runs scripts/sign_firmware.py)")
+        raise HTTPException(status_code=409, detail="firmware image is not signed")
+
+
 def register_firmware_routes(app) -> None:
     """Attach /firmware/* to the pipecat runner's FastAPI app (bot.py calls
     this before main()). Plain GETs; the node's TLS-skip handles the
@@ -103,6 +114,7 @@ def register_firmware_routes(app) -> None:
         target = (d / filename).resolve()
         if not str(target).startswith(str(d.resolve())) or not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
+        _refuse_unsigned_app(target)
         logger.info(f"firmware_server: serving {track}/{filename} ({target.stat().st_size} bytes)")
         return FileResponse(target, media_type="application/octet-stream")
 
@@ -114,10 +126,16 @@ def register_firmware_routes(app) -> None:
         target = (d / filename).resolve()
         if not str(target).startswith(str(d.resolve())) or not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
+        _refuse_unsigned_app(target)
         logger.info(f"firmware_server: serving {LEGACY_TRACK}/{filename} via legacy URL "
                     f"({target.stat().st_size} bytes)")
         return FileResponse(target, media_type="application/octet-stream")
 
     root = firmware_dir()  # what requests will serve (per-request resolution)
+    # Images copied in before signing existed (or by hand): sign them now, so
+    # serving never has to refuse something this bot could have signed.
+    signed = firmware_signing.sign_served_images(root, FIRMWARE_TRACKS)
+    if signed:
+        logger.info(f"firmware_server: signed at startup: {', '.join(signed)}")
     served = {t: (root / t / "version.json").is_file() for t in FIRMWARE_TRACKS}
     logger.info(f"firmware_server: /firmware/* routes live ({root}; manifests: {served})")

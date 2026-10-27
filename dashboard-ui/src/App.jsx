@@ -1326,6 +1326,7 @@ const OTA_LAST = {
   'too-big': 'image too big',
   'download-failed': 'download failed',
   'flash-failed': 'flash write failed',
+  'image-refused': 'refused an image not signed by this bot',
   'version-mismatch': "image version didn't match the manifest",
   updated: 'updated',
   deferred: 'update deferred',
@@ -1994,7 +1995,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
       fd.append('file', fwFile, fwFile.name)
       fd.append('track', fwTrack)
       upj = await api('/api/dashboard/firmware/upload', { method: 'POST', body: fd })
-      setMsg(`Firmware ${upj.version} served (${trackLabel(upj.track)} line).`, 'ok', 'Firmware')
+      setMsg(`Firmware ${upj.version} signed and served (${trackLabel(upj.track)} line, key ${upj.signing_key || '?'}).`, 'ok', 'Firmware')
     } catch (e) {
       setMsg('Firmware push failed: ' + e.message, 'err', 'Firmware')
       return
@@ -2027,7 +2028,7 @@ function FirmwarePanel({ status, setMsg, reloadAll }) {
 
   return (
     <Section title="Firmware"
-      note="Push a firmware .bin — nodes pick it up over OTA on their next boot.">
+      note="Push a firmware .bin — the bot signs it with its own key, and nodes pick it up over OTA on their next boot.">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium text-[var(--muted)]">Line</span>

@@ -247,6 +247,13 @@ EOF
 echo "==> copying firmware + manifest to $LVI_HOST"
 scp -q "$BIN" "$VFILE" "$FSTAGE"/bootloader.bin "$FSTAGE"/partition-table.bin \
   "$FSTAGE"/ota_data_initial.bin "$FSTAGE"/flash.json "$LVI_HOST:$LVI_REMOTE_DIR/"
+# Signed by the bot's own key ON THE HOST (the key never leaves it): nodes on
+# 1.3+ accept only images signed with the key of the image they run, and
+# firmware_server refuses to serve an unsigned app image.
+echo "==> signing on $LVI_HOST with the bot's key"
+# shellcheck disable=SC2029  # expands here on purpose (host paths are known locally)
+ssh "$LVI_HOST" "cd ~/projects/lenoxvi && ${LVI_BOT_PY:-~/venvs/lenoxvi/bin/python} scripts/sign_firmware.py ~/$LVI_REMOTE_DIR/${TRACK}_esp32.bin" \
+  || { echo "ERROR: signing failed on $LVI_HOST — the image is NOT served (firmware_server refuses unsigned images)"; exit 1; }
 # The manifest names only ${TRACK}_esp32.bin — drop any other .bin left in the
 # track dir (e.g. a pre-rename node_esp32.bin) so it holds exactly what's
 # served. Exception: the flash set's boot files are served too (flash.json's

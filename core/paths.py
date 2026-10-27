@@ -26,6 +26,11 @@ def clips_dir() -> Path:
     return state_root() / "clips"
 
 
+def secrets_dir() -> Path:
+    """Private files only the bot reads (the firmware signing key): state_root()/secrets."""
+    return state_root() / "secrets"
+
+
 def firmware_dir() -> Path:
     """Uploaded node firmware, one sub-folder per track."""
     return state_root() / "firmware"

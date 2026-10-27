@@ -55,3 +55,6 @@ pyserial==3.5
 # Cloud STT provider (Deepgram Nova-3); within pipecat's deepgram extra (>=6.1.1,<8).
 # If it's ever missing, the STT card offers local Whisper only.
 deepgram-sdk==7.13.0
+# Firmware signing: the bot signs every node image it serves with its own key
+# (core/firmware_signing.py runs `python -m espsecure`, Espressif's tool).
+esptool==5.4.0

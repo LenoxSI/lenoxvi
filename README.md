@@ -186,6 +186,10 @@ The default is **Hey Jarvis**, a stock openWakeWord model (also `hey_mycroft` an
 
 LAN-only by design. Reading the dashboard needs no login. Changes are checked against the request's Origin and Host, and against `LVI_DASHBOARD_TOKEN` when it is set.
 
+**Signed firmware updates.** The bot signs every node image it serves with its own key (RSA-3072, created on first use at `secrets/firmware-signing-key.pem`, or under `LVI_STATE_DIR`). Nodes on firmware 1.3 or later install an over-the-air update only if it's signed with the same key as the firmware they run, so someone on your network can't push their own firmware to a node. You never handle the key, but **back it up**: a new bot with a different key can't update your nodes until each one is re-flashed over USB from the Node setup card (about two minutes per node).
+
+Not covered yet: nodes don't check the bot's TLS certificate when they connect, so a device on your network that impersonates the bot could receive mic audio. Keep the bot and nodes on a network you trust.
+
 ## License
 
 No project license is set. Until one is, do not treat this repository as open source. The pre-trained wake-word models are non-commercial; see [Wake word](#wake-word).

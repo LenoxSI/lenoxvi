@@ -47,3 +47,5 @@ config.yaml.bak-*
 
 # room recorder output (local mic captures, never commit)
 captures/
+# the bot's private files (firmware signing key) — never in git
+secrets/
