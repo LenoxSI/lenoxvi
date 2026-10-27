@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Fixed
+- A fresh install starts: `requirements.txt` now pulls pipecat's WebRTC extra (`pipecat-ai[webrtc]`); without it the
+  bot crashed at import (`No module named 'aiortc'`). New `requirements-gpu.txt` lists the CUDA libraries Whisper
+  needs on an NVIDIA GPU (pip never installed them); the Quick start creates a venv and mentions both.
+
 ## [0.7.0] — 2026-10-26 — LocalAI on your network, node setup over USB
 
 ### Added

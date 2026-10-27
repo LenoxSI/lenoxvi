@@ -7,15 +7,19 @@
 # Transitive deps resolve from these pins; if a fresh install ever needs
 # more, add it here rather than committing a 174-line `pip freeze`.
 #
-# GPU extras: faster-whisper pulls CUDA wheels (nvidia-cublas/cudnn) on
-# CUDA-capable hosts. LD_LIBRARY_PATH for those wheels is set in the
-# systemd unit (lenoxvi-bot.service), NOT in code.
+# GPU hosts: nothing here pulls the CUDA libraries Whisper needs on a GPU
+# (pip doesn't detect GPUs). Install requirements-gpu.txt as well; the
+# LD_LIBRARY_PATH for those wheels is set in the systemd unit
+# (deploy/lenoxvi-bot.service.example), NOT in code.
 #
 # Provenance note (2026-09-20 review): pipecat-ai[runner] pulls
 # pipecat-ai-prebuilt only via its [runner] extra; bot.py imports
 # pipecat.runner.run, which hard-imports pipecat_ai_prebuilt, so it is
 # a direct runtime dep of this repo, not transitive.
-pipecat-ai==1.13.0
+# [webrtc] = aiortc and friends: bot.py imports pipecat's SmallWebRTC
+# transport, which refuses to load without them (a fresh install crashed at
+# import before this extra was listed).
+pipecat-ai[webrtc]==1.13.0
 # 1.13's [runner] extra requires pipecat-ai-prebuilt>=1.3.0.
 pipecat-ai-prebuilt==1.3.0
 pipecat-ai-small-webrtc-prebuilt==2.5.0

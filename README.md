@@ -19,7 +19,7 @@ The wake word always runs on your hardware. Speech and voice can stay local or g
 
 Python 3.12+. From the repo root:
 
-1. `pip install -r requirements.txt`
+1. `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt` (on an NVIDIA GPU host add `-r requirements-gpu.txt`; Debian and Ubuntu need `sudo apt install python3-venv` first)
 2. `cp config.example.yaml config.yaml` and fill every `<PLACEHOLDER>`
 3. `cp .env.example .env` and set `ELEVENLABS_API_KEY` and `LVI_TTS_VOICE_ID` for the default voice, plus the key for your intelligence (`LVI_HERMES_KEY`, `LVI_OPENCLAW_KEY` or `LVI_NANOBOT_KEY`)
 4. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
