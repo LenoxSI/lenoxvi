@@ -8797,11 +8797,12 @@ def main():
     # Naming law: users never see or hear "brain" (it's "intelligence").
     # Dashboard source (comments too) and every line the echo stub can say.
     import re as _reNL
+
     from intelligence import stub as _stubNL
     _nlS = _stubNL.StubIntelligence.__new__(_stubNL.StubIntelligence)
     _nlSaid = [_nlS._reply(q) for q in ("what's your name", "who are you", "bye", "turn on the lights")]
-    _nlHits = [l.strip()[:80] for l in _appsrc.splitlines() if _reNL.search(r"\bbrains?\b", l, _reNL.I)]
-    _nlHits += [s for s in _nlSaid if _reNL.search(r"\bbrains?\b", s, _reNL.I)]
+    _nlHits = [l.strip()[:80] for l in _appsrc.splitlines() if _reNL.search(r"\bbrains?\b", l, _reNL.IGNORECASE)]
+    _nlHits += [s for s in _nlSaid if _reNL.search(r"\bbrains?\b", s, _reNL.IGNORECASE)]
     check("naming law: the dashboard source and the echo stub's spoken lines never say 'brain'",
           not _nlHits and all("intelligence" in s for s in _nlSaid[:1] + _nlSaid[3:]), _nlHits[:3] or _nlSaid)
     check("echo ui: the Intelligence card shows 'None yet (echo)' only while saved, hides URL/agent/key/Test, never lists agents",
