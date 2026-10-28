@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # LenoxVI installer banner + theme. Source this from install.sh.
-# Brand: open = Mist, holler = Lime, secondary text = Muted.
+# Brand: LENOX = Mist, VI = Lime, secondary text = Muted.
 
 # ── Colour support: truecolor > 256 > none (respects NO_COLOR) ────────────
 if [[ -n "${NO_COLOR:-}" || ! -t 1 ]]; then
@@ -34,23 +34,22 @@ entry=white,black checkbox=white,black actcheckbox=black,brightgreen'
 banner() {
   local cols; cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
   echo
-  if (( cols >= 86 )); then
-    # ANSI Shadow — 84 cols
-    printf '%s%s%s\n'  "$MIST" ' ██████╗ ██████╗ ███████╗███╗   ██╗' "$LIME██╗  ██╗ ██████╗ ██╗     ██╗     ███████╗██████╗ $RESET"
-    printf '%s%s%s\n'  "$MIST" '██╔═══██╗██╔══██╗██╔════╝████╗  ██║' "$LIME██║  ██║██╔═══██╗██║     ██║     ██╔════╝██╔══██╗$RESET"
-    printf '%s%s%s\n'  "$MIST" '██║   ██║██████╔╝█████╗  ██╔██╗ ██║' "$LIME███████║██║   ██║██║     ██║     █████╗  ██████╔╝$RESET"
-    printf '%s%s%s\n'  "$MIST" '██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║' "$LIME██╔══██║██║   ██║██║     ██║     ██╔══╝  ██╔══██╗$RESET"
-    printf '%s%s%s\n'  "$MIST" '╚██████╔╝██║     ███████╗██║ ╚████║' "$LIME██║  ██║╚██████╔╝███████╗███████╗███████╗██║  ██║$RESET"
-    printf '%s%s%s\n'  "$MIST" ' ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝' "$LIME╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝$RESET"
-  elif (( cols >= 44 )); then
-    # Small — 42 cols, safe on SSH/serial consoles
-    printf '%s%s%s%s\n' "$MIST" '                    ' "$LIME" " _        _ _         $RESET"
-    printf '%s%s%s%s\n' "$MIST" ' ___ _ __  ___ _ _  ' "$LIME" "| |_  ___| | |___ _ _ $RESET"
-    printf '%s%s%s%s\n' "$MIST" "/ _ \\ '_ \\/ -_) ' \\ " "$LIME" "| ' \\/ _ \\ | / -_) '_|$RESET"
-    printf '%s%s%s%s\n' "$MIST" '\___/ .__/\___|_||_|' "$LIME" "|_||_\\___/_|_\\___|_|  $RESET"
-    printf '%s%s%s\n'   "$MIST" '    |_|' "$RESET"
+  if (( cols >= 57 )); then
+    # ANSI Shadow — 55 cols
+    printf '%s%s%s\n'  "$MIST" '██╗     ███████╗███╗   ██╗ ██████╗ ██╗  ██╗' "$LIME██╗   ██╗██╗$RESET"
+    printf '%s%s%s\n'  "$MIST" '██║     ██╔════╝████╗  ██║██╔═══██╗╚██╗██╔╝' "$LIME██║   ██║██║$RESET"
+    printf '%s%s%s\n'  "$MIST" '██║     █████╗  ██╔██╗ ██║██║   ██║ ╚███╔╝ ' "$LIME██║   ██║██║$RESET"
+    printf '%s%s%s\n'  "$MIST" '██║     ██╔══╝  ██║╚██╗██║██║   ██║ ██╔██╗ ' "$LIME╚██╗ ██╔╝██║$RESET"
+    printf '%s%s%s\n'  "$MIST" '███████╗███████╗██║ ╚████║╚██████╔╝██╔╝ ██╗' "$LIME ╚████╔╝ ██║$RESET"
+    printf '%s%s%s\n'  "$MIST" '╚══════╝╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝' "$LIME  ╚═══╝  ╚═╝$RESET"
+  elif (( cols >= 29 )); then
+    # Small — 27 cols, safe on SSH/serial consoles
+    printf '%s%s%s%s\n' "$MIST" ' _                  ' "$LIME" "     _ $RESET"
+    printf '%s%s%s%s\n' "$MIST" '| |___ _ _  _____ __' "$LIME" "__ _(_)$RESET"
+    printf '%s%s%s%s\n' "$MIST" "| / -_) ' \\/ _ \\ \\ /" "$LIME" "\\ V / |$RESET"
+    printf '%s%s%s%s\n' "$MIST" "|_\\___|_||_\\___/_\\_\\" "$LIME" " \\_/|_|$RESET"
   else
-    printf '%sopen%sholler%s\n' "$MIST" "$LIME" "$RESET"
+    printf '%slenox%svi%s\n' "$MIST" "$LIME" "$RESET"
   fi
   if (( cols >= 44 )); then
     printf '%s  open-source voice for AI agents · installer v%s%s\n\n' "$MUTED" "${LVI_VERSION:-dev}" "$RESET"

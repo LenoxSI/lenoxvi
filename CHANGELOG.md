@@ -29,6 +29,8 @@ The two version streams are independent.
   "Run from a clone (manual)".
 
 ### Changed
+- The project is now LenoxVI: repo github.com/LenoxSI/lenoxvi, CLI `lenoxvi`, service `lenoxvi`, paths
+  `/opt/lenoxvi` + `/var/lib/lenoxvi`, env prefix `LVI_`.
 - Installer: says "intelligence", not "brain"; `uninstall --purge` also deletes the install log. README: what to expect on a Raspberry Pi 5.
 - The repository moved to github.com/LenoxSI/lenoxvi; README links updated.
 - Dashboard: the voice-ID box shows a generic placeholder.
