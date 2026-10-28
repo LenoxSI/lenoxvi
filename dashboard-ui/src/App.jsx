@@ -238,8 +238,8 @@ const BTN_DANGER = `${BTN} bg-transparent border border-[var(--danger)] text-[va
 // exists in this app), so one img, sized to the header.
 function Wordmark() {
   return (
-    <img src="/lenoxvi-horizontal-on-dark.svg" alt="LenoxVI"
-      className="h-[34px] w-auto" />
+    <img src="/lenoxvi-horizontal-lime-on-dark.svg" alt="LenoxVI"
+      className="h-[40px] w-auto" />
   )
 }
 

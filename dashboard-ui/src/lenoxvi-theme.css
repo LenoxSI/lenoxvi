@@ -14,8 +14,8 @@
   --default-foreground: var(--foreground);
   --segment-foreground: var(--foreground);
   --field-foreground: var(--foreground);
-  --success-foreground: #18181b;
-  --warning-foreground: #18181b;
+  --success-foreground: #07110b;
+  --warning-foreground: #160f04;
   --danger-foreground: #fcfcfc;
   --radius: 0.5rem;
   --field-radius: 0.75rem;
@@ -44,8 +44,8 @@
   --separator: #242a21;
   --focus: var(--lenoxvi-lime);
   --link: var(--lenoxvi-lime);
-  --success: oklch(0.7329 0.1935 150.81);
-  --warning: oklch(0.8203 0.1388 76.34);
+  --success: #39ff88;
+  --warning: #ffb547;
   --danger: oklch(0.594 0.1967 24.63);
   --surface-shadow: none;
   --overlay-shadow: 0 0 1px 0 rgba(255, 255, 255, 0.3) inset;
@@ -72,8 +72,10 @@
   --separator: #e1e8db;
   --focus: var(--lenoxvi-ink);
   --link: var(--lenoxvi-olive);
-  --success: oklch(0.7329 0.1935 150.81);
-  --warning: oklch(0.7819 0.1585 72.33);
+  --success: #0d7a3c;
+  --warning: #9a5b00;
+  --success-foreground: #ffffff;
+  --warning-foreground: #ffffff;
   --danger: oklch(0.6532 0.2328 25.74);
   --surface-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06), 0 0 1px 0 rgba(0, 0, 0, 0.06);
   --overlay-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 -6px 12px 0 rgba(0, 0, 0, 0.03), 0 14px 28px 0 rgba(0, 0, 0, 0.08);

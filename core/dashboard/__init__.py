@@ -31,9 +31,12 @@ from loguru import logger
 # Files at the dist root the built page links with './' paths (served at /
 # and /dashboard/). Name only what the build ships; the suite pins that.
 DIST_ROOT_FILES = frozenset({
-    "lenoxvi-horizontal-on-dark.svg",
-    "lenoxvi-horizontal-on-light.svg",
+    "lenoxvi-horizontal-lime-on-dark.svg",
+    "lenoxvi-horizontal-lime-on-light.svg",
+    "favicon.ico",
+    "apple-touch-icon.png",
 })
+_ROOT_MEDIA = {".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png"}
 
 
 def register_dashboard(app) -> None:
@@ -109,7 +112,7 @@ def register_dashboard(app) -> None:
     if ui_assets.is_dir():
         app.mount("/assets", StaticFiles(directory=ui_assets), name="ui-assets")
 
-    # Dist-root files (the wordmark SVGs) — the built page
+    # Dist-root files (wordmark SVGs, favicon.ico, apple-touch-icon) — the built page
     # references them with './' paths that resolve against the SITE
     # root from /dashboard (no trailing slash). Serve each one at both
     # root and /dashboard/ so the lockups load either way (bug 1 fix,
@@ -121,7 +124,7 @@ def register_dashboard(app) -> None:
         if root_file in DIST_ROOT_FILES:
             f = ui_index.parent / root_file
             if f.is_file():
-                media = "image/svg+xml" if f.suffix == ".svg" else "application/octet-stream"
+                media = _ROOT_MEDIA.get(f.suffix, "application/octet-stream")
                 return _Resp(content=f.read_bytes(), media_type=media)
         raise _HTTPException(status_code=404, detail="not found")
 
