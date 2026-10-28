@@ -73,7 +73,7 @@ write_config_file() {
   else
     run_quiet runuser -u "$LVI_USER" -- "$LVI_VENV_REAL/bin/python" "$LVI_APP_REAL/scripts/installer/write_config.py" \
       "$LVI_APP_REAL/config.example.yaml" "$LVI_STATE_REAL/config.yaml" --host "$HOST_IP" --stt "$STT_PROFILE"
-    ok "config: written (no keys needed — the voice is local, the brain is echo until you pick one)"
+    ok "config: written (no keys needed — the voice is local, the intelligence answers with an echo until you pick one)"
   fi
 }
 

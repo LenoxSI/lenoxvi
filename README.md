@@ -19,6 +19,8 @@ The wake word always runs on your hardware. Speech and voice can stay local or g
 
 Ubuntu 22.04 / 24.04 / 26.04, Debian 12 / 13 or Raspberry Pi OS (64-bit), on x86_64 or arm64. No Docker.
 
+On a Raspberry Pi 5 the fully local voice works but is slow: Whisper base takes about 1.6 s per spoken command and Kokoro speaks a little slower than real time, so a local reply starts about 3.5 s after you stop talking, plus the intelligence's own time. For snappier replies on a Pi, use a cloud voice or a smaller Whisper model.
+
 ```bash
 sudo apt install git          # Debian and Raspberry Pi OS images may not have it
 git clone https://github.com/LenoxSI/lenoxvi.git
@@ -31,7 +33,7 @@ three questions: this machine's LAN address, whether speech-to-text runs on the 
 protect the dashboard with a token. Then it installs the newest release, downloads the speech models, starts the
 `lenoxvi` service and prints the dashboard address. A few minutes on a fresh box.
 
-It needs no keys: the voice is local (Kokoro) and the brain answers with an echo until you pick one on the
+It needs no keys: the voice is local (Kokoro) and the intelligence answers with an echo until you pick one on the
 dashboard. Keys, voices, rooms and speakers are all set there.
 
 - Code goes to `/opt/lenoxvi` (read-only to the bot). Settings, keys, certs and models go to `/var/lib/lenoxvi`.

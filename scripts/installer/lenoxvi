@@ -207,6 +207,7 @@ cmd_uninstall() {
   fi
   if [[ $purge == yes ]]; then
     run rm -rf "$LVI_STATE"
+    run rm -f "$LVI_LOG"
     if id -u "$LVI_USER" >/dev/null 2>&1; then run userdel "$LVI_USER"; fi
     ok "removed LenoxVI and its data"
   else

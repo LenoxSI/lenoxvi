@@ -29,6 +29,7 @@ The two version streams are independent.
   "Run from a clone (manual)".
 
 ### Changed
+- Installer: says "intelligence", not "brain"; `uninstall --purge` also deletes the install log. README: what to expect on a Raspberry Pi 5.
 - The repository moved to github.com/LenoxSI/lenoxvi; README links updated.
 - Dashboard: the voice-ID box shows a generic placeholder.
 - Default filler lines for slow replies are plainer: after 12 s "Almost there now.", "Still working on that.",

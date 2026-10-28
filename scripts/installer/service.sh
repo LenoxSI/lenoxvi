@@ -104,6 +104,6 @@ handoff() {
   if [[ -n ${DASH_TOKEN:-} ]]; then
     printf '\n  Dashboard token (shown once, also in %s/.env):\n  %s\n' "$LVI_STATE_REAL" "$DASH_TOKEN"
   fi
-  printf '\n  %sNext, on the dashboard: pick a voice and a brain, then add your rooms.%s\n' "$MUTED" "$RESET"
+  printf '\n  %sNext, on the dashboard: pick a voice and an intelligence, then add your rooms.%s\n' "$MUTED" "$RESET"
   printf '  Manage it: lenoxvi status | logs | restart | reconfigure | upgrade | uninstall\n\n'
 }
