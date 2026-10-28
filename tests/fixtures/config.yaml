@@ -214,6 +214,9 @@ room_zones:
   hall-mic: Loft
   kitchen-mic: Den
   study-mic: builtin
+logging:
+  level: INFO
+
 dashboard:
   enabled: true
 node_speaker:

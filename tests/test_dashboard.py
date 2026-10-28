@@ -5933,13 +5933,95 @@ def main():
     # The words come from LVI_PRIVATE_WORDS (comma-separated, kept out of the
     # repo): a public test must not name the private word it guards.
     _privwn = [w.strip().lower() for w in os.environ.get("LVI_PRIVATE_WORDS", "").split(",") if w.strip()]
+    # The org and product names (and their domains) are public and allowed;
+    # a private word inside them doesn't count, anywhere else it does.
+    _brandswn = ("lenoxsi", "lenoxvi", "lenoxai")
+
+    def _privhitwn(text: str) -> bool:
+        t = text.lower()
+        for b in _brandswn:
+            t = t.replace(b, "")
+        return any(w in t for w in _privwn)
+
     if _privwn:
         _hitswn = sorted({str(p.relative_to(_rootwn)) for p in _sweptwn
-                           if p.is_file() and any(w in p.read_text(errors="ignore").lower() for w in _privwn)})
+                           if p.is_file() and _privhitwn(p.read_text(errors="ignore"))})
         check("wake name sweep: no private word in core/, bot.py, dashboard src, README, config.example",
               not _hitswn, f"hits={_hitswn}")
+        check("wake name sweep: the org/product names (LenoxSI, LenoxVI, lenoxai.io) are allowed, every private "
+              "word on its own is still caught",
+              not _privhitwn("A LenoxSI project · lenoxsi.com · LenoxVI · lenoxai.io")
+              and all(_privhitwn(f"say {w} here") for w in _privwn), "")
     else:
         print("[SKIP] private-word sweep (set LVI_PRIVATE_WORDS to run it)")
+    # ── Public flip prep: license, org links, log level ──
+    _lic = (_rootwn / "LICENSE").read_text() if (_rootwn / "LICENSE").is_file() else ""
+    _ntc = (_rootwn / "NOTICE").read_text() if (_rootwn / "NOTICE").is_file() else ""
+    _rdm = (_rootwn / "README.md").read_text()
+    check("license: LICENSE is the Apache License 2.0 text, NOTICE names the project and the model terms",
+          _lic.lstrip().startswith("Apache License") and "Version 2.0, January 2004" in _lic
+          and "END OF TERMS AND CONDITIONS" in _lic and "Apache License, Version 2.0" in _ntc
+          and "CC BY-NC-SA 4.0" in _ntc and "CC BY 4.0" in _ntc, f"LICENSE {len(_lic)}B NOTICE {len(_ntc)}B")
+    check("license: README states Apache 2.0, links LICENSE/NOTICE and no longer says no license is set",
+          "Apache License 2.0" in _rdm and "(LICENSE)" in _rdm and "(NOTICE)" in _rdm
+          and "No project license is set" not in _rdm, "")
+    _oldorgrd = "github.com/" + "LenoxVI/"
+    check("org links: README points at github.com/LenoxSI/lenoxvi (clone + issues), links lenoxsi.com and "
+          "lenoxai.io, and no old-org URL is left",
+          "https://github.com/LenoxSI/lenoxvi.git" in _rdm and "https://github.com/LenoxSI/lenoxvi/issues" in _rdm
+          and "https://lenoxsi.com" in _rdm and "https://lenoxai.io" in _rdm and _oldorgrd not in _rdm, "")
+    _appsrcvp = (_rootwn / "dashboard-ui" / "src" / "App.jsx").read_text()
+    check("dashboard: the voice-ID box shows a generic placeholder (no real voice-ID prefix)",
+          'placeholder="Voice ID"' in _appsrcvp and "fq1S" not in _appsrcvp, "")
+    import log_setup as _lgs
+    from loguru import logger as _lgl
+    _lgout: list[str] = []
+    _real_cfgenv = _lgs.cfg_env
+    try:
+        _lgs.cfg_env = lambda *a, **k: None
+        _lv0 = _lgs.configure(lambda m: _lgout.append(str(m)))
+        _lgl.debug("dbg-line-x")
+        _lgl.info("info-line-x")
+        _lv1_out = list(_lgout)
+        _lgout.clear()
+        _lgs.cfg_env = lambda *a, **k: "debug"
+        _lv1 = _lgs.configure(lambda m: _lgout.append(str(m)))
+        _lgl.debug("dbg-line-y")
+        _lv1b = list(_lgout)
+        _lgout.clear()
+        _lgs.cfg_env = lambda *a, **k: "loud"
+        _lv2 = _lgs.configure(lambda m: _lgout.append(str(m)))
+        _lv2_out = list(_lgout)
+        _lgout.clear()
+        _secret_lg = "sk-test-" + "9f8e7d"
+
+        def _boom_lg(api_key):
+            raise RuntimeError("boom")
+        try:
+            _boom_lg(_secret_lg)
+        except RuntimeError:
+            _lgl.exception("caught")
+        _lv3_out = "".join(_lgout)
+    finally:
+        _lgs.cfg_env = _real_cfgenv
+        _lgl.remove()
+        _lgl.add(sys.stderr, level="DEBUG")
+    check("log level: unset -> INFO (debug lines dropped, info kept); 'debug' -> DEBUG",
+          _lv0 == "INFO" and not any("dbg-line-x" in x for x in _lv1_out) and any("info-line-x" in x for x in _lv1_out)
+          and _lv1 == "DEBUG" and any("dbg-line-y" in x for x in _lv1b), f"{_lv0} {_lv1} {_lv1_out}")
+    check("log level: an unknown value falls back to INFO with a warning naming it",
+          _lv2 == "INFO" and any("'loud'" in x and "using INFO" in x for x in _lv2_out), str(_lv2_out))
+    check("log level: tracebacks don't print variable values (a key in a local stays out of the log)",
+          "RuntimeError: boom" in _lv3_out and _secret_lg not in _lv3_out, _lv3_out[-200:])
+    _exlg = (_rootwn / "config.example.yaml").read_text()
+    _fxlg = (_rootwn / "tests" / "fixtures" / "config.yaml").read_text()
+    check("log level: config.example and the test fixture ship logging.level INFO",
+          "\nlogging:\n  level: INFO\n" in _exlg and "\nlogging:\n  level: INFO\n" in _fxlg, "")
+    _botsrc_lg = (_rootwn / "bot.py").read_text()
+    check("log level: bot.py applies it right after loading .env, before pipecat is imported",
+          "log_setup.configure()" in _botsrc_lg
+          and _botsrc_lg.index("log_setup.configure()") < _botsrc_lg.index("from pipecat")
+          and _botsrc_lg.index("load_dotenv(_paths.env_file())") < _botsrc_lg.index("log_setup.configure()"), "")
     # Dashboard dist-root allowlist names only files the build actually ships
     import dashboard as _dashdr
     _distdr = REPO_CORE.parent / "dashboard-ui" / "dist"
