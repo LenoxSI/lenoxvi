@@ -6030,6 +6030,16 @@ def main():
     _alldr = getattr(_dashdr, "DIST_ROOT_FILES", None)
     check("dashboard: dist-root allowlist exists and every name in it is in dist/",
           bool(_alldr) and all((_distdr / f).is_file() for f in _alldr), str(_alldr))
+    _idxdr = (REPO_CORE.parent / "dashboard-ui" / "index.html").read_text()
+    _appdr = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
+    _rmdr = (REPO_CORE.parent / "README.md").read_text()
+    import re as _redr
+    _logodr = _redr.findall(r'src="/([\w.-]+\.svg)"', _appdr) + _redr.findall(r'dashboard-ui/public/([\w.-]+\.svg)', _rmdr)
+    check("dashboard: the brand-kit favicon set is linked (svg, ico, apple-touch) and every root icon/logo the page or README uses is in public/ and the allowlist",
+          'href="/favicon.ico"' in _idxdr and 'rel="apple-touch-icon" href="/apple-touch-icon.png"' in _idxdr
+          and {"favicon.ico", "apple-touch-icon.png"} <= set(_alldr or ())
+          and bool(_logodr) and all((REPO_CORE.parent / "dashboard-ui" / "public" / f).is_file() and f in _alldr for f in _logodr)
+          and _dashdr._ROOT_MEDIA.get(".ico") == "image/x-icon" and _dashdr._ROOT_MEDIA.get(".png") == "image/png", str(_logodr))
     import intelligence.agent as _iawn
     check("wake name: intelligence drop-filter delegates to wake_name",
           "wake_name" in _inspwn.getsource(_iawn._is_wake_phrase_only))
