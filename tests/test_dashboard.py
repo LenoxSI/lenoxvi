@@ -5935,7 +5935,7 @@ def main():
     _privwn = [w.strip().lower() for w in os.environ.get("LVI_PRIVATE_WORDS", "").split(",") if w.strip()]
     # The org and product names (and their domains) are public and allowed;
     # a private word inside them doesn't count, anywhere else it does.
-    _brandswn = ("lenoxsi", "lenoxvi", "lenoxai")
+    _brandswn = ("lenoxsi", "lenoxvi", "lenoxmi", "lenoxci", "lenoxai")
 
     def _privhitwn(text: str) -> bool:
         t = text.lower()
@@ -5948,9 +5948,9 @@ def main():
                            if p.is_file() and _privhitwn(p.read_text(errors="ignore"))})
         check("wake name sweep: no private word in core/, bot.py, dashboard src, README, config.example",
               not _hitswn, f"hits={_hitswn}")
-        check("wake name sweep: the org/product names (LenoxSI, LenoxVI, lenoxai.io) are allowed, every private "
+        check("wake name sweep: the org/product names (LenoxSI, LenoxVI, LenoxMI, LenoxCI, lenoxai.io) are allowed, every private "
               "word on its own is still caught",
-              not _privhitwn("A LenoxSI project · lenoxsi.com · LenoxVI · lenoxai.io")
+              not _privhitwn("A LenoxSI project · lenoxsi.com · LenoxVI · LenoxMI · LenoxCI · lenoxai.io")
               and all(_privhitwn(f"say {w} here") for w in _privwn), "")
     else:
         print("[SKIP] private-word sweep (set LVI_PRIVATE_WORDS to run it)")
@@ -5965,11 +5965,13 @@ def main():
     check("license: README states Apache 2.0, links LICENSE/NOTICE and no longer says no license is set",
           "Apache License 2.0" in _rdm and "(LICENSE)" in _rdm and "(NOTICE)" in _rdm
           and "No project license is set" not in _rdm, "")
-    _oldorgrd = "github.com/" + "LenoxVI/"
+    _oldorgrd = "github.com/" + "Open" + "Holler/"  # the retired org (spelled in pieces so no sweep sees it)
+    _oldreporm = "LenoxSI/" + "open" + "holler"
     check("org links: README points at github.com/LenoxSI/lenoxvi (clone + issues), links lenoxsi.com and "
-          "lenoxai.io, and no old-org URL is left",
+          "lenoxai.io, and no old-org or old-repo URL is left",
           "https://github.com/LenoxSI/lenoxvi.git" in _rdm and "https://github.com/LenoxSI/lenoxvi/issues" in _rdm
-          and "https://lenoxsi.com" in _rdm and "https://lenoxai.io" in _rdm and _oldorgrd not in _rdm, "")
+          and "https://lenoxsi.com" in _rdm and "https://lenoxai.io" in _rdm and _oldorgrd not in _rdm
+          and _oldreporm.lower() not in _rdm.lower(), "")
     _appsrcvp = (_rootwn / "dashboard-ui" / "src" / "App.jsx").read_text()
     check("dashboard: the voice-ID box shows a generic placeholder (no real voice-ID prefix)",
           'placeholder="Voice ID"' in _appsrcvp and "fq1S" not in _appsrcvp, "")
