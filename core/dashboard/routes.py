@@ -150,7 +150,7 @@ def _intelligence_label() -> str:
     intelligence_cfg = config_store.read_section("intelligence") or {}
     default = intelligence.DEFAULT_KIND
     kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence_cfg.get("kind") or default) or default)
-    # No brain picked yet: the bot answers from the echo stub, so say so
+    # No intelligence picked yet: the bot answers from the echo stub, so say so
     # (a fresh install runs this way until a lane is set up).
     if kind.strip().lower() == "stub":
         return "echo"
@@ -2054,7 +2054,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (this probe previously read the now-DELETED
     # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
-    # caught in the 2026-10-08 brain→intelligence sweep).
+    # caught in the 2026-10-08 naming sweep).
     _kv = intelligence_target.key_var(kind, agent) or default_lane.base_key_var
     key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:

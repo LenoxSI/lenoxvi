@@ -902,7 +902,7 @@ function Stat({ label, children }) {
 // are lowercase, even brand names — "sonos"); hover text is a sentence.
 // A setup gap (no key, no URL, an unmapped room) is a warning chip that links
 // to the card that fixes it; healthy chips are not links.
-// intelligence.kind for "no brain picked yet": the bot answers from its echo
+// intelligence.kind for "no intelligence picked yet": the bot answers from its echo
 // stub. Not a lane (no URL, key or agents); a fresh install starts here.
 const ECHO_KIND = 'stub'
 
@@ -927,10 +927,10 @@ function StatChip({ stat, tone = 'neutral', text, title, muted, href, className,
 // Intelligence: the brand the bot runs, unless the configured kind has no
 // URL or no key saved (the next restart can't reach it).
 function intelligenceChip(status, intel) {
-  // No brain picked yet (a fresh install): the bot echoes. Not a fault, so a
+  // No intelligence picked yet (a fresh install): the bot echoes. Not a fault, so a
   // plain chip (only setup warnings are links); the hover says what to do.
   if ((intel?.kind || '') === ECHO_KIND || (!intel && status?.intelligence === 'echo'))
-    return { tone: 'neutral', text: 'echo', title: 'No brain picked yet: the bot repeats what it hears. Pick one on the Intelligence card.' }
+    return { tone: 'neutral', text: 'echo', title: 'No intelligence picked yet: the bot repeats what it hears. Pick one on the Intelligence card.' }
   if (intel) {
     const label = laneLabel(intel.kind)
     if (!intel.url)
@@ -3382,7 +3382,7 @@ function System({ intelligence, status, setMsg, reloadAll }) {
           </select>
           {intKind === ECHO_KIND ? (
             <span className="text-[13px] text-[var(--muted)]">
-              No brain picked yet: the bot repeats what it hears. Pick one to get real answers.
+              No intelligence picked yet: the bot repeats what it hears. Pick one to get real answers.
             </span>
           ) : <>
           <select aria-label="Intelligence agent" id="int-agent" value={agentSel} onChange={e => setIntAgent(e.target.value)}

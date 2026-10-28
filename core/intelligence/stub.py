@@ -1,4 +1,4 @@
-"""Echo intelligence for LenoxVI: no brain picked yet.
+"""Echo intelligence for LenoxVI: none picked yet.
 
 Runs when config.yaml says `intelligence.kind: stub` (a fresh install, or a
 bench run without an intelligence server). It repeats what it heard and
@@ -44,14 +44,14 @@ class StubIntelligence(FrameProcessor):
 
     def _reply(self, text: str) -> str:
         t = text.lower()
-        # What a fresh install says before a brain is set up: true on any
+        # What a fresh install says before an intelligence is set up: true on any
         # hardware or voice, and it points at the dashboard, not the YAML.
         if "your name" in t or "who are you" in t:
-            return ("I'm LenoxVI, with no brain picked yet. Pick one on the "
+            return ("I'm LenoxVI, and no intelligence is picked yet. Pick one on the "
                     "dashboard's System tab.")
         if any(w in t for w in ("bye", "goodbye", "good night")):
             return "Bye!"
-        return (f"I heard: {text.strip()}. Pick a brain on the dashboard's System tab "
+        return (f"I heard: {text.strip()}. Pick an intelligence on the dashboard's System tab "
                 "to get real answers.")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

@@ -17,7 +17,7 @@ The two version streams are independent.
   with `scripts/sign_firmware.py`), and any unsigned image found at startup. Unsigned app images are never
   served. Nodes on firmware 1.3+ accept only images signed with their bot's key. Back the key up.
 - Installer: `sudo bash scripts/install.sh` from a clone takes a fresh Ubuntu 22.04/24.04, Debian 12/13 or
-  Raspberry Pi OS (64-bit) box (Ubuntu 26.04 too) to a running LenoxVI with no keys needed (local voice, echo brain). It checks
+  Raspberry Pi OS (64-bit) box (Ubuntu 26.04 too) to a running LenoxVI with no keys needed (local voice, echo intelligence). It checks
   the machine, installs only the missing system packages (asked once), fetches pinned, checksum-checked tools,
   asks three questions (address, speech-to-text on GPU or CPU, a dashboard token) and starts a system service.
   Code lives in `/opt/lenoxvi` (read-only to the bot), settings, keys and models in `/var/lib/lenoxvi`.
