@@ -214,5 +214,50 @@ finally:
 check("speaker: WiiM drops a clip whose generation went stale while it waited for the player",
       len(CMDS) == 2, f"plays={len(CMDS)}")
 
+# ── WiiM: a bot stop during the play command still restores the music volume ─
+VOLS = []
+
+
+def slow_play_api(ip, cmd, timeout=4.0):
+    if cmd.startswith("setPlayerCmd:vol:"):
+        VOLS.append(int(cmd.rsplit(":", 1)[1]))
+    elif cmd.startswith("setPlayerCmd:play:"):
+        time.sleep(0.3)   # the stop lands inside this window
+    return "OK"
+
+
+real_live_vol = wiim_output.live_wiim_volume
+wiim_output.wiim_api = slow_play_api
+wiim_output.wiim_get_status = lambda ip, timeout=4.0: {"vol": "20"}
+wiim_output.live_wiim_volume = lambda zone: None
+
+
+async def wiim_stop_mid_play():
+    wiim_output._VOL_SAVED.pop("127.0.0.3", None)
+    wo = wiim_output.WiiMOutput(echo_gate=None, zone_selector=lambda: "test", led=None)
+    wo._enabled = True
+    wo._zones = {"test": {"ip": "127.0.0.3"}}
+    wo._zone_volumes = {"test": 45}
+    wo._clip_server = SRV
+    wo._speech_epoch = 1
+    task = asyncio.create_task(wo._speak_to_wiim(pcm_secs(0.3), epoch=1))
+    while not VOLS:              # the voice volume is set: the play call is now in flight
+        await asyncio.sleep(0.01)
+    task.cancel()                # the bot stops mid play command
+    try:
+        await asyncio.wait_for(task, 10)
+    except asyncio.CancelledError:
+        pass
+    return "127.0.0.3" in wiim_output._VOL_SAVED
+
+
+try:
+    _left_saved = asyncio.run(wiim_stop_mid_play())
+finally:
+    wiim_output.wiim_api, wiim_output.wiim_get_status = real_api, real_status
+    wiim_output.live_wiim_volume = real_live_vol
+check("speaker: WiiM put back the music volume when the bot stopped during the play command",
+      VOLS == [45, 20] and not _left_saved, f"vols={VOLS} saved_left={_left_saved}")
+
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

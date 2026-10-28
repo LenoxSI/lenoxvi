@@ -2381,6 +2381,15 @@ def main():
                   _cnm.get("/firmware/node/version").status_code == 404, "")
             check("firmware track OTA: path traversal out of a track dir 404s",
                   _cnm.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
+            _upTmp = Path("firmware/array/array_esp32.bin.k3x9q.uploading")
+            try:
+                _upTmp.write_bytes(b"half an image")
+                _upT = _cnm.get(f"/firmware/array/{_upTmp.name}").status_code
+                _upL = _cnm.get(f"/firmware/{_upTmp.name}").status_code
+            finally:
+                _upTmp.unlink(missing_ok=True)
+            check("firmware track OTA: an upload still being written (*.uploading) is never served (track and legacy URL 404)",
+                  _upT == 404 and _upL == 404, f"{_upT} {_upL}")
             # signing (note 071): unsigned app images never go out; boot files aren't app images
             _flxSG = Path("firmware/flex/flex_esp32.bin")
             _keepFlx = _flxSG.read_bytes() if _flxSG.is_file() else None
