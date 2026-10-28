@@ -327,8 +327,16 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
                     raise
                 return before
 
+            # Shielded: a bot stop landing while the play command is in flight
+            # can't abandon it half-done. The thread sets the voice volume and
+            # plays either way; without this, nothing would put the music
+            # volume back (the restore timer below never starts).
+            fut = asyncio.ensure_future(asyncio.to_thread(_net))
             try:
-                before_vol = await asyncio.to_thread(_net)
+                before_vol = await asyncio.shield(fut)
+            except asyncio.CancelledError:
+                await self._undo_inflight_play(ip, fut, need_snap)
+                raise
             except Exception as e:
                 logger.error(f"wiim_output: play failed on {ip}: {e}")
                 return
@@ -381,6 +389,23 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
             await self._restore_volume(ip, token)
         except Exception:
             pass  # restore is best-effort; the reply already played
+
+    async def _undo_inflight_play(self, ip: str, fut, need_snap: bool) -> None:
+        """The task was cancelled mid play command: let the command finish
+        (bounded) and put the music volume back if this clip took the
+        snapshot. A shared snapshot stays with the clip that owns it. Best
+        effort; the caller re-raises the cancel."""
+        try:
+            before = await asyncio.wait_for(asyncio.shield(fut), timeout=_RESTORE_ON_CANCEL_S)
+        except BaseException:  # noqa: BLE001 — the play failed (it restored itself) or the unit is napping
+            return
+        if need_snap and before is not None:
+            try:
+                await asyncio.wait_for(asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before}"),
+                                       timeout=_RESTORE_ON_CANCEL_S)
+                logger.info(f"wiim_output: stopped mid play command; music volume {before} restored on {ip}")
+            except BaseException as e:  # noqa: BLE001 — best effort on the way out
+                logger.warning(f"wiim_output: volume restore after a mid-play stop failed on {ip}: {e}")
 
     async def _restore_volume(self, ip: str, token: int, timeout: float = 4.0) -> None:
         """Put the music volume back - only from the newest clip on `ip`

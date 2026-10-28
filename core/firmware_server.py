@@ -71,6 +71,18 @@ def _read_manifest(track: str | None = None) -> dict:
     return manifest
 
 
+def _servable(d: Path, filename: str) -> Path:
+    """The file a node may fetch from a track dir, or 404. Only files that
+    really live in the dir (no traversal), and never a dashboard upload still
+    being written: those land as `<name>.<random>.uploading` next to the live
+    image and are renamed over it when complete."""
+    target = (d / filename).resolve()
+    if (not str(target).startswith(str(d.resolve())) or not target.is_file()
+            or target.name.endswith(".uploading")):
+        raise HTTPException(status_code=404, detail="not found")
+    return target
+
+
 def _refuse_unsigned_app(target: Path) -> None:
     """App images (<line>_esp32.bin) go out signed or not at all: signed nodes
     would refuse an unsigned one anyway, and nothing unsigned should reach a
@@ -110,10 +122,7 @@ def register_firmware_routes(app) -> None:
     @app.get("/firmware/{track}/{filename}")
     async def firmware_track_bin(track: str, filename: str):
         d = _track_dir(track)
-        # Path traversal guard: only serve files that actually live in the dir
-        target = (d / filename).resolve()
-        if not str(target).startswith(str(d.resolve())) or not target.is_file():
-            raise HTTPException(status_code=404, detail="not found")
+        target = _servable(d, filename)
         _refuse_unsigned_app(target)
         logger.info(f"firmware_server: serving {track}/{filename} ({target.stat().st_size} bytes)")
         return FileResponse(target, media_type="application/octet-stream")
@@ -122,10 +131,7 @@ def register_firmware_routes(app) -> None:
     async def firmware_bin(filename: str):
         # LEGACY ALIAS: array images <=1.2.8 download from here — array track.
         d = _track_dir(None)
-        # Path traversal guard: only serve files that actually live in the dir
-        target = (d / filename).resolve()
-        if not str(target).startswith(str(d.resolve())) or not target.is_file():
-            raise HTTPException(status_code=404, detail="not found")
+        target = _servable(d, filename)
         _refuse_unsigned_app(target)
         logger.info(f"firmware_server: serving {LEGACY_TRACK}/{filename} via legacy URL "
                     f"({target.stat().st_size} bytes)")
