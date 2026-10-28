@@ -32,6 +32,10 @@ from dotenv import load_dotenv
 
 load_dotenv(_paths.env_file())
 
+import log_setup
+
+log_setup.configure()  # logging.level (default INFO) before anything else logs
+
 from intelligence.stub import StubIntelligence
 from echo_gate import EchoGate
 from intelligence.agent import IntelligenceAgent

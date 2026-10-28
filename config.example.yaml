@@ -207,6 +207,12 @@ clip_server:
 room_zones: {}
   # <room>: <zone-name>   # the Rooms tab sets these
 
+# ── Logs ──────────────────────────────────────────────────────────────
+# INFO is what an operator needs; DEBUG (about twice the journal) is for
+# development. Env fallback: LVI_LOG_LEVEL. Restart to apply.
+logging:
+  level: INFO
+
 # ── Web dashboard ─────────────────────────────────────────────────────
 # Served by the bot at /dashboard (LAN-only, no login by design).
 dashboard:

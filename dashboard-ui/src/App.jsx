@@ -2731,7 +2731,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
                   placeholder="Voice name" className={`${INPUT_CLS} w-[200px] font-mono`} aria-label="LocalAI voice" />)}
             {provider === 'elevenlabs' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
             {provider === 'elevenlabs' &&
-              <input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice id (fq1S…)"
+              <input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })} placeholder="Voice ID"
                 className={`${INPUT_CLS} w-[260px] font-mono`} />}
             {provider === 'deepgram-flux' && (
               <>

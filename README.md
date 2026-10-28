@@ -192,7 +192,9 @@ Not covered yet: nodes don't check the bot's TLS certificate when they connect, 
 
 ## License
 
-No project license is set. Until one is, do not treat this repository as open source. The pre-trained wake-word models are non-commercial; see [Wake word](#wake-word).
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Models keep their own licenses: the stock openWakeWord wake-word models are non-commercial (see [Wake word](#wake-word)), and the Pocket TTS weights need attribution (CC BY 4.0).
+
+LenoxVI is a [LenoxSI](https://lenoxsi.com) project · [lenoxai.io](https://lenoxai.io)
 
 ## Help
 

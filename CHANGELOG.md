@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- Apache License 2.0 (`LICENSE`, `NOTICE`). Models keep their own terms: the stock wake-word models are
+  non-commercial, the Pocket TTS weights need attribution.
+- `logging.level` (env `LVI_LOG_LEVEL`), default INFO. Tracebacks no longer print variable values.
 - Signed firmware updates: the bot creates its own RSA-3072 key (`secrets/firmware-signing-key.pem`) and signs
   every node image it serves — dashboard uploads, images `deploy_firmware.sh` copies in (it signs on the host
   with `scripts/sign_firmware.py`), and any unsigned image found at startup. Unsigned app images are never
@@ -26,6 +29,8 @@ The two version streams are independent.
   "Run from a clone (manual)".
 
 ### Changed
+- The repository moved to github.com/LenoxSI/lenoxvi; README links updated.
+- Dashboard: the voice-ID box shows a generic placeholder.
 - Default filler lines for slow replies are plainer: after 12 s "Almost there now.", "Still working on that.",
   "Taking a minute."; after 25 s "This is taking a bit.", "Give me a few more seconds.", "Just hang tight.".
 - With `LVI_STATE_DIR` set, the secrets file (`.env`, written by System · Keys and loaded at boot) and the TLS certs
