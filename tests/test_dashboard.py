@@ -8754,7 +8754,7 @@ def main():
           in _optUI and _lanesUI.LANES["nanobot"].ui_meta()["no_agent_label"] == "nanobot's own model"
           and _lanesUI.LANES["hermes"].ui_meta()["no_agent_label"] is None
           and _lanesUI.LANES["openclaw"].ui_meta()["no_agent_label"] is None, _optUI[:240])
-    # ── echo (intelligence.kind: stub): a fresh install's "no brain yet" ──
+    # ── echo (intelligence.kind: stub): a fresh install's "no intelligence yet" ──
     from dashboard import routes as _rEC
     _icfg_EC = dict(config_store.read_section("intelligence") or {})
     _env_kind_EC = os.environ.pop("LVI_INTELLIGENCE_KIND", None)
@@ -8774,7 +8774,17 @@ def main():
     check("echo ui: the Intelligence chip says 'echo' (neutral, not a link: not a fault) before any url/key warning",
           "const ECHO_KIND = 'stub'" in _appsrc
           and 0 <= _chipEC.find("=== ECHO_KIND") < _chipEC.find("'no url'")
-          and "return { tone: 'neutral', text: 'echo', title: 'No brain picked yet" in _chipEC, _chipEC[:300])
+          and "return { tone: 'neutral', text: 'echo', title: 'No intelligence picked yet" in _chipEC, _chipEC[:300])
+    # Naming law: users never see or hear "brain" (it's "intelligence").
+    # Dashboard source (comments too) and every line the echo stub can say.
+    import re as _reNL
+    from intelligence import stub as _stubNL
+    _nlS = _stubNL.StubIntelligence.__new__(_stubNL.StubIntelligence)
+    _nlSaid = [_nlS._reply(q) for q in ("what's your name", "who are you", "bye", "turn on the lights")]
+    _nlHits = [l.strip()[:80] for l in _appsrc.splitlines() if _reNL.search(r"\bbrains?\b", l, _reNL.I)]
+    _nlHits += [s for s in _nlSaid if _reNL.search(r"\bbrains?\b", s, _reNL.I)]
+    check("naming law: the dashboard source and the echo stub's spoken lines never say 'brain'",
+          not _nlHits and all("intelligence" in s for s in _nlSaid[:1] + _nlSaid[3:]), _nlHits[:3] or _nlSaid)
     check("echo ui: the Intelligence card shows 'None yet (echo)' only while saved, hides URL/agent/key/Test, never lists agents",
           "{savedKind === ECHO_KIND && <option value={ECHO_KIND}>None yet (echo)</option>}" in _sysUI
           and "{intKind === ECHO_KIND ? (" in _sysUI and "intKind !== ECHO_KIND && !(agentEntry" in _sysUI
