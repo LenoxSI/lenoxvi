@@ -287,7 +287,7 @@ try:
     c = YAML(typ="safe").load(dest.read_text())
 except Exception as e:  # noqa: BLE001
     c = {"error": repr(e)}
-check("installer config: keyless values — kokoro voice, echo brain, CPU Whisper base, no rooms, the clip address",
+check("installer config: keyless values — kokoro voice, echo intelligence, CPU Whisper base, no rooms, the clip address",
       r.returncode == 0 and c.get("tts", {}).get("provider") == "kokoro" and c.get("intelligence", {}).get("kind") == "stub"
       and (c["stt"]["model"], c["stt"]["device"], c["stt"]["compute_type"]) == ("base", "cpu", "int8")
       and c.get("room_zones") == {} and c.get("clip_server", {}).get("host_ip") == "192.0.2.10"
@@ -460,6 +460,15 @@ r = subprocess.run(["setsid", "bash", str(CLI), "--dry-run", "--prefix", str(don
                    env={**env_for(done, STUB_USER="yes"), "LVI_YES": "0"})
 check("lenoxvi uninstall --purge without a terminal refuses instead of guessing",
       r.returncode != 0 and "--yes" in r.stderr, out(r))
+_cli_src = CLI.read_text()
+_purge_blk = _cli_src[_cli_src.index("if [[ $purge == yes ]]; then\n    run rm -rf"):]
+_purge_blk = _purge_blk[:_purge_blk.index("else")]
+check("lenoxvi uninstall --purge also deletes the install log",
+      'run rm -f "$LVI_LOG"' in _purge_blk, _purge_blk[:200])
+_user_text = "".join((SCRIPTS / n).read_text() for n in ("lib.sh", "preflight.sh", "deps.sh", "app.sh", "state.sh", "service.sh", "lenoxvi"))
+_user_text += (SCRIPTS.parent / "install.sh").read_text()
+check("installer copy: says 'intelligence', never 'brain' (naming law)",
+      "brain" not in _user_text.lower(), [l.strip() for l in _user_text.splitlines() if "brain" in l.lower()][:3])
 r = cli(done, "upgrade", "--to", "v0.9.0", "--source", str(src))
 check("lenoxvi upgrade: going back to an older release needs --force",
       r.returncode != 0 and "older" in r.stderr and "--force" in r.stderr, out(r))
