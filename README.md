@@ -3,7 +3,7 @@
   <img alt="LenoxVI" src="dashboard-ui/public/lenoxvi-horizontal-lime-on-light.svg" width="420">
 </picture>
 
-Multi-zone voice for your AI agent: a mic in each room, the reply on that room's Sonos or WiiM speaker, music ducked while it talks. Everything is tuned from a web dashboard.
+High quality multi-zone audio for your AI agent, with mic and room routing + audio ducking. Local, cloud or hybrid. Works with Sonos + WiiM.
 
 Mics: ReSpeaker (Array, Flex) or Waveshare, including in-ceiling mics that match architectural speakers.
 
