@@ -4,11 +4,10 @@ Copyright 2026 LenoxSI (https://lenoxsi.com)
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Models and libraries LenoxVI downloads or depends on keep their own licenses.
-Two of them carry terms worth knowing before you ship anything:
+One of them carries terms worth knowing before you ship anything:
 
 - openWakeWord pre-trained wake-word models (the stock "Hey Jarvis",
   "hey_mycroft", "alexa"): CC BY-NC-SA 4.0, non-commercial use only. Train
   your own model for commercial use.
-- Pocket TTS weights (kyutai/pocket-tts): CC BY 4.0, attribution required.
 
 Kokoro-82M weights are Apache-2.0; faster-whisper is MIT; pipecat is BSD-2-Clause.

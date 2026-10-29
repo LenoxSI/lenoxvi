@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2034,SC2153
-# LenoxVI installer — the three questions and the keyless state:
+# LenoxVI installer — the two questions and the keyless state:
 # config.yaml, .env (dashboard token only), the TLS cert. Never overwrites
 # a config or .env that's already there.
 
@@ -11,13 +11,13 @@ detect_ip() {
 all_ips() { ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1] " (" $2 ")"}'; }
 
 ask_questions() {
-  step "Three questions"
+  step "Two questions"
   [[ -n ${UI:-} ]] || pick_ui
-  local guess cur_ip='' cur_stt=''
-  # Already installed: today's settings are the defaults (a re-run with
-  # --yes must not flip a CPU box to GPU or move the address).
+  local guess cur_ip=''
+  # Already installed: today's address is the default (a re-run with --yes
+  # must not move it). Only the first field counts.
   if [[ -r $LVI_STATE/config.yaml && -x $LVI_VENV/bin/python ]]; then
-    read -r cur_ip cur_stt < <("$LVI_VENV/bin/python" "$LVI_APP/scripts/installer/write_config.py" --get "$LVI_STATE/config.yaml" 2>/dev/null || true) || true
+    read -r cur_ip _ < <("$LVI_VENV/bin/python" "$LVI_APP/scripts/installer/write_config.py" --get "$LVI_STATE/config.yaml" 2>/dev/null || true) || true
   fi
   guess=${cur_ip:-$(detect_ip)}
   if [[ -z ${HOST_IP:-} ]]; then
@@ -31,22 +31,9 @@ ask_questions() {
   fi
   [[ $HOST_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "\"$HOST_IP\" isn't an IPv4 address"
   ok "address: $HOST_IP"
-
-  if [[ -z ${STT_PROFILE:-} ]]; then
-    local def="CPU (Whisper base)"
-    if [[ $cur_stt == gpu || ( -z $cur_stt && $GPU == yes ) ]]; then def="GPU (Whisper large-v3-turbo)"; fi
-    case $(ask_choice "Speech-to-text runs on" "$def" "GPU (Whisper large-v3-turbo)" "CPU (Whisper base)") in
-      GPU*) STT_PROFILE=gpu ;;
-      *) STT_PROFILE=cpu ;;
-    esac
-  fi
-  [[ $STT_PROFILE == gpu || $STT_PROFILE == cpu ]] || die "--stt must be gpu or cpu"
-  if [[ $STT_PROFILE == gpu && $GPU != yes ]]; then
-    warn "GPU picked but no working NVIDIA driver was found — it will fail to load until the driver works"
-  fi
-  STT_MODEL=base
-  [[ $STT_PROFILE == gpu ]] && STT_MODEL=large-v3-turbo
-  ok "speech-to-text: $STT_PROFILE (Whisper $STT_MODEL)"
+  # No speech question: Embedded is fixed and CPU-only; LocalAI and Cloud are
+  # picked later on the dashboard.
+  ok "speech: Embedded (Whisper base + Kokoro)"
 
   if [[ -z ${MAKE_TOKEN:-} ]]; then
     if [[ -f $LVI_STATE/.env ]]; then
@@ -72,7 +59,7 @@ write_config_file() {
     ok "config: kept your $LVI_STATE_REAL/config.yaml"
   else
     run_quiet runuser -u "$LVI_USER" -- "$LVI_VENV_REAL/bin/python" "$LVI_APP_REAL/scripts/installer/write_config.py" \
-      "$LVI_APP_REAL/config.example.yaml" "$LVI_STATE_REAL/config.yaml" --host "$HOST_IP" --stt "$STT_PROFILE"
+      "$LVI_APP_REAL/config.example.yaml" "$LVI_STATE_REAL/config.yaml" --host "$HOST_IP"
     ok "config: written (no keys needed — the voice is local, the intelligence answers with an echo until you pick one)"
   fi
 }

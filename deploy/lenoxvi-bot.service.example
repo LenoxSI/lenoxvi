@@ -1,12 +1,12 @@
 # lenoxvi-bot.service.example — sanitized copy of the production unit
 # (the real launch config lived only on the appliance
 # host, untracked — a fresh clone had no way to run the bot as a
-# service). Adjust every <PLACEHOLDER> and the venv python version.
+# service). Adjust every <PLACEHOLDER>.
 #
 # Install as a systemd USER unit (no root needed):
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/lenoxvi-bot.service.example ~/.config/systemd/user/lenoxvi-bot.service
-#   # edit: venv path, python version in LD_LIBRARY_PATH, --host IP
+#   # edit: venv path, --host IP
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now lenoxvi-bot
 #   journalctl --user -u lenoxvi-bot -f        # logs
@@ -30,11 +30,6 @@ EnvironmentFile=%h/projects/lenoxvi/.env
 #   Environment=LVI_STATE_DIR=/var/lib/lenoxvi
 #   Environment=LVI_CONFIG=/var/lib/lenoxvi/config.yaml
 #   EnvironmentFile=/var/lib/lenoxvi/.env
-# CTranslate2 (whisper) needs libcublas/cudnn/nvrtc from the pip nvidia
-# wheels in requirements-gpu.txt — the NVIDIA driver alone does not provide
-# them (GPU hosts only; drop this line on a CPU host). The paths
-# below must match YOUR venv's python version (3.14 shown — adjust).
-Environment=LD_LIBRARY_PATH=%h/venvs/lenoxvi/lib/python3.14/site-packages/nvidia/cublas/lib:%h/venvs/lenoxvi/lib/python3.14/site-packages/nvidia/cudnn/lib:%h/venvs/lenoxvi/lib/python3.14/site-packages/nvidia/cuda_nvrtc/lib
 # --host <bot-host-LAN-IP>: bind the LAN interface (0.0.0.0 works too;
 # localhost does NOT — mic nodes and browsers connect from the LAN).
 # --esp32: enable SDP munging for the ESP32-S3 mic nodes.

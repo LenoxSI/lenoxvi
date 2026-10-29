@@ -39,12 +39,10 @@ from intelligence import target as intelligence_target
 import node_speaker
 from paths import clips_dir, firmware_dir, models_dir, state_root, wake_root
 import room_recorder
+import stt_catalog
+import tts_catalog
 import tts_kokoro
-import tts_pocket
 import wake_name
-
-import wake_word  # module-level import is light (pipecat frames only;
-                  # the OWW/torch load happens at filter construction)
 
 from . import config_store, node_command, registry
 from .guard import mutation_guard, recording_guard
@@ -172,8 +170,6 @@ def _lane(kind):
 @router.get("/status")
 async def status():
     boot = registry.boot_time()
-    wake_cfg = config_store.read_section("wake") or {}
-    stt_cfg = config_store.read_section("stt") or {}
     tts_cfg = config_store.read_section("tts") or {}
     return {
         "uptime_secs": round(time.time() - boot, 1) if boot else None,
@@ -182,22 +178,17 @@ async def status():
         # the SAME chains the consumers use, so the dashboard always
         # shows what's actually constructed, never static text:
         # config > env > code default.
-        "wake_model": os.path.basename(str(
-            cfg_env("wake", "model", "LVI_WAKE_MODEL",
-                    wake_cfg.get("model") or wake_word.WAKE_MODEL))),
-        "stt_model": cfg_env("stt", "model", "LVI_STT_MODEL",
-                             stt_cfg.get("model") or "large-v3-turbo"),
         # STT card chips: load state + per-command transcription time (median
         # of the last 10), straight from the shared model's owner.
         "stt": _stt_status(),
-        "tts_provider": cfg_env("tts", "provider", "LVI_TTS_PROVIDER",
-                                tts_cfg.get("provider") or "elevenlabs"),
+        # Unset or unknown = Embedded (Kokoro), as the bot resolves it.
+        "tts_provider": tts_catalog.resolve_provider(
+            cfg_env("tts", "provider", "LVI_TTS_PROVIDER", tts_cfg.get("provider"))),
         # Intelligence: rig-facts label — same cfg_env chain
         # the agent reads, so the dashboard shows what will actually be
         # constructed. Config section, env vars, and UI all say
         # "intelligence" — one name, everywhere (naming rule).
         "intelligence": _intelligence_label(),
-        "active_room": registry.active_room(),
         "last_wake": registry.last_wake(),
         "rooms": registry.known_rooms(),
         # Session modes (fresh | sticky per node) — the dashboard renders
@@ -262,7 +253,7 @@ def _restart_pending() -> list:
         out.append("room agents")
     if differs("wake", ("model",)):
         out.append("wake model")
-    stt_keys = ["provider", "model", "device", "compute_type"]
+    stt_keys = ["provider"]   # the Embedded model is fixed: nothing else in stt waits for a restart
     # Whisper reads the language live; a cloud provider fixes it when the session is built.
     if any(stt_catalog.is_cloud(str(pick(c, "stt").get("provider") or os.getenv("LVI_STT_PROVIDER") or "").lower())
            for c in (boot, saved)):
@@ -1210,23 +1201,36 @@ _DEEPGRAM_FLUX_VOICES = (
 # MUST match TTSPayload.model's pattern (suite pins it).
 _ELEVENLABS_MODELS = ("eleven_flash_v2_5", "eleven_v4_turbo")
 
+# LocalAI's pocket-tts backend speaks these preset voices. The TTS card's
+# LocalAI voice picker lists them when the picked LocalAI model runs that
+# backend (any other voice name is typed by hand).
+_LOCALAI_POCKET_VOICES = (
+    "alba", "anna", "azelma", "bill_boerst", "caro_davy", "charles",
+    "cosette", "eponine", "eve", "fantine", "george", "jane", "jean",
+    "javert", "marius", "mary", "michael", "paul", "peter_yearsley",
+    "stuart_bell", "vera",
+)
+
 # The dashboard's pick-lists come FROM HERE via
 # GET /tts — the UI used to hardcode its own copies (12 of 40 Aura, 16 of
 # 36 Flux), so most accepted voices were unpickable and a configured
 # aura-2-zeus-en couldn't even display. One catalog, one owner.
+# "pocket" is not a provider: it is LocalAI's pocket-tts voice list.
 TTS_CATALOG = {
     "elevenlabs": list(_ELEVENLABS_MODELS),
     "deepgram": list(_DEEPGRAM_VOICES),
     "deepgram-flux": list(_DEEPGRAM_FLUX_VOICES),
-    "pocket": list(tts_pocket.POCKET_VOICES),
+    "pocket": list(_LOCALAI_POCKET_VOICES),
     "kokoro": list(tts_kokoro.KOKORO_VOICES),
 }
 
 
 class TTSPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
-    provider: str = Field(default="elevenlabs",
-                          pattern="^(elevenlabs|deepgram|deepgram-flux|pocket|kokoro|localai)$")
+    # One of the TTS catalog's providers; unset = Embedded (Kokoro). A field
+    # the payload no longer has (an old tab) 422s like any unknown key.
+    provider: str = Field(default=tts_catalog.DEFAULT_PROVIDER,
+                          pattern=f"^({'|'.join(tts_catalog.PROVIDER_NAMES)})$")
     voice_id: str | None = Field(default=None, min_length=8, max_length=64)
     # Model trim: flash for reliability/speed, v4
     # turbo for expressiveness — v2/v3/v4-regular have no use case in a
@@ -1250,19 +1254,14 @@ class TTSPayload(BaseModel):
     # ElevenLabs apply_text_normalization: auto (their default; OFF on
     # Flash) | on (spell numbers/times/dates; ~+0.15 s) | off.
     elevenlabs_text_normalization: str | None = Field(default=None, pattern="^(auto|on|off)$")
-    # Pocket (local): a preset voice name only from the dashboard; a .wav
-    # clone path is config-file-only (it needs gated weights + an HF login).
-    pocket_voice: str | None = Field(default=None)
-    # Kokoro (local): one of the 28 English voices; speed 0.5–1.5 in 0.05
-    # steps (None = leave as-is).
+    # Kokoro: the Embedded voice, and the standby behind LocalAI and Cloud
+    # (the card's "Fallback voice"). One of the 28 English voices; speed
+    # 0.5–1.5 in 0.05 steps. Saved with any provider; None = leave as-is.
     kokoro_voice: str | None = Field(default=None)
     kokoro_speed: float | None = Field(default=None, ge=0.5, le=1.5)
-    # Local hot standby behind a cloud provider. "off" clears it; None =
-    # leave as-is (partial update).
-    fallback: str | None = Field(default=None, pattern="^(pocket|kokoro|off)$")
 
 
-def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> None:
+def _validate_tts_payload(p: TTSPayload) -> None:
     if p.provider == "elevenlabs":
         if not p.voice_id or not p.model:
             raise HTTPException(status_code=422, detail="elevenlabs needs voice_id and model")
@@ -1276,11 +1275,6 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
             raise HTTPException(status_code=422, detail="deepgram_flux_voice must be one of the Flux voices (flux-hannah-en …)")
         if p.deepgram_flux_speed is not None and abs(p.deepgram_flux_speed * 20 - round(p.deepgram_flux_speed * 20)) > 1e-9:
             raise HTTPException(status_code=422, detail="speed must be 0.5–1.5 in 0.05 steps")
-    elif p.provider == "pocket":
-        if not p.pocket_voice or p.pocket_voice not in tts_pocket.POCKET_VOICES:
-            raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
-        if not tts_pocket.pocket_available():
-            raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
     elif p.provider == "kokoro":
         if not p.kokoro_voice or p.kokoro_voice not in tts_kokoro.KOKORO_VOICES:
             raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
@@ -1295,25 +1289,6 @@ def _validate_tts_payload(p: TTSPayload, saved_fallback: str | None = None) -> N
         raise HTTPException(status_code=422, detail="kokoro_voice must be one of the Kokoro voices (af_heart …)")
     if p.kokoro_speed is not None and abs(p.kokoro_speed * 20 - round(p.kokoro_speed * 20)) > 1e-9:
         raise HTTPException(status_code=422, detail="kokoro_speed must be 0.5–1.5 in 0.05 steps")
-    # A Pocket voice is validated wherever it rides (primary voice or the
-    # fallback's voice): only the presets are dashboard-settable.
-    if p.pocket_voice is not None and p.pocket_voice not in tts_pocket.POCKET_VOICES:
-        raise HTTPException(status_code=422, detail="pocket_voice must be one of the Pocket presets (alba …)")
-    if p.fallback == "kokoro":
-        if p.provider == "kokoro":
-            raise HTTPException(status_code=422, detail="the fallback can't be the primary (Kokoro is already the provider)")
-        # Install check only when TURNING IT ON (same rule as Pocket below).
-        if saved_fallback != "kokoro":
-            problem = tts_kokoro.setup_problem()
-            if problem:
-                raise HTTPException(status_code=422, detail=problem)
-    if p.fallback == "pocket":
-        if p.provider == "pocket":
-            raise HTTPException(status_code=422, detail="the fallback can't be the primary (Pocket is already the provider)")
-        # Install check only when TURNING IT ON: re-sending an already-saved
-        # fallback must never lock the panel if Pocket went missing later.
-        if saved_fallback != "pocket" and not tts_pocket.pocket_available():
-            raise HTTPException(status_code=422, detail=f"Pocket TTS is not installed — {tts_pocket.INSTALL_HINT}")
 
 
 class TTSKeyPayload(BaseModel):
@@ -1328,15 +1303,33 @@ class TTSKeyPayload(BaseModel):
                          pattern=r"^[A-Za-z0-9_.\-]+$")
 
 
+def _tts_providers(kokoro_problem: str | None, localai_problem: str | None) -> list:
+    """Every TTS provider in card order with its tier (tts_catalog). One
+    that can't be picked yet says why: missing setup first, then its key."""
+    out = []
+    for p in tts_catalog.PROVIDERS:
+        item = {"name": p["name"], "label": p["label"], "tier": p["tier"], "available": True}
+        if p["name"] == "kokoro" and kokoro_problem:
+            item.update(available=False, reason="model files missing" if tts_kokoro.kokoro_available() else "not installed")
+        elif p["name"] == "localai" and localai_problem:
+            item.update(available=False, reason=_LOCALAI_REASON)
+        elif p["key_var"] and not _key_set(p["key_var"]):
+            item.update(available=False, reason=_ADD_KEY_REASON)
+        out.append(item)
+    return out
+
+
 @router.get("/tts")
 async def get_tts():
     """Current TTS config + key status per provider. Never returns keys.
     Every knob the bot reads with an env var resolves file > LVI_* env >
     the bot's default (bot.py's cfg_env precedence) — the panel used to
-    show the code default for a knob that lived only in .env."""
+    show the code default for a knob that lived only in .env. An unset or
+    unknown provider reads as Embedded (Kokoro), as the bot resolves it."""
     import os as _os
     tts_cfg = config_store.read_section("tts") or {}
     kokoro_problem = tts_kokoro.setup_problem()
+    localai_problem = _localai_problem()
 
     def _cfg_env(key, env_var, default=None):
         # same precedence as core.config.cfg_env, on the fresh file read
@@ -1346,7 +1339,7 @@ async def get_tts():
         return default if v is None else v
 
     return {
-        "provider": _cfg_env("provider", "LVI_TTS_PROVIDER", "elevenlabs"),
+        "provider": tts_catalog.resolve_provider(_cfg_env("provider", "LVI_TTS_PROVIDER")),
         "voice_id": _cfg_env("voice_id", "LVI_TTS_VOICE_ID"),
         "model": _cfg_env("model", "LVI_TTS_MODEL", "eleven_flash_v2_5"),
         "deepgram_voice": _cfg_env("deepgram_voice", "LVI_TTS_VOICE", "aura-2-thalia-en"),
@@ -1357,18 +1350,10 @@ async def get_tts():
         "elevenlabs_stability": tts_cfg.get("elevenlabs_stability"),
         # None = unset = ElevenLabs' own default (auto).
         "elevenlabs_text_normalization": tts_cfg.get("elevenlabs_text_normalization"),
-        "pocket_voice": _cfg_env("pocket_voice", "LVI_TTS_POCKET_VOICE", tts_pocket.DEFAULT_VOICE),
-        "fallback": tts_cfg.get("fallback") or None,
-        "pocket_installed": tts_pocket.pocket_available(),
         "kokoro_voice": _cfg_env("kokoro_voice", "LVI_TTS_KOKORO_VOICE", tts_kokoro.DEFAULT_VOICE),
         # None = unset in file and env = the bot's default (1.0). Kept None
         # so the card doesn't pin 1.0 into config on its next save.
         "kokoro_speed": _cfg_env("kokoro_speed", "LVI_TTS_KOKORO_SPEED"),
-        "kokoro_installed": kokoro_problem is None,
-        "kokoro_files_missing": tts_kokoro.kokoro_available() and kokoro_problem is not None,
-        "kokoro_problem": kokoro_problem,
-        # LocalAI: the provider is offered once its URL and key are saved.
-        "localai_problem": _localai_problem(),
         "localai_model_tts": _localai_saved()["model_tts"],
         "localai_voice": _localai_saved()["voice"],
         "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
@@ -1377,8 +1362,13 @@ async def get_tts():
         "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
         "localai_key_hint": intelligence_target.key_hint(_saved_env().get("LVI_LOCALAI_KEY")),
         "deepgram_key_hint": intelligence_target.key_hint(_saved_env().get("DEEPGRAM_API_KEY")),
-        # The accepted values per provider — the UI's only source
-        # for its pick-lists (elevenlabs = model ids; deepgram* = voices).
+        # The three tiers and every provider in card order (tts_catalog): the
+        # card's grouped dropdown, with a reason on each one it can't offer yet.
+        "tiers": tts_catalog.TIERS,
+        "providers": _tts_providers(kokoro_problem, localai_problem),
+        # The accepted values per provider — the UI's only source for its
+        # pick-lists (elevenlabs = model ids; deepgram* and kokoro = voices;
+        # pocket = LocalAI's pocket-tts voices for the LocalAI voice picker).
         "catalog": TTS_CATALOG,
         "note": "provider/voice/model apply on next bot restart; keys apply "
                 "on next bot restart (read at pipeline construction)",
@@ -1390,7 +1380,7 @@ async def put_tts(payload: TTSPayload):
     """Write provider + knobs to config.yaml (tts section). Applies on the
     next bot restart — same contract as every config edit."""
     current = dict(config_store.read_section("tts") or {})
-    _validate_tts_payload(payload, saved_fallback=current.get("fallback"))
+    _validate_tts_payload(payload)
     current["provider"] = payload.provider
     if payload.provider == "elevenlabs":
         current["voice_id"] = payload.voice_id
@@ -1405,13 +1395,6 @@ async def put_tts(payload: TTSPayload):
             current["elevenlabs_text_normalization"] = payload.elevenlabs_text_normalization
     elif payload.provider == "deepgram":
         current["deepgram_voice"] = payload.deepgram_voice
-    elif payload.provider == "pocket":
-        current["pocket_voice"] = payload.pocket_voice
-        current.pop("fallback", None)   # Pocket as primary never carries a fallback
-    elif payload.provider == "kokoro":
-        current["kokoro_voice"] = payload.kokoro_voice
-        if payload.kokoro_speed is not None:   # None = leave as-is
-            current["kokoro_speed"] = payload.kokoro_speed
     elif payload.provider == "deepgram-flux":
         current["deepgram_flux_voice"] = payload.deepgram_flux_voice
         # Flux knobs ride along — None means "leave as-is" (partial update
@@ -1421,16 +1404,13 @@ async def put_tts(payload: TTSPayload):
             current["deepgram_flux_speed"] = payload.deepgram_flux_speed
         if payload.deepgram_flux_expressivity is not None:
             current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
-    if payload.fallback == "kokoro" and payload.provider != "kokoro":
-        current["fallback"] = "kokoro"
-    elif payload.fallback == "pocket" and payload.provider != "pocket":
-        current["fallback"] = "pocket"
-        # The fallback's voice (same tts.pocket_voice key Pocket-as-primary
-        # uses) rides with the fallback; ignored when the fallback is off.
-        if payload.pocket_voice:
-            current["pocket_voice"] = payload.pocket_voice
-    elif payload.fallback == "off":
-        current.pop("fallback", None)
+    # Kokoro's voice and speed serve every tier: the Embedded voice, and the
+    # standby behind LocalAI and Cloud (the card's "Fallback voice"). Saved
+    # with any provider (Kokoro itself requires the voice); None = leave as-is.
+    if payload.kokoro_voice is not None:
+        current["kokoro_voice"] = payload.kokoro_voice
+    if payload.kokoro_speed is not None:
+        current["kokoro_speed"] = payload.kokoro_speed
     try:
         config_store.write_section("tts", current)
     except FileNotFoundError as e:
@@ -1474,6 +1454,20 @@ def _saved_env() -> dict:
     except OSError:
         pass
     return view
+
+
+# Why a cloud provider shows disabled on either speech card.
+_ADD_KEY_REASON = "add the key on System · Keys"
+# Reasons are short on purpose: the option text reads "<label> — <reason>";
+# the LocalAI card on System explains what is missing.
+_LOCALAI_REASON = "set it up on System"
+
+
+def _key_set(var: str | None) -> bool:
+    """A key is set: the live process env OR the saved .env (a key saved on
+    the Keys card counts before the restart that loads it). Presence only —
+    never the value."""
+    return bool(var and (os.getenv(var) or _saved_env().get(var)))
 
 
 _ENV_BACKUPS_KEPT = 3
@@ -1591,7 +1585,7 @@ def _keys_cfg() -> dict:
         return str(v if v not in (None, "") else os.getenv(env, default)).strip().lower()
     icfg = dict(config_store.read_section("intelligence") or {})
     icfg["kind"] = pick("intelligence", "kind", "LVI_INTELLIGENCE_KIND", intelligence.DEFAULT_KIND)
-    return {"tts": {"provider": pick("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs")},
+    return {"tts": {"provider": tts_catalog.resolve_provider(pick("tts", "provider", "LVI_TTS_PROVIDER", ""))},
             "stt": {"provider": pick("stt", "provider", "LVI_STT_PROVIDER", "whisper")},
             "intelligence": icfg,
             "room_agents": dict(config_store.read_section("room_agents") or {})}
@@ -2213,144 +2207,9 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
 
 
 # ── speech-to-text card ──────────────────────────────────────────────
-# Four benchmarked faster-whisper models (stt_catalog), a language, and the
-# GPU/CPU runtime written with each pick. A model that isn't on disk is
-# downloaded FIRST; config switches only after the download succeeds, so a
-# restart never downloads and config never names a missing model.
-
-import threading
-
-import stt_catalog
-
-_STT_DL: dict = {}          # {"model", "state": downloading|ready|error, "error"?}
-_STT_DL_LOCK = threading.RLock()  # re-entrant: claim checks call _stt_in_use_repos
-_GPU_NAME_CACHE: list = []
-
-
-def _stt_cached(name: str) -> bool:
-    """On disk AND complete. Older huggingface_hub returns a snapshot dir
-    without checking it's whole, and a restart mid-download leaves one
-    behind — so the files the model actually loads must be there."""
-    try:
-        from faster_whisper.utils import download_model
-        path = Path(download_model(name, local_files_only=True))
-    except Exception:  # noqa: BLE001 — not cached (or no hub): either way, not on disk
-        return False
-    return (path / "model.bin").is_file() and (path / "config.json").is_file()
-
-
-def _stt_download(name: str, on_progress=None) -> None:
-    """Fetch a model with byte progress. faster-whisper's download_model
-    hard-disables progress, so this calls snapshot_download directly with
-    the same repo + file patterns, and a silent tqdm class: the hub builds a
-    "Downloading bytes" bar (network) and a "Reconstructing…" bar (bytes
-    written to disk) from it and aggregates every file into them. Only the
-    written-to-disk bar is reported."""
-    from huggingface_hub import snapshot_download
-    from tqdm import tqdm
-
-    class _Progress(tqdm):
-        def __init__(self, *args, **kwargs):
-            fp = open(os.devnull, "w")  # noqa: SIM115 — closed in close()
-            kwargs["file"] = fp
-            kwargs["disable"] = False
-            self._report = str(kwargs.get("desc", "")).startswith("Reconstructing")
-            try:
-                super().__init__(*args, **kwargs)
-            except Exception:
-                fp.close()
-                raise
-
-        def update(self, n=1):
-            out = super().update(n)
-            if self._report and on_progress:
-                on_progress(int(self.n), int(self.total or 0))
-            return out
-
-        def close(self):
-            fp = self.fp
-            super().close()
-            fp.close()
-
-    snapshot_download(stt_catalog.spec(name)["repo"], allow_patterns=stt_catalog.FILE_PATTERNS,
-                      tqdm_class=_Progress)
-
-
-def _stt_hub_repo(name: str):
-    from huggingface_hub import scan_cache_dir
-
-    repo_id = stt_catalog.spec(name)["repo"]
-    return next((r for r in scan_cache_dir().repos if r.repo_id == repo_id and r.repo_type == "model"), None)
-
-
-def _stt_disk_sizes() -> dict:
-    """Bytes on disk per catalog model (complete or not), from ONE cache scan."""
-    try:
-        from huggingface_hub import scan_cache_dir
-
-        by_repo = {r.repo_id: int(r.size_on_disk) for r in scan_cache_dir().repos if r.repo_type == "model"}
-    except Exception:  # noqa: BLE001 — no cache dir yet
-        by_repo = {}
-    return {m["name"]: by_repo.get(m["repo"], 0) for m in stt_catalog.MODELS}
-
-
-def _stt_repo_of(value):
-    """The Hugging Face repo a stt.model value loads from: a catalog name,
-    one of faster-whisper's own aliases ("turbo"), a raw repo id, or a local
-    path inside the hub cache. None when it isn't from the hub cache."""
-    if not value:
-        return None
-    spec = stt_catalog.spec(value)
-    if spec:
-        return spec["repo"]
-    try:
-        from faster_whisper.utils import _MODELS as fw_models
-    except Exception:  # noqa: BLE001 — alias table unavailable: fall through
-        fw_models = {}
-    if value in fw_models:
-        return fw_models[value]
-    m = re.search(r"models--([^/\\]+?)--([^/\\]+)", value)
-    if m:
-        return f"{m.group(1)}/{m.group(2)}"
-    if "/" in value and not value.startswith(("/", ".", "~")):
-        return value
-    return None
-
-
-def _stt_delete(name: str) -> int:
-    """Remove a model from the Hugging Face cache via the hub's own API
-    (never a hand-rolled rm). Returns bytes freed."""
-    from huggingface_hub import scan_cache_dir
-
-    repo = _stt_hub_repo(name)
-    if repo is None:
-        return 0
-    strategy = scan_cache_dir().delete_revisions(*(rev.commit_hash for rev in repo.revisions))
-    freed = int(strategy.expected_freed_size)
-    strategy.execute()
-    return freed
-
-
-def _stt_gpu_name():
-    """The CUDA GPU's name, or None without one. Looked up once."""
-    if _GPU_NAME_CACHE:
-        return _GPU_NAME_CACHE[0]
-    name = None
-    try:
-        import ctranslate2
-        if ctranslate2.get_cuda_device_count() > 0:
-            name = "GPU"
-            try:
-                out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], check=False,
-                                     capture_output=True, text=True, timeout=3)
-                first = out.stdout.strip().splitlines()[0].strip() if out.returncode == 0 else ""
-                name = first.replace("NVIDIA ", "") or name
-            except Exception as e:  # noqa: BLE001 — a name is cosmetic; "GPU" will do
-                logger.debug(f"stt: nvidia-smi name lookup failed: {e}")
-    except Exception:  # noqa: BLE001 — no ctranslate2 CUDA support -> no GPU
-        name = None
-    _GPU_NAME_CACHE.append(name)
-    return name
+# A provider from one of the three speech tiers (stt_catalog) and a
+# language. Embedded is one fixed Whisper model on this machine, so the
+# card has nothing to download, delete or size up.
 
 
 def _stt_status() -> dict:
@@ -2368,56 +2227,49 @@ def _stt_deepgram_sdk() -> bool:
 
 
 def _stt_key_set(provider: str) -> bool:
-    # Live process env OR saved .env (a key saved on the Keys card counts
-    # before the restart that loads it). Presence only — never the value.
-    var = stt_catalog.KEY_VARS.get(provider)
-    return bool(var and (os.getenv(var) or _saved_env().get(var)))
+    return _key_set(stt_catalog.KEY_VARS.get(provider))
 
 
 def _stt_providers() -> list:
+    """Every STT provider in card order with its tier (stt_catalog). One
+    that can't be picked yet says why: missing setup first, then its key."""
+    localai_problem = _localai_problem()
     out = []
     for p in stt_catalog.PROVIDERS:
         item = dict(p, available=True)
         if p["name"] == "deepgram" and not _stt_deepgram_sdk():
-            item.update(available=False, reason="deepgram-sdk is not installed (pip install deepgram-sdk)")
-        if p["name"] == "localai" and _localai_problem():
-            item.update(available=False, reason=_localai_problem())
+            item.update(available=False, reason="not installed")
+        elif p["name"] == "localai" and localai_problem:
+            item.update(available=False, reason=_LOCALAI_REASON)
+        elif stt_catalog.is_cloud(p["name"]) and not _stt_key_set(p["name"]):
+            item.update(available=False, reason=_ADD_KEY_REASON)
         out.append(item)
     return out
 
 
 def _stt_current() -> dict:
     # Fresh from config.yaml (config > env > default, the same chain the bot
-    # boots with) — the process config cache misses hand edits, and this
-    # decides what's safe to delete.
+    # boots with) — the process config cache misses hand edits. An unset or
+    # unknown provider reads as Embedded, the way the bot resolves it.
     sec = config_store.read_section("stt") or {}
 
     def pick(key, env, default=None):
         return sec.get(key) or os.getenv(env) or default
 
-    model = pick("model", "LVI_STT_MODEL", "large-v3-turbo")
-    provider = pick("provider", "LVI_STT_PROVIDER", "whisper")
     language = pick("language", "LVI_STT_LANGUAGE") or "auto"
     return {
-        "provider": provider,
-        "model": model,
+        "provider": stt_catalog.resolve_provider(pick("provider", "LVI_STT_PROVIDER")),
         "language": language,
-        "device": pick("device", "LVI_STT_DEVICE", "cuda"),
-        "compute": pick("compute_type", "LVI_STT_COMPUTE", "float16"),
-        "custom_model": model not in stt_catalog.MODEL_NAMES,
         "custom_language": language not in stt_catalog.LANGUAGE_CODES,
     }
 
 
-def _stt_write(model: str | None = None, language: str | None = None, has_gpu: bool = True,
-               provider: str | None = None) -> None:
-    # Read-modify-write under the store's lock: the download thread and a
-    # loop-side PUT can't lose each other's change.
+def _stt_write(language: str | None = None, provider: str | None = None) -> None:
+    # Read-modify-write under the store's lock. Only provider and language
+    # are written; anything else the section holds stays as it is (the
+    # product never rewrites a user's config).
     with config_store.LOCK:
         section = dict(config_store.read_section("stt") or {})
-        if model is not None:
-            device, compute = stt_catalog.runtime_for(has_gpu)
-            section.update(model=model, device=device, compute_type=compute)
         if provider is not None:
             section["provider"] = provider
         if language is not None:
@@ -2427,123 +2279,42 @@ def _stt_write(model: str | None = None, language: str | None = None, has_gpu: b
         config_store.write_section("stt", section)
 
 
-def _stt_progress(model: str):
-    """Download progress sink: bytes written so far / expected total. Early
-    on the hub's total only covers files already started, so the catalog
-    size is the floor — the bar never shoots up and falls back."""
-    floor = int(stt_catalog.spec(model)["size_gb"] * 1e9)
-
-    def report(done: int, total: int) -> None:
-        with _STT_DL_LOCK:
-            if _STT_DL.get("model") == model and _STT_DL.get("state") == "downloading":
-                _STT_DL.update(done_bytes=done, total_bytes=total if total >= 0.8 * floor else floor)
-    return report
-
-
-def _stt_download_then_switch(model: str, has_gpu: bool) -> None:
-    try:
-        _stt_download(model, on_progress=_stt_progress(model))
-        _stt_write(model=model, has_gpu=has_gpu)
-        with _STT_DL_LOCK:
-            _STT_DL.update(model=model, state="ready")
-            _STT_DL.pop("error", None)
-        logger.info(f"stt: downloaded {model}; config switched (restart to load it)")
-    except Exception as e:  # noqa: BLE001 — reported to the card; config untouched
-        with _STT_DL_LOCK:
-            _STT_DL.update(model=model, state="error", error=f"{type(e).__name__}: {e}"[:300])
-        logger.warning(f"stt: download of {model} failed: {e}")
-
-
 class SttPayload(BaseModel):
+    # extra='forbid': a field the card no longer has (a tab left open
+    # across an upgrade) 422s naming it, and nothing is written.
     model_config = ConfigDict(extra="forbid")
-    model: str | None = Field(default=None, max_length=64)
     language: str | None = Field(default=None, max_length=16)
     provider: str | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def _something(self):
-        if self.model is None and self.language is None and self.provider is None:
-            raise ValueError("send model, language and/or provider")
+        if self.language is None and self.provider is None:
+            raise ValueError("send language and/or provider")
         return self
 
 
 @router.get("/stt")
 async def get_stt():
-    gpu = await asyncio.to_thread(_stt_gpu_name)
-    cached = await asyncio.gather(*(asyncio.to_thread(_stt_cached, m["name"]) for m in stt_catalog.MODELS))
-    with _STT_DL_LOCK:
-        dl = dict(_STT_DL) or None
-    if dl and dl.get("state") == "downloading" and dl.get("total_bytes"):
-        dl["percent"] = min(99, round(100 * dl.get("done_bytes", 0) / dl["total_bytes"]))
-    sizes = await asyncio.to_thread(_stt_disk_sizes)
-    in_use = _stt_in_use_repos()
+    """The STT card: the saved pick, the three tiers, every provider (its
+    tier, and whether it can be picked now), the languages and the running
+    state."""
     return {
         "current": _stt_current(),
-        "models": [{**{k: v for k, v in m.items() if k != "repo"}, "cached": c,
-                    "available": not (m["gpu_only"] and gpu is None),
-                    "disk_bytes": sizes.get(m["name"], 0),
-                    "deletable": sizes.get(m["name"], 0) > 0 and m["repo"] not in in_use}
-                   for m, c in zip(stt_catalog.MODELS, cached)],
-        "languages": stt_catalog.LANGUAGES,
+        "tiers": stt_catalog.TIERS,
         "providers": _stt_providers(),
+        "languages": stt_catalog.LANGUAGES,
         "deepgram_key_set": _stt_key_set("deepgram"),
         "elevenlabs_key_set": _stt_key_set("elevenlabs"),
-        "gpu": gpu,
         "status": _stt_status(),
-        "download": dl,
     }
-
-
-# Models with a delete or a switch in flight (claimed under _STT_DL_LOCK).
-# A delete and a switch of the same model can't overlap: between "is it on
-# disk / in use?" and acting, neither may let the other slip in. A claim set
-# instead of an asyncio.Lock: no lock is ever held across an await.
-_STT_BUSY: set = set()
-
-
-def _stt_claim(name: str, why: str) -> None:
-    if name in _STT_BUSY:
-        raise HTTPException(status_code=409, detail=f"{name} is busy ({why} in progress) — try again")
-    _STT_BUSY.add(name)
-
-
-def _stt_in_use_repos() -> set:
-    """Repos the bot needs: the configured model (next boot), the loaded one,
-    and one mid-download — compared by REPO, so an alias ("turbo"), a raw
-    repo id or a local cache path protects the same files."""
-    used = [_stt_current()["model"], _stt_status().get("model")]
-    with _STT_DL_LOCK:
-        if _STT_DL.get("state") == "downloading":
-            used.append(_STT_DL.get("model"))
-    return {repo for repo in map(_stt_repo_of, used) if repo}
-
-
-@router.delete("/stt/model/{name}", dependencies=GUARD)
-async def delete_stt_model(name: str):
-    spec = stt_catalog.spec(name)
-    if spec is None:
-        raise HTTPException(status_code=422, detail=f"model must be one of {stt_catalog.MODEL_NAMES}")
-    with _STT_DL_LOCK:
-        if spec["repo"] in _stt_in_use_repos():
-            raise HTTPException(status_code=409, detail=f"{name} is in use (configured, loaded or downloading)")
-        _stt_claim(name, "a change")
-    try:
-        if not (await asyncio.to_thread(_stt_disk_sizes)).get(name):
-            raise HTTPException(status_code=404, detail=f"{name} isn't on disk")
-        freed = await asyncio.to_thread(_stt_delete, name)
-        if (await asyncio.to_thread(_stt_disk_sizes)).get(name):
-            raise HTTPException(status_code=500, detail=f"{name} is still on disk — delete didn't complete")
-    finally:
-        with _STT_DL_LOCK:
-            _STT_BUSY.discard(name)
-    logger.info(f"stt: deleted {name} from the model cache ({freed / 1e6:.0f} MB)")
-    return {"ok": True, "freed_bytes": freed}
 
 
 @router.put("/stt", dependencies=GUARD)
 async def put_stt(payload: SttPayload):
-    has_gpu = (await asyncio.to_thread(_stt_gpu_name)) is not None
-    err = stt_catalog.validate(payload.model, payload.language, has_gpu)
+    """Save the STT provider and/or language. A provider change waits for a
+    restart; the language is live on Whisper (a cloud provider fixes it when
+    the session is built)."""
+    err = stt_catalog.validate_language(payload.language)
     if payload.provider is not None:
         err = err or stt_catalog.validate_provider(payload.provider)
         if not err and payload.provider == "deepgram" and not _stt_deepgram_sdk():
@@ -2552,76 +2323,29 @@ async def put_stt(payload: SttPayload):
             err = _localai_problem()
     if err:
         raise HTTPException(status_code=422, detail=err)
-    if payload.model is not None:
-        with _STT_DL_LOCK:
-            if _STT_DL.get("state") == "downloading":
-                raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
     import stt_fallback
 
     running_provider = stt_fallback._STATE["provider"]
     before = _stt_current()
-    restart_needed, download = False, "not_needed"
-    # Every check that can refuse (409) runs before anything is written, and
-    # model, language and provider land in ONE write — a refused save
-    # changes nothing (the language used to be written before the model
-    # claim could 409).
-    try:
-        if payload.model is not None:
-            with _STT_DL_LOCK:
-                _stt_claim(payload.model, "a delete")
+    restart_needed = False
+    # Whisper reads the language live; a cloud provider's is fixed when the
+    # session is built, so on (or headed to) one it's a restart.
+    if (payload.language is not None and payload.language != before["language"]
+            and any(map(stt_catalog.is_cloud, (before["provider"], running_provider, payload.provider)))):
+        restart_needed = True
+    provider = None
+    if payload.provider is not None and payload.provider != before["provider"]:
+        provider = payload.provider
+        # A restart only if the bot isn't already running what was picked.
+        restart_needed = restart_needed or payload.provider != running_provider
+    if payload.language is not None or provider is not None:
         try:
-            write_model = False
-            if payload.model is not None:
-                restart_needed, download, write_model = await _stt_switch_model(payload.model, has_gpu)
-            # Whisper reads the language live; a cloud provider's is fixed when
-            # the session is built, so on (or headed to) one it's a restart.
-            if (payload.language is not None and payload.language != before["language"]
-                    and any(map(stt_catalog.is_cloud, (before["provider"], running_provider, payload.provider)))):
-                restart_needed = True
-            provider = None
-            if payload.provider is not None and payload.provider != before["provider"]:
-                provider = payload.provider
-                # A restart only if the bot isn't already running what was picked.
-                restart_needed = restart_needed or payload.provider != running_provider
-            if write_model or payload.language is not None or provider is not None:
-                # Inside the model's claim: a delete can't remove it between
-                # the cache check and this write.
-                _stt_write(model=payload.model if write_model else None, language=payload.language,
-                           has_gpu=has_gpu, provider=provider)
-        finally:
-            if payload.model is not None:
-                with _STT_DL_LOCK:
-                    _STT_BUSY.discard(payload.model)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+            _stt_write(language=payload.language, provider=provider)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=409, detail=str(e))
     cur = _stt_current()
     key_needed = stt_catalog.is_cloud(cur["provider"]) and not _stt_key_set(cur["provider"])
-    return {"ok": True, "restart_needed": restart_needed, "download": download, "key_needed": key_needed,
-            "current": cur}
-
-
-async def _stt_switch_model(model: str, has_gpu: bool) -> tuple:
-    """(restart_needed, download, write_model). Writes nothing: when
-    write_model is True the caller writes the model, still holding its
-    claim, so a delete can't remove it between the cache check and the
-    config write."""
-    cur = _stt_current()
-    if (model, *stt_catalog.runtime_for(has_gpu)) == (cur["model"], cur["device"], cur["compute"]):
-        return False, "not_needed", False
-    cached = await asyncio.to_thread(_stt_cached, model)
-    # Check-and-claim in ONE lock hold (the cache check above awaits, so the
-    # early 409 alone can't stop two PUTs racing).
-    with _STT_DL_LOCK:
-        if _STT_DL.get("state") == "downloading":
-            raise HTTPException(status_code=409, detail=f"still downloading {_STT_DL.get('model')}")
-        if not cached:
-            _STT_DL.clear()
-            _STT_DL.update(model=model, state="downloading")
-    if cached:
-        return True, "not_needed", True
-    threading.Thread(target=_stt_download_then_switch, args=(model, has_gpu),
-                     name="stt-download", daemon=True).start()
-    return False, "started", False
+    return {"ok": True, "restart_needed": restart_needed, "key_needed": key_needed, "current": cur}
 
 
 @router.get("/voice-tuning")

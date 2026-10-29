@@ -1,7 +1,8 @@
-"""TTS hot standby: primary cloud TTS -> a local standby on hard failure.
+"""TTS hot standby: a cloud voice -> Kokoro (Embedded) on hard failure.
 
-The standby is Pocket or Kokoro (tts.fallback); the text below says Pocket,
-and the same holds for Kokoro (its own GEN_LOCK is the idle check).
+Every cloud TTS provider runs behind pipecat's ServiceSwitcher with the
+Kokoro standby (bot.py arms it for every cloud voice). Kokoro as the main
+voice needs none, and LocalAI falls back to Kokoro by itself, per sentence.
 
 pipecat's ServiceSwitcherStrategyFailover switches when the active service
 pushes an ErrorFrame AND is_usable is False (pipecat flips usability
@@ -16,17 +17,18 @@ Two gaps are ours to close:
    escalates a connection error on the ACTIVE primary to a permanent one,
    which flips it unusable and lets the switcher fail over.
 
-2. The switcher never switches BACK. While Pocket is active the primary
-   gets no speaks, so TTSTracked's on-speak revive can't fire. recover()
-   probes every tts.revive_cooldown_secs: a cheap TCP check of the
-   primary's host first (no websocket attempt, no log noise while the
-   network is down), then the real websocket revive. It waits until
-   Pocket is idle before queueing the switch frame (a switch mid-reply
-   would mix the two voices into one clip), then confirms the switch
-   actually landed and keeps trying if it was refused.
+2. The switcher never switches BACK. While the standby is active the
+   primary gets no speaks, so TTSTracked's on-speak revive can't fire.
+   recover() probes every tts.revive_cooldown_secs: a cheap TCP check of
+   the primary's host first (no websocket attempt, no log noise while the
+   network is down), then the real websocket revive. It waits until the
+   standby is idle (Kokoro's generation lock is free) before queueing the
+   switch frame (a switch mid-reply would mix the two voices into one
+   clip), then confirms the switch actually landed and keeps trying if it
+   was refused.
 
 Hard errors only, no first-chunk timeout: a slow-but-alive primary
-would start Pocket and then play its own late audio too (two voices).
+would start the standby and then play its own late audio too (two voices).
 """
 from __future__ import annotations
 
@@ -77,15 +79,8 @@ async def _tcp_reachable(endpoint, timeout: float = 3.0) -> bool:
     return True
 
 
-def _pocket_idle_default() -> bool:
-    try:
-        import tts_pocket
-        return not tts_pocket.GEN_LOCK.locked()
-    except Exception:
-        return True
-
-
 def _kokoro_idle() -> bool:
+    """True while Kokoro isn't generating (its process-wide lock is free)."""
     try:
         import tts_kokoro
         return not tts_kokoro.GEN_LOCK.locked()
@@ -93,23 +88,24 @@ def _kokoro_idle() -> bool:
         return True
 
 
-# Standby name -> its label in logs. Pocket's idle check stays recover()'s
-# default (looked up at call time); Kokoro passes its own.
-_LABELS = {"pocket": "Pocket", "kokoro": "Kokoro"}
+# Standby name -> its label in logs.
+_LABELS = {"kokoro": "Kokoro"}
 
 
 async def recover(primary, request_switch: Callable, cooldown: float,
-                  sleep=asyncio.sleep, *, reachable=_DEFAULT, pocket_idle=None,
+                  sleep=asyncio.sleep, *, reachable=_DEFAULT, standby_idle=None,
                   is_active=None, closed=None, confirm_secs: float = 5.0) -> bool:
     """Probe the primary until it revives, then switch back to it.
 
-    Returns True once the switch is confirmed (or requested, when there is
-    no is_active to confirm with); False when the session closed first.
+    standby_idle: True while the standby is free (default: Kokoro's
+    generation lock), so the switch never lands mid-reply. Returns True once
+    the switch is confirmed (or requested, when there is no is_active to
+    confirm with); False when the session closed first.
     """
     if reachable is _DEFAULT:
         endpoint = _primary_endpoint(primary)
         reachable = (lambda: _tcp_reachable(endpoint)) if endpoint else None
-    pocket_idle = pocket_idle or _pocket_idle_default
+    standby_idle = standby_idle or _kokoro_idle
     while True:
         if closed and closed():
             return False
@@ -121,7 +117,7 @@ async def recover(primary, request_switch: Callable, cooldown: float,
         await primary._try_revive()
         if not primary.is_usable:
             continue
-        while not pocket_idle():          # never switch mid-reply
+        while not standby_idle():         # never switch mid-reply
             if closed and closed():
                 return False
             await sleep(0.25)
@@ -152,8 +148,8 @@ def close_fallback(switcher) -> None:
 
 async def on_primary_connection_error(switcher, error) -> None:
     """Escalate a connect failure on the ACTIVE, still-usable primary to a
-    permanent error, so the failover strategy switches to Pocket. Failed
-    recovery probes (Pocket active) and repeats (already unusable) are
+    permanent error, so the failover strategy switches to the standby. Failed
+    recovery probes (standby active) and repeats (already unusable) are
     ignored."""
     primary = switcher._lenoxvi_primary
     if getattr(switcher, "_lenoxvi_closed", False):
@@ -174,7 +170,7 @@ async def on_primary_connection_error(switcher, error) -> None:
 async def on_switched(switcher, service) -> None:
     primary = switcher._lenoxvi_primary
     room = switcher._lenoxvi_room
-    name = getattr(switcher, "_lenoxvi_standby_name", "pocket")
+    name = getattr(switcher, "_lenoxvi_standby_name", "kokoro")
     label = _LABELS.get(name, name)
     if service is primary:
         cancel_recovery(switcher)
@@ -183,7 +179,7 @@ async def on_switched(switcher, service) -> None:
                        f"switching off {label}")
         _note(room, primary._tts_provider, True)
         return
-    # While Pocket speaks, the primary's own health notes (a probe's
+    # While the standby speaks, the primary's own health notes (a probe's
     # set_usable(True)) must not paint the dashboard chip green early.
     primary._tts_note_suppressed = True
     logger.warning(f"tts fallback: {primary._tts_provider} is down, "
@@ -199,16 +195,15 @@ async def on_switched(switcher, service) -> None:
                  if strategy is not None else None)
     switcher._lenoxvi_recovery = asyncio.create_task(recover(
         primary, _request, switcher._lenoxvi_cooldown, is_active=is_active,
-        closed=lambda: getattr(switcher, "_lenoxvi_closed", False),
-        pocket_idle=_kokoro_idle if name == "kokoro" else None))
+        closed=lambda: getattr(switcher, "_lenoxvi_closed", False)))
 
 
-def wrap_with_fallback(primary, pocket, *, room,
+def wrap_with_fallback(primary, standby, *, room,
                        queue_frame: Callable[..., Awaitable[None]],
-                       cooldown: float, standby_name: str = "pocket") -> ServiceSwitcher:
-    """ServiceSwitcher([primary, pocket], Failover) + the escalation hook +
+                       cooldown: float, standby_name: str = "kokoro") -> ServiceSwitcher:
+    """ServiceSwitcher([primary, standby], Failover) + the escalation hook +
     the switch-back loop."""
-    switcher = ServiceSwitcher(services=[primary, pocket],
+    switcher = ServiceSwitcher(services=[primary, standby],
                                strategy_type=ServiceSwitcherStrategyFailover)
     switcher._lenoxvi_primary = primary
     switcher._lenoxvi_room = room

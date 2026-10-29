@@ -27,11 +27,6 @@ ensure_user() {
     run useradd --system --home-dir "$LVI_STATE_REAL" --no-create-home --shell /usr/sbin/nologin "$LVI_USER"
     ok "service user: $LVI_USER (created)"
   fi
-  if [[ $STT_PROFILE == gpu ]]; then
-    local g groups=()
-    for g in video render; do getent group "$g" >/dev/null 2>&1 && groups+=("$g"); done
-    (( ${#groups[@]} )) && run usermod -aG "$(IFS=,; echo "${groups[*]}")" "$LVI_USER"
-  fi
   return 0
 }
 
@@ -89,14 +84,12 @@ install_venv() {
 
 # pip_sync — install the app's requirements into the venv (a no-op when met).
 pip_sync() {
-  local reqs=(-r "$LVI_APP/requirements.txt")
-  [[ $STT_PROFILE == gpu ]] && reqs+=(-r "$LVI_APP/requirements-gpu.txt")
-  _uv pip install --quiet --python "$LVI_VENV/bin/python" "${reqs[@]}"
+  _uv pip install --quiet --python "$LVI_VENV/bin/python" -r "$LVI_APP/requirements.txt"
 }
 
-# Speech models up front, so the first start doesn't sit downloading: Kokoro
-# (the voice) and the Whisper model (speech-to-text). They land in the service
-# user's home (= the data folder), where the bot looks.
+# Speech models up front, so the first start doesn't sit downloading: the
+# Embedded pair, Kokoro (the voice) and Whisper base (speech-to-text). They
+# land in the service user's home (= the data folder), where the bot looks.
 _as_user() {
   run_logged runuser -u "$LVI_USER" -- env HOME="$LVI_STATE_REAL" LVI_STATE_DIR="$LVI_STATE_REAL" "$@"
 }
@@ -105,9 +98,9 @@ fetch_models() {
   _as_user bash "$LVI_APP_REAL/scripts/fetch_kokoro_models.sh" || die "couldn't download the Kokoro voice model (see above)"
   ok "voice model (Kokoro): ready"
   _as_user "$LVI_VENV_REAL/bin/python" -c \
-    "import faster_whisper as f; f.download_model('$STT_MODEL')" \
-    || warn "couldn't download the $STT_MODEL speech model now — the bot will fetch it on first start"
-  ok "speech model (Whisper $STT_MODEL): ready"
+    "import faster_whisper as f; f.download_model('base')" \
+    || warn "couldn't download the Whisper base speech model now — the bot will fetch it on first start"
+  ok "speech model (Whisper base): ready"
 }
 
 LVI_APP_REAL=$LVI_OPT_REAL/app

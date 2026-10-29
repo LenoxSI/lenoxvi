@@ -3,7 +3,7 @@
 # bot never downloads anything at runtime (it refuses to: a missing file is
 # a clear error naming this script).
 #
-# Run once after `pip install -r requirements-kokoro.txt`, as the user the
+# Run once after `pip install -r requirements.txt`, as the user the
 # bot runs as:
 #   bash scripts/fetch_kokoro_models.sh
 #

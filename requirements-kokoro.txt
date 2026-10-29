@@ -1,6 +1,0 @@
-# Kokoro is part of the base install now (requirements.txt). This file stays
-# so older instructions keep working:
-#
-#   pip install -r requirements-kokoro.txt
-#   bash scripts/fetch_kokoro_models.sh
--r requirements.txt

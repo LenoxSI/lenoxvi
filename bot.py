@@ -1,17 +1,19 @@
-"""LenoxVI house-voice bot: wake gate -> VAD -> whisper STT -> intelligence -> TTS.
+"""LenoxVI voice bot: wake gate -> VAD -> speech-to-text -> intelligence -> text-to-speech.
 
-Pipeline (Phase 4): WebRTC in -> wake gate (openWakeWord) ->
-Silero VAD -> local faster-whisper STT -> intelligence (IntelligenceAgent via config.yaml
-intelligence.kind, production = hermes; stub = bench fallback) -> ElevenLabs TTS
-(voice from .env LVI_TTS_VOICE_ID) -> Sonos audioClip in the room's zone.
+Pipeline: WebRTC in -> wake gate (openWakeWord) -> Silero VAD -> STT
+(stt.provider: Embedded faster-whisper base by default, LocalAI on the LAN,
+or a cloud vendor) -> intelligence (IntelligenceAgent via config.yaml
+intelligence.kind, production = hermes; stub = bench fallback) -> TTS
+(tts.provider: Embedded Kokoro by default, LocalAI or a cloud voice) -> the
+room's speaker. LocalAI and cloud speech always fall back to Embedded.
 
 Run on the appliance host from the repo root:
   ~/venvs/lenoxvi/bin/python bot.py
 Then open https://<bot-host-LAN-IP>:7860/client in a LAN browser
 (mic access needs the HTTPS secure context; certs via scripts/make-cert.sh).
 
-Requires .env (see .env.example) with all three keys:
-  ELEVENLABS_API_KEY, LVI_TTS_VOICE_ID, LVI_HERMES_KEY.
+Secrets live in .env (see .env.example): the intelligence key, plus the key of
+any cloud speech provider you pick. Embedded speech needs none.
 """
 
 import asyncio
@@ -111,7 +113,7 @@ class TTSTracked:
 
     async def set_usable(self, is_usable: bool):
         await super().set_usable(is_usable)
-        # While a Pocket fallback is speaking for this room, the switcher owns
+        # While the Kokoro standby is speaking for this room, the switcher owns
         # the chip; a recovery probe's verdict must not repaint it early.
         if getattr(self, "_tts_note_suppressed", False):
             return
@@ -198,13 +200,19 @@ _BOOT_TTS_PROVIDER: str | None = None
 
 async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments):
     from config import cfg, cfg_env
+    import stt_catalog
+    import tts_catalog
 
-    # Secrets are checked ONCE at
-    # pipeline construction with a clear error naming the provider and
-    # the .env variable — not a bare KeyError per TTS request. Same
-    # fail-loud law as the intelligence key: construction survives,
-    # the missing secret says its name.
-    tts_provider = str(cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "elevenlabs")
+    # tts.provider: kokoro (Embedded, the default), localai (LAN) or a cloud
+    # voice; unset or unknown = Kokoro (tts_catalog), and an unknown name says
+    # so. Secrets are checked ONCE at pipeline construction with a clear error
+    # naming the provider and the .env variable — not a bare KeyError per TTS
+    # request. Same fail-loud law as the intelligence key: construction
+    # survives, the missing secret says its name.
+    _tts_raw = cfg_env("tts", "provider", "LVI_TTS_PROVIDER", None)
+    tts_provider = tts_catalog.resolve_provider(_tts_raw)
+    if str(_tts_raw or "").strip().lower() not in ("", tts_provider):
+        logger.warning(f"tts: unknown provider {_tts_raw!r} — using Kokoro")
     tts_provider, _tts_warn = keys_catalog.session_tts_provider(
         tts_provider, _BOOT_TTS_PROVIDER, os.environ)
     if _tts_warn:
@@ -215,10 +223,13 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             f"tts.provider is {tts_provider!r} but {_need_secret} is not set — "
             f"add it to .env (see .env.example). No TTS can be constructed.")
 
-    # stt.provider: whisper (local, default), localai (LAN), or a cloud
-    # provider with this Whisper service as its fallback (wired below, once
-    # the task exists).
-    stt_provider = str(cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "whisper").strip().lower()
+    # stt.provider: whisper (Embedded, the default), localai (LAN), or a cloud
+    # provider with Embedded Whisper as its standby (wired below, once the
+    # task exists). Unset or unknown = Embedded (stt_catalog).
+    _stt_raw = cfg_env("stt", "provider", "LVI_STT_PROVIDER", None)
+    stt_provider = stt_catalog.resolve_provider(_stt_raw)
+    if str(_stt_raw or "").strip().lower() not in ("", stt_provider):
+        logger.warning(f"stt: unknown provider {_stt_raw!r} — using local Whisper")
     # LocalAI: the same Whisper service with LocalAI standing in for its
     # model; a failed call sends the same clip to Whisper base on this
     # appliance (preloaded at startup). Nothing LocalAI is imported otherwise.
@@ -232,33 +243,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         _stt_override = stt_localai.LocalAIWhisper(_la_stt["model_stt"], stt_localai.whisper_base,
                                                    url=_la_stt["url"], timeout=_la_stt["stt_timeout"])
         logger.info(f"stt: localai {_la_stt['model_stt'] or '(no model picked)'} (Whisper base standby)")
+    # Embedded Whisper is fixed (stt_catalog: base on the CPU, int8): the
+    # listener, LocalAI's fallback and every cloud provider's standby.
     stt = LocalWhisperSTTService(
-        model=cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
-        device=cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
-        compute_type=cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
         language=cfg_env("stt", "language", "LVI_STT_LANGUAGE") or None,
         model_override=_stt_override,
     )
-    # TTS provider dispatch: tts.provider
-    # selects the engine; each provider's knobs live under its own config
-    # key. ElevenLabs stays the default (a config without tts.provider —
-    # the fresh-clone state — must land on a provider that speaks).
+    # TTS provider dispatch: tts.provider selects the engine; each provider's
+    # knobs live under its own config key. Kokoro is the default (a config
+    # without tts.provider — the fresh-clone state — speaks with no keys).
     # (tts_provider was resolved above against the keys actually loaded.)
-    if tts_provider == "pocket":
-        # Pocket TTS (Kyutai, CPU-native, fully local: no key, no egress).
-        # One model per process, preloaded at startup by tts_pocket.
-        import tts_pocket
-        if not tts_pocket.pocket_available():
-            raise RuntimeError("tts.provider=pocket but pocket-tts is not installed — "
-                               f"run: {tts_pocket.INSTALL_HINT}")
-        _pv = cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")
-        await tts_pocket.warm(_pv)  # weights/voice load off the event loop
-        tts = tts_pocket.make_service(mixin=TTSTracked, voice=_pv)
-        if tts is None:
-            raise RuntimeError("tts.provider=pocket but the Pocket model failed to "
-                               f"load — run: {tts_pocket.INSTALL_HINT}")
-        logger.info("tts backend: pocket (local)")
-    elif tts_provider == "kokoro":
+    if tts_provider == "kokoro":
         # Kokoro (82M, CPU via ONNX, fully local: no key, no egress). One
         # model per process (tts_kokoro), loaded off the event loop; a
         # room's service never loads or downloads anything itself.
@@ -332,7 +327,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             ),
         )
         logger.info("tts backend: deepgram flux")
-    else:
+    elif tts_provider == "elevenlabs":
         # ElevenLabs. Config precedence per house law: voice_id lives in
         # config.yaml (dashboard-editable) with the legacy LVI_TTS_VOICE_ID
         # env as fallback; model in config.yaml; api_key stays env-side
@@ -382,46 +377,30 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 ),
             )
             logger.info(f"tts backend: elevenlabs {el_model}")
-    # Hot standby (tts.fallback: pocket): the primary gets wrapped in
-    # pipecat's failover switcher just before the pipeline is built. No
-    # fallback key = today's pipeline, unchanged.
+    else:
+        # Every provider tts_catalog knows has a branch above, and resolve
+        # turned anything else into Kokoro: reaching here means a provider was
+        # added to the catalog without one. Fail loud — never a cloud voice.
+        raise RuntimeError(f"tts.provider {tts_provider!r} has no TTS dispatch in bot.py")
+    # Hot standby: every cloud voice gets Kokoro (Embedded), always armed —
+    # the primary is wrapped in pipecat's failover switcher just before the
+    # pipeline is built (below). Kokoro as the main voice needs none, and
+    # LocalAI falls back to Kokoro by itself (per sentence). The standby uses
+    # the Kokoro voice/speed keys — the same ones as Kokoro as the main voice.
     tts_primary = tts
-    _fallback = str(cfg("tts", "fallback") or "").strip().lower()
-    if _fallback == "pocket" and tts_provider == "pocket":
-        import tts_pocket
-        tts_pocket.warn_once("fallback-ignored",
-                             "tts.fallback: pocket ignored — Pocket is already the primary")
-        _fallback = ""
-    if (_fallback == "kokoro" and tts_provider == "kokoro") or (
-            _fallback in ("pocket", "kokoro") and tts_provider == "localai"):
-        # Kokoro can't stand in for itself, and LocalAI falls back to Kokoro
-        # by itself (per sentence).
-        logger.info(f"tts.fallback: {_fallback} not used — {tts_provider} has its own")
-        _fallback = ""
-    tts_pocket_standby = None
-    if _fallback == "pocket":
-        import tts_pocket
-        tts_pocket_standby = None
-        if tts_pocket.pocket_available():
-            _pv = cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")
-            # Enabled from the dashboard after boot: load off the event loop,
-            # or every room stalls for the load (seconds; ~24 s offline).
-            await tts_pocket.warm(_pv)
-            tts_pocket_standby = tts_pocket.make_service(mixin=TTSTracked, voice=_pv)
-        if tts_pocket_standby is None:
-            tts_pocket.warn_once("fallback-unavailable",
-                                 "tts.fallback: pocket requested but Pocket can't load — "
-                                 f"running WITHOUT a fallback ({tts_pocket.INSTALL_HINT})")
-    if _fallback == "kokoro":
+    tts_standby = None
+    if tts_catalog.is_cloud(tts_provider):
         import tts_kokoro
         if tts_kokoro.kokoro_available():
+            # Load off the event loop (a no-op once the startup preload ran),
+            # or every room stalls for the load.
             await tts_kokoro.warm()
-            tts_pocket_standby = tts_kokoro.make_service(
+            tts_standby = tts_kokoro.make_service(
                 mixin=TTSTracked,
                 voice=cfg_env("tts", "kokoro_voice", "LVI_TTS_KOKORO_VOICE", tts_kokoro.DEFAULT_VOICE),
                 speed=cfg_env("tts", "kokoro_speed", "LVI_TTS_KOKORO_SPEED", tts_kokoro.DEFAULT_SPEED))
-        if tts_pocket_standby is None:
-            logger.warning("tts.fallback: kokoro requested but Kokoro can't load — "
+        if tts_standby is None:
+            logger.warning("tts: the Kokoro standby can't load — "
                            f"running WITHOUT a fallback ({tts_kokoro.INSTALL_HINT})")
     gate = EchoGate()
     # Multi-node fix: EVERYTHING room-related resolves
@@ -474,10 +453,10 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # dashboard — note_tts(True) here, then every set_usable().
     if isinstance(tts_primary, TTSTracked):
         tts_primary.bind_tts_room(_room)
-    if tts_pocket_standby is not None:
+    if tts_standby is not None:
         # Quiet bind: no initial "usable" note (that would overwrite the
         # primary's chip); it reports only if it dies while speaking.
-        tts_pocket_standby._tts_room = _room
+        tts_standby._tts_room = _room
 
     # Intelligence dispatch: every registered lane (intelligence.KINDS) rides
     # IntelligenceAgent — the lane owns its request envelope
@@ -569,11 +548,11 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     from node_speaker_output import NodeSpeakerOutput
     node_spk_out = NodeSpeakerOutput(echo_gate=gate, zone_selector=_reply_zone)
 
-    # Arm the hot standby: ServiceSwitcher([primary, pocket], Failover).
+    # Arm the hot standby: ServiceSwitcher([primary, Kokoro], Failover).
     # The recovery loop queues its switch-back frame through the task,
     # which doesn't exist yet: late-bound via _task_ref.
     _task_ref = {}
-    if tts_pocket_standby is not None:
+    if tts_standby is not None:
         from tts_fallback import wrap_with_fallback
         try:
             _cool = float(cfg_env("tts", "revive_cooldown_secs",
@@ -584,21 +563,17 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         async def _queue(frame):
             await _task_ref["task"].queue_frame(frame)
 
-        tts = wrap_with_fallback(tts_primary, tts_pocket_standby, room=_room,
-                                 queue_frame=_queue, cooldown=_cool, standby_name=_fallback)
-        logger.info(f"tts fallback: {_fallback} armed behind {tts_provider}")
+        tts = wrap_with_fallback(tts_primary, tts_standby, room=_room,
+                                 queue_frame=_queue, cooldown=_cool, standby_name="kokoro")
+        logger.info(f"tts fallback: kokoro armed behind {tts_provider}")
 
     # Cloud STT: ServiceSwitcher([cloud, whisper], Failover). Deepgram or
     # ElevenLabs Scribe marks itself down on a bad key / dead network and the
     # session moves to local Whisper; stt_fallback switches back when it
     # answers again. A missing key or SDK = Whisper with a warning, never a
     # dead pipeline.
-    import stt_catalog
     import stt_fallback
     import stt_local
-    if stt_catalog.validate_provider(stt_provider):
-        logger.warning(f"stt: unknown provider {stt_provider!r} — using local Whisper")
-        stt_provider = "whisper"
     stt_fallback.set_provider(stt_provider)
     stt_timer = None
     if stt_catalog.is_cloud(stt_provider):
@@ -697,7 +672,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         registry.mark_disconnected(client.pc_id)
         registry.drop_sender(client.pc_id)
         logger.info("client disconnected")
-        if tts_pocket_standby is not None:
+        if tts_standby is not None:
             # Stop recovery BEFORE teardown: a probe firing between the
             # cancel and the finally would open a socket on a dead session.
             from tts_fallback import close_fallback
@@ -722,7 +697,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     try:
         await runner.run(task)
     finally:
-        if tts_pocket_standby is not None:
+        if tts_standby is not None:
             from tts_fallback import close_fallback
             close_fallback(tts)
         if getattr(stt, "_lenoxvi_primary", None) is not None:
@@ -790,72 +765,50 @@ if __name__ == "__main__":
     wrap_uvicorn_run(uvicorn, str(_paths.certs_dir()))
 
     # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
-    # step"): same model/device/precision run_bot uses. Non-fatal — a failure
+    # step"): the fixed Embedded model (stt_catalog: base on the CPU, int8)
+    # for every STT provider — it listens, or stands by behind LocalAI or a
+    # cloud provider — so one call, no provider check. Non-fatal — a failure
     # leaves the lazy load in LocalWhisperSTTService.ensure_model() in charge.
-    # With LocalAI as the STT provider the appliance only keeps its fallback
-    # warm: Whisper base on the CPU (the configured model isn't loaded).
     try:
         from stt_local import preload_shared_model
-        from config import cfg_env as _cfg_env
 
-        if str(_cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "").strip().lower() == "localai":
-            import stt_local as _stl_boot
-            _stl_boot.preload_shared_model("base", "cpu", "int8")
-        else:
-            preload_shared_model(
-                _cfg_env("stt", "model", "LVI_STT_MODEL", "large-v3-turbo"),
-                _cfg_env("stt", "device", "LVI_STT_DEVICE", "cuda"),
-                _cfg_env("stt", "compute_type", "LVI_STT_COMPUTE", "float16"),
-            )
+        preload_shared_model()
     except Exception as e:
         logger.warning(f"whisper preload failed ({e}) — will load lazily on the first voice turn")
 
-    # Pocket TTS at STARTUP when it's the provider or the fallback: one
-    # model per process, so sessions never load weights mid-wake.
-    # Non-fatal: a failure means primary-only (fallback) or a loud
-    # construction error (pocket primary).
+    # The TTS provider this process booted with (unset or unknown = Kokoro):
+    # a session whose newly configured provider's key isn't loaded yet keeps
+    # it until the restart (keys_catalog.session_tts_provider).
     try:
-        from config import cfg as _cfg
+        import tts_catalog
         from config import cfg_env as _cfg_env
 
-        _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
-        _BOOT_TTS_PROVIDER = _tp or "elevenlabs"
-        _fb = str(_cfg("tts", "fallback") or "").strip().lower()
-        if _tp == "pocket" or _fb == "pocket":
-            import tts_pocket
-            if tts_pocket.pocket_available():
-                tts_pocket.preload(tts_pocket.resolve_voice(
-                    _cfg_env("tts", "pocket_voice", "LVI_TTS_POCKET_VOICE", "alba")))
-            else:
-                logger.warning(f"pocket tts not installed — {tts_pocket.INSTALL_HINT}")
-    except Exception as e:
-        logger.warning(f"pocket preload failed ({e}) — running without Pocket")
+        _BOOT_TTS_PROVIDER = tts_catalog.resolve_provider(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", None))
+    except Exception as e:  # noqa: BLE001 — boot must survive a config hiccup
+        logger.warning(f"tts boot provider unread ({e}) — a new TTS key applies after a restart")
 
-    # Kokoro at STARTUP when it's the provider, the fallback, or LocalAI's
-    # fallback: one model per process, so sessions never load it mid-wake.
-    # Non-fatal: a failure means a loud construction error per session
-    # (missing files are retried there) or no fallback.
+    # Kokoro at STARTUP for every provider: it is the main voice, LocalAI's
+    # fallback, or every cloud voice's standby. One model per process, so
+    # sessions never load it mid-wake. Non-fatal: a failure means a loud
+    # construction error per session (missing files are retried there) or a
+    # cloud voice running without its standby.
     try:
-        from config import cfg as _cfg
-        from config import cfg_env as _cfg_env
-
-        _tp = str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "")
-        _fb = str(_cfg("tts", "fallback") or "").strip().lower()
-        if _tp in ("kokoro", "localai") or _fb == "kokoro":
-            import tts_kokoro
-            if tts_kokoro.kokoro_available():
-                tts_kokoro.preload()
-            else:
-                logger.warning(f"kokoro tts not installed — {tts_kokoro.INSTALL_HINT}")
+        import tts_kokoro
+        if tts_kokoro.kokoro_available():
+            tts_kokoro.preload()
+        else:
+            logger.warning(f"kokoro tts not installed — {tts_kokoro.INSTALL_HINT}")
     except Exception as e:  # noqa: BLE001 — boot must survive any preload failure
         logger.warning(f"kokoro preload failed ({e}) — sessions will retry the load")
 
     # LocalAI's background probe runs at the STT revive cadence.
     try:
+        import stt_catalog
+        import tts_catalog
         from config import cfg_env as _cfg_env
 
-        _la_cards = (str(_cfg_env("stt", "provider", "LVI_STT_PROVIDER", "whisper") or "").strip().lower(),
-                     str(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", "elevenlabs") or "").strip().lower())
+        _la_cards = (stt_catalog.resolve_provider(_cfg_env("stt", "provider", "LVI_STT_PROVIDER", None)),
+                     tts_catalog.resolve_provider(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", None)))
         if "localai" in _la_cards:
             import localai
             localai.set_cooldown(_cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30))

@@ -1,9 +1,10 @@
 """Local faster-whisper STT service for LenoxVI (pipecat 1.11).
 
 Subclasses pipecat's Whisper base STT (the OpenAI-API one) and overrides
-`_transcribe` to run faster-whisper locally on the GPU instead of hitting
-the OpenAI API. The base class gives us segmentation, VAD interplay, metrics
-and TranscriptionFrame plumbing for free.
+`_transcribe` to run faster-whisper on this machine instead of hitting the
+OpenAI API: the fixed Embedded model (stt_catalog: base on the CPU, int8).
+The base class gives us segmentation, VAD interplay, metrics and
+TranscriptionFrame plumbing for free.
 """
 
 import asyncio
@@ -86,9 +87,9 @@ def note_latency(ms: float) -> None:
     _LAT_MS.append(float(ms))
 
 
-def _set_status(state: str, model: str, device: str, compute: str, error: str | None = None) -> None:
+def _set_status(state: str, model: str, compute: str, error: str | None = None) -> None:
     global _STATUS
-    _STATUS = {"state": state, "model": model, "device": device, "compute": compute}
+    _STATUS = {"state": state, "model": model, "compute": compute}
     if error:
         _STATUS["error"] = error
 
@@ -114,6 +115,11 @@ def _new_model(model: str, device: str, compute: str):
     return WhisperModel(model, device=device, compute_type=compute)
 
 
+def _embedded() -> tuple[str, str, str]:
+    """The one Whisper this appliance runs: stt_catalog's Embedded model."""
+    return stt_catalog.EMBEDDED_MODEL, stt_catalog.EMBEDDED_DEVICE, stt_catalog.EMBEDDED_COMPUTE
+
+
 def _live_language():
     """stt.language, read per utterance so a dashboard change applies to the
     next thing said — config > env, same chain as at construction."""
@@ -136,11 +142,11 @@ def _rss_mb() -> int:
 
 
 def _trim_heap(why: str) -> None:
-    """Hand freed heap back to the OS (glibc malloc_trim). Loading the model
-    streams ~1.6 GB through RAM on its way to the GPU; in a long-lived,
-    fragmented heap that transient peak was KEPT (2026-10-15: the first voice
-    turn of a 7.5 h-old process took the bot 768 MB -> 2.8 GB, of which only
-    ~612 MB was the model's real cost). Never raises."""
+    """Hand freed heap back to the OS (glibc malloc_trim). Loading a model
+    streams its weights through RAM; in a long-lived, fragmented heap that
+    transient peak was KEPT (2026-10-15: the first voice turn of a 7.5 h-old
+    process took the bot 768 MB -> 2.8 GB, of which only ~612 MB was the
+    model's real cost). Never raises."""
     try:
         import ctypes
 
@@ -151,58 +157,58 @@ def _trim_heap(why: str) -> None:
         logger.debug(f"stt_local: malloc_trim unavailable: {e}")
 
 
-def preload_shared_model(model: str, device: str, compute_type: str) -> None:
-    """Load + warm the shared Whisper model at bot STARTUP (sync, before the
+def preload_shared_model() -> None:
+    """Load + warm the shared Whisper model — the fixed Embedded model
+    (stt_catalog: base on the CPU, int8) — at bot STARTUP (sync, before the
     server runs), instead of lazily on the first voice turn.
 
-    Why: the lazy load happened inside a heap
-    fragmented by hours of sessions, so its transient peak stuck as RSS. At
-    startup the heap is fresh, the warm-up pulls cuBLAS/CUDA in too, and
-    malloc_trim returns the peak. Bonus: the first wake of the day no
-    longer waits ~2.5 s for the model. Failure is non-fatal — the lazy path in
+    Why: the lazy load happened inside a heap fragmented by hours of
+    sessions, so its transient peak stuck as RSS. At startup the heap is
+    fresh and malloc_trim returns the peak. Bonus: the first wake of the day
+    doesn't wait for the model. Failure is non-fatal — the lazy path in
     ensure_model() still works."""
     if LocalWhisperSTTService._shared_model is not None:
         return
     import numpy as np
 
+    model, device, compute = _embedded()
     t0 = time.monotonic()
     before = _rss_mb()
-    logger.info(f"stt_local: preloading faster-whisper {model} on {device} ({compute_type}) at startup")
-    _set_status("loading", model, device, compute_type)
+    logger.info(f"stt_local: preloading faster-whisper {model} on {device} ({compute}) at startup")
+    _set_status("loading", model, compute)
     try:
-        m = _new_model(model, device, compute_type)
-        # Warm-up: the first encode loads cuBLAS (+~0.5 GB) — do it now, not
+        m = _new_model(model, device, compute)
+        # Warm-up: the first encode sets up the decoder — do it now, not
         # inside someone's first question. 1 s of silence, result discarded.
-        # Inside the try: a broken CUDA lib fails HERE, and must show as an
-        # error on the dashboard, not a "Loading…" that never ends.
+        # Inside the try: a warm-up that fails must show as an error on the
+        # dashboard, not a "Loading…" that never ends.
         segs, _ = m.transcribe(np.zeros(16000, dtype=np.float32), language="en")
         list(segs)
     except Exception as e:
         # Recorded for the dashboard, then re-raised: bot.py treats a failed
         # preload as non-fatal (the lazy path tries again).
-        _set_status("error", model, device, compute_type, error=f"{type(e).__name__}: {e}"[:300])
+        _set_status("error", model, compute, error=f"{type(e).__name__}: {e}"[:300])
         raise
     LocalWhisperSTTService._shared_model = m
-    _set_status("ready", model, device, compute_type)
+    _set_status("ready", model, compute)
     logger.info(f"stt_local: whisper ready in {time.monotonic() - t0:.1f}s "
                 f"(RSS {before} -> {_rss_mb()} MB before trim)")
     _trim_heap("startup preload")
 
 
 class LocalWhisperSTTService(BaseWhisperSTTService):
-    """Segmented STT backed by a local faster-whisper model.
+    """Segmented STT backed by the local faster-whisper model.
 
-    The heavy model is cached at module level and shared across ALL
-    pipelines: the bot constructs a fresh STT per WebRTC offer, so
-    instance-caching reloads large-v3-turbo onto the GPU on every node
-    reconnect (node blip, crash-retry, reboot) — seconds of deaf STT
-    and VRAM churn. One model per bot process instead.
+    The model is fixed (stt_catalog's Embedded base on the CPU, int8), cached
+    at module level and shared across ALL pipelines: the bot constructs a
+    fresh STT per WebRTC offer, so instance-caching would reload it on every
+    node reconnect (node blip, crash-retry, reboot). One model per process.
 
     Args:
-        model: faster-whisper model size/name (e.g. "large-v3-turbo").
-        device: "cuda" or "cpu".
-        compute_type: faster-whisper compute type (e.g. "float16" on GPU).
-        language: ISO language hint, None for auto-detect.
+        language: ISO language hint, None for auto-detect (the live
+            stt.language, read per utterance, wins; this is its fallback).
+        model_override: a stand-in with faster-whisper's transcribe() shape
+            (LocalAI), used instead of the shared model.
     """
 
     _shared_model = None
@@ -211,17 +217,11 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
     def __init__(
         self,
         *,
-        model: str = "large-v3-turbo",
-        device: str = "cuda",
-        compute_type: str = "float16",
         language: Optional[str] = None,
         model_override=None,
         **kwargs,
     ):
         super().__init__(api_key="sk-local-not-used", **kwargs)
-        self._model_name = model
-        self._device = device
-        self._compute_type = compute_type
         self._language = language
         self._fw_model = None
         # A stand-in with faster-whisper's transcribe() shape (LocalAI): used
@@ -237,19 +237,15 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             if LocalWhisperSTTService._shared_model is not None:
                 self._fw_model = LocalWhisperSTTService._shared_model
                 return
-            logger.info(
-                f"Loading faster-whisper {self._model_name} on {self._device} ({self._compute_type})"
-            )
-            _set_status("loading", self._model_name, self._device, self._compute_type)
+            model, device, compute = _embedded()
+            logger.info(f"Loading faster-whisper {model} on {device} ({compute})")
+            _set_status("loading", model, compute)
             try:
-                LocalWhisperSTTService._shared_model = await asyncio.to_thread(
-                    _new_model, self._model_name, self._device, self._compute_type
-                )
+                LocalWhisperSTTService._shared_model = await asyncio.to_thread(_new_model, model, device, compute)
             except Exception as e:
-                _set_status("error", self._model_name, self._device, self._compute_type,
-                            error=f"{type(e).__name__}: {e}"[:300])
+                _set_status("error", model, compute, error=f"{type(e).__name__}: {e}"[:300])
                 raise
-            _set_status("ready", self._model_name, self._device, self._compute_type)
+            _set_status("ready", model, compute)
             self._fw_model = LocalWhisperSTTService._shared_model
             _trim_heap("lazy whisper load")
 

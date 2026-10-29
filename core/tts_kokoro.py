@@ -11,9 +11,11 @@ A process-wide lock serializes generation, so two rooms queue instead of
 thrashing the CPU. Text gets the local-voice number pass (tts_numbers)
 before synthesis.
 
-Optional dependency: kokoro-onnx (requirements-kokoro.txt). Nothing here
-imports it or pipecat's Kokoro module at import time; kokoro_available()
-answers without importing it.
+Kokoro is the Embedded voice: kokoro-onnx is in the base install
+(requirements.txt) and the bot preloads it at startup, as the main voice or
+as the standby behind LocalAI and every cloud voice. Nothing here imports
+kokoro-onnx or pipecat's Kokoro module at import time (the dashboard imports
+this module); kokoro_available() answers without importing it.
 
 Missing or wrong-size model files are retried on the next warm() (a cheap
 check, so fetching the files then reconnecting a node works). A model that
@@ -47,7 +49,7 @@ DEFAULT_SPEED = 1.0
 SPEED_RANGE = (0.5, 1.5)
 # File name -> exact size (scripts/fetch_kokoro_models.sh checks the sha256).
 MODEL_FILES = {"kokoro-v1.0.onnx": 325_532_387, "voices-v1.0.bin": 28_214_398}
-INSTALL_HINT = ("pip install -r requirements-kokoro.txt && "
+INSTALL_HINT = ("pip install -r requirements.txt && "
                 "bash scripts/fetch_kokoro_models.sh")
 
 GEN_LOCK = asyncio.Lock()

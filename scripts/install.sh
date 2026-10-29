@@ -2,7 +2,7 @@
 # LenoxVI installer: a fresh Ubuntu / Debian / Raspberry Pi OS (64-bit) box
 # to a running bot behind a system service, then the dashboard does the rest.
 #
-#   sudo bash scripts/install.sh            # from a clone; asks three questions
+#   sudo bash scripts/install.sh            # from a clone; asks two questions
 #   sudo bash scripts/install.sh --yes --host 192.0.2.10   # no questions
 #   bash scripts/install.sh --dry-run --yes --host 192.0.2.10  # print, change nothing
 #
@@ -20,7 +20,6 @@ Usage: sudo bash scripts/install.sh [options]
 
   --yes             use the default answer for every question
   --host IP         this machine's LAN address (default: detected)
-  --stt gpu|cpu     where speech-to-text runs (default: GPU when one works)
   --token yes|no    protect dashboard settings with a token (default: yes)
   --tag vX.Y.Z      release to install (default: the newest one)
   --source URL|DIR  where to get the code (default: this clone)
@@ -36,7 +35,6 @@ while (( $# )); do
     --dry-run) LVI_DRY_RUN=1 ;;
     --force) LVI_FORCE=1 ;;
     --host) HOST_IP=${2:?--host needs an address}; shift ;;
-    --stt) STT_PROFILE=${2:?--stt needs gpu or cpu}; shift ;;
     --token) MAKE_TOKEN=${2:?--token needs yes or no}; shift ;;
     --tag) LVI_TAG=${2:?--tag needs a tag}; shift ;;
     --source) LVI_SOURCE=${2:?--source needs a URL or folder}; shift ;;

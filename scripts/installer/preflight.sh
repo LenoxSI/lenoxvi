@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2034,SC2153
 # LenoxVI installer — preflight. Reads only; changes nothing.
-# Sets: OS_ID OS_VERSION OS_NAME ARCH PY_BIN PY_OK GPU GPU_NAME RAM_MB DISK_MB EXISTING
+# Sets: OS_ID OS_VERSION OS_NAME ARCH PY_BIN PY_OK RAM_MB DISK_MB EXISTING
 
 LVI_FORCE=${LVI_FORCE:-0}
 
@@ -52,19 +52,6 @@ check_python() {
   fi
 }
 
-check_gpu() {
-  GPU=no
-  GPU_NAME=
-  if command -v nvidia-smi >/dev/null 2>&1 && GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) && [[ -n $GPU_NAME ]]; then
-    GPU=yes
-    ok "gpu: $GPU_NAME"
-  elif command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -qi 'nvidia'; then
-    note "an NVIDIA card is present but its driver isn't working, so speech-to-text runs on the CPU. After installing the driver, run: lenoxvi reconfigure"
-  else
-    ok "gpu: none (speech-to-text runs on the CPU)"
-  fi
-}
-
 check_resources() {
   RAM_MB=$(free -m | awk '/^Mem:/ {print $2}')
   local dir=$LVI_PREFIX/opt
@@ -72,7 +59,7 @@ check_resources() {
   DISK_MB=$(df -Pm "$dir" | awk 'NR==2 {print $4}')
   ok "memory: ${RAM_MB} MB, free disk: $((DISK_MB / 1024)) GB"
   (( RAM_MB >= 1800 )) || warn "under 2 GB of memory — LenoxVI needs about 1.2 GB on its own"
-  (( DISK_MB >= 4000 )) || die "not enough free disk: $((DISK_MB / 1024)) GB (needs about 4 GB, 8 GB with a GPU)"
+  (( DISK_MB >= 4000 )) || die "not enough free disk: $((DISK_MB / 1024)) GB (needs about 4 GB)"
 }
 
 # Ports 7860 (dashboard) and 8765 (speaker clips). Ours when the service runs.
@@ -104,7 +91,6 @@ preflight() {
   check_os
   check_existing
   check_python
-  check_gpu
   check_resources
   check_ports
 }

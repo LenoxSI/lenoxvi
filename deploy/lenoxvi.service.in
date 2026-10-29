@@ -14,7 +14,6 @@ Environment=LVI_STATE_DIR=/var/lib/lenoxvi
 Environment=LVI_CONFIG=/var/lib/lenoxvi/config.yaml
 Environment=HOME=/var/lib/lenoxvi
 EnvironmentFile=-/var/lib/lenoxvi/.env
-@GPU_LD_LIBRARY_PATH@
 ExecStart=/opt/lenoxvi/venv/bin/python bot.py --host @HOST_IP@ --port 7860 --esp32
 Restart=on-failure
 RestartSec=5

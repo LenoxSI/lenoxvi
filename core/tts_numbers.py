@@ -1,7 +1,8 @@
 """Number pass for the local voices: digits -> the words a person would say.
 
-Pocket reads digits one at a time ("4-4-9", "2-3rd", "7-5%"), and Kokoro's
-espeak front-end reads "9:06" as "nine zero six" and garbles "$12.50".
+Pocket (LocalAI's pocket-tts backend) reads digits one at a time ("4-4-9",
+"2-3rd", "7-5%"), and Kokoro's espeak front-end reads "9:06" as "nine zero
+six" and garbles "$12.50".
 spell_numbers() rewrites clock times, money, percentages, degrees,
 ordinals, years and plain numbers into words before either engine sees
 the text.

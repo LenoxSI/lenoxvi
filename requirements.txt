@@ -7,11 +7,6 @@
 # Transitive deps resolve from these pins; if a fresh install ever needs
 # more, add it here rather than committing a 174-line `pip freeze`.
 #
-# GPU hosts: nothing here pulls the CUDA libraries Whisper needs on a GPU
-# (pip doesn't detect GPUs). Install requirements-gpu.txt as well; the
-# LD_LIBRARY_PATH for those wheels is set in the systemd unit
-# (deploy/lenoxvi-bot.service.example), NOT in code.
-#
 # Provenance note (2026-09-20 review): pipecat-ai[runner] pulls
 # pipecat-ai-prebuilt only via its [runner] extra; bot.py imports
 # pipecat.runner.run, which hard-imports pipecat_ai_prebuilt, so it is
@@ -24,9 +19,8 @@ pipecat-ai[webrtc]==1.13.0
 pipecat-ai-prebuilt==1.3.0
 pipecat-ai-small-webrtc-prebuilt==2.5.0
 faster-whisper==1.2.1
-# The dashboard's STT downloads read byte progress from huggingface_hub's
-# snapshot_download progress bars (the "Reconstructing" bar, 1.31+).
-# Older or newer hubs still download fine; only the progress bar would go quiet.
+# faster-whisper fetches the Embedded Whisper model (base) through
+# huggingface_hub; this is the range the release is tested with.
 huggingface_hub>=1.31,<2
 openwakeword==0.4.0
 lameenc==1.8.4
@@ -42,10 +36,10 @@ ruamel.yaml==0.19.1
 openai==3.14.0
 loguru==0.7.3
 python-dotenv==1.2.3
-# Kokoro (82M, Apache-2.0): the local voice every install ships with, the
-# default TTS fallback, and LocalAI's fallback. CPU via onnxruntime (already
-# here through openWakeWord); phonemes from the bundled espeakng-loader
-# wheel. Model files: bash scripts/fetch_kokoro_models.sh
+# Kokoro (82M, Apache-2.0): the Embedded voice every install ships with, and
+# the standby behind LocalAI and every cloud voice. CPU via onnxruntime
+# (already here through openWakeWord); phonemes from the bundled
+# espeakng-loader wheel. Model files: bash scripts/fetch_kokoro_models.sh
 kokoro-onnx==0.4.7
 PyYAML==6.0.3
 numpy==2.5.3

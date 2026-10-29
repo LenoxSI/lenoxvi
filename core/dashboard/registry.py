@@ -30,7 +30,6 @@ from loguru import logger
 _version = "unknown"
 
 _boot_time = None
-_active_room = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
 _known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire)
@@ -339,8 +338,6 @@ def mark_connected(pc_id):
         room = PROVISIONAL
         if pc_id:
             _room_by_pc[pc_id] = room
-    global _active_room
-    _active_room = room
     now = time.time()
     rec = _known_rooms.setdefault(room, {"online": False, "first_seen": now})
     rec["online"] = True
@@ -439,14 +436,7 @@ def relabel_room(pc_id: str, info: dict | None) -> None:
     rec = _known_rooms.pop(old, None)
     if rec:
         _known_rooms[new] = rec
-    global _active_room
-    if _active_room == old:
-        _active_room = new
     logger.info(f"registry: room '{old}' relabeled '{new}' (set_name ack)")
-
-
-def active_room():
-    return _active_room
 
 
 def last_wake():

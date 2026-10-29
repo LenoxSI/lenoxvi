@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 import intelligence
+import tts_catalog
 from intelligence import target as intelligence_target
 
 # Static rows, in card order. used_by = features that read the key
@@ -30,13 +31,8 @@ _AGENT_VAR = re.compile(rf"^{re.escape(_AGENT_LANE.base_key_var)}_([A-Z0-9_]+)$"
 
 
 def tts_secret(provider: str | None) -> str | None:
-    """The .env key a TTS provider needs (None = keyless, e.g. pocket)."""
-    p = str(provider or "")
-    if p.startswith("eleven"):
-        return "ELEVENLABS_API_KEY"
-    if p.startswith("deepgram"):
-        return "DEEPGRAM_API_KEY"
-    return None
+    """The .env key a TTS provider needs (None = keyless: Kokoro, LocalAI)."""
+    return tts_catalog.key_var(str(provider or ""))
 
 
 def session_tts_provider(configured: str, boot: str | None, environ) -> tuple[str, str | None]:
@@ -102,7 +98,7 @@ def _stt_provider(cfg: dict) -> str:
 
 
 def _tts_provider(cfg: dict) -> str:
-    return str((cfg.get("tts") or {}).get("provider") or "elevenlabs").strip().lower()
+    return str((cfg.get("tts") or {}).get("provider") or tts_catalog.DEFAULT_PROVIDER).strip().lower()
 
 
 def _used_by(row: dict, cfg: dict) -> list:
@@ -120,7 +116,7 @@ def _used_by(row: dict, cfg: dict) -> list:
 def _in_use(row: dict, cfg: dict) -> bool:
     tts = cfg.get("tts") or {}
     icfg = cfg.get("intelligence") or {}
-    tts_provider = str(tts.get("provider") or "elevenlabs").strip().lower()
+    tts_provider = str(tts.get("provider") or tts_catalog.DEFAULT_PROVIDER).strip().lower()
     if row["var"] == "ELEVENLABS_API_KEY":
         return tts_provider == "elevenlabs" or _stt_provider(cfg) == "elevenlabs"
     if row["var"] == "DEEPGRAM_API_KEY":

@@ -1,5 +1,5 @@
-"""Cloud STT (Deepgram Nova-3 or ElevenLabs Scribe v2) with local Whisper as
-the hot standby.
+"""Cloud STT (Deepgram Nova-3 or ElevenLabs Scribe v2) with Embedded Whisper
+(stt_local: the fixed base model on the CPU) as the hot standby.
 
 pipecat's DeepgramSTTService already marks itself permanently unusable when
 it can't connect — a 4xx handshake (bad key) at once, a dead network after

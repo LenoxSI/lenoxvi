@@ -1,6 +1,6 @@
-"""Speech-to-text choices the dashboard offers: four faster-whisper models
-(benchmarked on a 12 GB GPU and a 4-core CPU), common languages, and the
-GPU/CPU runtime each pick is written with.
+"""Speech-to-text choices: the three speech tiers (one copy, shared with
+tts_catalog), the fixed Embedded Whisper model, common languages, and the
+tier each provider sits in.
 
 Pure data + rules — no Whisper import, so routes and tests stay light.
 Hand-set config values outside these lists are left alone (shown as
@@ -8,24 +8,21 @@ Hand-set config values outside these lists are left alone (shown as
 """
 from __future__ import annotations
 
-MODELS = [
-    {"name": "large-v3-turbo", "label": "Turbo — best all-round", "size_gb": 1.6, "gpu_only": True,
-     "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"},
-    {"name": "medium", "label": "Medium — faster, solid in noise", "size_gb": 1.5, "gpu_only": True,
-     "repo": "Systran/faster-whisper-medium"},
-    {"name": "small", "label": "Small — snappy in quiet rooms", "size_gb": 0.5, "gpu_only": False,
-     "repo": "Systran/faster-whisper-small"},
-    {"name": "base", "label": "Base — no GPU / fastest", "size_gb": 0.15, "gpu_only": False,
-     "repo": "Systran/faster-whisper-base"},
+# The three speech tiers, in display order — one copy for both cards
+# (tts_catalog imports it). Embedded runs on this machine with no keys and
+# no GPU; LocalAI is a speech server on the LAN; Cloud is an internet vendor.
+TIERS = [
+    {"name": "embedded", "label": "Embedded"},
+    {"name": "localai", "label": "LocalAI"},
+    {"name": "cloud", "label": "Cloud"},
 ]
-MODEL_NAMES = [m["name"] for m in MODELS]
-# The files faster-whisper fetches for a model (same list as its
-# download_model), so our own download leaves exactly what it would.
-FILE_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+TIER_NAMES = [t["name"] for t in TIERS]
 
-
-def spec(name):
-    return next((m for m in MODELS if m["name"] == name), None)
+# Embedded speech-to-text is fixed and CPU-only. Bigger models or a GPU
+# belong to the LocalAI tier.
+EMBEDDED_MODEL = "base"
+EMBEDDED_DEVICE = "cpu"
+EMBEDDED_COMPUTE = "int8"
 
 LANGUAGES = [
     {"code": "auto", "label": "Auto-detect"},
@@ -49,17 +46,16 @@ LANGUAGES = [
 LANGUAGE_CODES = [lang["code"] for lang in LANGUAGES]
 
 
-# Who turns speech into text. Whisper runs on this machine (private); a
-# cloud provider streams post-wake speech out (quality on slow hardware),
-# with the configured Whisper model as its fallback.
+# Who turns speech into text, in card order. Every provider sits in one
+# tier; LocalAI and Cloud fall back to Embedded (Whisper base).
 PROVIDERS = [
-    {"name": "whisper", "label": "Whisper (local)", "cloud": False},
-    # LocalAI on the LAN: audio stays in the house, so it is not cloud.
-    {"name": "localai", "label": "LocalAI (host)", "cloud": False},
-    {"name": "deepgram", "label": "Deepgram Nova-3 (cloud)", "cloud": True},
-    {"name": "elevenlabs", "label": "ElevenLabs Scribe v2 (cloud)", "cloud": True},
+    {"name": "whisper", "label": "Whisper base", "tier": "embedded"},
+    {"name": "localai", "label": "LocalAI", "tier": "localai"},
+    {"name": "deepgram", "label": "Deepgram Nova-3", "tier": "cloud"},
+    {"name": "elevenlabs", "label": "ElevenLabs Scribe v2", "tier": "cloud"},
 ]
 PROVIDER_NAMES = [p["name"] for p in PROVIDERS]
+DEFAULT_PROVIDER = "whisper"
 DEEPGRAM_MODEL = "nova-3"
 ELEVENLABS_MODEL = "scribe_v2_realtime"
 # The .env key each cloud provider reads — shared with that vendor's TTS.
@@ -72,8 +68,18 @@ def validate_provider(provider):
     return None
 
 
+def resolve_provider(value) -> str:
+    """What a configured stt.provider means: unset or unknown -> Embedded."""
+    v = str(value or "").strip().lower()
+    return v if v in PROVIDER_NAMES else DEFAULT_PROVIDER
+
+
+def tier_of(provider) -> str | None:
+    return next((p["tier"] for p in PROVIDERS if p["name"] == provider), None)
+
+
 def is_cloud(provider) -> bool:
-    return any(p["name"] == provider and p["cloud"] for p in PROVIDERS)
+    return tier_of(provider) == "cloud"
 
 
 def cloud_model(provider):
@@ -92,26 +98,13 @@ def elevenlabs_language(code):
     return language_value(code)
 
 
-def runtime_for(has_gpu: bool) -> tuple[str, str]:
-    """(device, compute_type) written with a model: never a mismatched pair
-    (float16 on a CPU fails to load)."""
-    return ("cuda", "float16") if has_gpu else ("cpu", "int8")
-
-
-def validate(model, language, has_gpu: bool):
-    """An error message, or None when the pick is allowed. `model=None` means
-    a language-only change."""
-    if model is not None:
-        spec = next((m for m in MODELS if m["name"] == model), None)
-        if spec is None:
-            return f"model must be one of {MODEL_NAMES}"
-        if spec["gpu_only"] and not has_gpu:
-            return f"{model} needs a GPU (none detected) — pick small or base"
-    if language is not None and language not in LANGUAGE_CODES:
-        return "language must be 'auto' or one of the listed codes"
-    return None
-
-
 def language_value(code):
     """Config/Whisper value for a language code: auto or empty -> None."""
     return None if not code or code == "auto" else code
+
+
+def validate_language(language):
+    """An error message, or None when the language is allowed (None = no change)."""
+    if language is not None and language not in LANGUAGE_CODES:
+        return "language must be 'auto' or one of the listed codes"
+    return None

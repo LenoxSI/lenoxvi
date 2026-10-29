@@ -36,30 +36,36 @@ vad:
   stop_secs: 0.2        # lower = snappier turn-ends but clips word onsets
   min_volume: 0.6       # floor under VAD (ignores very quiet speech/noise)
 
-# ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
+# ── Speech-to-text ─────────────────────────────────────────────────────
+# Three tiers, the same on the TTS card: Embedded runs on this machine (no
+# keys, no GPU), LocalAI on a server on your network (localai block below),
+# Cloud with its key in .env. LocalAI and Cloud fall back to Embedded on
+# their own. Unset or unknown = whisper.
 stt:
-  # provider: whisper    # whisper (local, default) | deepgram (Nova-3) |
-  #                      # elevenlabs (Scribe v2, uses ELEVENLABS_API_KEY);
-  #                      # a cloud provider keeps the Whisper model below
-  #                      # as its automatic fallback
-  model: large-v3-turbo
-  device: cuda
-  compute_type: float16
+  provider: whisper      # whisper (Embedded: faster-whisper base on the CPU) |
+  #                      # localai | deepgram (Nova-3, DEEPGRAM_API_KEY) |
+  #                      # elevenlabs (Scribe v2, ELEVENLABS_API_KEY)
   # language: en         # unset = auto-detect per utterance
 
 # ── Text-to-speech ───────────────────────────────────────────────────────
-# Provider dropdown (dashboard Settings tab): elevenlabs | deepgram-flux |
-# deepgram (Aura-2). API keys stay in .env only — secrets never ride
-# config.yaml (it ships in the public repo). ElevenLabs voice_id/model;
-# Deepgram Flux (voice-agent-first surface, /v2/speak) uses
-# deepgram_flux_voice; Aura-2 uses deepgram_voice. Flux and Aura-2 share
-# the DEEPGRAM_API_KEY. Voice catalogs: developers.deepgram.com/docs/
+# Three tiers on the TTS card: Embedded (kokoro, on this machine, no keys),
+# LocalAI (localai block below) and Cloud (elevenlabs | deepgram-flux |
+# deepgram, Aura-2). API keys stay in .env only (System · Keys) — secrets
+# never ride config.yaml (it ships in the public repo). LocalAI and Cloud
+# fall back to Kokoro on their own, with the Kokoro voice below. Unset or
+# unknown = kokoro. Deepgram voice catalogs: developers.deepgram.com/docs/
 # flux-tts/voices and developers.deepgram.com/docs/tts-models.
 tts:
-  provider: elevenlabs
-  # voice_id: <elevenlabs-voice-id>   # your ElevenLabs voice (the TTS card sets it)
-  model: eleven_flash_v2_5   # production model — do NOT change to eleven_v3:
-                             # the websocket handshake rejects v3 with HTTP 400
+  provider: kokoro
+  # kokoro_voice: af_heart                # Embedded voice, and the fallback voice behind
+  #                                       # LocalAI and Cloud (28 English voices;
+  #                                       # af_/am_ American, bf_/bm_ British)
+  # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
+  #                                       # (model files: scripts/fetch_kokoro_models.sh)
+  # voice_id: <elevenlabs-voice-id>       # ElevenLabs: your voice (the TTS card sets it)
+  # model: eleven_flash_v2_5              # ElevenLabs: eleven_flash_v2_5 (default) | eleven_v4_turbo
+  # elevenlabs_speed: 1.0                 # Flash only: 0.7–1.2 (unset = ElevenLabs' default)
+  # elevenlabs_stability: 0.5             # Flash only: 0.0–1.0, lower = more expressive
   # elevenlabs_text_normalization: on     # auto (ElevenLabs default: OFF on Flash) | on | off
   #                                       # on = ElevenLabs spells out numbers, times, dates
   #                                       # (~+0.15 s to first audio). Recommended on
@@ -68,15 +74,6 @@ tts:
   # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
   # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
   # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
-  # pocket_voice: alba                    # used when provider: pocket, or by the fallback
-  #                                       # (preset name, or a .wav path for cloning)
-  # kokoro_voice: af_heart                # used when provider: kokoro (28 English voices;
-  #                                       # af_/am_ American, bf_/bm_ British)
-  # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
-  #                                       # (model files: scripts/fetch_kokoro_models.sh)
-  fallback: kokoro                        # local hot standby behind a cloud provider:
-  #                                       # kokoro (ships with every install) | pocket
-  #                                       # (needs requirements-pocket.txt) | off
   # revive_cooldown_secs: 30   # min seconds between websocket retries once the
   #                             # TTS service is marked dead (revive fires on the
   #                             # next speak; one retry per window, 0 = every utterance)

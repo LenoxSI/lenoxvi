@@ -22,9 +22,10 @@ _BASE = {"failed": None}
 
 
 def whisper_base():
-    """The appliance fallback model (Whisper base, CPU int8), loaded once:
-    normally at startup; if that failed, at most once more here (two rooms
-    can't load it twice, and a failed load isn't retried on every turn)."""
+    """The Embedded model (stt_catalog: base on the CPU, int8) — the SAME
+    shared model the local Whisper service uses — loaded once: normally at
+    startup; if that failed, at most once more here (two rooms can't load it
+    twice, and a failed load isn't retried on every turn)."""
     import stt_local
     if stt_local.LocalWhisperSTTService._shared_model is not None:
         return stt_local.LocalWhisperSTTService._shared_model
@@ -33,7 +34,7 @@ def whisper_base():
             if _BASE["failed"]:
                 raise RuntimeError(f"Whisper base failed to load: {_BASE['failed']}")
             try:
-                stt_local.preload_shared_model("base", "cpu", "int8")
+                stt_local.preload_shared_model()
             except Exception as e:  # noqa: BLE001
                 _BASE["failed"] = type(e).__name__
                 raise

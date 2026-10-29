@@ -125,29 +125,5 @@ ask_input() {
   esac
 }
 
-# ask_choice "<question>" "<default>" <option>... -> echoes the picked option
-ask_choice() {
-  local q=$1 def=$2; shift 2
-  local ans
-  [[ -n ${UI:-} ]] || pick_ui
-  case $UI in
-    none) printf '%s\n' "$def" ;;
-    notty) _no_answer "$q" ;;
-    gum) _gum choose --header "$q" --selected "$def" "$@" </dev/tty ;;
-    whiptail)
-      local args=() o
-      for o in "$@"; do args+=("$o" ""); done
-      whiptail --default-item "$def" --menu "$q" 15 70 "$#" "${args[@]}" 3>&1 1>&2 2>&3 </dev/tty ;;
-    *)
-      local i=1 o
-      printf '  %s\n' "$q" >/dev/tty
-      for o in "$@"; do printf '    %d) %s\n' "$i" "$o" >/dev/tty; i=$((i + 1)); done
-      read -r -p "  choice [$def] " ans </dev/tty
-      if [[ -z $ans ]]; then printf '%s\n' "$def"
-      elif [[ $ans =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= $# )); then printf '%s\n' "${!ans}"
-      else printf '%s\n' "$def"; fi ;;
-  esac
-}
-
 # Newest release tag (vX.Y.Z, no pre-release suffix) from a tag list on stdin.
 newest_tag() { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1; }
