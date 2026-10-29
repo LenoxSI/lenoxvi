@@ -8,6 +8,9 @@
 - pins: the duck holder skips silence loads while a reply is loading (A #2);
   bot.py lowercases the lane kind, parses wake.enabled like everything
   else, and registers the echo gate per session
+- long turns: the last filler tier (30 s) promises a report, and a turn
+  superseded by a new question while its call was running speaks that
+  call's reply late, after the current one
 
 Run: cd tests && ~/venvs/lenoxvi/bin/python turn_fixes_test.py <path-to-core>
 """
@@ -293,6 +296,319 @@ sent, spoken = asyncio.run(think_probe(supersede=True))
 check("agent: a superseded turn sends no thinking LED", sent == [], f"sent={sent}")
 sent, spoken = asyncio.run(think_probe(with_led=False))
 check("agent: no LED bound (stub/tests) -> the turn still answers", spoken and spoken[-1] == "It is noon.", str(spoken))
+
+# ── long turns: the 30 s line, and a superseded running call reports late ─
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import intelligence.agent as ia
+import yaml
+from loguru import logger
+from pipecat.frames.frames import CancelFrame
+
+REPO = Path(CORE).resolve().parent
+
+
+def _yaml_tiers(path):
+    raw = (yaml.safe_load(path.read_text()).get("intelligence") or {}).get("fillers") or []
+    return [(float(t["after"]), list(t["lines"])) for t in raw]
+
+
+_defaults = [(a, list(lines)) for a, lines in ia._DEFAULT_TIERS]
+_last_after, _last_lines = _defaults[-1]
+check("agent: the last default filler tier is at 30 s and every line says the result will be reported",
+      [a for a, _ in _defaults] == [3.0, 12.0, 30.0]
+      and all(("tell you when" in ln or "let you know when" in ln) and len(ln.split()) >= 3
+              for ln in _last_lines),
+      str(_defaults[-1]))
+check("agent: the default tiers, config.example.yaml and the test fixture agree",
+      _yaml_tiers(REPO / "config.example.yaml") == _defaults == _yaml_tiers(REPO / "tests" / "fixtures" / "config.yaml"),
+      str(_yaml_tiers(REPO / "config.example.yaml")[-1:]))
+
+LATE = "About your earlier request:"
+ACK = "Hold on — switching."
+LOGS = []
+logger.add(lambda m: LOGS.append(m.record["message"]), level="INFO",
+           filter=lambda r: "late result" in r["message"])
+
+
+class _Intel:
+    """Fake intelligence: each question blocks on its own gate until released."""
+
+    def __init__(self, answers):
+        self.answers = answers               # question -> reply text or an exception
+        self.gates = {q: threading.Event() for q in answers}
+        self.started = {q: threading.Event() for q in answers}
+        self.finished = {q: threading.Event() for q in answers}
+        self.asked = []
+
+    def __call__(self, text):
+        self.asked.append(text)
+        self.started[text].set()
+        try:
+            self.gates[text].wait(5)
+            answer = self.answers[text]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        finally:
+            self.finished[text].set()
+
+    def release_all(self):
+        for g in self.gates.values():
+            g.set()
+
+
+async def until(cond, secs=2.0):
+    end = time.monotonic() + secs
+    while not cond() and time.monotonic() < end:
+        await asyncio.sleep(0.01)
+    return cond()
+
+
+def late_agent(answers, prefix=None, sticky=False):
+    sec = {"kind": "hermes", "url": "http://hm.test:8642/v1",
+           "fillers": [{"after": 30, "lines": ["One moment please."]}]}
+    if prefix is not None:
+        sec["late_reply_prefix"] = prefix
+    LIVE.clear()
+    LIVE.update({"intelligence": sec})
+    config._BOOT = LIVE
+    ag = IntelligenceAgent(echo_gate=EchoGate(), room="suite-late-reply",
+                           session_mode="sticky" if sticky else "fresh")
+    ag._lull_secs = 0.2
+    intel = _Intel(answers)
+    ag._ask_intelligence = intel
+    spoken, saves = [], []
+
+    async def push(frame, direction=None):
+        if type(frame).__name__ == "TTSSpeakFrame":
+            spoken.append(frame.text)
+    ag.push_frame = push
+    ag._save_history = lambda h: saves.append(list(h))
+    LOGS.clear()
+    return ag, intel, spoken, saves
+
+
+async def say(ag, text):
+    """One spoken question, through the frame path, until its turn closes."""
+    await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+    await ag.process_frame(TranscriptionFrame(text, "", 0), D)
+    await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+        await ag.process_frame(TranscriptionFrame("", "", 0), D)
+        if ag._flushed:
+            return
+
+
+OLD, NEW = "add milk to the grocery list", "what time is it"
+OLD_REPLY, NEW_REPLY = "Milk is on the list.", "It is noon."
+
+
+def _late(spoken):
+    return [s for s in spoken if s.startswith(LATE)]
+
+
+async def late_held_probe():
+    ag, intel, spoken, saves = late_agent({OLD: OLD_REPLY, NEW: NEW_REPLY}, sticky=True)
+    try:
+        await say(ag, OLD)
+        await until(intel.started[OLD].is_set)
+        await say(ag, NEW)                   # supersedes while the old call runs
+        await until(intel.started[NEW].is_set)
+        intel.gates[OLD].set()               # the old call lands first: held
+        await until(intel.finished[OLD].is_set)
+        await asyncio.sleep(0.1)
+        held = list(spoken)
+        intel.gates[NEW].set()
+        await until(lambda: _late(spoken))
+        await until(lambda: len(saves) >= 2)
+        return held, spoken, list(ag._history), saves, list(LOGS)
+    finally:
+        intel.release_all()
+
+
+held, spoken, hist, saves, logs = asyncio.run(late_held_probe())
+check("agent: a superseded running call that succeeds is spoken once, with the lead-in, after the newer reply",
+      held == [ACK] and spoken == [ACK, NEW_REPLY, f"{LATE} {OLD_REPLY}"],
+      f"held={held} spoken={spoken}")
+_old_pair = [{"role": "user", "content": OLD}, {"role": "assistant", "content": OLD_REPLY}]
+check("agent: a spoken late result enters history (no lead-in) and the sticky save",
+      hist[-2:] == _old_pair and saves and saves[-1][-2:] == _old_pair, f"hist={hist} saves={saves[-1:]}")
+check("agent: a late result logs held, then spoken",
+      any("late result held until the current reply" in m for m in logs)
+      and any("late result spoken" in m for m in logs), str(logs))
+
+
+async def late_idle_probe(vad):
+    ag, intel, spoken, _saves = late_agent({OLD: OLD_REPLY, NEW: NEW_REPLY})
+    intel.gates[NEW].set()                   # the newer turn answers at once
+    try:
+        await say(ag, OLD)
+        await until(intel.started[OLD].is_set)
+        await say(ag, NEW)
+        await until(lambda: NEW_REPLY in spoken and ag._turn_task.done())
+        if vad:
+            await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+        intel.gates[OLD].set()
+        await until(intel.finished[OLD].is_set)
+        await asyncio.sleep(0.2)
+        while_talking = list(spoken)
+        if vad:
+            await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+        await until(lambda: _late(spoken), 1.0)
+        return while_talking, spoken, list(LOGS)
+    finally:
+        intel.release_all()
+
+
+early, spoken, logs = asyncio.run(late_idle_probe(vad=False))
+check("agent: a late result with no turn in flight is spoken as soon as it lands",
+      early == spoken == [ACK, NEW_REPLY, f"{LATE} {OLD_REPLY}"], f"early={early} spoken={spoken}")
+early, spoken, logs = asyncio.run(late_idle_probe(vad=True))
+check("agent: a late result is held while the user talks, spoken once they stop",
+      early == [ACK, NEW_REPLY] and spoken == [ACK, NEW_REPLY, f"{LATE} {OLD_REPLY}"]
+      and any("held until the user stops talking" in m for m in logs),
+      f"early={early} spoken={spoken} logs={logs}")
+
+
+async def late_end_probe(end):
+    ag, intel, spoken, saves = late_agent({OLD: OLD_REPLY, NEW: NEW_REPLY}, sticky=True)
+    intel.gates[NEW].set()
+    try:
+        await say(ag, OLD)
+        await until(intel.started[OLD].is_set)
+        await say(ag, NEW)
+        await until(lambda: NEW_REPLY in spoken and ag._turn_task.done())
+        if end == "held":                    # landed, waiting on the user, then the session ends
+            await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+            intel.gates[OLD].set()
+            await until(lambda: ag._late_pending)
+            await ag.cleanup()
+            # the user stops talking after the end: a speaker still alive would speak now
+            await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+        elif end == "cleanup":
+            await ag.cleanup()
+        else:
+            await ag.process_frame(CancelFrame(), D)
+        intel.gates[OLD].set()
+        await until(intel.finished[OLD].is_set)
+        await asyncio.sleep(0.2)
+        return spoken, list(ag._history), saves, list(LOGS)
+    finally:
+        intel.release_all()
+
+
+for _end in ("cleanup", "CancelFrame", "held"):
+    spoken, hist, saves, logs = asyncio.run(late_end_probe(_end))
+    _all_saved = [m for s in saves for m in s]
+    check(f"agent: session end ({_end}) before a late result is spoken drops it: nothing said, no history",
+          spoken == [ACK, NEW_REPLY] and {"role": "user", "content": OLD} not in hist
+          and {"role": "user", "content": OLD} not in _all_saved
+          and any("late result dropped (the session ended)" in m for m in logs),
+          f"spoken={spoken} hist={hist} logs={logs}")
+
+
+async def late_join_probe():
+    first, rest = "check the weather", "for tomorrow morning"
+    joined = f"{first} {rest}"
+    ag, intel, spoken, _saves = late_agent({first: "Sunny all day.", joined: "Tomorrow morning is sunny."})
+    try:
+        await say(ag, first)
+        await until(intel.started[first].is_set)
+        ag._last_close_segmented = True      # as a segmented STT closes on part one
+        await ag.process_frame(TranscriptionFrame(rest, "", 0), D)   # the slow stretch joins
+        await until(intel.started[joined].is_set)
+        intel.gates[first].set()
+        await until(intel.finished[first].is_set)
+        intel.gates[joined].set()
+        await until(lambda: "Tomorrow morning is sunny." in spoken)
+        await asyncio.sleep(0.2)
+        return intel.asked, spoken, list(LOGS)
+    finally:
+        intel.release_all()
+
+
+asked, spoken, logs = asyncio.run(late_join_probe())
+check("agent: a turn superseded by a join drops its late result (same question, more words)",
+      asked == ["check the weather", "check the weather for tomorrow morning"]
+      and spoken == ["Tomorrow morning is sunny."]
+      and any("late result dropped (the rest of the question joined it)" in m for m in logs),
+      f"asked={asked} spoken={spoken} logs={logs}")
+
+
+async def late_quiet_probe(old_answer, prefix=None):
+    ag, intel, spoken, _saves = late_agent({OLD: old_answer, NEW: NEW_REPLY}, prefix=prefix)
+    intel.gates[NEW].set()
+    try:
+        await say(ag, OLD)
+        await until(intel.started[OLD].is_set)
+        await say(ag, NEW)
+        await until(lambda: NEW_REPLY in spoken and ag._turn_task.done())
+        intel.gates[OLD].set()
+        await until(intel.finished[OLD].is_set)
+        await asyncio.sleep(0.2)
+        return spoken, list(ag._history), list(LOGS)
+    finally:
+        intel.release_all()
+
+
+for _label, _answer, _why in (("fails", RuntimeError("suite: upstream gone"), "the call failed"),
+                              ("returns empty", "", "empty reply")):
+    spoken, hist, logs = asyncio.run(late_quiet_probe(_answer))
+    check(f"agent: a late call that {_label} says nothing",
+          spoken == [ACK, NEW_REPLY] and {"role": "user", "content": OLD} not in hist
+          and any(f"late result dropped ({_why}" in m for m in logs),
+          f"spoken={spoken} logs={logs}")
+
+spoken, hist, logs = asyncio.run(late_quiet_probe(OLD_REPLY, prefix=""))
+check("agent: late_reply_prefix \"\" turns late results off (dropped as before)",
+      spoken == [ACK, NEW_REPLY] and {"role": "user", "content": OLD} not in hist
+      and any("late result dropped (intelligence.late_reply_prefix is off)" in m for m in logs),
+      f"spoken={spoken} logs={logs}")
+
+_env_prefix = os.environ.pop("LVI_LATE_REPLY_PREFIX", None)
+try:
+    _p_def = getattr(late_agent({})[0], "_late_prefix", None)
+    _p_cfg = getattr(late_agent({}, prefix="Earlier you asked:")[0], "_late_prefix", None)
+    os.environ["LVI_LATE_REPLY_PREFIX"] = "Back to before:"
+    _p_env = getattr(late_agent({})[0], "_late_prefix", None)
+finally:
+    os.environ.pop("LVI_LATE_REPLY_PREFIX", None)
+    if _env_prefix is not None:
+        os.environ["LVI_LATE_REPLY_PREFIX"] = _env_prefix
+check("agent: intelligence.late_reply_prefix is read from config.yaml, env fallback, default lead-in",
+      (_p_cfg, _p_env, _p_def) == ("Earlier you asked:", "Back to before:", LATE), str((_p_cfg, _p_env, _p_def)))
+
+
+async def late_queued_probe():
+    q1, q2, q3 = OLD, "how long is the drive", NEW
+    ag, intel, spoken, _saves = late_agent({q1: OLD_REPLY, q2: "About an hour.", q3: NEW_REPLY})
+    intel.gates[q3].set()
+    try:
+        await say(ag, q1)                    # the pool's only thread runs q1
+        await until(intel.started[q1].is_set)
+        await say(ag, q2)                    # q2's call queues behind q1
+        await say(ag, q3)                    # supersedes q2 while its call is still queued
+        intel.gates[q1].set()                # q1 lands late; q3 then runs and answers
+        await until(lambda: _late(spoken))
+        await asyncio.sleep(0.1)
+        return intel.asked, spoken
+    finally:
+        intel.release_all()
+
+
+_pool_saved = ia._INTEL_POOL
+ia._INTEL_POOL = ThreadPoolExecutor(max_workers=1)
+try:
+    asked, spoken = asyncio.run(late_queued_probe())
+finally:
+    ia._INTEL_POOL.shutdown(wait=True)
+    ia._INTEL_POOL = _pool_saved
+check("agent: a superseded call still queued is never sent; only the running one reports late",
+      asked == [OLD, NEW] and spoken == [ACK, NEW_REPLY, f"{LATE} {OLD_REPLY}"],
+      f"asked={asked} spoken={spoken}")
 
 # ── pins ──────────────────────────────────────────────────────────
 src = Path(CORE, "sonos_output.py").read_text()

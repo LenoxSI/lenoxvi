@@ -3259,8 +3259,8 @@ def main():
 
     # Epoch turns + wake-word barge-in: turns
     # run as background tasks (frame loop never blocks on the intelligence), a
-    # new question supersedes (old reply discarded, no history write,
-    # ack spoken), and the wake word twice-confirmed during LOCKED fires
+    # new question supersedes (old reply not spoken in its place, no history
+    # write, ack spoken), and the wake word twice-confirmed during LOCKED fires
     # the interrupt + reopens the gate; backends stop their clips.
     if True:  # scope block
         import os as _os
@@ -3475,6 +3475,8 @@ def main():
             return agent, _block
 
         try:
+            # The probe ends before the slow first call returns, so its late
+            # report never lands here (turn_fixes_test covers late results).
             _agent, _block_time = _asyncio.run(_agent_probe())
             check("turns turn: frame loop never blocks on the intelligence (was 2.5s)",
                   _block_time < 0.5, f"blocked={_block_time:.2f}s")
