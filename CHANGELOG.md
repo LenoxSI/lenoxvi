@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
+
+A patch release: aiohttp 3.14.4 closes eight advisories (several in the clip server), long agent turns now keep you
+informed, and the LocalAI speech group is renamed Local.
+
 ### Changed
 - The STT and TTS dropdowns' LocalAI group is now **Local**, so more servers on your network can join it
   later; LocalAI is its first option. Dashboard API: the tier is `local` (was `localai`) in `tiers` and in
