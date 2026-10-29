@@ -44,7 +44,7 @@ dashboard. Keys, voices, rooms and speakers are all set there.
 
 ### The `lenoxvi` command
 
-| Command | What it does |
+| Command<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> | What it does<br><img src="docs/readme/spacer.png" width="460" height="1" alt=""> |
 |---|---|
 | `lenoxvi status` | Service state, version and dashboard address (add `sudo` for the address) |
 | `sudo lenoxvi logs [-f]` | The last 100 log lines; `-f` keeps following |
@@ -67,7 +67,7 @@ For development. Python 3.12+. From the repo root:
 
 ## Features
 
-| Feature | What |
+| Feature<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | What<br><img src="docs/readme/spacer.png" width="560" height="1" alt=""> |
 |---|---|
 | Wake gate | "Hey Jarvis" out of the box. Train your own. |
 | Turn-taking | Optional wake-word barge-in, echo containment, and filler lines while the agent thinks. |
@@ -88,7 +88,7 @@ Demo data.
 
 ✅ runs on your hardware. ❌ goes to the cloud.
 
-| Provider | Local | Fallback |
+| Provider<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> | Local<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Fallback<br><img src="docs/readme/spacer.png" width="340" height="1" alt=""> |
 |---|---|---|
 | Whisper | ✅ | — |
 | Deepgram Nova-3 | ❌ | The configured Whisper model |
@@ -98,7 +98,7 @@ Demo data.
 
 Turbo and Medium need a GPU.
 
-| Model | Size | Needs | Best for |
+| Model<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | Size<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Needs<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Best for<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> |
 |---|---|---|---|
 | `large-v3-turbo` | 1.6 GB | GPU | Best all-round. The default. |
 | `medium` | 1.5 GB | GPU | Faster, solid in noise. |
@@ -107,7 +107,7 @@ Turbo and Medium need a GPU.
 
 ## Intelligence
 
-| System | Talks to | Session history | Spoken style |
+| System<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Talks to<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> | Session history<br><img src="docs/readme/spacer.png" width="180" height="1" alt=""> | Spoken style<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> |
 |---|---|---|---|
 | Hermes | Hermes API, bearer key | Hermes keeps it | LenoxVI sends voice instructions: short spoken sentences, no markdown |
 | OpenClaw | OpenClaw Gateway, model `openclaw/<agent>` | Sticky per room via a session key | Same as Hermes |
@@ -115,7 +115,7 @@ Turbo and Medium need a GPU.
 
 ## Text to speech
 
-| Provider | Local | Fallback |
+| Provider<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> | Local<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Fallback<br><img src="docs/readme/spacer.png" width="340" height="1" alt=""> |
 |---|---|---|
 | ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Kokoro or Pocket |
 | Deepgram Flux or Aura-2 | ❌ | Kokoro or Pocket |
@@ -159,7 +159,7 @@ If LocalAI stops answering, this appliance listens with Whisper base and speaks 
 
 Each zone picks Sonos or WiiM. The difference that matters is ducking.
 
-| | Sonos | WiiM |
+| <img src="docs/readme/spacer.png" width="300" height="1" alt=""> | Sonos<br><img src="docs/readme/spacer.png" width="230" height="1" alt=""> | WiiM<br><img src="docs/readme/spacer.png" width="230" height="1" alt=""> |
 |---|---|---|
 | How a reply plays | Audio clip overlay, mixed over what is playing | Replaces what is playing |
 | Music while she talks | Ducks and keeps playing | Stops and is not resumed |
@@ -174,7 +174,7 @@ WiiM's prompt-overlay command does nothing on the firmware we tested, so the bac
 
 Ducking needs the `AUDIO_CLIP` capability, which [Sonos documents](https://docs.sonos.com/reference/audioclip) on every player running S2 and not on S1-only players. The groups below follow Sonos's [compatibility list](https://support.sonos.com/en-us/article/sonos-app-version-compatibility). Only the three tested models are confirmed here; the bot logs the capability check for each zone at startup.
 
-| Can duck | Models |
+| Can duck<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | Models<br><img src="docs/readme/spacer.png" width="560" height="1" alt=""> |
 |---|---|
 | ✅ S2 only | Arc, Arc SL, Arc Ultra, Beam (Gen 2), Beam Ultra, Era 100, Era 100 Pro, Era 100 SL, Era 300, Five, Move 2, One SL, Ray, Roam, Roam 2, Roam SL, Sonos Play, Amp Multi, SYMFONISK Bookshelf (Gen 2), Floor lamp, Picture frame, Table lamp (Gen 2) |
 | ✅ When set up on the S2 app | Amp, Beam (Gen 1), Move, One (Gen 1), One (Gen 2), Play:1, Play:3, Play:5 (Gen 2), Playbar, Playbase, Port, Connect (Gen 2), Connect:Amp (Gen 2), SYMFONISK Bookshelf (Gen 1), SYMFONISK Table lamp (Gen 1) |
