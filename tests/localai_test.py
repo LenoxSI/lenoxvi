@@ -451,7 +451,7 @@ if HAVE_PIPECAT:
     os.environ[la.KEY_VAR] = KEY
     stt_local._language_hook = lambda: "en"
     _shared_before = stt_local.LocalWhisperSTTService._shared_model
-    svc = stt_local.LocalWhisperSTTService(model="base", device="cpu", compute_type="int8", language="en",
+    svc = stt_local.LocalWhisperSTTService(language="en",
                                            model_override=sla.LocalAIWhisper("faster-whisper-small", lambda: fw))
     BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Turn on the lights."}', 0)
     out = asyncio.run(svc._transcribe(b"RIFF....WAVE"))
@@ -469,8 +469,8 @@ if HAVE_PIPECAT:
     _real_pre = stt_local.preload_shared_model
     _loads = []
 
-    def _slow_pre(model, device, compute):
-        _loads.append((model, device, compute))
+    def _slow_pre(*args):
+        _loads.append(args)
         time.sleep(0.3)
         stt_local.LocalWhisperSTTService._shared_model = fw
     stt_local.LocalWhisperSTTService._shared_model = None
@@ -480,7 +480,7 @@ if HAVE_PIPECAT:
     [x.start() for x in _th]
     [x.join() for x in _th]
     check("stt localai: Whisper base loads once even when rooms ask together",
-          _loads == [("base", "cpu", "int8")] and stt_local.LocalWhisperSTTService._shared_model is fw, str(_loads))
+          _loads == [()] and stt_local.LocalWhisperSTTService._shared_model is fw, str(_loads))
     _fails = []
     stt_local.LocalWhisperSTTService._shared_model = None
     stt_local.preload_shared_model = lambda *a: (_fails.append(a), (_ for _ in ()).throw(OSError("no disk")))

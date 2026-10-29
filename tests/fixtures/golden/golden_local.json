@@ -6,16 +6,13 @@
  },
  "whisper": {
   "clip1": {
-   "base": "Turn on the kitchen lights.",
-   "medium": "Turn on the kitchen lights."
+   "base": "Turn on the kitchen lights."
   },
   "clip2": {
-   "base": "Set a timer for 10 minutes.",
-   "medium": "Set a timer for 10 minutes."
+   "base": "Set a timer for 10 minutes."
   },
   "clip3": {
-   "base": "What is the weather tomorrow in the morning?",
-   "medium": "What is the weather tomorrow in the morning?"
+   "base": "What is the weather tomorrow in the morning?"
   }
  }
 }

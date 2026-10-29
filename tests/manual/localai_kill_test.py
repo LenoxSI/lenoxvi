@@ -29,7 +29,7 @@ def check(name, cond, detail=""):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 wav = open(os.path.join(HERE, "..", "fixtures", "golden", "clip1.wav"), "rb").read()
-stt_local.preload_shared_model("base", "cpu", "int8")
+stt_local.preload_shared_model()
 base = stt_local.LocalWhisperSTTService._shared_model
 la.set_cooldown(5)
 m = stt_localai.LocalAIWhisper(la.discover()["stt"][0], lambda: base)

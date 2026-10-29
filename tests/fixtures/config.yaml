@@ -35,15 +35,12 @@ vad:
   stop_secs: 0.2        # lower = snappier turn-ends but clips word onsets
   min_volume: 0.6       # floor under VAD (ignores very quiet speech/noise)
 
-# ── Speech-to-text (faster-whisper on the GPU) ──────────────────────────
+# ── Speech-to-text ─────────────────────────────────────────────────────
 stt:
-  # provider: whisper    # whisper (local, default) | deepgram (Nova-3) |
-  #                      # elevenlabs (Scribe v2, uses ELEVENLABS_API_KEY);
-  #                      # a cloud provider keeps the Whisper model below
-  #                      # as its automatic fallback
-  model: small
-  device: cpu
-  compute_type: int8
+  # provider: whisper    # whisper (Embedded, default) | localai (LocalAI) |
+  #                      # deepgram (Nova-3) | elevenlabs (Scribe v2);
+  #                      # LocalAI and the cloud providers fall back to
+  #                      # Embedded (Whisper base on this machine's CPU)
   # language: en         # unset = auto-detect per utterance
 
 # ── Text-to-speech ───────────────────────────────────────────────────────
@@ -69,22 +66,16 @@ tts:
   # deepgram_flux_speed: 1.1              # 0.5–1.5, 0.05 steps (unset = default)
   # deepgram_flux_expressivity: 2         # -2..2, calm→animated (unset = default)
   # deepgram_voice: aura-2-thalia-en      # used when provider: deepgram
-  # pocket_voice: alba                    # used when provider: pocket, or by the fallback
-  #                                       # (preset name, or a .wav path for cloning)
-  # kokoro_voice: af_heart                # used when provider: kokoro (28 English voices;
+  # kokoro_voice: af_heart                # Embedded voice, and the standby behind LocalAI and
+  #                                       # the cloud providers (28 English voices;
   #                                       # af_/am_ American, bf_/bm_ British)
   # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
-  #                                       # (needs requirements-kokoro.txt)
-  # fallback: pocket                     # local hot standby behind a cloud provider
-  #                                       # (needs requirements-pocket.txt)
   # revive_cooldown_secs: 30   # min seconds between websocket retries once the
   #                             # TTS service is marked dead (revive fires on the
   #                             # next speak; one retry per window, 0 = every utterance)
 
 # ── Intelligence (OpenAI-compatible chat endpoint — e.g. a Hermes agent) ───────
-  pocket_voice: alba
   kokoro_voice: af_heart
-  fallback: pocket
 intelligence:
   kind: hermes          # hermes | openclaw | nanobot | stub (stub = canned echo, bench only).
                         # openclaw = OpenClaw Gateway: model "openclaw/<agent>",

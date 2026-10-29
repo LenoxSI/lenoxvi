@@ -1,4 +1,4 @@
-"""Number pass for the local voices (Pocket, Kokoro): digits -> spoken words.
+"""Number pass for Kokoro and LocalAI's voices (Pocket among them): digits -> spoken words.
 
 Pure Python, no dependencies: runs with any python3.
 

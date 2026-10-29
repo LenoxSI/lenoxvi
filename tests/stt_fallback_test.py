@@ -26,10 +26,10 @@ def check(name, cond, detail=""):
 import stt_catalog as cat
 
 # ── catalog ──────────────────────────────────────────────────────────
-check("provider catalog: Whisper (local) first, then LocalAI, then Deepgram Nova-3 (cloud), then ElevenLabs Scribe v2 (cloud)",
-      [(p["name"], p["label"]) for p in getattr(cat, "PROVIDERS", [])]
-      == [("whisper", "Whisper (local)"), ("localai", "LocalAI (host)"), ("deepgram", "Deepgram Nova-3 (cloud)"),
-          ("elevenlabs", "ElevenLabs Scribe v2 (cloud)")],
+check("provider catalog: Whisper base first, then LocalAI, then Deepgram Nova-3, then ElevenLabs Scribe v2",
+      [(p["name"], p["label"], p.get("tier")) for p in getattr(cat, "PROVIDERS", [])]
+      == [("whisper", "Whisper base", "embedded"), ("localai", "LocalAI", "localai"),
+          ("deepgram", "Deepgram Nova-3", "cloud"), ("elevenlabs", "ElevenLabs Scribe v2", "cloud")],
       str(getattr(cat, "PROVIDERS", None)))
 check("deepgram language: auto -> multi, a code passes through, empty -> multi",
       getattr(cat, "deepgram_language", lambda c: None)("auto") == "multi"
@@ -227,10 +227,11 @@ def _dns_ok(host):
         return False
 
 
-async def _failover(dg, budget, provider="deepgram", feed=False):
+async def _failover(dg, budget, provider="deepgram", feed=False, whisper=None):
     """feed: audio every 0.1 s while waiting (a room that is awake) — a
-    service that connects on demand can't fail before it hears something."""
-    whisper = _FakeWhisper()
+    service that connects on demand can't fail before it hears something.
+    whisper: the standby (default: a fake that counts the audio it gets)."""
+    whisper = whisper if whisper is not None else _FakeWhisper()
     task_ref = {}
 
     async def queue(frame):
@@ -263,12 +264,33 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 
 dead = DeepgramSTTService(api_key="junk", base_url="ws://127.0.0.1:9",
                           settings=DeepgramSTTService.Settings(model="nova-3", language="en"))
-landed, took, st = asyncio.run(_failover(dead, 40))
+# The standby is the real Embedded Whisper service, built exactly as bot.py builds it.
+_embedded = sl.LocalWhisperSTTService(language=None)
+landed, took, st = asyncio.run(_failover(dead, 40, whisper=_embedded))
 check("REAL: Deepgram unreachable (dead port) -> the switcher lands on Whisper",
       landed, f"after {took:.1f}s")
 check("REAL: the fallback is visible in status (active whisper + reason, room listed)",
       st.get("active") == "whisper" and st.get("fallback_rooms") == ["proof"] and st.get("fallback_reason"), str(st))
 print(f"    (dead-port failover took {took:.1f}s)")
+_emb_loads = []
+
+
+class _FW:
+    def transcribe(self, audio, **kw):
+        return iter(()), type("I", (), {"language": "en"})()
+
+
+_saved_new, _saved_shared = sl._new_model, sl.LocalWhisperSTTService._shared_model
+sl._new_model = lambda model, device, compute: (_emb_loads.append((model, device, compute)), _FW())[1]
+sl.LocalWhisperSTTService._shared_model = None
+try:
+    asyncio.run(_embedded.ensure_model())
+finally:
+    sl._new_model, sl.LocalWhisperSTTService._shared_model = _saved_new, _saved_shared
+check("REAL: the cloud standby is Embedded Whisper — the service the switcher landed on loads base on the CPU (int8)",
+      landed and type(_embedded) is sl.LocalWhisperSTTService
+      and _emb_loads == [(cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)],
+      f"landed={landed} loads={_emb_loads}")
 
 if _dns_ok("api.deepgram.com"):
     badkey = DeepgramSTTService(api_key="definitely-not-a-key",

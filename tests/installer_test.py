@@ -23,6 +23,17 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts" / "installer"
+sys.path.append(str(REPO / "core"))  # appended, never first: no core module may shadow a stdlib one
+# Pure data (no pipecat): the Embedded defaults the installer relies on.
+import stt_catalog
+
+try:
+    import tts_catalog
+except ImportError:  # an older tree (the red probe): the checks that need it fail, the suite still runs
+    tts_catalog = None
+EMB = getattr(stt_catalog, "EMBEDDED_MODEL", None)
+STT_DEFAULT = getattr(stt_catalog, "DEFAULT_PROVIDER", None)
+TTS_DEFAULT = getattr(tts_catalog, "DEFAULT_PROVIDER", None)
 FAILS = []
 
 
@@ -95,6 +106,17 @@ def out(r):
     return r.stdout + r.stderr
 
 
+# Question log: replaces lib.sh's prompts AFTER sourcing. Each question goes to stderr and is answered with
+# its default, so a check can list exactly which questions a step asks (ask_choice is a tripwire: lib.sh has none).
+ASK_LOG = ('ask_input() { printf "ASKED input: %s\\n" "$1" >&2; printf "%s\\n" "$2"; }; '
+           'ask_yes() { printf "ASKED yes: %s\\n" "$1" >&2; [[ $2 == y ]]; }; '
+           'ask_choice() { printf "ASKED choice: %s\\n" "$1" >&2; printf "%s\\n" "$2"; }; ')
+
+
+def asked(r):
+    return [ln[len("ASKED "):] for ln in r.stderr.splitlines() if ln.startswith("ASKED ")]
+
+
 # ── lib: dry-run runner, prompts, tags ───────────────────────────────────
 marker = TMP / "should-not-exist"
 r = sh(f"run touch {marker}")
@@ -106,10 +128,9 @@ check("installer lib: dry-run write_file prints one line and writes nothing",
 r = sh(f"LVI_DRY_RUN=0; printf 'a\\nb\\n' | write_file {TMP}/wf2 0600 -; stat -c %a {TMP}/wf2; ls {TMP} | grep -c 'wf2\\.' || true")
 check("installer lib: write_file lands the file with its mode and leaves no temp file",
       (TMP / "wf2").read_text() == "a\nb\n" and r.stdout.split() == ["600", "0"], out(r))
-r = sh('ask_choice "STT?" "CPU (Whisper base)" "GPU (Whisper large-v3-turbo)" "CPU (Whisper base)"; '
-       'ask_input "IP?" 192.0.2.7; ask_yes "ok?" y && echo Y; ask_yes "no?" n || echo N')
+r = sh('ask_input "IP?" 192.0.2.7; ask_yes "ok?" y && echo Y; ask_yes "no?" n || echo N')
 check("installer lib: --yes answers every question with its default",
-      r.stdout.split("\n")[:4] == ["CPU (Whisper base)", "192.0.2.7", "Y", "N"], out(r))
+      r.stdout.split("\n")[:3] == ["192.0.2.7", "Y", "N"], out(r))
 r = sh('LVI_YES=0; UI=; ask_input "This machine\'s address" 192.0.2.7')
 check("installer lib: no terminal and no --yes = a clear error naming --yes, never a hang",
       r.returncode != 0 and "--yes" in r.stderr and "This machine" in r.stderr, out(r))
@@ -151,12 +172,6 @@ pfx_inst = make_prefix()
 r = sh("preflight; echo EXISTING=$EXISTING", pfx_inst, STUB_SS=busy, STUB_ACTIVE="yes")
 check("installer preflight: on a box where LenoxVI already runs, its own ports aren't an error",
       r.returncode == 0 and "EXISTING=yes" in r.stdout and "in use by LenoxVI" in r.stdout, out(r))
-r = sh("preflight; echo GPU=$GPU NAME=$GPU_NAME", make_prefix(), STUB_GPU="NVIDIA RTX A2000")
-check("installer preflight: a working NVIDIA driver = GPU profile offered",
-      "GPU=yes NAME=NVIDIA RTX A2000" in r.stdout, out(r))
-r = sh("preflight; echo GPU=$GPU", make_prefix(), STUB_LSPCI="01:00.0 VGA compatible controller: NVIDIA Corporation")
-check("installer preflight: NVIDIA card without a driver = CPU, and says how to switch later",
-      "GPU=no" in r.stdout and "driver" in r.stdout and "lenoxvi reconfigure" in r.stdout, out(r))
 old_py = STUBS.parent / "oldpy"
 old_py.mkdir()
 (old_py / "python3").write_text("#!/usr/bin/env bash\nexit 1\n")
@@ -227,13 +242,13 @@ r = sh(f"LVI_SOURCE={src}; resolve_source; echo TAG=$LVI_TAG ORIGIN=$LVI_ORIGIN"
 check("installer app: the newest release tag of the source is installed, and upgrades follow its origin",
       "TAG=v0.10.0 ORIGIN=https://example.com/lenoxvi.git" in r.stdout, out(r))
 p = make_prefix()
-r = sh("STT_PROFILE=cpu; ensure_user", p)
+r = sh("ensure_user", p)
 check("installer app: a fresh box gets a system user with no login, home = the data folder",
       "+ useradd --system --home-dir /var/lib/lenoxvi --no-create-home --shell /usr/sbin/nologin lenoxvi" in r.stdout
       and "usermod" not in r.stdout, out(r))
-r = sh("STT_PROFILE=gpu; ensure_user", p, STUB_USER="yes")
-check("installer app: an existing user isn't re-created; the GPU profile adds video,render",
-      "useradd" not in r.stdout and "+ usermod -aG video,render lenoxvi" in r.stdout, out(r))
+r = sh("ensure_user", p, STUB_USER="yes")
+check("installer app: an existing user isn't re-created or added to any group",
+      r.returncode == 0 and "useradd" not in r.stdout and "usermod" not in r.stdout and "(exists)" in r.stdout, out(r))
 r = sh(f"LVI_SOURCE={src}; LVI_TAG=v0.10.0; LVI_ORIGIN=https://example.com/o.git; install_code", p)
 check("installer app: code is a shallow clone of the release tag, origin kept for upgrades",
       f"clone --quiet --depth 1 --branch v0.10.0 file://{src} {p}/opt/lenoxvi/app" in r.stdout
@@ -243,35 +258,37 @@ check("installer app: the code folder is marked safe for git, so the bot (not ro
 r = sh(f"LVI_SOURCE={src}; LVI_TAG=v0.10.0; LVI_ORIGIN=x; install_code", pfx_inst)
 check("installer app: an existing install's code is left alone (upgrades are lenoxvi upgrade)",
       "clone" not in r.stdout and "lenoxvi upgrade" in r.stdout, out(r))
-r = sh("PY_OK=no; STT_PROFILE=cpu; install_venv", p)
+r = sh("PY_OK=no; install_venv", p)
 check("installer app: old system Python = uv installs a private 3.12 under /opt (not root's home)",
       "python install --quiet 3.12" in r.stdout and f"UV_PYTHON_INSTALL_DIR={p}/opt/lenoxvi/python" in r.stdout
       and "UV_COMPILE_BYTECODE=1" in r.stdout and "requirements-gpu" not in r.stdout, out(r))
-r = sh("PY_OK=yes; PY_BIN=/usr/bin/python3; STT_PROFILE=gpu; install_venv", p)
-check("installer app: GPU profile adds requirements-gpu.txt; a new-enough system Python is used as is",
-      "venv --quiet -p /usr/bin/python3" in r.stdout and "-r " + f"{p}/opt/lenoxvi/app/requirements-gpu.txt" in r.stdout
-      and "python install" not in r.stdout, out(r))
-r = sh("STT_MODEL=large-v3-turbo; fetch_models", p)
+r = sh("PY_OK=yes; PY_BIN=/usr/bin/python3; install_venv", p)
+_pip = [ln for ln in r.stdout.splitlines() if " pip install " in ln]
+check("installer app: a new-enough system Python is used as is; packages come from requirements.txt alone",
+      "venv --quiet -p /usr/bin/python3" in r.stdout and "python install" not in r.stdout and len(_pip) == 1
+      and _pip[0].endswith(f"--python {p}/opt/lenoxvi/venv/bin/python -r {p}/opt/lenoxvi/app/requirements.txt")
+      and "requirements-gpu" not in r.stdout, out(r))
+r = sh("fetch_models", p)
 check("installer app: both speech models download up front as the service user, into its home",
-      "runuser -u lenoxvi -- env HOME=/var/lib/lenoxvi" in r.stdout
-      and "fetch_kokoro_models.sh" in r.stdout and "download_model\\(\\'large-v3-turbo\\'\\)" in r.stdout, out(r))
+      "runuser -u lenoxvi -- env HOME=/var/lib/lenoxvi" in r.stdout and EMB is not None
+      and "fetch_kokoro_models.sh" in r.stdout and f"download_model\\(\\'{EMB}\\'\\)" in r.stdout
+      and f"speech model (Whisper {EMB}): ready" in r.stdout, out(r))
 
 # ── questions + keyless state ────────────────────────────────────────────
-r = sh("GPU=yes; ask_questions; echo IP=$HOST_IP STT=$STT_PROFILE MODEL=$STT_MODEL TOKEN=$MAKE_TOKEN",
-       make_prefix(), STUB_SRC="192.0.2.44")
-check("installer questions: defaults = the default-route address, GPU when it works, a token",
-      "IP=192.0.2.44 STT=gpu MODEL=large-v3-turbo TOKEN=yes" in r.stdout, out(r))
-r = sh("GPU=no; ask_questions; echo STT=$STT_PROFILE", make_prefix(), STUB_SRC="192.0.2.44")
-check("installer questions: no GPU = CPU / Whisper base by default", "STT=cpu" in r.stdout, out(r))
-r = sh("GPU=no; ask_questions", make_prefix())
+r = sh(ASK_LOG + "ask_questions; echo IP=$HOST_IP TOKEN=$MAKE_TOKEN", make_prefix(), STUB_SRC="192.0.2.44")
+check("installer questions: two questions — the LAN address (default-route guess) and a token; speech needs none",
+      r.returncode == 0 and [a.split(":")[0] for a in asked(r)] == ["input", "yes"] and "LAN address" in asked(r)[0]
+      and "IP=192.0.2.44 TOKEN=yes" in r.stdout and "speech: Embedded (Whisper base + Kokoro)" in r.stdout
+      and "Two questions" in r.stdout, out(r))
+r = sh("ask_questions", make_prefix())
 check("installer questions: no default route and no --host = stop and ask for --host",
       r.returncode != 0 and "--host" in r.stderr, out(r))
-r = sh("GPU=no; HOST_IP=10.0.0.300x; ask_questions", make_prefix())
+r = sh("HOST_IP=10.0.0.300x; ask_questions", make_prefix())
 check("installer questions: a malformed --host is refused", r.returncode != 0 and "IPv4" in r.stderr, out(r))
 pe = make_prefix()
 (pe / "var/lib/lenoxvi").mkdir(parents=True)
 (pe / "var/lib/lenoxvi/.env").write_text("ELEVENLABS_API_KEY=x\n")
-r = sh("GPU=no; HOST_IP=192.0.2.5; ask_questions; echo TOKEN=$MAKE_TOKEN", pe)
+r = sh("HOST_IP=192.0.2.5; ask_questions; echo TOKEN=$MAKE_TOKEN", pe)
 check("installer questions: an existing keys file = no token question, nothing replaced", "TOKEN=no" in r.stdout, out(r))
 
 # write_config.py, real files
@@ -280,31 +297,35 @@ cfgdir = TMP / "cfg"
 cfgdir.mkdir()
 dest = cfgdir / "config.yaml"
 WC = [sys.executable, str(SCRIPTS / "write_config.py")]
-r = subprocess.run([*WC, str(ex), str(dest), "--host", "192.0.2.10", "--stt", "cpu"],
-                   capture_output=True, text=True, check=False)
+r = subprocess.run([*WC, str(ex), str(dest), "--host", "192.0.2.10"], capture_output=True, text=True, check=False)
+if not dest.exists():  # an older write_config refused the call: the check below reports it; later sections need a config
+    shutil.copy(ex, dest)
 try:
     from ruamel.yaml import YAML
     c = YAML(typ="safe").load(dest.read_text())
 except Exception as e:  # noqa: BLE001
     c = {"error": repr(e)}
 check("installer config: keyless values — kokoro voice, echo intelligence, CPU Whisper base, no rooms, the clip address",
-      r.returncode == 0 and c.get("tts", {}).get("provider") == "kokoro" and c.get("intelligence", {}).get("kind") == "stub"
-      and (c["stt"]["model"], c["stt"]["device"], c["stt"]["compute_type"]) == ("base", "cpu", "int8")
+      r.returncode == 0 and TTS_DEFAULT is not None and c.get("tts", {}).get("provider") == TTS_DEFAULT
+      and STT_DEFAULT is not None and c.get("stt", {}).get("provider") == STT_DEFAULT
+      and not {"model", "device", "compute_type"} & set(c.get("stt") or {})
+      and not {"fallback", "pocket_voice"} & set(c.get("tts") or {})
+      and c.get("intelligence", {}).get("kind") == "stub"
       and c.get("room_zones") == {} and c.get("clip_server", {}).get("host_ip") == "192.0.2.10"
-      and c.get("wake", {}).get("enabled") is True, f"{r.stderr[-300:]} {str(c)[:200]}")
+      and c.get("wake", {}).get("enabled") is True, f"{r.stderr[-300:]} {str(c)[:300]}")
 check("installer config: the example's comments survive (ruamel round-trip)",
       "the Rooms tab sets these" in dest.read_text() and "Web dashboard" in dest.read_text())
 before = dest.read_bytes()
-r = subprocess.run([*WC, str(ex), str(dest), "--host", "192.0.2.99", "--stt", "gpu"], capture_output=True, text=True, check=False)
+r = subprocess.run([*WC, str(ex), str(dest), "--host", "192.0.2.99"], capture_output=True, text=True, check=False)
 check("installer config: an existing config is never overwritten", dest.read_bytes() == before and "kept" in r.stdout, r.stdout)
-r = subprocess.run([*WC, "--update", str(dest), "--host", "192.0.2.11", "--stt", "gpu"], capture_output=True, text=True, check=False)
+r = subprocess.run([*WC, "--update", str(dest), "--host", "192.0.2.11"], capture_output=True, text=True, check=False)
 c2 = YAML(typ="safe").load(dest.read_text())
-check("installer config: --update changes only the address and the Whisper profile",
-      c2["clip_server"]["host_ip"] == "192.0.2.11" and c2["stt"]["device"] == "cuda"
-      and c2["stt"]["model"] == "large-v3-turbo" and c2["tts"] == c["tts"] and c2["intelligence"] == c["intelligence"]
+check("installer config: --update changes only the address",
+      r.returncode == 0 and c2["clip_server"]["host_ip"] == "192.0.2.11"
+      and {k: v for k, v in c2.items() if k != "clip_server"} == {k: v for k, v in c.items() if k != "clip_server"}
       and not (cfgdir / "config.yaml.tmp").exists(), r.stderr[-200:])
 r = subprocess.run([*WC, "--get", str(dest)], capture_output=True, text=True, check=False)
-check("installer config: --get reads back the address and profile", r.stdout.strip() == "192.0.2.11 gpu", r.stdout)
+check("installer config: --get prints only the address", r.returncode == 0 and r.stdout == "192.0.2.11\n", repr(r.stdout))
 
 me = subprocess.run(["id", "-un"], capture_output=True, text=True, check=True).stdout.strip()
 pt = make_prefix()
@@ -319,39 +340,43 @@ check("installer state: the keys file is 0600 and holds only the generated dashb
 r = sh(f"LVI_DRY_RUN=0; LVI_USER={me}; MAKE_TOKEN=yes; write_env; echo TOKEN=[$DASH_TOKEN]", pt)
 check("installer state: an existing keys file is kept byte for byte (no new token)",
       envf.read_text() == body and "TOKEN=[]" in r.stdout, out(r))
-r = sh("HOST_IP=192.0.2.10; STT_PROFILE=cpu; MAKE_TOKEN=no; write_state", make_prefix())
+r = sh("HOST_IP=192.0.2.10; MAKE_TOKEN=no; write_state", make_prefix())
 check("installer state: fresh box = config written as the service user, empty keys file, cert for the address",
-      "write_config.py /opt/lenoxvi/app/config.example.yaml /var/lib/lenoxvi/config.yaml --host 192.0.2.10 --stt cpu" in r.stdout
+      "write_config.py /opt/lenoxvi/app/config.example.yaml /var/lib/lenoxvi/config.yaml --host 192.0.2.10\n" in r.stdout
+      and "--stt" not in r.stdout
       and "/var/lib/lenoxvi/.env (0600 lenoxvi:lenoxvi)" in r.stdout
       and "LVI_STATE_DIR=/var/lib/lenoxvi bash /opt/lenoxvi/app/scripts/make-cert.sh 192.0.2.10" in r.stdout, out(r))
 
 # ── service ──────────────────────────────────────────────────────────────
 UT = f"LVI_UNIT_TEMPLATE={REPO}/deploy/lenoxvi.service.in"
-r = sh(f"{UT}; PY_OK=no; render_unit 192.0.2.10 cpu")
+r = sh(f"{UT}; render_unit 192.0.2.10")
 check("installer service: CPU unit runs the bot from /opt as lenoxvi with the state dir, no CUDA path",
       "ExecStart=/opt/lenoxvi/venv/bin/python bot.py --host 192.0.2.10 --port 7860 --esp32" in r.stdout
       and "User=lenoxvi" in r.stdout and "Environment=LVI_STATE_DIR=/var/lib/lenoxvi" in r.stdout
       and "Environment=LVI_CONFIG=/var/lib/lenoxvi/config.yaml" in r.stdout
       and "ReadWritePaths=/var/lib/lenoxvi" in r.stdout and "ProtectSystem=strict" in r.stdout
       and "LD_LIBRARY_PATH" not in r.stdout and "@" not in r.stdout, r.stdout)
-r = sh(f"{UT}; PY_OK=no; render_unit 192.0.2.10 gpu")
-ld = [ln for ln in r.stdout.splitlines() if "LD_LIBRARY_PATH" in ln]
-check("installer service: GPU unit points LD_LIBRARY_PATH at the venv's three CUDA wheels",
-      len(ld) == 1 and all(f"/opt/lenoxvi/venv/lib/python3.12/site-packages/nvidia/{x}/lib" in ld[0]
-                           for x in ("cublas", "cudnn", "cuda_nvrtc")), r.stdout)
+GPU_BOX = {"STUB_GPU": "NVIDIA RTX A2000 12GB", "STUB_LSPCI": "01:00.0 VGA compatible controller: NVIDIA Corporation"}
+wheels = make_prefix()
+for _lib in ("cublas", "cudnn", "cuda_nvrtc"):      # CUDA wheels a venv may still hold
+    (wheels / f"opt/lenoxvi/venv/lib/python3.12/site-packages/nvidia/{_lib}/lib").mkdir(parents=True)
+r = sh(f"{UT}; render_unit 192.0.2.10", wheels, **GPU_BOX)
+check("installer service: the unit carries no CUDA lib dirs, even with an NVIDIA GPU and its wheels present",
+      r.returncode == 0 and "ExecStart=" in r.stdout
+      and not any(w in r.stdout.lower() for w in ("ld_library_path", "nvidia", "cuda", "@gpu")), r.stdout)
 pu = make_prefix()
 (pu / "etc/systemd/system").mkdir(parents=True)
-r = sh(f"{UT}; PY_OK=no; install_unit 192.0.2.10 cpu; echo CHANGED=$UNIT_CHANGED", pu)
+r = sh(f"{UT}; install_unit 192.0.2.10; echo CHANGED=$UNIT_CHANGED", pu)
 check("installer service: a new unit is written and systemd reloaded",
       "CHANGED=yes" in r.stdout and "+ systemctl daemon-reload" in r.stdout, out(r))
-(pu / "etc/systemd/system/lenoxvi.service").write_text(sh(f"{UT}; PY_OK=no; render_unit 192.0.2.10 cpu").stdout)
-r = sh(f"{UT}; PY_OK=no; HOST_IP=192.0.2.10; STT_PROFILE=cpu; install_service", pu, STUB_ACTIVE="yes")
+(pu / "etc/systemd/system/lenoxvi.service").write_text(sh(f"{UT}; render_unit 192.0.2.10").stdout)
+r = sh(f"{UT}; HOST_IP=192.0.2.10; install_service", pu, STUB_ACTIVE="yes")
 check("installer service: same unit + running = no restart",
       "restart" not in r.stdout.replace("restarted", "") and "+ write" not in r.stdout and "nothing changed" in r.stdout, out(r))
-r = sh(f"{UT}; PY_OK=no; HOST_IP=192.0.2.20; STT_PROFILE=cpu; install_service", pu, STUB_ACTIVE="yes")
+r = sh(f"{UT}; HOST_IP=192.0.2.20; install_service", pu, STUB_ACTIVE="yes")
 check("installer service: a changed address rewrites the unit and restarts once",
       "+ systemctl restart lenoxvi" in r.stdout and r.stdout.count("systemctl restart") == 1, out(r))
-r = sh(f"{UT}; PY_OK=no; HOST_IP=192.0.2.10; STT_PROFILE=cpu; install_service", make_prefix())
+r = sh(f"{UT}; HOST_IP=192.0.2.10; install_service", make_prefix())
 check("installer service: not running = enable --now, and the lenoxvi command is linked",
       "+ systemctl enable --now --quiet lenoxvi" in r.stdout
       and "ln -sfn /opt/lenoxvi/app/scripts/installer/lenoxvi" in r.stdout, out(r))
@@ -383,6 +408,33 @@ check("installer dry-run: a fresh box runs every step in order (apt, gum, uv, us
       f"rc={r.returncode} missing={[order[i] for i, x in enumerate(pos) if x == -1]}\n{out(r)[-600:]}")
 check("installer dry-run: nothing was written to the scratch root", not any(fresh.joinpath(d).exists()
       for d in ("opt/lenoxvi", "var/lib/lenoxvi", "etc/systemd")), str(list(fresh.rglob("*"))[:10]))
+p_cpu, p_gpu = make_prefix(), make_prefix()
+
+
+def _no_token(s):
+    """The dashboard token is random per install: mask it before comparing two dry-runs."""
+    return re.sub(r"(?m)^  [0-9a-f]{64}$", "  <token>", s)
+
+
+r_cpu = install(p_cpu, "--source", str(src), "--host", "192.0.2.10")
+r_gpu = install(p_gpu, "--source", str(src), "--host", "192.0.2.10", **GPU_BOX)
+u_gpu = sh(f"{UT}; render_unit 192.0.2.10", p_gpu, **GPU_BOX).stdout
+check("installer dry-run: a machine with an NVIDIA GPU installs exactly like one without — no GPU question, no "
+      "requirements-gpu, no CUDA lib dirs in the unit",
+      r_cpu.returncode == 0 and r_gpu.returncode == 0
+      and _no_token(r_gpu.stdout.replace(str(p_gpu), "PFX")) == _no_token(r_cpu.stdout.replace(str(p_cpu), "PFX"))
+      and "requirements-gpu" not in r_gpu.stdout
+      and "gpu" not in out(r_gpu).replace(str(p_gpu), "PFX").replace(str(TMP), "TMP").lower()  # random dir names
+      and "speech: Embedded (Whisper base + Kokoro)" in r_gpu.stdout and EMB is not None
+      and f"download_model\\(\\'{EMB}\\'\\)" in r_gpu.stdout
+      and "ExecStart=" in u_gpu and not any(w in u_gpu.lower() for w in ("ld_library_path", "nvidia", "cuda")),
+      out(r_gpu)[-600:] + u_gpu[-300:])
+r = install(make_prefix(), "--stt", "gpu")
+rh = subprocess.run(["bash", str(INST), "--help"], capture_output=True, text=True, timeout=30, check=False,
+                    stdin=subprocess.DEVNULL)
+check("installer dry-run: --stt is gone — '--stt gpu' is a usage error naming it, and --help no longer lists it",
+      r.returncode == 2 and "unknown option: --stt" in r.stderr and "Usage:" in r.stderr
+      and rh.returncode == 0 and "--host IP" in rh.stdout and "--stt" not in rh.stdout, out(r) + rh.stdout)
 
 # an installed box: re-running changes nothing it doesn't own
 done = make_prefix()
@@ -407,12 +459,12 @@ shutil.copy(dest, st / "config.yaml")
 (st / "certs/cert.pem").write_text("x")
 (done / "etc/systemd/system").mkdir(parents=True)
 unit = subprocess.run(["bash", "-c", f"source {SCRIPTS}/lib.sh; source {SCRIPTS}/service.sh; LVI_UNIT_TEMPLATE={REPO}/deploy/lenoxvi.service.in; "
-                       f"LVI_VENV={done}/opt/lenoxvi/venv; render_unit 192.0.2.10 cpu"],
-                      capture_output=True, text=True, check=True).stdout
+                       "render_unit 192.0.2.10"],
+                      capture_output=True, text=True, check=False).stdout
 (done / "etc/systemd/system/lenoxvi.service").write_text(unit)
 (done / "usr/local/bin").mkdir(parents=True)
 os.symlink("/opt/lenoxvi/app/scripts/installer/lenoxvi", done / "usr/local/bin/lenoxvi")
-r = install(done, "--source", str(src), "--host", "192.0.2.10", "--stt", "cpu", STUB_USER="yes", STUB_ACTIVE="yes",
+r = install(done, "--source", str(src), "--host", "192.0.2.10", STUB_USER="yes", STUB_ACTIVE="yes",
             STUB_SS="LISTEN 0 1 0.0.0.0:7860 x users:((\\\"python\\\"))\\n")
 o = r.stdout
 bad = [x for x in ("useradd", "apt-get", "clone", "write_config.py", "+ write", "make-cert", "systemctl restart",
@@ -424,9 +476,9 @@ check("installer dry-run: the re-run only re-checks the Python packages (a no-op
 
 (app_dir / "scripts/installer").mkdir(parents=True)
 shutil.copy(SCRIPTS / "write_config.py", app_dir / "scripts/installer/write_config.py")
-r = sh("GPU=no; ask_questions; echo IP=$HOST_IP STT=$STT_PROFILE TOKEN=$MAKE_TOKEN", done, STUB_SRC="192.0.2.99")
-check("installer questions: on an installed box today's settings are the defaults (no flip to another address or profile)",
-      "IP=192.0.2.11 STT=gpu TOKEN=no" in r.stdout, out(r))
+r = sh("ask_questions; echo IP=$HOST_IP TOKEN=$MAKE_TOKEN", done, STUB_SRC="192.0.2.99")
+check("installer questions: on an installed box today's address is the default (a re-run never moves it)",
+      "IP=192.0.2.11 TOKEN=no" in r.stdout, out(r))
 
 # ── the lenoxvi command ───────────────────────────────────────────────
 CLI = SCRIPTS / "lenoxvi"
@@ -439,9 +491,9 @@ def cli(prefix, *args, **stub):
 
 
 r = cli(done, "status", STUB_ACTIVE="yes")
-check("lenoxvi status: service, version, dashboard address, profile",
-      "service:   active" in r.stdout and "version:   v0.10.0" in r.stdout
-      and "https://192.0.2.11:7860/dashboard" in r.stdout and "stt:       gpu" in r.stdout, out(r))
+check("lenoxvi status: service, version and dashboard address; no speech-to-text profile line",
+      r.returncode == 0 and "service:   active" in r.stdout and "version:   v0.10.0" in r.stdout
+      and "https://192.0.2.11:7860/dashboard" in r.stdout and "stt:" not in r.stdout, out(r))
 os.chmod(st / "config.yaml", 0)
 r = cli(done, "status", STUB_ACTIVE="yes")
 os.chmod(st / "config.yaml", 0o644)
@@ -491,6 +543,13 @@ envt = (tf / "var/lib/lenoxvi/.env").read_text()
 check("lenoxvi reconfigure: a new token replaces only that line; keys and comments stay, file stays 0600",
       "ELEVENLABS_API_KEY=keep-me" in envt and "# note" in envt and "LVI_DASHBOARD_TOKEN=newtok" in envt
       and "=old" not in envt and r.stdout.strip() == "600", out(r) + envt)
+# reconfigure's questions: source the CLI (it only prints its usage with no command), log the prompts, run it dry.
+r = subprocess.run(["setsid", "bash", "-c", f"set -euo pipefail; source {CLI} >/dev/null; {ASK_LOG}cmd_reconfigure"],
+                   capture_output=True, text=True, timeout=60, check=False, stdin=subprocess.DEVNULL, env=env_for(done))
+check("lenoxvi reconfigure: one question (the LAN address) plus the offer of a new token; no speech-to-text choice, "
+      "no packages, no groups",
+      r.returncode == 0 and [a.split(":")[0] for a in asked(r)] == ["input", "yes"] and "LAN address" in asked(r)[0]
+      and not any(w in r.stdout.lower() for w in ("pip install", "usermod", "nvidia")), out(r))
 
 # ── README matches the scripts ───────────────────────────────────────────
 readme = (REPO / "README.md").read_text()
@@ -502,6 +561,14 @@ check("installer README: the command table lists exactly the lenoxvi commands",
 inst_flags = set(re.findall(r"^    (--[a-z-]+)", (REPO / "scripts/install.sh").read_text(), re.M))
 check("installer README: the install steps and the flags it names exist",
       "sudo bash scripts/install.sh" in readme and {"--yes", "--host", "--dry-run"} <= inst_flags, str(inst_flags))
+_aq = (SCRIPTS / "state.sh").read_text()
+_aq = _aq[_aq.index("ask_questions() {"):]
+_aq = _aq[:_aq.index("\n}\n")]
+_n_q = len(re.findall(r"\bask_(?:input|yes|choice)\b", _aq))
+_flat = " ".join(readme.split())
+check("installer README: says how many questions the installer asks, and nothing about a speech-to-text profile",
+      _n_q == 2 and "asks two questions" in _flat and "speech-to-text profile" not in _flat
+      and "GPU or the CPU" not in _flat, f"ask_questions asks {_n_q}")
 
 # ── hygiene ──────────────────────────────────────────────────────────────
 shell_files = [REPO / "scripts/install.sh", CLI, *sorted(SCRIPTS.glob("*.sh"))]
@@ -509,6 +576,14 @@ modes = [f.name for f in (REPO / "scripts/install.sh", CLI) if not os.stat(f).st
 check("installer: install.sh and the lenoxvi command are executable", not modes, str(modes))
 syn = [subprocess.run(["bash", "-n", str(f)], capture_output=True, text=True, check=False).returncode for f in shell_files]
 check("installer: every shell file parses (bash -n)", not any(syn), str(list(zip([f.name for f in shell_files], syn))))
+_gpu_src = {f.relative_to(REPO).as_posix(): f.read_text().lower()
+            for f in (*shell_files, SCRIPTS / "write_config.py", REPO / "deploy/lenoxvi.service.in")}
+_gpu_hits = sorted(f"{n}: {w}" for n, s in _gpu_src.items()
+                   for w in ("--stt", "stt_profile", "stt_model", "check_gpu", "usermod_gpu", "requirements-gpu",
+                             "nvidia", "cuda", "ld_library_path", "video,render", "gpu", "profile")
+                   if w in s)
+check("installer: no GPU path left — no --stt, GPU probe, CUDA package or library dir, or speech profile in any "
+      "installer file or the unit template", not _gpu_hits, str(_gpu_hits))
 code = "\n".join(ln.split("#", 1)[0] if not ln.lstrip().startswith(("printf", "note", "warn", "die", "ok")) else ""
                  for f in shell_files for ln in f.read_text().splitlines())
 check("installer: never installs drivers, never reboots, never upgrades the system, no ffmpeg",

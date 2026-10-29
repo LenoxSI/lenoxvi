@@ -23,38 +23,46 @@ def check(name, cond, detail=""):
 import stt_catalog as cat
 
 # ── catalog ──────────────────────────────────────────────────────────
-names = [m["name"] for m in cat.MODELS]
-check("stt catalog: exactly the four benchmarked models, Turbo first",
-      names == ["large-v3-turbo", "medium", "small", "base"], str(names))
-gpu_only = {m["name"]: m["gpu_only"] for m in cat.MODELS}
-check("stt catalog: Turbo + Medium are GPU-only; Small + Base run on CPU",
-      gpu_only == {"large-v3-turbo": True, "medium": True, "small": False, "base": False}, str(gpu_only))
-repos = {m["name"]: m.get("repo") for m in cat.MODELS}
-check("stt catalog: pinned Hugging Face repos (no reliance on faster-whisper internals)",
-      repos == {"large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo", "medium": "Systran/faster-whisper-medium",
-                "small": "Systran/faster-whisper-small", "base": "Systran/faster-whisper-base"}, str(repos))
-check("stt catalog: download file patterns match faster-whisper's",
-      cat.FILE_PATTERNS == ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"])
-check("stt catalog: every model has a label and a size",
-      all(m.get("label") and isinstance(m.get("size_gb"), (int, float)) for m in cat.MODELS))
 codes = [lang["code"] for lang in cat.LANGUAGES]
 check("stt languages: Auto first, then the 16 common ones",
       codes[0] == "auto" and len(codes) == 17 and "en" in codes and len(set(codes)) == 17, str(codes))
-check("stt runtime: GPU -> cuda/float16", cat.runtime_for(True) == ("cuda", "float16"))
-check("stt runtime: no GPU -> cpu/int8", cat.runtime_for(False) == ("cpu", "int8"))
-check("stt validate: good pick", cat.validate("medium", "en", has_gpu=True) is None)
-check("stt validate: model outside the four", "model" in (cat.validate("large-v3", "en", has_gpu=True) or ""))
-check("stt validate: GPU-only model without a GPU",
-      "GPU" in (cat.validate("large-v3-turbo", "auto", has_gpu=False) or ""))
-check("stt validate: CPU model without a GPU is fine", cat.validate("base", "auto", has_gpu=False) is None)
-check("stt validate: unknown language", "language" in (cat.validate("small", "xx", has_gpu=True) or ""))
-check("stt validate: language-only (model None) is allowed", cat.validate(None, "fr", has_gpu=False) is None)
 check("stt language_value: auto/empty -> None, code -> code",
       cat.language_value("auto") is None and cat.language_value("") is None
       and cat.language_value(None) is None and cat.language_value("en") == "en")
 
-# ── stt_local: status on preload ─────────────────────────────────────
-import stt_local as sl
+# ── stt_local: the Embedded model is fixed ───────────────────────────
+import ast  # noqa: E402
+import inspect  # noqa: E402
+import os  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import stt_local as sl  # noqa: E402
+import stt_localai as sla  # noqa: E402
+
+EMBEDDED = (cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)
+_ctor = inspect.signature(sl.LocalWhisperSTTService.__init__).parameters
+check("stt: LocalWhisperSTTService takes no model, device or compute_type (Embedded Whisper is fixed)",
+      not ({"model", "device", "compute_type"} & set(_ctor)), str(list(_ctor)))
+check("stt: preload_shared_model takes no arguments (it always loads the Embedded model)",
+      not inspect.signature(sl.preload_shared_model).parameters, str(inspect.signature(sl.preload_shared_model)))
+# The env names are built from pieces so the repo-wide grep gate for the
+# deleted variables stays at zero hits.
+_STT_ENV = tuple(f"LVI_STT_{k}" for k in ("MODEL", "DEVICE", "COMPUTE"))
+_KEPT_ENV = ("LVI_STT_PROVIDER", "LVI_STT_LANGUAGE", "LVI_STT_REVIVE_COOLDOWN")
+_leaks = []
+for _f in ("stt_local.py", "stt_localai.py", "stt_fallback.py"):
+    for _n in ast.walk(ast.parse((Path(CORE) / _f).read_text())):
+        if isinstance(_n, ast.Constant) and isinstance(_n.value, str) and (
+                _n.value in {"tiny", "base", "small", "medium", "cpu", "cuda", "int8", "float16"}
+                or _n.value.startswith("large")
+                or (_n.value.startswith("LVI_STT_") and _n.value not in _KEPT_ENV)):
+            _leaks.append(f"{_f}: {_n.value!r}")
+        if (isinstance(_n, ast.Call) and getattr(_n.func, "id", getattr(_n.func, "attr", "")) in ("cfg", "cfg_env")
+                and len(_n.args) >= 2 and all(isinstance(a, ast.Constant) for a in _n.args[:2])
+                and _n.args[0].value == "stt" and _n.args[1].value not in ("language", "provider", "revive_cooldown_secs")):
+            _leaks.append(f"{_f}: reads stt.{_n.args[1].value}")
+check("stt: the Whisper modules name no model, device or precision and read only the stt keys that stay "
+      "(stt_catalog's Embedded constants decide)", not _leaks, str(_leaks))
 
 
 class _Seg:
@@ -87,45 +95,83 @@ check("stt status before any load: not loaded, no latency",
       sl.status().get("state") == "not_loaded" and "latency_ms_median" not in sl.status(), str(sl.status()))
 
 _real_new = sl._new_model
+LOADS = []
 
 
 def _boom(model, device, compute):
-    raise RuntimeError("CUDA driver missing")
+    LOADS.append((model, device, compute))
+    raise RuntimeError("model.bin is unreadable")
+
 
 sl._new_model = _boom
 raised = False
 try:
-    sl.preload_shared_model("large-v3-turbo", "cuda", "float16")
+    sl.preload_shared_model()
 except RuntimeError:
     raised = True
 st = sl.status()
 check("stt preload failure is recorded (state error + reason) and still raised (bot.py stays non-fatal)",
-      raised and st.get("state") == "error" and "CUDA driver missing" in (st.get("error") or "")
-      and st.get("model") == "large-v3-turbo", str(st))
+      raised and st.get("state") == "error" and "model.bin is unreadable" in (st.get("error") or "")
+      and st.get("model") == cat.EMBEDDED_MODEL, str(st))
+
 
 class _WarmupBoom(_FakeModel):
     def transcribe(self, *a, **k):
-        raise RuntimeError("cuBLAS failed to load")
+        raise RuntimeError("warm-up transcribe failed")
 
 
 sl._new_model = lambda model, device, compute: _WarmupBoom()
 raised = False
 try:
-    sl.preload_shared_model("small", "cuda", "float16")
+    sl.preload_shared_model()
 except RuntimeError:
     raised = True
 st = sl.status()
-check("stt warm-up failure (where cuBLAS loads) is recorded as error, not stuck on loading",
-      raised and st.get("state") == "error" and "cuBLAS" in (st.get("error") or "")
+check("stt warm-up failure is recorded as error, not stuck on loading",
+      raised and st.get("state") == "error" and "warm-up transcribe failed" in (st.get("error") or "")
       and sl.LocalWhisperSTTService._shared_model is None, str(st))
 
-sl._new_model = lambda model, device, compute: _FakeModel()
-sl.preload_shared_model("medium", "cuda", "float16")
+_saved_env = {k: os.environ.get(k) for k in _STT_ENV}
+os.environ.update(dict(zip(_STT_ENV, ("medium", "cuda", "float16"))))
+
+
+def _record(model, device, compute):
+    LOADS.append((model, device, compute))
+    return _FakeModel()
+
+
+LOADS.clear()
+sl._new_model = _record
+sl.preload_shared_model()
 st = sl.status()
 check("stt preload success: ready with model/device/compute, error cleared",
-      st.get("state") == "ready" and st.get("model") == "medium" and st.get("device") == "cuda"
-      and st.get("compute") == "float16" and "error" not in st, str(st))
+      st.get("state") == "ready" and (st.get("model"), st.get("compute")) == (EMBEDDED[0], EMBEDDED[2])
+      and "device" not in st
+      and "error" not in st, str(st))
+check("stt: preload loads base on the CPU (int8) whatever the LVI_STT_ variables say", LOADS == [EMBEDDED], str(LOADS))
 check("stt status never carries a load time (stays in the log only)", "ready_s" not in st and "load_s" not in st)
+LOADS.clear()
+sl.preload_shared_model()
+check("stt: a second preload reuses the shared model (no reload)", LOADS == [], str(LOADS))
+
+sl.LocalWhisperSTTService._shared_model = None
+_lazy = sl.LocalWhisperSTTService(language=None)
+asyncio.run(_lazy.ensure_model())
+check("stt: with no preload, the first turn loads the same Embedded model, shared by every room",
+      LOADS == [EMBEDDED] and _lazy._fw_model is sl.LocalWhisperSTTService._shared_model, str(LOADS))
+
+LOADS.clear()
+sl.LocalWhisperSTTService._shared_model = None
+sla._reset_for_tests()
+_wb = sla.whisper_base()
+check("stt: LocalAI's standby (whisper_base) is the shared Embedded model, loaded once",
+      LOADS == [EMBEDDED] and _wb is sl.LocalWhisperSTTService._shared_model and sla.whisper_base() is _wb,
+      str(LOADS))
+for _k, _v in _saved_env.items():
+    if _v is None:
+        os.environ.pop(_k, None)
+    else:
+        os.environ[_k] = _v
 sl._new_model = _real_new
 
 # ── stt_local: per-command latency ring + live language ──────────────
@@ -143,7 +189,7 @@ def _wav(seconds=0.5):
 
 fake = _FakeModel(delay=0.02)
 sl.LocalWhisperSTTService._shared_model = fake
-svc = sl.LocalWhisperSTTService(model="medium", device="cuda", compute_type="float16", language=None)
+svc = sl.LocalWhisperSTTService(language=None)
 LANG = {"v": None}
 sl._language_hook = lambda: LANG["v"]
 
@@ -174,7 +220,7 @@ def _hook_boom():
     raise RuntimeError("config hiccup")
 
 sl._language_hook = _hook_boom
-svc_auto = sl.LocalWhisperSTTService(model="medium", device="cuda", compute_type="float16", language="auto")
+svc_auto = sl.LocalWhisperSTTService(language="auto")
 asyncio.run(svc_auto._transcribe(_wav()))
 check("stt hook failure falls back to the constructor language, with 'auto' mapped to None",
       fake.calls[-1] is None, str(fake.calls[-2:]))

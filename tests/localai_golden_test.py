@@ -6,7 +6,7 @@ Run on the host (pipecat + faster-whisper + kokoro-onnx installed):
 `record` writes fixtures/golden/golden_local.json from the CURRENT tree (do
 it from main); without it the test compares. What it pins:
 - Whisper: the transcripts LocalWhisperSTTService._transcribe returns for
-  three fixed clips, on CPU int8 (deterministic), models base + medium.
+  three fixed clips, on the Embedded model (base, CPU int8, deterministic).
 - Kokoro: sha256 of the PCM TrackedKokoroTTSService.run_tts yields for
   three fixed sentences (CPU ONNX, deterministic).
 The clips were made once with Kokoro (am_adam, 1.0) and resampled to 16 kHz
@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GOLD_DIR = os.path.join(HERE, "fixtures", "golden")
 GOLD = os.path.join(GOLD_DIR, "golden_local.json")
 CLIPS = ["clip1", "clip2", "clip3"]
-WHISPER_MODELS = ["base", "medium"]
+WHISPER_MODELS = ["base"]  # the Embedded model: LocalWhisperSTTService can run nothing else
 SENTENCES = [
     "The kitchen lights are now off.",
     "Your timer for 10 minutes has started.",
@@ -44,10 +44,10 @@ SENTENCES = [
 import stt_local  # noqa: E402
 
 
-async def whisper_text(model: str, wav: bytes) -> str:
+async def whisper_text(wav: bytes) -> str:
     stt_local.LocalWhisperSTTService._shared_model = None
     stt_local._language_hook = lambda: "en"
-    svc = stt_local.LocalWhisperSTTService(model=model, device="cpu", compute_type="int8", language="en")
+    svc = stt_local.LocalWhisperSTTService(language="en")
     try:
         return (await svc._transcribe(wav)).text
     finally:
@@ -82,8 +82,9 @@ async def main():
         with open(os.path.join(GOLD_DIR, f"{c}.wav"), "rb") as f:
             wav = f.read()
         out["whisper"][c] = {}
+        assert WHISPER_MODELS == [stt_local.stt_catalog.EMBEDDED_MODEL], "the golden pins the Embedded model"
         for m in WHISPER_MODELS:
-            out["whisper"][c][m] = await whisper_text(m, wav)
+            out["whisper"][c][m] = await whisper_text(wav)
     for s in SENTENCES:
         out["kokoro"][s] = await kokoro_hash(s)
     stt_local.LocalWhisperSTTService._shared_model = None

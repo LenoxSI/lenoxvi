@@ -173,15 +173,13 @@ def main():
     # knew the room when connect fired:
     rooms = {r["room"]: r for r in registry.known_rooms()}
     check("tee correlated room BEFORE connect (send-time)",
-          rooms.get("bedroom", {}).get("online") is True
-          or registry.active_room() == "bedroom",
-          f"rooms={list(rooms)} active={registry.active_room()}")
+          rooms.get("bedroom", {}).get("online") is True, f"rooms={list(rooms)}")
 
     # connect-BEFORE-offer race: mark connected first, then tee fires
     pc2 = "fake-pc-race"
     registry.mark_connected(pc2)  # provisional 'unknown'
     check("provisional room assigned pre-offer",
-          registry.active_room() == "unknown")
+          registry.room_for_pc(pc2) == "unknown", f"room={registry.room_for_pc(pc2)!r}")
     registry.note_offer(pc2, "kitchen")
     rooms = {r["room"]: r for r in registry.known_rooms()}
     check("race reconciled to kitchen",
@@ -218,7 +216,7 @@ def main():
     # 4. status shape
     s = client.get("/api/dashboard/status").json()
     check("status shape", all(k in s for k in
-          ("uptime_secs", "active_room", "last_wake", "rooms")), f"s={s}")
+          ("uptime_secs", "last_wake", "rooms")), f"s={s}")
     # Contract: bot.py passes THIS pipeline's room (room_for_pc) — the
     # bare-call form is gone; a wake with no room records room=None.
     registry.note_wake("bedroom")
@@ -680,23 +678,22 @@ def main():
               str({k: len(v) for k, v in _cat.items()}))
         from dashboard import routes as _routes_m1
         import tts_kokoro as _tk_m1
-        import tts_pocket as _tp_m1
-        _m1_avail = _tp_m1.pocket_available
         _m1_kavail = _tk_m1.kokoro_available
         _m1_kfiles = _tk_m1._files_problem
-        _tp_m1.pocket_available = lambda: True  # validate the list, not this host's install
-        _tk_m1.kokoro_available = lambda: True
+        _tk_m1.kokoro_available = lambda: True  # validate the list, not this host's install
         _tk_m1._files_problem = lambda: None
         _m1_bad = []
         for _prov, _vals in _cat.items():
             for _v in _vals:
                 try:
+                    if _prov == "pocket":
+                        # LocalAI's pocket-tts presets ride PUT /localai's voice, not a TTS provider.
+                        _routes_m1.LocalAIPayload(voice=_v)
+                        continue
                     if _prov == "elevenlabs":
                         _p = _routes_m1.TTSPayload(provider=_prov, model=_v, voice_id="AbC123xyZw9876543210")
                     elif _prov == "deepgram":
                         _p = _routes_m1.TTSPayload(provider=_prov, deepgram_voice=_v)
-                    elif _prov == "pocket":
-                        _p = _routes_m1.TTSPayload(provider=_prov, pocket_voice=_v)
                     elif _prov == "kokoro":
                         _p = _routes_m1.TTSPayload(provider=_prov, kokoro_voice=_v)
                     else:
@@ -704,11 +701,12 @@ def main():
                     _routes_m1._validate_tts_payload(_p)
                 except Exception as _e:
                     _m1_bad.append((_prov, _v, str(_e)[:40]))
-        _tp_m1.pocket_available = _m1_avail
         _tk_m1.kokoro_available = _m1_kavail
         _tk_m1._files_problem = _m1_kfiles
         check("every catalog entry passes the server's own TTS validation",
               not _m1_bad and sum(len(v) for v in _cat.values()) == 127, f"bad={_m1_bad[:3]}")
+        check("localai card: GET /tts catalog.pocket = LocalAI pocket-tts's 21 presets, alba first (its voice picker's list)",
+              (_cat.get("pocket") or [None])[0] == "alba" and len(_cat.get("pocket") or []) == 21, str(_cat.get("pocket")))
     r = client.put("/api/dashboard/tts", json={
         "provider": "elevenlabs",
         "voice_id": "AbC123xyZw9876543210", "model": "eleven_flash_v2_5"})
@@ -828,111 +826,8 @@ def main():
         "model": "eleven_bogus_v9"})
     check("TTS PUT rejects unknown model (422)",
           r.status_code == 422, f"status={r.status_code}")
-    # Pocket lane + fallback (routes). pocket_available is monkeypatched
-    # so the pins are deterministic whether or not torch is on this host.
-    import tts_pocket as _tppk
-    _orig_availpk = _tppk.pocket_available
-    _tppk.pocket_available = lambda: True
-    try:
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: GET /tts catalog.pocket = 21 presets, alba first",
-              (t.get("catalog", {}).get("pocket") or [None])[0] == "alba"
-              and len(t["catalog"]["pocket"]) == 21, f"{t.get('catalog', {}).get('pocket')}")
-        _pvpk = ((__import__("yaml").safe_load(Path(os.environ["LVI_CONFIG"]).read_text())
-                   .get("tts") or {}).get("pocket_voice") or "alba")
-        check("pocket: GET /tts reports pocket_installed + pocket_voice + fallback",
-              t.get("pocket_installed") is True and t.get("pocket_voice") == _pvpk
-              and "fallback" in t,
-              str({k: t.get(k) for k in ("pocket_installed", "pocket_voice", "fallback")}))
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "vera"})
-        check("pocket: PUT pocket provider ok", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket round-trip: provider pocket + voice vera",
-              t.get("provider") == "pocket" and t.get("pocket_voice") == "vera", str(t)[:160])
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "nope"})
-        check("pocket: PUT rejects unknown pocket voice (422)", r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "/x/clone.wav"})
-        check("pocket: PUT rejects a wav path from the dashboard (config-file only)",
-              r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba",
-                                                   "fallback": "pocket"})
-        check("pocket: PUT rejects pocket primary + pocket fallback (422)", r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "pocket"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: PUT cloud primary + pocket fallback persists",
-              r.status_code == 200 and t.get("fallback") == "pocket", f"{r.status_code} {t.get('fallback')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: PUT without fallback leaves it as-is (partial update)",
-              r.status_code == 200 and t.get("fallback") == "pocket", f"{t.get('fallback')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: switching to pocket primary drops a saved fallback",
-              r.status_code == 200 and t.get("fallback") is None, f"{t.get('fallback')}")
-        client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                               "deepgram_voice": "aura-2-thalia-en", "fallback": "pocket"})
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "off"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: PUT fallback off clears it", r.status_code == 200 and t.get("fallback") is None,
-              f"{r.status_code} {t.get('fallback')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "flux"})
-        check("pocket: PUT rejects unknown fallback (422)", r.status_code == 422, f"{r.status_code}")
-        # Fallback voice: pickable with a cloud primary (it rides with
-        # fallback: pocket), validated, and ignored when the fallback is off.
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "pocket", "pocket_voice": "vera"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: fallback voice saves with a cloud primary",
-              r.status_code == 200 and t.get("pocket_voice") == "vera"
-              and t.get("provider") == "deepgram" and t.get("fallback") == "pocket",
-              f"{r.status_code} {t.get('provider')}/{t.get('fallback')}/{t.get('pocket_voice')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "pocket", "pocket_voice": "nope"})
-        check("pocket: fallback voice must be a Pocket preset (422)", r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "off", "pocket_voice": "charles"})
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: fallback voice ignored when the fallback is off",
-              r.status_code == 200 and t.get("pocket_voice") == "vera", f"{t.get('pocket_voice')}")
-        # R2: a saved fallback must never lock the panel when Pocket goes
-        # missing later — re-sending the SAME fallback isn't a new request.
-        client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                               "deepgram_voice": "aura-2-thalia-en",
-                                               "fallback": "pocket"})
-        _tppk.pocket_available = lambda: False
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-zeus-en",
-                                                   "fallback": "pocket"})
-        check("pocket: R2 saved fallback + Pocket missing: other edits still save",
-              r.status_code == 200, f"{r.status_code} {r.text[:120]}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "off"})
-        check("pocket: R2 saved fallback + Pocket missing: fallback can be turned off",
-              r.status_code == 200, f"{r.status_code}")
-        t = client.get("/api/dashboard/tts").json()
-        check("pocket: GET /tts reports pocket_installed false when missing",
-              t.get("pocket_installed") is False, f"{t.get('pocket_installed')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "pocket", "pocket_voice": "alba"})
-        check("pocket: PUT pocket primary refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
-        r = client.put("/api/dashboard/tts", json={"provider": "deepgram",
-                                                   "deepgram_voice": "aura-2-thalia-en",
-                                                   "fallback": "pocket"})
-        check("pocket: PUT pocket fallback refused when not installed (422)", r.status_code == 422, f"{r.status_code}")
-    finally:
-        _tppk.pocket_available = _orig_availpk
-    # Kokoro lane (routes). kokoro_available is monkeypatched like Pocket's,
-    # so the pins hold whether or not kokoro-onnx is on this host.
+    # Kokoro lane (routes). kokoro_available is monkeypatched, so the pins
+    # hold whether or not kokoro-onnx is on this host.
     import tts_kokoro as _tkr
     check("kokoro: the dashboard imports neither kokoro_onnx nor pipecat's Kokoro service",
           "kokoro_onnx" not in sys.modules and "pipecat.services.kokoro.tts" not in sys.modules)
@@ -941,18 +836,17 @@ def main():
                   "am_santa bf_alice bf_emma bf_isabella bf_lily bm_daniel bm_fable bm_george bm_lewis").split()
     _orig_availkr = _tkr.kokoro_available
     _orig_fileskr = _tkr._files_problem
-    _orig_availpk2 = _tppk.pocket_available
     _tkr.kokoro_available = lambda: True
     _tkr._files_problem = lambda: None
-    _tppk.pocket_available = lambda: True
     try:
         t = client.get("/api/dashboard/tts").json()
         check("kokoro: GET /tts catalog.kokoro = exactly the 28 English voices",
               (t.get("catalog") or {}).get("kokoro") == _KOKORO_28, f"{(t.get('catalog') or {}).get('kokoro')}")
-        check("kokoro: GET /tts reports kokoro_voice + kokoro_speed + kokoro_installed",
-              {"kokoro_voice", "kokoro_speed", "kokoro_installed"} <= set(t)
-              and t.get("kokoro_installed") is True and t.get("kokoro_voice") in _KOKORO_28,
-              str({k: t.get(k) for k in ("kokoro_voice", "kokoro_speed", "kokoro_installed")}))
+        _kp = next((p for p in t.get("providers") or [] if p.get("name") == "kokoro"), {})
+        check("kokoro: GET /tts reports kokoro_voice + kokoro_speed and offers Kokoro",
+              {"kokoro_voice", "kokoro_speed"} <= set(t) and _kp.get("available") is True
+              and t.get("kokoro_voice") in _KOKORO_28,
+              str({k: t.get(k) for k in ("kokoro_voice", "kokoro_speed")}) + str(_kp))
         r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "bf_emma",
                                                    "kokoro_speed": 1.25})
         t = client.get("/api/dashboard/tts").json()
@@ -961,7 +855,7 @@ def main():
               and t.get("kokoro_speed") == 1.25, f"{r.status_code} {r.text[:120]} {t.get('kokoro_voice')}/{t.get('kokoro_speed')}")
         for _body, _why in (({"provider": "kokoro"}, "no voice"),
                             ({"provider": "kokoro", "kokoro_voice": "af_nope"}, "unknown voice"),
-                            ({"provider": "kokoro", "kokoro_voice": "alba"}, "a Pocket voice"),
+                            ({"provider": "kokoro", "kokoro_voice": "aura-2-thalia-en"}, "another provider's voice"),
                             ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 1.27}, "off-step speed"),
                             ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 1.6}, "speed above 1.5"),
                             ({"provider": "kokoro", "kokoro_voice": "af_heart", "kokoro_speed": 0.45}, "speed below 0.5"),
@@ -971,18 +865,18 @@ def main():
         # Package installed but model files missing: not offered, not accepted.
         _tkr._files_problem = lambda: "/x/kokoro-v1.0.onnx is missing"
         t = client.get("/api/dashboard/tts").json()
-        check("kokoro: model files missing -> GET /tts says not installed, files missing, and how to fetch them",
-              t.get("kokoro_installed") is False and t.get("kokoro_files_missing") is True
-              and "fetch_kokoro_models.sh" in str(t.get("kokoro_problem")),
-              str({k: t.get(k) for k in ("kokoro_installed", "kokoro_files_missing", "kokoro_problem")}))
+        _kp = next((p for p in t.get("providers") or [] if p.get("name") == "kokoro"), {})
+        check("kokoro: model files missing -> GET /tts offers Kokoro disabled with 'model files missing'",
+              _kp.get("available") is False and _kp.get("reason") == "model files missing", str(_kp))
         r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "bf_emma"})
         check("kokoro: model files missing -> PUT provider kokoro is refused (422) with the fetch hint",
               r.status_code == 422 and "fetch_kokoro_models.sh" in r.text, f"{r.status_code} {r.text[:160]}")
         _tkr.kokoro_available = lambda: False
         t = client.get("/api/dashboard/tts").json()
+        _kp = next((p for p in t.get("providers") or [] if p.get("name") == "kokoro"), {})
         check("kokoro: package missing -> not installed, not 'files missing'",
-              t.get("kokoro_installed") is False and t.get("kokoro_files_missing") is False
-              and "requirements-kokoro.txt" in str(t.get("kokoro_problem")), str(t.get("kokoro_problem")))
+              _kp.get("available") is False and _kp.get("reason") == "not installed"
+              and "pip install -r requirements.txt" in _tkr.INSTALL_HINT, str(_kp))
         _tkr.kokoro_available = lambda: True
         _tkr._files_problem = lambda: None
         t = client.get("/api/dashboard/tts").json()
@@ -1000,25 +894,8 @@ def main():
               r.status_code == 200 and t.get("provider") == "elevenlabs"
               and t.get("kokoro_voice") == "am_adam" and t.get("kokoro_speed") == 1.25,
               f"{t.get('provider')} {t.get('kokoro_voice')}/{t.get('kokoro_speed')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
-                                                   "fallback": "pocket", "pocket_voice": "vera"})
-        t = client.get("/api/dashboard/tts").json()
-        check("kokoro: Kokoro primary + Pocket fallback persists (same as behind the cloud voices)",
-              r.status_code == 200 and t.get("provider") == "kokoro" and t.get("fallback") == "pocket"
-              and t.get("pocket_voice") == "vera", f"{r.status_code} {t.get('provider')}/{t.get('fallback')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
-                                                   "fallback": "off"})
-        t = client.get("/api/dashboard/tts").json()
-        check("kokoro: fallback off clears it behind Kokoro",
-              r.status_code == 200 and t.get("fallback") is None, f"{t.get('fallback')}")
-        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart",
-                                                   "fallback": "kokoro"})
-        check("kokoro: Kokoro as a fallback is refused (422)", r.status_code == 422, f"{r.status_code}")
         # Not installed: the card shows it disabled, a PUT says how to install.
         _tkr.kokoro_available = lambda: False
-        t = client.get("/api/dashboard/tts").json()
-        check("kokoro: GET /tts reports kokoro_installed false when missing",
-              t.get("kokoro_installed") is False, f"{t.get('kokoro_installed')}")
         r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart"})
         check("kokoro: PUT provider kokoro refused when not installed (422 + install hint)",
               r.status_code == 422 and _tkr.INSTALL_HINT in r.text, f"{r.status_code} {r.text[:160]}")
@@ -1030,7 +907,6 @@ def main():
     finally:
         _tkr.kokoro_available = _orig_availkr
         _tkr._files_problem = _orig_fileskr
-        _tppk.pocket_available = _orig_availpk2
     # restore the real provider (the suite config is a copy, but leave it
     # in a sane state anyway)
     client.put("/api/dashboard/tts", json={
@@ -1254,7 +1130,6 @@ def main():
 
     # ── LocalAI card: settings, Test, key route, provider gates ──
     import http.server as _la_hs
-    import tts_kokoro as _la_tk
     import threading as _la_th
     _la_seen = []
 
@@ -1316,7 +1191,7 @@ def main():
         _g = client.get("/api/dashboard/stt").json()
         _lp = next((p for p in _g.get("providers", []) if p.get("name") == "localai"), {})
         check("localai card: the STT card offers LocalAI as unavailable with the reason",
-              _lp.get("available") is False and "System · Keys" in (_lp.get("reason") or ""), str(_lp))
+              _lp.get("available") is False and _lp.get("reason") == "set it up on System", str(_lp))
         r = client.post("/api/dashboard/localai/test")
         check("localai card: Test without a key answers ok=false naming System · Keys (no request sent)",
               r.status_code == 200 and r.json()["ok"] is False and "System · Keys" in (r.json()["reason"] or ""), r.text[:200])
@@ -1373,30 +1248,11 @@ def main():
               "localai" in _la_pending(_laB, _laS) and "localai" not in _la_pending(_laN, _laN2)
               and "localai" not in _la_pending(_laB, _laB), f"{_la_pending(_laB, _laS)} {_la_pending(_laN, _laN2)}")
         check("localai card: GET /tts says nothing is missing for LocalAI",
-              client.get("/api/dashboard/tts").json().get("localai_problem") is None)
+              any(p.get("name") == "localai" and p.get("available") is True
+                  for p in client.get("/api/dashboard/tts").json().get("providers") or []))
         r = client.put("/api/dashboard/localai", json={"model_stt": ""})
         check("localai card: an empty value clears that setting", r.status_code == 200
               and "model_stt" not in (config_store.read_section("localai") or {}))
-        # Kokoro as the fallback
-        _tk_saved = _la_tk.setup_problem
-        _la_tk.setup_problem = lambda: None
-        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
-                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
-        check("tts card: Kokoro accepted as the fallback behind ElevenLabs",
-              r.status_code == 200 and config_store.read_section("tts").get("fallback") == "kokoro", r.text[:160])
-        r = client.put("/api/dashboard/tts", json={"provider": "kokoro", "kokoro_voice": "af_heart", "fallback": "kokoro"})
-        check("tts card: Kokoro can't be its own fallback (422)", r.status_code == 422, r.text[:160])
-        _la_tk.setup_problem = lambda: "Kokoro model files are missing"
-        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
-                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
-        check("tts card: re-sending a saved Kokoro fallback never locks the card when Kokoro went missing",
-              r.status_code == 200, r.text[:160])
-        config_store.write_section("tts", {**_la_tts_before, "fallback": None})
-        r = client.put("/api/dashboard/tts", json={"provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
-                                                     "model": "eleven_flash_v2_5", "fallback": "kokoro"})
-        check("tts card: turning the Kokoro fallback ON needs Kokoro installed (422 with the reason)",
-              r.status_code == 422 and "missing" in r.text, r.text[:160])
-        _la_tk.setup_problem = _tk_saved
     finally:
         _la_srv.shutdown()
         config_store.write_section("tts", _la_tts_before)
@@ -3269,10 +3125,8 @@ def main():
     # 9d. Rig facts (Settings tab header) — status carries live rig facts
     r = client.get("/api/dashboard/status")
     s = r.json()
-    check("status exposes wake_model",
-          r.status_code == 200 and bool(s.get("wake_model")), f"wake_model={s.get('wake_model')!r}")
-    check("status exposes stt_model",
-          bool(s.get("stt_model")), f"stt_model={s.get('stt_model')!r}")
+    check("status: no wake_model or active_room — the dashboard never read them",
+          r.status_code == 200 and not {"wake_model", "active_room"} & set(s), str(sorted(s)))
     check("status exposes tts_provider",
           bool(s.get("tts_provider")), f"tts_provider={s.get('tts_provider')!r}")
 
@@ -3291,21 +3145,6 @@ def main():
     check("every rooms[] entry carries the tts fields (None = no service)",
           all("tts_usable" in x and "tts_provider" in x for x in s_tts["rooms"]),
           f"rooms={[x['room'] for x in s_tts['rooms']]}")
-    # Dynamic, not static: set config wake.model and re-GET status —
-    # the readout must move with the config (it reads through the
-    # same chain the consumer uses).
-    try:
-        wake_sec = config_store.read_section("wake") or {}
-        wake_sec["model"] = "UNIT_TEST_WAKE_MODEL.onnx"
-        config_store.write_section("wake", wake_sec)
-        s2 = client.get("/api/dashboard/status").json()
-        check("wake_model tracks config changes (not static)",
-              s2.get("wake_model") == "UNIT_TEST_WAKE_MODEL.onnx",
-              f"before={s.get('wake_model')!r} after={s2.get('wake_model')!r}")
-    finally:
-        # restore the section we touched (throwaway config anyway)
-        pass
-
     # 10. REAL soco discovery on the LAN — opt-in (LVI_TEST_LIVE=1), like the
     # live clip: a default run never touches the network.
     r = (client.post("/api/dashboard/zones/discover") if os.environ.get("LVI_TEST_LIVE") == "1"
@@ -5509,9 +5348,11 @@ def main():
                       and getattr(n.func, "id", "") == "preload_shared_model"), None)
     _stt_tr = [t for t in _cfg_triples(_stt_call) if t[1] in ("model", "device", "compute_type")] if _stt_call else []
     _pre_tr = _cfg_triples(_pre_call) if _pre_call else []
-    check("RSS preload uses the SAME stt model/device/compute_type config as run_bot",
-          _pre_call is not None and len(_pre_tr) == 3 and _pre_tr == _stt_tr,
-          f"preload={_pre_tr} run_bot={_stt_tr}")
+    check("RSS preload loads the SAME Whisper as run_bot — neither passes a model, device or compute_type (the fixed Embedded model)",
+          _pre_call is not None and _stt_call is not None and not _pre_call.args and not _pre_call.keywords
+          and not _stt_tr and not ({k.arg for k in _stt_call.keywords} & {"model", "device", "compute_type"}),
+          f"preload={_astR.unparse(_pre_call) if _pre_call else None} "
+          f"run_bot={_astR.unparse(_stt_call) if _stt_call else None}")
     _main_src = _astR.unparse(_botR)
     check("tts norm: the Flash lane sends tts.elevenlabs_text_normalization to ElevenLabs",
           "el_norm = tts_text.normalization_mode(cfg('tts', 'elevenlabs_text_normalization'))"
@@ -5535,41 +5376,33 @@ def main():
           _pre_call is not None and _main_src.find("preload_shared_model(") < _main_src.rfind("main()"),
           "preload call missing or after main()")
     check("cloud stt bot.py: stt.provider read with whisper as the default",
-          "cfg_env('stt', 'provider', 'LVI_STT_PROVIDER', 'whisper')" in _main_src)
+          "_stt_raw = cfg_env('stt', 'provider', 'LVI_STT_PROVIDER', None)" in _main_src
+          and "stt_provider = stt_catalog.resolve_provider(_stt_raw)" in _main_src)
     check("cloud stt bot.py: deepgram wraps Whisper as the fallback and closes it with the session",
           "wrap_stt_with_fallback(" in _main_src and _main_src.count("close_stt_fallback(") >= 2
           and "SttTimer(" in _main_src, f"wrap={'wrap_stt_with_fallback(' in _main_src} close={_main_src.count('close_stt_fallback(')}")
-    # Pocket lane + fallback wiring. _main_src is ast.unparse (code only,
-    # comments stripped, single-quoted literals), so a comment can't fake a
-    # pass. Behavior is pinned in tests/pocket_test.py.
-    check("pocket bot.py: pocket lane branch exists",
-          "tts_provider == 'pocket'" in _main_src)
-    check("pocket bot.py: pocket primary fails loud with the install hint",
-          _main_src.count("INSTALL_HINT") >= 2, f"count={_main_src.count('INSTALL_HINT')}")
-    check("pocket bot.py: fallback wrap keyed on tts.fallback",
-          "wrap_with_fallback(" in _main_src and "cfg('tts', 'fallback')" in _main_src)
-    check("pocket bot.py: pocket+pocket fallback ignored with a warning",
-          "fallback: pocket ignored" in _main_src)
-    _pk_pre = _main_src.find("tts_pocket.preload(")
-    check("pocket bot.py: pocket preload at startup, before main(), non-fatal",
-          _pk_pre != -1 and _pk_pre < _main_src.rfind("main()")
-          and "pocket preload failed" in _main_src)
-    check("pocket bot.py: fallback closed at session end AND on client disconnect",
-          _main_src.count("close_fallback(") >= 2, f"count={_main_src.count('close_fallback(')}")
-    check("pocket bot.py: TTSTracked skips health notes while the fallback speaks",
+    # TTS standby wiring (Kokoro behind every cloud voice). _main_src is
+    # ast.unparse (code only, comments stripped, single-quoted literals), so a
+    # comment can't fake a pass. Behaviour is pinned in tests/tts_failover_test.py
+    # and tests/speech_tiers_test.py.
+    check("tts fallback bot.py: every cloud voice is wrapped with the Kokoro standby — no tts.fallback key",
+          "wrap_with_fallback(" in _main_src and "cfg('tts', 'fallback')" not in _main_src
+          and "if tts_catalog.is_cloud(tts_provider):" in _main_src)
+    check("tts fallback bot.py: the standby is closed at session end AND on client disconnect",
+          _main_src.count("close_fallback(") >= 2 and _main_src.count("if tts_standby is not None:") >= 3,
+          f"close={_main_src.count('close_fallback(')} guards={_main_src.count('if tts_standby is not None:')}")
+    check("tts fallback bot.py: TTSTracked skips health notes while the standby speaks",
           "_tts_note_suppressed" in _main_src)
-    check("pocket bot.py: repeated per-session Pocket warnings go through warn_once",
-          _main_src.count("warn_once(") >= 2, f"count={_main_src.count('warn_once(')}")
-    check("pocket bot.py: the Pipeline still takes `tts` (switcher reassigns it)",
+    check("tts fallback bot.py: the Pipeline still takes `tts` (the switcher reassigns it)",
           "tts_primary = tts" in _main_src)
 
-    # ── Kokoro lane: bot.py wiring (code only, like the Pocket pins above) ──
+    # ── Kokoro lane: bot.py wiring (code only, like the standby pins above) ──
     _rbKK = next((n for n in _astR.walk(_botR)
                   if isinstance(n, _astR.AsyncFunctionDef) and n.name == "run_bot"), None)
     _rbKKsrc = _astR.unparse(_rbKK) if _rbKK else ""
     _kkBranch = _rbKKsrc.find("tts_provider == 'kokoro'")
     # The primary branch alone (up to the next provider): one warm, one build.
-    # Kokoro is also built as a fallback (`_fallback == 'kokoro'`), checked below.
+    # Kokoro is also built as the cloud standby, checked below.
     _kkEnd = _rbKKsrc.find("elif tts_provider ==", _kkBranch + 1)
     _kkPrim = _rbKKsrc[_kkBranch:_kkEnd] if 0 <= _kkBranch < _kkEnd else ""
     _kkWarm, _kkMake = _kkPrim.find("await tts_kokoro.warm()"), _kkPrim.find("tts_kokoro.make_service(")
@@ -5583,36 +5416,36 @@ def main():
           "tts.provider=kokoro but kokoro-onnx is not installed" in _rbKKsrc
           and "tts.provider=kokoro but the Kokoro model failed to load" in _rbKKsrc
           and _rbKKsrc.count("tts_kokoro.INSTALL_HINT") >= 2)
-    check("kokoro bot.py: Kokoro is a primary in the same dispatch, before the Pocket fallback wrap",
-          0 <= _kkBranch < _rbKKsrc.find("tts_primary = tts") < _rbKKsrc.find("if _fallback == 'pocket':"))
+    check("kokoro bot.py: Kokoro is a primary in the same dispatch, before the cloud standby is built",
+          0 <= _kkBranch < _rbKKsrc.find("tts_primary = tts") < _rbKKsrc.find("if tts_catalog.is_cloud(tts_provider):"))
     # Kokoro is imported only where it is used: its own branch, LocalAI's
-    # branch (Kokoro is LocalAI's fallback) and the Kokoro fallback block.
-    _kkGuards = ["tts_provider == 'kokoro'", "tts_provider == 'localai'", "if _fallback == 'kokoro':"]
+    # branch (Kokoro is LocalAI's fallback) and the cloud standby block.
+    _kkGuards = ["tts_provider == 'kokoro'", "tts_provider == 'localai'", "if tts_catalog.is_cloud(tts_provider):"]
     _kkImports = [i for i in range(len(_rbKKsrc)) if _rbKKsrc.startswith("import tts_kokoro", i)]
     _kkGuardPos = sorted(_rbKKsrc.find(g) for g in _kkGuards)
-    check("kokoro bot.py: another provider never imports Kokoro (only inside its branch and the startup preload)",
+    check("kokoro bot.py: Kokoro is imported only in its branch, LocalAI's branch, the cloud standby block and the startup preload",
           not any(isinstance(n, (_astR.Import, _astR.ImportFrom))
                   and "tts_kokoro" in _astR.unparse(n) for n in _botR.body)
           and len(_kkImports) == 3 and min(_kkGuardPos) >= 0
           and all(g < i for g, i in zip(_kkGuardPos, _kkImports)), f"imports={_kkImports} guards={_kkGuardPos}")
-    _kkFb = _rbKKsrc.find("if _fallback == 'kokoro':")
+    _kkFb = _rbKKsrc.find("if tts_catalog.is_cloud(tts_provider):")
     _kkFbSrc = _rbKKsrc[_kkFb:_rbKKsrc.find("EchoGate()", _kkFb)] if _kkFb >= 0 else ""
-    check("kokoro bot.py: tts.fallback kokoro warms Kokoro, builds it with the Kokoro voice/speed, warns when it can't",
+    check("kokoro bot.py: every cloud voice warms Kokoro as its standby, builds it with the Kokoro voice/speed, warns when it can't",
           "await tts_kokoro.warm()" in _kkFbSrc and "tts_kokoro.make_service(" in _kkFbSrc
           and "cfg_env('tts', 'kokoro_voice', 'LVI_TTS_KOKORO_VOICE', tts_kokoro.DEFAULT_VOICE)" in _kkFbSrc
           and "running WITHOUT a fallback" in _kkFbSrc)
     check("tts fallback bot.py: the switcher is told which standby it holds",
-          "standby_name=_fallback" in _rbKKsrc)
+          "standby_name='kokoro'" in _rbKKsrc)
     _kkPre = _main_src.find("tts_kokoro.preload()")
-    check("kokoro bot.py: Kokoro preload at startup when it's the provider, before main(), non-fatal",
+    check("kokoro bot.py: Kokoro preload at startup for every provider, before main(), non-fatal",
           0 <= _kkPre < _main_src.rfind("main()") and "kokoro preload failed" in _main_src
-          and "if _tp in ('kokoro', 'localai') or _fb == 'kokoro':" in _main_src)
+          and "if _tp in (" not in _main_src and "_fb = " not in _main_src)
     # Must still hold: the number pass is for the local voices only. A custom
     # speller in front of ElevenLabs' own normalizer once garbled times.
     _numUsers = sorted(p.relative_to(REPO_CORE).as_posix() for p in REPO_CORE.rglob("*.py")
                        if "spell_numbers" in p.read_text() and p.name != "tts_numbers.py")
-    check("number pass: only the local-voice modules (Pocket, Kokoro, LocalAI) call spell_numbers (never bot.py or a cloud lane)",
-          _numUsers == ["tts_kokoro.py", "tts_localai.py", "tts_pocket.py"]
+    check("number pass: only the local-voice modules (Kokoro, LocalAI) call spell_numbers (never bot.py or a cloud lane)",
+          _numUsers == ["tts_kokoro.py", "tts_localai.py"]
           and "spell_numbers" not in _main_src and "tts_numbers" not in _main_src, f"users={_numUsers}")
     check("number pass: the ElevenLabs and Deepgram services keep pipecat's own run_tts",
           _bot13.TrackedElevenLabsTTSService.run_tts is _bot13.ElevenLabsTTSService.run_tts
@@ -5970,7 +5803,8 @@ def main():
     check("license: LICENSE is the Apache License 2.0 text, NOTICE names the project and the model terms",
           _lic.lstrip().startswith("Apache License") and "Version 2.0, January 2004" in _lic
           and "END OF TERMS AND CONDITIONS" in _lic and "Apache License, Version 2.0" in _ntc
-          and "CC BY-NC-SA 4.0" in _ntc and "CC BY 4.0" in _ntc, f"LICENSE {len(_lic)}B NOTICE {len(_ntc)}B")
+          and "CC BY-NC-SA 4.0" in _ntc and "Kokoro-82M weights are Apache-2.0" in _ntc
+          and "pocket" not in _ntc.lower(), f"LICENSE {len(_lic)}B NOTICE {len(_ntc)}B")
     check("license: README states Apache 2.0, links LICENSE/NOTICE and no longer says no license is set",
           "Apache License 2.0" in _rdm and "(LICENSE)" in _rdm and "(NOTICE)" in _rdm
           and "No project license is set" not in _rdm, "")
@@ -5981,6 +5815,17 @@ def main():
           "https://github.com/LenoxSI/lenoxvi.git" in _rdm and "https://github.com/LenoxSI/lenoxvi/issues" in _rdm
           and "https://lenoxsi.com" in _rdm and "https://lenoxai.io" in _rdm and _oldorgrd not in _rdm
           and _oldreporm.lower() not in _rdm.lower(), "")
+    import stt_catalog as _sc_rd
+    _tiers_rd = getattr(_sc_rd, "TIERS", None) or []
+    _sp_rd = _rdm.split("\n## Speech\n", 1)[1].split("\n## ", 1)[0] if "\n## Speech\n" in _rdm else ""
+    _la_rd = _rdm.split("\n## LocalAI\n", 1)[1].split("\n## ", 1)[0] if "\n## LocalAI\n" in _rdm else ""
+    check("speech tiers: README has one Speech section — the three tiers and their fallbacks — no Whisper model table, "
+          "no embedded Pocket, large-v3-turbo only as LocalAI GPU advice",
+          len(_tiers_rd) == 3 and all(f"| {t['label']} |" in _sp_rd for t in _tiers_rd)
+          and "Whisper base and Kokoro" in _sp_rd and "## Speech to text" not in _rdm and "## Text to speech" not in _rdm
+          and "### Whisper models" not in _rdm and "requirements-pocket" not in _rdm and "fetch_pocket_weights" not in _rdm
+          and "Pocket" in _la_rd and "cuda: true" in _la_rd
+          and _rdm.count("large-v3-turbo") == _la_rd.count("large-v3-turbo") >= 1, _sp_rd[:300])
     _appsrcvp = (_rootwn / "dashboard-ui" / "src" / "App.jsx").read_text()
     check("dashboard: the voice-ID box shows a generic placeholder (no real voice-ID prefix)",
           'placeholder="Voice ID"' in _appsrcvp and "fq1S" not in _appsrcvp, "")
@@ -6483,14 +6328,14 @@ def main():
             _p, _w = _sp("deepgram-flux", "elevenlabs", _EL)
             check("tts provider: key not loaded yet -> the boot provider + a warning naming the key",
                   _p == "elevenlabs" and _w and "DEEPGRAM_API_KEY" in _w, f"{_p} {_w}")
-            check("tts provider: boot provider to keyless pocket works too",
-                  _sp("elevenlabs", "pocket", {})[0] == "pocket")
+            check("tts provider: boot provider to keyless kokoro works too",
+                  _sp("elevenlabs", "kokoro", {})[0] == "kokoro")
             check("tts provider: no boot provider -> configured (construction fails loud)",
                   _sp("deepgram", None, _EL) == ("deepgram", None))
             check("tts provider: boot provider ALSO keyless-missing -> configured (fails loud)",
                   _sp("deepgram", "elevenlabs", {}) == ("deepgram", None))
-            check("tts provider: pocket needs no key",
-                  _sp("pocket", "elevenlabs", {}) == ("pocket", None))
+            check("tts provider: kokoro needs no key",
+                  _sp("kokoro", "elevenlabs", {}) == ("kokoro", None))
         import ast as _astcp
         _botcp = _astcp.parse((REPO_CORE.parent / "bot.py").read_text())
         _rbcp = next((n for n in _astcp.walk(_botcp)
@@ -6499,11 +6344,11 @@ def main():
         check("tts provider: run_bot resolves the provider against the loaded keys",
               "session_tts_provider" in _rbsrc and _rbsrc.count("'tts', 'provider'") == 1,
               f"reads={_rbsrc.count(chr(39) + 'tts' + chr(39) + ', ' + chr(39) + 'provider' + chr(39))}")
-        _mk = [i for i in range(len(_rbsrc)) if _rbsrc.startswith("tts_pocket.make_service(", i)]
-        _wm = [i for i in range(len(_rbsrc)) if _rbsrc.startswith("await tts_pocket.warm(", i)]
-        check("pocket: run_bot warms Pocket off the loop before every make_service",
-              len(_mk) == 2 and len(_wm) == 2 and all(w < m for w, m in zip(_wm, _mk)),
-              f"make={_mk} warm={_wm}")
+        _mk = [i for i in range(len(_rbsrc)) if _rbsrc.startswith("tts_kokoro.make_service(", i)]
+        check("kokoro: run_bot warms Kokoro off the loop before every make_service",
+              len(_mk) == 2 and all(_rbsrc.rfind("await tts_kokoro.warm()", 0, m)
+                                    > _rbsrc.rfind("tts_kokoro.make_service(", 0, m) for m in _mk),
+              f"make={_mk}")
 
         # Keys card: an agent used by a room is in use
         import keys_catalog as _kc57
@@ -6763,57 +6608,25 @@ def main():
         _iaRN2._INTEL_POOL = _pool_saved_RN2
 
     # ── stt STT card (routes) ─────────────────────────────────────────
-    import time as _tstt
-
     import yaml as _ystt
     from dashboard import routes as _rstt
 
     def _sttstt():
         return (_ystt.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}).get("stt") or {}
 
-    _CACHEDstt = {"large-v3-turbo", "small", "base"}
-    _GPUstt = {"name": "RTX TEST 12GB"}
-    _DLstt = {"delay": 0.8, "fail": False, "calls": []}
-
-    def _fake_dlstt(name, on_progress=None):
-        _DLstt["calls"].append(name)
-        if on_progress:
-            on_progress(0, 1_500_000_000)
-        _tstt.sleep(_DLstt["delay"] / 2)
-        if on_progress:
-            on_progress(650_000_000, 1_500_000_000)
-        _tstt.sleep(_DLstt["delay"] / 2)
-        if _DLstt["fail"]:
-            raise RuntimeError("network down")
-        _CACHEDstt.add(name)
-
-    _savedstt = tuple(getattr(_rstt, _n, None) for _n in ("_stt_cached", "_stt_download", "_stt_gpu_name"))
-    _rstt._stt_cached = lambda name: name in _CACHEDstt
-    _rstt._stt_download = _fake_dlstt
-    _rstt._stt_gpu_name = lambda: _GPUstt["name"]
-    # the suite never scans the real model cache: sizes follow the fake cache
-    _saved_sizes = getattr(_rstt, "_stt_disk_sizes", None)
-    _rstt._stt_disk_sizes = lambda: {n: (1 if n in _CACHEDstt else 0)
-                                     for n in ("large-v3-turbo", "medium", "small", "base")}
     _stt_beforestt = dict(config_store.read_section("stt") or {})
     try:
         _g = client.get("/api/dashboard/stt").json()
-        check("stt GET /stt: the four models with cached flags",
-              [(m["name"], m["cached"]) for m in _g.get("models", [])]
-              == [("large-v3-turbo", True), ("medium", False), ("small", True), ("base", True)], str(_g.get("models")))
-        check("stt GET /stt: gpu name, 17 languages, status block",
-              _g.get("gpu") == "RTX TEST 12GB" and len(_g.get("languages", [])) == 17 and "state" in (_g.get("status") or {}),
-              str({k: _g.get(k) for k in ("gpu", "status")}))
-        check("stt GET /stt: current config, not custom", _g.get("current", {}).get("custom_model") is False,
-              str(_g.get("current")))
+        check("stt GET /stt: 17 languages and the status block",
+              len(_g.get("languages", [])) == 17 and "state" in (_g.get("status") or {}),
+              str({k: _g.get(k) for k in ("languages", "status")})[:300])
 
-        config_store.write_section("stt", {**_stt_beforestt, "model": "large-v3"})
-        _g = client.get("/api/dashboard/stt").json()
-        check("stt hand-set model shown as custom, preserved",
-              _g["current"]["model"] == "large-v3" and _g["current"]["custom_model"] is True, str(_g["current"]))
+        # A value the card no longer writes (hand-set, or left by an older
+        # version) stays in config.yaml as it is.
+        config_store.write_section("stt", {**_stt_beforestt, "model": "stale-suite-model"})
 
-        for _body, _why in (({"model": "large-v3"}, "outside the four"), ({"language": "xx"}, "bad language"),
-                            ({"model": "small", "beam": 5}, "extra key"), ({}, "empty body")):
+        for _body, _why in (({"language": "xx"}, "bad language"), ({"language": "en", "beam": 5}, "extra key"),
+                            ({}, "empty body")):
             _r = client.put("/api/dashboard/stt", json=_body)
             check(f"stt PUT refuses {_why}", _r.status_code == 422, f"{_r.status_code} {_r.text[:100]}")
 
@@ -6821,7 +6634,7 @@ def main():
         _c = _sttstt()
         check("stt language-only PUT: live, no restart, model (even a hand-set one) untouched",
               _r.status_code == 200 and _r.json().get("restart_needed") is False
-              and _c.get("language") == "en" and _c.get("model") == "large-v3", f"{_r.text[:120]} cfg={_c}")
+              and _c.get("language") == "en" and _c.get("model") == "stale-suite-model", f"{_r.text[:120]} cfg={_c}")
         _os_lang = os.environ.get("LVI_STT_LANGUAGE")
         os.environ["LVI_STT_LANGUAGE"] = "de"
         try:
@@ -6836,309 +6649,256 @@ def main():
             else:
                 os.environ["LVI_STT_LANGUAGE"] = _os_lang
 
-        _GPUstt["name"] = None
-        _r = client.put("/api/dashboard/stt", json={"model": "large-v3-turbo"})
-        check("stt GPU-only model refused without a GPU", _r.status_code == 422 and "GPU" in _r.text,
-              f"{_r.status_code} {_r.text[:100]}")
-        _r = client.put("/api/dashboard/stt", json={"model": "base"})
+        # Provider and language in one save land together.
+        _lang_mx = "es" if _sttstt().get("language") != "es" else "it"
+        _r = client.put("/api/dashboard/stt", json={"provider": "elevenlabs", "language": _lang_mx})
         _c = _sttstt()
-        check("stt no GPU: base -> cpu/int8 written together, restart needed",
-              _r.status_code == 200 and _r.json().get("restart_needed") is True
-              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("base", "cpu", "int8"), str(_c))
-
-        _GPUstt["name"] = "RTX TEST 12GB"
-        _r = client.put("/api/dashboard/stt", json={"model": "small"})
-        _c = _sttstt()
-        check("stt GPU: small -> cuda/float16, restart needed",
-              _r.status_code == 200 and _r.json().get("restart_needed") is True
-              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("small", "cuda", "float16"), str(_c))
-
-        # A save the model claim refuses (a delete of that model in flight)
-        # changes nothing: the language in the same PUT isn't written either.
-        _before_busy = _sttstt()
-        _rstt._STT_BUSY.add("base")
-        try:
-            _r = client.put("/api/dashboard/stt", json={"model": "base",
-                                                         "language": "es" if _before_busy.get("language") != "es" else "it"})
-        finally:
-            _rstt._STT_BUSY.discard("base")
-        check("stt: a save refused with 409 (model busy) changes nothing, language included",
-              _r.status_code == 409 and _sttstt() == _before_busy, f"{_r.status_code} before={_before_busy} after={_sttstt()}")
-        # Model + language + provider in one save land together.
-        _lang_mx = "es" if _before_busy.get("language") != "es" else "it"
-        _r = client.put("/api/dashboard/stt", json={"model": "base", "language": _lang_mx})
-        _c = _sttstt()
-        check("stt: model and language in one save are both written",
-              _r.status_code == 200 and (_c.get("model"), _c.get("language")) == ("base", _lang_mx), str(_c))
-        client.put("/api/dashboard/stt", json={"model": "small", "language": _before_busy.get("language") or "auto"})
-
-        # download-first: config never names a model that isn't on disk
-        _r = client.put("/api/dashboard/stt", json={"model": "medium"})
-        _j = _r.json()
-        check("stt uncached model: download started, no restart offered yet, config untouched",
-              _r.status_code == 200 and _j.get("download") == "started" and _j.get("restart_needed") is False
-              and _sttstt().get("model") == "small", f"{_r.text[:140]} cfg={_sttstt()}")
-        _r2 = client.put("/api/dashboard/stt", json={"model": "medium"})
-        check("stt a second model change while downloading -> 409", _r2.status_code == 409, str(_r2.status_code))
-        _r3 = client.put("/api/dashboard/stt", json={"language": "fr"})
-        check("stt a language change mid-download is accepted", _r3.status_code == 200, str(_r3.status_code))
-        check("stt GET shows the download in progress",
-              (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") == "downloading")
-        for _ in range(30):   # wait for the mid-download report (fake reports at delay/2)
-            _dp = client.get("/api/dashboard/stt").json().get("download") or {}
-            if _dp.get("done_bytes"):
-                break
-            _tstt.sleep(0.03)
-        check("stt download progress: bytes + percent while downloading",
-              _dp.get("done_bytes") == 650_000_000 and _dp.get("total_bytes") == 1_500_000_000
-              and _dp.get("percent") == 43, str(_dp))
-        for _ in range(40):
-            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
-                break
-            _tstt.sleep(0.05)
-        _d = client.get("/api/dashboard/stt").json().get("download") or {}
-        _c = _sttstt()
-        check("stt download done -> config switched (model/device/compute) and state ready",
-              _d.get("state") == "ready" and _d.get("model") == "medium"
-              and (_c.get("model"), _c.get("device"), _c.get("compute_type")) == ("medium", "cuda", "float16"),
-              f"dl={_d} cfg={_c}")
-        check("stt the download's config write keeps a language saved mid-download", _c.get("language") == "fr", str(_c))
-
-        # two simultaneous model PUTs for uncached models: exactly one download starts, the other gets 409
-        import threading as _thstt
-        _CACHEDstt.discard("large-v3-turbo")
-        _CACHEDstt.discard("small")
-        _DLstt.update(fail=False, delay=0.4)
-        _slow_cached = _rstt._stt_cached
-        def _slow(name):
-            _tstt.sleep(0.15)
-            return _slow_cached(name)
-        _rstt._stt_cached = _slow
-        _codes = []
-        _ts = [_thstt.Thread(target=lambda m=m: _codes.append(client.put("/api/dashboard/stt", json={"model": m}).status_code))
-               for m in ("large-v3-turbo", "small")]  # both differ from the current (medium)
-        [t.start() for t in _ts]
-        [t.join() for t in _ts]
-        _rstt._stt_cached = _slow_cached
-        check("stt concurrent uncached model PUTs: one starts, the other 409", sorted(_codes) == [200, 409], str(_codes))
-        for _ in range(40):
-            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
-                break
-            _tstt.sleep(0.05)
-        _CACHEDstt.update({"large-v3-turbo", "small"})
-
-        _CACHEDstt.discard("medium")
-        _DLstt.update(fail=True, delay=0.05)
-        client.put("/api/dashboard/stt", json={"model": "base"})  # cached: back to base first
-        _r = client.put("/api/dashboard/stt", json={"model": "medium"})
-        for _ in range(40):
-            if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
-                break
-            _tstt.sleep(0.05)
-        _d = client.get("/api/dashboard/stt").json().get("download") or {}
-        check("stt failed download -> error state, config unchanged",
-              _d.get("state") == "error" and "network down" in (_d.get("error") or "") and _sttstt().get("model") == "base",
-              f"dl={_d} cfg={_sttstt()}")
-
-        # ── delete ──
-        _DELstt = []
-        _SIZEstt = {"large-v3-turbo": 1_600_000_000, "medium": 1_500_000_000, "small": 464_000_000, "base": 142_000_000}
-        _PARTIALstt = set()          # on disk but incomplete (crashed download)
-        _SCANSstt = [0]
-        _DELMODEstt = {"slow": 0.0, "noop": False}
-        _saved_del = tuple(getattr(_rstt, _n, None) for _n in ("_stt_delete", "_stt_disk_sizes"))
-
-        def _fake_delete(name):
-            _DELstt.append(name)
-            _tstt.sleep(_DELMODEstt["slow"])
-            if _DELMODEstt["noop"]:
-                return _SIZEstt[name]
-            _CACHEDstt.discard(name)
-            _PARTIALstt.discard(name)
-            return _SIZEstt[name]
-
-        def _fake_sizes():
-            _SCANSstt[0] += 1
-            return {n: (_SIZEstt[n] if n in _CACHEDstt else 12_000_000 if n in _PARTIALstt else 0) for n in _SIZEstt}
-
-        _rstt._stt_delete = _fake_delete
-        _rstt._stt_disk_sizes = _fake_sizes
-        _saved_status = _rstt._stt_status
-        _rstt._stt_status = lambda: {"state": "ready", "model": "large-v3-turbo", "device": "cuda",
-                                     "compute": "float16", "samples": 0}
-
-        def _set_model_by_hand(value):
-            # a hand edit of config.yaml — NOT through config_store (the process config cache stays stale)
-            _raw = _ystt.safe_load(Path(os.environ["LVI_CONFIG"]).read_text()) or {}
-            _raw.setdefault("stt", {})["model"] = value
-            Path(os.environ["LVI_CONFIG"]).write_text(_ystt.safe_dump(_raw, sort_keys=False))
-
-        try:
-            _CACHEDstt.update({"large-v3-turbo", "medium", "small", "base"})
-            client.put("/api/dashboard/stt", json={"model": "medium"})   # configured = medium, running = turbo
-            _SCANSstt[0] = 0
-            _g = client.get("/api/dashboard/stt").json()
-            _m = {m["name"]: m for m in _g["models"]}
-            check("stt GET: size on disk per downloaded model",
-                  _m["small"].get("disk_bytes") == 464_000_000 and _m["base"].get("disk_bytes") == 142_000_000,
-                  str({k: v.get("disk_bytes") for k, v in _m.items()}))
-            check("stt GET scans the model cache ONCE per request", _SCANSstt[0] == 1, str(_SCANSstt[0]))
-            check("stt GET: deletable = on disk and not configured/running",
-                  [n for n, m in _m.items() if m.get("deletable")] == ["small", "base"],
-                  str({k: v.get("deletable") for k, v in _m.items()}))
-            for _n, _why in (("medium", "the configured model"), ("large-v3-turbo", "the running model")):
-                _r = client.delete(f"/api/dashboard/stt/model/{_n}")
-                check(f"stt DELETE refuses {_why} (409)", _r.status_code == 409 and not _DELstt,
-                      f"{_r.status_code} {_r.text[:100]}")
-            _r = client.delete("/api/dashboard/stt/model/large-v3")
-            check("stt DELETE refuses a model outside the four (422)", _r.status_code == 422, str(_r.status_code))
-
-            # in use is judged by REPO, not name: aliases, repo ids and local paths all protect the files
-            _rstt._stt_status = lambda: {"state": "ready", "model": "none-loaded", "samples": 0}  # only config protects
-            for _val, _target, _why in (
-                    ("turbo", "large-v3-turbo", "faster-whisper's 'turbo' alias"),
-                    ("Systran/faster-whisper-small", "small", "a raw repo id"),
-                    ("/x/hub/models--Systran--faster-whisper-base/snapshots/abc", "base", "a local snapshot path")):
-                config_store.write_section("stt", {**(config_store.read_section("stt") or {}), "model": _val})
-                _g = client.get("/api/dashboard/stt").json()
-                _dm = {m["name"]: m.get("deletable") for m in _g["models"]}
-                _r = client.delete(f"/api/dashboard/stt/model/{_target}")
-                check(f"stt in-use by repo: {_why} protects {_target} (not deletable, DELETE 409)",
-                      _dm.get(_target) is False and _r.status_code == 409 and not _DELstt,
-                      f"deletable={_dm.get(_target)} {_r.status_code}")
-            _set_model_by_hand("small")
-            _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt a hand edit of config.yaml (no restart) still protects that model",
-                  _r.status_code == 409 and not _DELstt, f"{_r.status_code} {_r.text[:100]}")
-            config_store.write_section("stt", {**(config_store.read_section("stt") or {}), "model": "medium"})
-            _rstt._stt_status = lambda: {"state": "ready", "model": "large-v3-turbo", "device": "cuda",
-                                         "compute": "float16", "samples": 0}
-
-            _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt DELETE removes an unused downloaded model, reports freed bytes",
-                  _r.status_code == 200 and _r.json().get("freed_bytes") == 464_000_000 and _DELstt == ["small"],
-                  f"{_r.status_code} {_r.text[:120]} calls={_DELstt}")
-            _g = client.get("/api/dashboard/stt").json()
-            _m = {m["name"]: m for m in _g["models"]}
-            check("stt after delete: shown as not downloaded (downloads first again)",
-                  _m["small"]["cached"] is False and not _m["small"].get("deletable"), str(_m["small"]))
-            _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt DELETE of a model that isn't on disk -> 404", _r.status_code == 404, str(_r.status_code))
-
-            # leftovers of a crashed download: on disk, not complete -> still deletable
-            _PARTIALstt.add("small")
-            _g = client.get("/api/dashboard/stt").json()
-            _ms = next(m for m in _g["models"] if m["name"] == "small")
-            _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt partial leftovers: shown (cached false, on disk) and deletable",
-                  _ms["cached"] is False and _ms.get("disk_bytes") == 12_000_000 and _ms.get("deletable") is True
-                  and _r.status_code == 200, f"{_ms} {_r.status_code}")
-
-            # a delete that leaves the files behind must not report success
-            _DELMODEstt["noop"] = True
-            _r = client.delete("/api/dashboard/stt/model/base")
-            _DELMODEstt["noop"] = False
-            check("stt DELETE that didn't remove the files -> 500, not ok", _r.status_code == 500, str(_r.status_code))
-
-            # DELETE racing a PUT of the same model: config must never name a model that isn't on disk
-            import threading as _thrace
-            _DELMODEstt["slow"] = 0.4
-            _DLstt.update(fail=False, delay=0.2)
-            _res = {}
-            _td = _thrace.Thread(target=lambda: _res.update(d=client.delete("/api/dashboard/stt/model/base").status_code))
-            _tp = _thrace.Thread(target=lambda: _res.update(p=client.put("/api/dashboard/stt", json={"model": "base"}).json()))
-            _td.start()
-            _tstt.sleep(0.1)
-            _tp.start()
-            _td.join()
-            _tp.join()
-            _DELMODEstt["slow"] = 0.0
-            for _ in range(40):
-                if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
-                    break
-                _tstt.sleep(0.05)
-            _cfg_model = _sttstt().get("model")
-            check("stt DELETE racing a PUT: config never names a model that isn't on disk",
-                  _cfg_model != "base" or "base" in _CACHEDstt, f"cfg={_cfg_model} cached={sorted(_CACHEDstt)} res={_res}")
-            _CACHEDstt.add("base")
-            client.put("/api/dashboard/stt", json={"model": "medium"})
-
-            # a model mid-download can't be deleted
-            _CACHEDstt.discard("small")
-            _DLstt.update(fail=False, delay=0.4)
-            client.put("/api/dashboard/stt", json={"model": "small"})
-            _r = client.delete("/api/dashboard/stt/model/small")
-            check("stt DELETE refuses the model being downloaded (409)", _r.status_code == 409, str(_r.status_code))
-            for _ in range(40):
-                if (client.get("/api/dashboard/stt").json().get("download") or {}).get("state") != "downloading":
-                    break
-                _tstt.sleep(0.05)
-        finally:
-            _rstt._stt_status = _saved_status
-            for _n, _v in zip(("_stt_delete", "_stt_disk_sizes"), _saved_del):
-                if _v is not None:
-                    setattr(_rstt, _n, _v)
-
-        # partial download must not count as cached (real hook, faked hub)
-        import tempfile as _tfstt
-
-        import faster_whisper.utils as _fwu
-        _real_cached = _savedstt[0]
-        _real_dm = _fwu.download_model
-        _pdir = Path(_tfstt.mkdtemp())
-        _fwu.download_model = lambda name, local_files_only=False, **k: str(_pdir)
-        try:
-            _empty = _real_cached("small") if _real_cached else None
-            (_pdir / "config.json").write_text("{}")
-            (_pdir / "model.bin").write_bytes(b"x")
-            _full = _real_cached("small") if _real_cached else None
-        finally:
-            _fwu.download_model = _real_dm
-        check("stt a partial snapshot (no model.bin/config.json) is NOT cached; a complete one is",
-              _empty is False and _full is True, f"{_empty} {_full}")
-
-        # real download hook vs huggingface_hub's progress contract: snapshot_download builds two
-        # bars from tqdm_class ("Downloading bytes" = network, "Reconstructing…" = written to disk)
-        import huggingface_hub as _hhstt
-        _real_dl = _savedstt[1]
-        _seen = {}
-        def _fake_snapshot(repo_id, allow_patterns=None, tqdm_class=None, **kw):
-            _seen.update(repo=repo_id, patterns=list(allow_patterns or []))
-            net = tqdm_class(desc="Downloading bytes", total=0, initial=0, unit="B", unit_scale=True)
-            rec = tqdm_class(desc="Reconstructing (incomplete total...)", total=0, initial=0, unit="B", unit_scale=True)
-            rec.total = 1000
-            rec.refresh()
-            net.update(900)            # network bytes must NOT drive the bar
-            rec.update(250)
-            rec.update(250)
-            net.close()
-            rec.close()
-            return "/nowhere"
-        _real_snap = _hhstt.snapshot_download
-        _hhstt.snapshot_download = _fake_snapshot
-        _prog = []
-        try:
-            if _real_dl:
-                _real_dl("medium", on_progress=lambda d, t: _prog.append((d, t)))
-        finally:
-            _hhstt.snapshot_download = _real_snap
-        check("stt real download: medium's repo + faster-whisper's file patterns",
-              _seen.get("repo") == "Systran/faster-whisper-medium"
-              and _seen.get("patterns") == ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"],
-              str(_seen))
-        check("stt real download: progress follows the bytes-written bar only, ends at 500/1000",
-              bool(_prog) and _prog[-1] == (500, 1000) and all(d <= 500 for d, _ in _prog), str(_prog))
+        check("stt: provider and language in one save are both written",
+              _r.status_code == 200 and (_c.get("provider"), _c.get("language")) == ("elevenlabs", _lang_mx), str(_c))
 
         _s = client.get("/api/dashboard/status").json()
         check("stt /status carries the stt block", isinstance(_s.get("stt"), dict) and "state" in _s["stt"],
               str(_s.get("stt")))
     finally:
-        if _saved_sizes is not None:
-            _rstt._stt_disk_sizes = _saved_sizes
-        for _n, _v in zip(("_stt_cached", "_stt_download", "_stt_gpu_name"), _savedstt):
-            if _v is not None:
-                setattr(_rstt, _n, _v)
         config_store.write_section("stt", _stt_beforestt)
+
+    # ── speech tiers: the /stt and /tts payloads (routes) ─────────────
+    # Each card's groups come from its catalog; a cloud provider without its
+    # key is offered disabled with the reason; a field the payloads no longer
+    # have (a tab left open across the upgrade) is a 422 that changes nothing.
+    import hashlib as _hlST
+
+    import config as _cfgST
+    import stt_catalog as _scST
+    import tts_catalog as _tcST
+    import tts_kokoro as _tkST
+    from loguru import logger as _lgST
+
+    _ST_VARS = ("LVI_ENV_FILE", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "LVI_LOCALAI_KEY", "LVI_LOCALAI_URL",
+                "LVI_STT_PROVIDER", "LVI_STT_LANGUAGE", "LVI_TTS_PROVIDER")
+    _st_env = {k: os.environ.get(k) for k in _ST_VARS}
+    _st_cfg = {s: copy.deepcopy(dict(config_store.read_section(s) or {})) for s in ("stt", "tts", "localai")}
+    _st_fns = (_rstt._stt_deepgram_sdk, _tkST.kokoro_available, _tkST._files_problem)
+    _st_envfile = SCRATCH / "speech-tiers.env"
+    _st_cfgpath = Path(os.environ["LVI_CONFIG"])
+    _ST_DEAD = "suite-dead-value-4242"
+    _NO_KEY = (False, "add the key on System · Keys")
+
+    def _names_field(r, field):
+        """A dashboard 422 for a body field the payload no longer has, naming it."""
+        try:
+            det = r.json().get("detail")
+        except ValueError:
+            return False
+        return r.status_code == 422 and isinstance(det, list) and any(
+            isinstance(e, dict) and e.get("type") == "extra_forbidden" and list(e.get("loc") or [])[-1:] == [field]
+            for e in det)
+
+    def _offered(payload):
+        return {p.get("name"): (p.get("available"), p.get("reason")) for p in payload.get("providers") or []}
+
+    def _st_pending(boot, saved):
+        _rb, _rl = _cfgST.boot_config, _cfgST._load
+        _cfgST.boot_config, _cfgST._load = (lambda: boot), (lambda: saved)
+        try:
+            return _rstt._restart_pending()
+        finally:
+            _cfgST.boot_config, _cfgST._load = _rb, _rl
+
+    try:
+        for _k in _ST_VARS:
+            os.environ.pop(_k, None)
+        _st_envfile.write_text("")
+        os.environ["LVI_ENV_FILE"] = str(_st_envfile)
+        config_store.write_section("localai", {})
+        _rstt._stt_deepgram_sdk = lambda: True
+        _tkST.kokoro_available = lambda: True    # Kokoro set up: the TTS card reads it
+        _tkST._files_problem = lambda: None
+
+        # ── STT card ──
+        _gS = client.get("/api/dashboard/stt").json()
+        check("speech tiers: GET /stt groups equal the catalog — the three tiers, then every provider in card order with its tier",
+              _gS.get("tiers") == _scST.TIERS
+              and [(p.get("name"), p.get("label"), p.get("tier")) for p in _gS.get("providers") or []]
+              == [(p["name"], p["label"], p["tier"]) for p in _scST.PROVIDERS],
+              str({k: _gS.get(k) for k in ("tiers", "providers")})[:400])
+        check("speech tiers: GET /stt returns exactly the card's fields — no model list, GPU or download state; current is provider and language",
+              set(_gS) == {"current", "tiers", "providers", "languages", "deepgram_key_set", "elevenlabs_key_set", "status"}
+              and set(_gS.get("current") or {}) == {"provider", "language", "custom_language"},
+              f"keys={sorted(_gS)} current={_gS.get('current')}")
+        _oS = _offered(_gS)
+        check("speech tiers: STT — a cloud provider without its key is offered disabled with 'add the key on System · Keys'; Whisper base needs none",
+              _oS.get("deepgram") == _NO_KEY and _oS.get("elevenlabs") == _NO_KEY and _oS.get("whisper") == (True, None),
+              str(_oS))
+        _st_envfile.write_text("ELEVENLABS_API_KEY=el-tier-SECRET-0001\nDEEPGRAM_API_KEY=dg-tier-SECRET-0002\n")
+        _gSr = client.get("/api/dashboard/stt")
+        _cloudS = [p for p in _gSr.json().get("providers") or [] if p.get("tier") == "cloud"]
+        check("speech tiers: STT — with its key saved on System · Keys a cloud provider is offered, and the key never appears",
+              len(_cloudS) == 2 and all(p.get("available") is True and "reason" not in p for p in _cloudS)
+              and "SECRET" not in _gSr.text, _gSr.text[:300])
+        _st_envfile.write_text("")
+
+        config_store.write_section("stt", {k: v for k, v in _st_cfg["stt"].items() if k != "provider"})
+        _pS = [client.get("/api/dashboard/stt").json().get("current", {}).get("provider")]
+        for _v in ("nonesuch", " Deepgram "):
+            config_store.write_section("stt", {**_st_cfg["stt"], "provider": _v})
+            _pS.append(client.get("/api/dashboard/stt").json().get("current", {}).get("provider"))
+        check("speech tiers: GET /stt reads an unset or unknown provider as Embedded (whisper), odd case or spaces as that provider",
+              _pS == ["whisper", "whisper", "deepgram"], str(_pS))
+
+        _leanS = {k: v for k, v in _st_cfg["stt"].items() if k not in ("provider", "model", "device", "compute_type")}
+        config_store.write_section("stt", {**_leanS, "language": "fr"})
+        _rS = client.put("/api/dashboard/stt", json={"language": "en"})
+        check("speech tiers: PUT /stt answers ok, restart_needed, key_needed and current — no download state",
+              _rS.status_code == 200 and set(_rS.json()) == {"ok", "restart_needed", "key_needed", "current"},
+              _rS.text[:200])
+        client.put("/api/dashboard/stt", json={"provider": "elevenlabs", "language": "de"})
+        client.put("/api/dashboard/stt", json={"provider": "whisper"})
+        _cS = _sttstt()
+        check("speech tiers: PUT /stt writes only provider and language — never a model, device or compute type",
+              _cS.get("provider") == "whisper" and _cS.get("language") == "de"
+              and not ({"model", "device", "compute_type"} & set(_cS)), str(_cS))
+        _shaS = _hlST.sha256(_st_cfgpath.read_bytes()).hexdigest()
+        _rS = client.put("/api/dashboard/stt", json={"language": "en", "model": _ST_DEAD})
+        check("speech tiers: PUT /stt with the deleted model field (a tab left open) is a 422 naming it; config.yaml byte-identical",
+              _names_field(_rS, "model") and _hlST.sha256(_st_cfgpath.read_bytes()).hexdigest() == _shaS,
+              f"{_rS.status_code} {_rS.text[:160]}")
+        # Never a real model name here: a red run against the old routes would delete it from the host's cache.
+        _rS = client.delete("/api/dashboard/stt/model/nonesuch")
+        check("speech tiers: the Whisper model delete route is gone (404/405) — the appliance never deletes models",
+              _rS.status_code in (404, 405)
+              and not any(getattr(_rt, "path", "") == "/api/dashboard/stt/model/{name}" for _rt in _rstt.router.routes),
+              f"{_rS.status_code} {_rS.text[:120]}")
+        config_store.write_section("stt", {**_st_cfg["stt"], "model": "stale-suite-model"})
+        _sjS = client.get("/api/dashboard/status").json()
+        check("speech tiers: /status has no stt_model and the STT status no device (Embedded is fixed); a stale "
+              "stt.model never shows",
+              "stt_model" not in _sjS and "device" not in (_sjS.get("stt") or {})
+              and "stale-suite-model" not in str(_sjS), str({k: _sjS.get(k) for k in ("stt",)})[:300])
+        _bootS = {"stt": {"provider": "whisper", "model": "stale-a"}}
+        _saveS = {"stt": {"provider": "whisper", "model": "stale-b", "device": "stale-c", "compute_type": "stale-d"}}
+        check("speech tiers: restart pending — a stt key the bot no longer reads never waits for a restart; a provider change still does",
+              "stt" not in _st_pending(_bootS, _saveS)
+              and "stt" in _st_pending(_bootS, {"stt": {"provider": "elevenlabs"}}),
+              f"pending={_st_pending(_bootS, _saveS)}")
+
+        # ── TTS card ──
+        _TTS_FIELDS = {"provider", "voice_id", "model", "deepgram_voice", "deepgram_flux_voice", "deepgram_flux_speed",
+                       "deepgram_flux_expressivity", "elevenlabs_speed", "elevenlabs_stability",
+                       "elevenlabs_text_normalization", "kokoro_voice", "kokoro_speed", "localai_model_tts",
+                       "localai_voice",
+                       "elevenlabs_key_set", "deepgram_key_set", "elevenlabs_key_hint", "localai_key_hint",
+                       "deepgram_key_hint", "tiers", "providers", "catalog", "note"}
+        _gT = client.get("/api/dashboard/tts").json()
+        check("speech tiers: GET /tts groups equal the catalog — the three tiers, then every provider in card order with its tier",
+              _gT.get("tiers") == _tcST.TIERS
+              and [(p.get("name"), p.get("label"), p.get("tier")) for p in _gT.get("providers") or []]
+              == [(p["name"], p["label"], p["tier"]) for p in _tcST.PROVIDERS],
+              str({k: _gT.get(k) for k in ("tiers", "providers")})[:400])
+        check("speech tiers: GET /tts returns exactly the card's fields (no leftovers of removed voices or the fallback switch); the Kokoro voice list stays",
+              set(_gT) == _TTS_FIELDS and (_gT.get("catalog") or {}).get("kokoro") == list(_tkST.KOKORO_VOICES),
+              f"extra={sorted(set(_gT) - _TTS_FIELDS)} missing={sorted(_TTS_FIELDS - set(_gT))}")
+        _oT = _offered(_gT)
+        check("speech tiers: TTS — a cloud provider without its key is offered disabled with 'add the key on System · Keys'; Kokoro needs none",
+              [_oT.get(n) for n in ("elevenlabs", "deepgram-flux", "deepgram")] == [_NO_KEY] * 3
+              and _oT.get("kokoro") == (True, None), str(_oT))
+        _st_envfile.write_text("ELEVENLABS_API_KEY=el-tier-SECRET-0001\nDEEPGRAM_API_KEY=dg-tier-SECRET-0002\n")
+        _gTr = client.get("/api/dashboard/tts")
+        _cloudT = [p for p in _gTr.json().get("providers") or [] if p.get("tier") == "cloud"]
+        check("speech tiers: TTS — with its key saved on System · Keys a cloud provider is offered, and the key never appears",
+              len(_cloudT) == 3 and all(p.get("available") is True and "reason" not in p for p in _cloudT)
+              and "SECRET" not in _gTr.text, _gTr.text[:300])
+        _st_envfile.write_text("")
+        _tkST._files_problem = lambda: "/x/kokoro-v1.0.onnx is missing"
+        _gT = client.get("/api/dashboard/tts").json()
+        _tkST._files_problem = lambda: None
+        _oT, _oS = _offered(_gT), _offered(client.get("/api/dashboard/stt").json())
+        check("speech tiers: TTS — Kokoro's files missing: 'model files missing'; LocalAI not set up: 'set it up on System' on both cards",
+              _oT.get("kokoro") == (False, "model files missing")
+              and _oT.get("localai") == (False, "set it up on System") == _oS.get("localai"), f"tts={_oT} stt={_oS}")
+
+        config_store.write_section("tts", {k: v for k, v in _st_cfg["tts"].items() if k != "provider"})
+        _pT = [(client.get("/api/dashboard/tts").json().get("provider"),
+                client.get("/api/dashboard/status").json().get("tts_provider"))]
+        for _v in ("nonesuch", "ElevenLabs"):
+            config_store.write_section("tts", {**_st_cfg["tts"], "provider": _v})
+            _pT.append((client.get("/api/dashboard/tts").json().get("provider"),
+                        client.get("/api/dashboard/status").json().get("tts_provider")))
+        check("speech tiers: GET /tts and /status read an unset or unknown TTS provider as Embedded (kokoro), odd case as that provider",
+              _pT == [("kokoro", "kokoro"), ("kokoro", "kokoro"), ("elevenlabs", "elevenlabs")], str(_pT))
+        config_store.write_section("tts", {k: v for k, v in _st_cfg["tts"].items() if k != "provider"})
+        config_store.write_section("stt", {**_st_cfg["stt"], "provider": "whisper"})
+        _kT = {r["var"]: r for r in client.get("/api/dashboard/keys").json().get("keys", [])}
+        check("speech tiers: Keys card — an unset TTS provider is Kokoro, so the ElevenLabs key is not in use",
+              _kT.get("ELEVENLABS_API_KEY", {}).get("in_use") is False, str(_kT.get("ELEVENLABS_API_KEY")))
+
+        from pydantic import ValidationError as _VEST
+
+        def _tts_body_ok(**kw):
+            try:
+                _rstt.TTSPayload(**kw)
+            except _VEST:
+                return False
+            return True
+        check("speech tiers: TTSPayload takes exactly the TTS catalog's providers and defaults to Embedded (kokoro)",
+              _rstt.TTSPayload().provider == _tcST.DEFAULT_PROVIDER
+              and all(_tts_body_ok(provider=n) for n in _tcST.PROVIDER_NAMES) and not _tts_body_ok(provider="nonesuch"),
+              f"default={_rstt.TTSPayload().provider!r}")
+
+        config_store.write_section("localai", {"url": "http://192.0.2.50:8080"})
+        _st_envfile.write_text("LVI_LOCALAI_KEY=la-tier-SECRET-0003\n")
+        _rTa = client.put("/api/dashboard/tts", json={"provider": "localai", "kokoro_voice": "am_adam", "kokoro_speed": 0.9})
+        _cTa = dict(config_store.read_section("tts") or {})
+        _rTb = client.put("/api/dashboard/tts", json={"provider": "deepgram", "deepgram_voice": "aura-2-thalia-en",
+                                                      "kokoro_voice": "bf_emma", "kokoro_speed": 1.2})
+        _cTb = dict(config_store.read_section("tts") or {})
+        check("speech tiers: the Kokoro voice and speed save with LocalAI and Cloud providers too — the standby's Fallback voice",
+              _rTa.status_code == 200 and _rTb.status_code == 200
+              and (_cTa.get("provider"), _cTa.get("kokoro_voice"), _cTa.get("kokoro_speed")) == ("localai", "am_adam", 0.9)
+              and (_cTb.get("provider"), _cTb.get("kokoro_voice"), _cTb.get("kokoro_speed")) == ("deepgram", "bf_emma", 1.2),
+              f"{_rTa.status_code} {_rTa.text[:100]} {_rTb.status_code} {_rTb.text[:100]} localai={_cTa} cloud={_cTb}")
+        config_store.write_section("localai", {})
+        _st_envfile.write_text("")
+
+        config_store.write_section("tts", {**dict(config_store.read_section("tts") or {}), "fallback": "stale-suite-value"})
+        _rT = client.put("/api/dashboard/tts", json={"provider": "deepgram", "deepgram_voice": "aura-2-zeus-en"})
+        check("speech tiers: PUT /tts carries a stale tts key it no longer writes over as it is — the product never rewrites a user's config",
+              _rT.status_code == 200 and (config_store.read_section("tts") or {}).get("fallback") == "stale-suite-value",
+              f"{_rT.status_code} {_rT.text[:100]} {dict(config_store.read_section('tts') or {})}")
+
+        # A tab left open across the upgrade still sends the old fields (the
+        # old card sent `fallback` with every cloud save).
+        config_store.write_section("tts", {**_st_cfg["tts"], "provider": "elevenlabs"})
+        _bodyT = {"provider": "deepgram", "deepgram_voice": "aura-2-thalia-en"}
+        _deadT = (("fallback", "off"), ("fallback", _ST_DEAD), ("pocket_voice", _ST_DEAD))
+        _shaT = _hlST.sha256(_st_cfgpath.read_bytes()).hexdigest()
+        _rTs = [(_f, client.put("/api/dashboard/tts", json={**_bodyT, _f: _x})) for _f, _x in _deadT]
+        check("speech tiers: PUT /tts with a deleted field (fallback, the old local voice) is a 422 naming that field",
+              all(_names_field(_r, _f) for _f, _r in _rTs), str([(_f, _r.status_code, _r.text[:80]) for _f, _r in _rTs]))
+        check("speech tiers: those refused TTS saves leave config.yaml byte-identical",
+              _hlST.sha256(_st_cfgpath.read_bytes()).hexdigest() == _shaT)
+        _hitsST = len(PIPECAT_HANDLER_HITS)
+        _linesST = []
+        _sinkST = _lgST.add(lambda m: _linesST.append(str(m)), level="DEBUG")
+        try:
+            _rAll = [client.put("/api/dashboard/stt", json={"language": "en", "model": _ST_DEAD})]
+            _rAll += [client.put("/api/dashboard/tts", json={**_bodyT, _f: _x}) for _f, _x in _deadT]
+        finally:
+            _lgST.remove(_sinkST)
+        check("speech tiers: the dashboard answers deleted-field 422s itself — pipecat's handler never runs, the rejected value is never echoed or logged",
+              all(_r.status_code == 422 for _r in _rAll) and len(PIPECAT_HANDLER_HITS) == _hitsST
+              and not any(_ST_DEAD in _r.text for _r in _rAll) and not any(_ST_DEAD in _ln for _ln in _linesST)
+              and sum("dashboard: 422 on /api/dashboard/" in _ln for _ln in _linesST) == len(_rAll),
+              f"codes={[_r.status_code for _r in _rAll]} pipecat={PIPECAT_HANDLER_HITS[_hitsST:][:3]} lines={len(_linesST)}")
+    finally:
+        _rstt._stt_deepgram_sdk, _tkST.kokoro_available, _tkST._files_problem = _st_fns
+        for _k, _v in _st_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        for _s, _v in _st_cfg.items():
+            config_store.write_section(_s, _v)
 
     # ── Keys card: every API key in one place (presence + hint only) ──
     from dashboard import routes as _rk
@@ -7195,12 +6955,12 @@ def main():
         check("keys GET: in use follows config (TTS elevenlabs, STT deepgram, hermes default; openclaw/agent not)",
               _kk["ELEVENLABS_API_KEY"]["in_use"] and _kk["DEEPGRAM_API_KEY"]["in_use"] and _kk["LVI_HERMES_KEY"]["in_use"]
               and not _kk["LVI_OPENCLAW_KEY"]["in_use"] and not _hb.get("in_use"), str({k: v.get("in_use") for k, v in _kk.items()}))
-        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "pocket"})
+        config_store.write_section("tts", {**_k_before_cfg["tts"], "provider": "kokoro"})
         config_store.write_section("stt", {**_k_before_cfg["stt"], "provider": "whisper"})
         config_store.write_section("intelligence", {**config_store.read_section("intelligence"), "kind": "hermes",
                                                     "agents": {"hermes": "ha-butler"}})
         _kk2 = {r["var"]: r for r in client.get("/api/dashboard/keys").json()["keys"]}
-        check("keys GET: pocket TTS + whisper STT -> Deepgram/ElevenLabs not in use; hermes agent ha-butler -> its key in use",
+        check("keys GET: kokoro TTS + whisper STT -> Deepgram/ElevenLabs not in use; hermes agent ha-butler -> its key in use",
               not _kk2["DEEPGRAM_API_KEY"]["in_use"] and not _kk2["ELEVENLABS_API_KEY"]["in_use"]
               and _kk2["LVI_HERMES_KEY_HA_BUTLER"]["in_use"] and not _kk2["LVI_HERMES_KEY"]["in_use"],
               str({k: v.get("in_use") for k, v in _kk2.items()}))
@@ -7921,10 +7681,12 @@ def main():
         os.environ["DEEPGRAM_API_KEY"] = "dg-secret-xyz123"
         _gr = client.get("/api/dashboard/stt")
         _g = _gr.json()
+        # ElevenLabs' availability follows its key, which this block doesn't
+        # control (the speech tiers block pins the key rule).
         check("cloud stt GET: provider defaults to whisper; providers listed with availability",
               _g.get("current", {}).get("provider") == "whisper"
-              and [(p["name"], p.get("available")) for p in _g.get("providers", [])]
-              == [("whisper", True), ("localai", False), ("deepgram", True), ("elevenlabs", True)],
+              and [(p["name"], p.get("available")) for p in _g.get("providers", []) if p["name"] != "elevenlabs"]
+              == [("whisper", True), ("localai", False), ("deepgram", True)],
               str({k: _g.get(k) for k in ("providers",)}) + str(_g.get("current")))
         check("cloud stt GET: deepgram_key_set true, and the key value never appears",
               _g.get("deepgram_key_set") is True and "dg-secret-xyz123" not in _gr.text, str(_g.get("deepgram_key_set")))
@@ -7935,7 +7697,7 @@ def main():
         _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
         check("cloud stt: SDK missing -> deepgram unavailable with a reason, PUT 422",
               _r.status_code == 422 and next(p for p in _g["providers"] if p["name"] == "deepgram").get("available") is False
-              and "deepgram-sdk" in (next(p for p in _g["providers"] if p["name"] == "deepgram").get("reason") or ""),
+              and next(p for p in _g["providers"] if p["name"] == "deepgram").get("reason") == "not installed",
               f"{_r.status_code} {_g['providers']}")
         _DGSDK["ok"] = True
         _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
@@ -8922,9 +8684,6 @@ def main():
     check("hunt 10-24 #1: agent discovery sends a typed host:port (the server fills in http:// and /v1)",
           "if ((url || '').trim()) body.url = url.trim()" in _appsrc
           and "if (/^https?:\\/\\//.test(url || '')) body.url = url" not in _appsrc)
-    check("hunt 10-24 #3: the Kokoro option says when its model files are missing, with the fetch hint as its title",
-          "title={tts?.kokoro_problem || undefined}" in _appsrc
-          and "tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'" in _appsrc)
     check("ux3: the mapping and Nodes tables both list rooms by name",
           "const roomRows = [...mappedRooms, ...unmappedRooms].sort(byRoom)" in _appsrc
           and "[...(status?.rooms || [])].sort((a, b) => byRoom(a.room, b.room)).map(r => (" in _appsrc
@@ -8992,8 +8751,8 @@ def main():
         _r0, _p0 = _rp_status()
         check("restart pending: /status lists nothing right after a boot",
               _r0.status_code == 200 and _p0 == [], f"status={_r0.status_code} pending={_p0}")
-        _RP_FIELDS = ("uptime_secs", "version", "wake_model", "stt_model", "stt", "tts_provider",
-                      "intelligence", "active_room", "last_wake", "rooms", "session_modes", "note")
+        _RP_FIELDS = ("uptime_secs", "version", "stt", "tts_provider",
+                      "intelligence", "last_wake", "rooms", "session_modes", "note")
         check("restart pending: /status keeps every field it had and adds restart_pending",
               _r0.status_code == 200 and all(k in _r0.json() for k in _RP_FIELDS)
               and "restart_pending" in _r0.json(), _r0.text[:300])
@@ -9027,8 +8786,8 @@ def main():
                                                     "url": "http://192.0.2.71:8642/v1"})
         config_store.write_section("wake", {**config_store.read_section("wake"), "model": "suite-rp-model.onnx"})
         _stRP = dict(config_store.read_section("stt") or {})
-        config_store.write_section("stt", {**_stRP, "compute_type":
-                                           "int8" if _stRP.get("compute_type") != "int8" else "float32"})
+        config_store.write_section("stt", {**_stRP, "provider":
+                                           "elevenlabs" if _stRP.get("provider") != "elevenlabs" else "whisper"})
         _r2, _p2 = _rp_status()
         check("restart pending: each restart-only save is listed once, in a stable order",
               all(r.status_code == 200 for r in (_rt, _rtu, _rma)) and _p2 == _RP_ALL,
@@ -9104,8 +8863,6 @@ def main():
                                                  "await load() reloadAll()")),
             ("stt", "function SttCard(", (": 'Saved — restart to apply.', 'ok', 'STT') "
                                          "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
-            ("stt download", "function SttCard(", ("msgRef.current(`Downloaded ${dl.model} — restart to apply.`, 'ok', 'STT') "
-                                                  "window.dispatchEvent(new CustomEvent('lenoxvi:reload-all'))")),
             ("room agents", "function Rooms(", "say(`Saved — restart to apply (agent ${picks}).`")):
         check(f"restart pending: the {_whatRP} save says 'restart to apply' and refreshes status",
               _pinRP in _ws(_fnUI(_fnRP)), _pinRP[:80])
@@ -9137,8 +8894,10 @@ def main():
           bool(_ttsHO) and "const hint = TTS_KEY_HINT[tts?.provider]" in _ttsHO
           and "if (hint && !tts[hint])" in _ttsHO
           and "tone: 'warning', text: 'no key', href: '#keys'" in _ws(_ttsHO), _ttsHO[:200])
-    check("overview: the TTS chip reads key hints GET /tts really returns, for every cloud provider; pocket needs none",
-          set(_hintHO) == {"elevenlabs", "deepgram", "deepgram-flux", "localai"}
+    import tts_catalog as _tcHO
+    check("overview: the TTS chip reads key hints GET /tts really returns, for every LocalAI and Cloud provider; "
+          "Embedded needs none",
+          set(_hintHO) == {p["name"] for p in _tcHO.PROVIDERS if p["tier"] != "embedded"}
           and all(v in _ttsGet for v in _hintHO.values()), f"{_hintHO} vs {sorted(_ttsGet)[:12]}")
     _intGet = client.get("/api/dashboard/intelligence").json()
     check("overview: the intelligence chip warns 'no url' (link to Intelligence), else 'no key' (link to Keys)",
@@ -9552,7 +9311,7 @@ def main():
                                                        "function NodeActions(", "function FirmwarePanel("))
           and _wkUS.count("useUnsaved(") == 1 and _owUS.count("useUnsaved(") == 1
           and "onClick={upload}" in _owUS and "onClick={() => del(m.name, m.source)}" in _owUS
-          and "onChange={sticky => toggleMode(r.room, sticky)}" in _roUS and "onClick={() => del(m)}" in _stUS)
+          and "onChange={sticky => toggleMode(r.room, sticky)}" in _roUS)
     check("unsaved: the bar renders once in App, pinned to the bottom, full width, header background, safe area",
           _appTB.count("<UnsavedBar cards={cards} units={units} setMsg={setMsg} />") == 1
           and "<UnsavedCtx.Provider value={putUnsaved}>" in _appTB and "if (!total) return null" in _barUS
@@ -9595,11 +9354,11 @@ def main():
           "fluxTouched" not in _voUS and "document.getElementById('tts-voice')" not in _appsrc
           and '<input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })}' in _voUS
           and "blank: { el_speed: 1.0, el_stab: 0.5, el_norm: 'auto', flux_speed: 1.0, flux_expr: 1 }" in _voUS
-          and "const onProviderChange = p => t.set({ provider: p, [`model:${p}`]: undefined })" in _voUS)
-    check("unsaved: STT picks follow the server until changed; a model already downloading counts as saved",
-          "const s = useDraft({ model: pendingModel || data?.current?.model" in _stUS and "setBusy(" not in _stUS
-          and "if (downloading && body.model) {" in _saveUS["stt"]
-          and _saveUS["stt"].find("if (downloading && body.model) {") < _saveUS["stt"].find("await api("))
+          and "const onProviderChange = p => t.set({ provider: p, ...(p === 'kokoro' ? {} : { [`model:${p}`]: undefined }) })"
+          in _voUS)
+    check("unsaved: STT picks (provider, language, LocalAI model) follow the server until changed",
+          "const s = useDraft({ language: data?.current?.language, provider: data?.current?.provider," in _stUS
+          and "la_model: laSaved?.model_stt || '' })" in _stUS and "setBusy(" not in _stUS)
     check("unsaved: intelligence keeps a URL and agent draft per kind; switching kinds only changes which show",
           "[`url:${k}`, shortUrl(savedUrls[k])]" in _syUS and "const switchKind = kind => {" in _syUS
           and "d.set({ kind })" in _jsbody(_syUS, "const switchKind = kind => {")
@@ -9633,44 +9392,32 @@ def main():
               "if (elSpeed != null) body.elevenlabs_speed = elSpeed", "if (elStab != null) body.elevenlabs_stability = elStab",
               "if (elNorm != null) body.elevenlabs_text_normalization = elNorm", "body.deepgram_voice = model",
               "body.deepgram_flux_voice = model", "body.deepgram_flux_speed = parseFloat(fluxSpeed)",
-              "body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)", "body.pocket_voice = model",
-              "if (provider !== 'pocket' && provider !== 'localai') body.fallback = fallback",
-              "if (provider !== 'pocket' && fallback === 'pocket') body.pocket_voice = pocketVoice")), _ttsUS[:300])
-    # Kokoro on the TTS card: provider option (disabled like Pocket's when not
-    # installed), a voice select with readable labels, a speed slider; all on
-    # the unsaved-changes bar.
+              "body.deepgram_flux_expressivity = parseInt(fluxExpr, 10)", "body.kokoro_voice = kokoroVoice")), _ttsUS[:300])
+    # Kokoro on the TTS card: a voice select with readable labels and a speed
+    # slider on every tier; all on the unsaved-changes bar.
     _voWS = _ws(_voUS)
-    check("tts ui: Kokoro (local) provider option, disabled with a hint when kokoro-onnx isn't installed",
-          "<option value=\"kokoro\" disabled={!tts?.kokoro_installed && provider !== 'kokoro'}" in _voWS
-          and "Kokoro (local){tts?.kokoro_installed ? '' : tts?.kokoro_files_missing ? ' — model files missing' : ' — not installed'}" in _voWS, _voWS[:300])
     _klUI = _reui.search(r"const kokoroLabel = (.*?)\n\S", _appsrc, _reui.DOTALL)
     _klUI = _ws(_klUI.group(1)) if _klUI else ""
     check("tts ui: Kokoro voice select shows readable labels ('Heart — American female'), values stay the ids",
           "/^([ab])([fm])_(\\w+)$/" in _klUI and "'American' : 'British'" in _klUI and "'female' : 'male'" in _klUI
           and " — " in _klUI
-          and "{options.map(v => <option key={v} value={v}>{provider === 'kokoro' ? kokoroLabel(v) : ttsLabel(v)}</option>)}"
-          in _voWS
+          and "{kokoroVoices.map(v => <option key={v} value={v}>{kokoroLabel(v)}</option>)}" in _voWS
           and "p === 'kokoro' ? t?.kokoro_voice" in _ws(_appsrc), _klUI[:200])
     check("tts ui: Kokoro speed slider 0.5–1.5 in 0.05 steps (the Flux slider's pattern)",
           "<input id=\"tts-kokoro-speed\" type=\"range\" min=\"0.5\" max=\"1.5\" step=\"0.05\" value={kokoroSpeed} "
           "onChange={e => t.set({ kokoro_speed: parseFloat(e.target.value) })}" in _voWS
-          and "aria-label=\"Kokoro speed\"" in _voWS and "{kokoroSpeed.toFixed(2)}" in _voWS
-          and "{provider === 'kokoro' && (" in _voWS)
+          and "aria-label=\"Kokoro speed\"" in _voWS and "{kokoroSpeed.toFixed(2)}" in _voWS)
     check("tts ui: Kokoro voice + speed ride the unsaved bar and the save (speed only when edited or saved)",
-          "...(provider === 'kokoro' ? ['kokoro_speed'] : [])" in _voWS
+          "...(provider === 'kokoro' ? [] : ['model:kokoro']), 'kokoro_speed']" in _voWS
           and "kokoro_speed: num(tts?.kokoro_speed, parseFloat) ?? 1.0" in _voWS
           and "const kokoroSpeed = t.val('kokoro_speed') ?? 1.0" in _voWS
-          and "body.kokoro_voice = model" in _ttsUS
+          and "body.kokoro_voice = kokoroVoice" in _ttsUS
           and "if (t.changed('kokoro_speed') || tts?.kokoro_speed != null) body.kokoro_speed = kokoroSpeed" in _ttsUS,
           _ttsUS[-400:])
     check("tts ui: Kokoro needs no key (no Missing key notice); the chip says 'kokoro'",
           "{TTS_KEY_HINT[provider] && tts && !tts[TTS_KEY_HINT[provider]] && (" in _voWS
           and "kokoro: 'Kokoro'" in _appsrc and "return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }"
           in _appsrc)
-    check("unsaved: the STT save still starts a model download and the 0.5 s progress poll follows it (still holds)",
-          "if (r.download === 'started') {" in _saveUS["stt"]
-          and "`Downloading ${model} — restart to apply once it's on disk.`" in _saveUS["stt"]
-          and "}, 500)" in _stUS and "if (!downloading) return" in _stUS)
     check("unsaved: the intelligence save body and 'Test saved config' stay as they were (still holds)",
           "const body = { kind, url }" in _saveUS["intelligence"]
           and "if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel" in _saveUS["intelligence"]
@@ -9727,15 +9474,15 @@ def main():
         _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
         os.environ.update({"LVI_ENV_FILE": str(_el_envfile), "ELEVENLABS_API_KEY": "el-stt-SECRET-0001"})
         _sfEL.set_provider("whisper")
-        _el_set(stt={"language": "auto"}, tts="pocket")
+        _el_set(stt={"language": "auto"}, tts="kokoro")
 
         # GET / PUT /stt
         _gr = client.get("/api/dashboard/stt")
         _g = _gr.json()
         _elp = next((p for p in _g.get("providers", []) if p.get("name") == "elevenlabs"), {})
-        check("elevenlabs stt GET: the last provider, 'ElevenLabs Scribe v2 (cloud)', available with no extra package",
+        check("elevenlabs stt GET: the last provider, 'ElevenLabs Scribe v2' in the Cloud tier, available with no extra package",
               [p.get("name") for p in _g.get("providers", [])] == ["whisper", "localai", "deepgram", "elevenlabs"]
-              and _elp.get("label") == "ElevenLabs Scribe v2 (cloud)" and _elp.get("cloud") is True
+              and _elp.get("label") == "ElevenLabs Scribe v2" and _elp.get("tier") == "cloud"
               and _elp.get("available") is True, str(_g.get("providers")))
         check("elevenlabs stt GET: elevenlabs_key_set comes from the shared ElevenLabs key; the value never appears",
               _g.get("elevenlabs_key_set") is True and not any(s in _gr.text for s in _EL_SECRETS)
@@ -9799,23 +9546,23 @@ def main():
         check("elevenlabs stt /status: failed over -> active whisper with the reason and the room",
               _st2.get("active") == "whisper" and _st2.get("fallback_rooms") == ["suite-el-room"]
               and "rejected" in (_st2.get("fallback_reason") or ""), str(_st2))
-        _EL_FIELDS = ("uptime_secs", "version", "wake_model", "stt_model", "stt", "tts_provider", "intelligence",
-                      "active_room", "last_wake", "rooms", "session_modes", "note", "restart_pending")
+        _EL_FIELDS = ("uptime_secs", "version", "stt", "tts_provider", "intelligence",
+                      "last_wake", "rooms", "session_modes", "note", "restart_pending")
         check("/status keeps every field it returns today, with Scribe running too (still holds)",
               all(k in _s1 for k in _EL_FIELDS) and all(k in _s2 for k in _EL_FIELDS), str(sorted(_s1)))
 
         # Keys card: the ElevenLabs row
-        _el_set(stt={"provider": "elevenlabs"}, tts="pocket")
+        _el_set(stt={"provider": "elevenlabs"}, tts="kokoro")
         _kk = _el_keys()
-        check("elevenlabs keys: STT on Scribe -> the ElevenLabs row is used by TTS + STT and in use (TTS on pocket), "
+        check("elevenlabs keys: STT on Scribe -> the ElevenLabs row is used by TTS + STT and in use (TTS on kokoro), "
               "the Deepgram key is not",
               _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS", "STT"]
               and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is True
               and _kk.get("DEEPGRAM_API_KEY", {}).get("in_use") is False,
               f"{_kk.get('ELEVENLABS_API_KEY')} {_kk.get('DEEPGRAM_API_KEY', {}).get('in_use')}")
-        _el_set(stt={"provider": "whisper"}, tts="pocket")
+        _el_set(stt={"provider": "whisper"}, tts="kokoro")
         _kk = _el_keys()
-        check("elevenlabs keys: Whisper + pocket -> ElevenLabs used by TTS only, not in use (still holds)",
+        check("elevenlabs keys: Whisper + kokoro -> ElevenLabs used by TTS only, not in use (still holds)",
               _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS"]
               and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is False, str(_kk.get("ELEVENLABS_API_KEY")))
         _el_set(stt={"provider": "whisper"}, tts="elevenlabs")
@@ -9823,19 +9570,19 @@ def main():
         check("elevenlabs keys: ElevenLabs TTS + Whisper -> in use, used by TTS only (still holds)",
               _kk.get("ELEVENLABS_API_KEY", {}).get("used_by") == ["TTS"]
               and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is True, str(_kk.get("ELEVENLABS_API_KEY")))
-        _el_set(stt={"provider": "deepgram"}, tts="pocket")
+        _el_set(stt={"provider": "deepgram"}, tts="kokoro")
         _kk = _el_keys()
         check("elevenlabs keys: Deepgram STT still uses the Deepgram key, used by TTS + STT; ElevenLabs not (still holds)",
               _kk.get("DEEPGRAM_API_KEY", {}).get("in_use") is True
               and _kk.get("DEEPGRAM_API_KEY", {}).get("used_by") == ["TTS", "STT"]
               and _kk.get("ELEVENLABS_API_KEY", {}).get("in_use") is False, str(_kk.get("DEEPGRAM_API_KEY")))
         check("elevenlabs keys: the TTS side of the key is untouched (still holds)",
-              _kcEL.tts_secret("elevenlabs") == "ELEVENLABS_API_KEY" and _kcEL.tts_secret("pocket") is None
+              _kcEL.tts_secret("elevenlabs") == "ELEVENLABS_API_KEY" and _kcEL.tts_secret("kokoro") is None
               and _kcEL.session_tts_provider("elevenlabs", None, {"ELEVENLABS_API_KEY": "x"}) == ("elevenlabs", None)
-              and _kcEL.session_tts_provider("elevenlabs", "pocket", {})[0] == "pocket")
+              and _kcEL.session_tts_provider("elevenlabs", "kokoro", {})[0] == "kokoro")
 
         # Restart pending: Scribe fixes its language at session build
-        _el_set(stt={"provider": "elevenlabs", "language": "auto"}, tts="pocket")
+        _el_set(stt={"provider": "elevenlabs", "language": "auto"}, tts="kokoro")
         _el_reboot()
         _p0 = _el_pending()
         _el_set(stt={"provider": "elevenlabs", "language": "de"})
@@ -9844,10 +9591,10 @@ def main():
               isinstance(_p0, list) and "stt" not in _p0 and isinstance(_p1, list) and "stt" in _p1, f"{_p0} -> {_p1}")
         _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0002\n")
         _p2 = _el_pending()
-        check("elevenlabs restart pending: a new ElevenLabs key counts while only STT uses it (TTS on pocket)",
+        check("elevenlabs restart pending: a new ElevenLabs key counts while only STT uses it (TTS on kokoro)",
               isinstance(_p2, list) and "elevenlabs key" in _p2, str(_p2))
         _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0001\n")
-        _el_set(stt={"provider": "whisper", "language": "auto"}, tts="pocket")
+        _el_set(stt={"provider": "whisper", "language": "auto"}, tts="kokoro")
         _el_reboot()
         _el_set(stt={"provider": "whisper", "language": "de"})
         _el_envfile.write_text("ELEVENLABS_API_KEY=el-stt-SECRET-0002\n")
@@ -9886,7 +9633,7 @@ def main():
     # UI: one table of cloud providers drives the chips, the key line and the save message
     _clEL = _reui.search(r"const STT_CLOUD = \{(.*?)\n\}", _appsrc, _reui.DOTALL)
     _clEL = _ws(_clEL.group(1)) if _clEL else ""
-    _chEL = _jsbody(_appsrc, "function sttChip(st, configuredModel) {")
+    _chEL = _jsbody(_appsrc, "function sttChip(st) {")
     _scEL = _fnUI("function SttCard({ status, setMsg }) {")
     _svEL = _ws(_jsbody(_scEL, "const save = async say => {"))
     check("elevenlabs ui: the cloud table names Deepgram and ElevenLabs with their GET /stt key flags",
@@ -9897,19 +9644,18 @@ def main():
     check("elevenlabs ui: every key flag the card reads is one GET /stt returns",
           bool(_reui.findall(r"key: '(\w+)'", _clEL)) and all(k in _gEL for k in _reui.findall(r"key: '(\w+)'", _clEL)),
           str(_reui.findall(r"key: '(\w+)'", _clEL)))
-    check("elevenlabs ui: the Overview chip reads 'elevenlabs scribe' on Scribe and 'whisper fallback' naming ElevenLabs",
+    check("elevenlabs ui: the Overview chip reads 'elevenlabs scribe' on Scribe and 'embedded fallback' naming ElevenLabs",
           "const cloud = STT_CLOUD[st.provider]" in _chEL and "const onWhisper = !cloud || st.active === 'whisper'" in _chEL
           and "if (cloud && st.active === 'whisper') {" in _chEL and "`${cloud.name} unreachable`" in _chEL
           and "if (cloud) return { text: cloud.chip(st) }" in _chEL and "'deepgram'" not in _chEL, _chEL[:400])
-    check("elevenlabs ui: the Overview chip keeps Whisper's words (still holds)",
-          "text: 'whisper failed'" in _chEL and "text: 'whisper fallback'" in _chEL
+    check("elevenlabs ui: the Overview chip keeps Whisper's load words; its fallback reads 'embedded fallback'",
+          "text: 'whisper failed'" in _chEL and "text: 'embedded fallback'" in _chEL
           and "return { text: whisper.toLowerCase() }" in _chEL and "text: 'loading', muted: true" in _chEL, _chEL[:300])
-    check("elevenlabs ui: the STT card shows the running cloud provider's chip, 'Fallback model' and its own missing key",
+    check("elevenlabs ui: the STT card shows the running cloud provider's chip and its own missing key",
           "const cloud = STT_CLOUD[st?.provider]" in _scEL and "const onCloud = !!cloud && st.active === st.provider" in _scEL
           and "const onFallback = !!cloud && st.active === 'whisper'" in _scEL
           and "const cloudPick = STT_CLOUD[provider]" in _scEL
           and "<span className={CHIP_CLS}>{cloud.chip(st)}</span>" in _scEL
-          and "<Field label={cloudPick ? 'Fallback model' : 'Model'}>" in _scEL
           and "{cloudPick && data && !data[cloudPick.key] && <MissingKey label={cloudPick.name} />}" in _scEL
           and "'deepgram'" not in _scEL and 'label="Deepgram"' not in _scEL, _scEL[:300])
     check("elevenlabs ui: 'add your key' names the saved provider; the restart message is unchanged",
@@ -9917,33 +9663,47 @@ def main():
           in _svEL and ": 'Saved — restart to apply.', 'ok', 'STT')" in _svEL, _svEL[:400])
     check("elevenlabs ui: the STT card still registers its draft with the unsaved bar (still holds)",
           "useUnsaved('stt', { label: 'STT', count: Object.keys(sttBody()).length, save, discard: s.discard })" in _scEL
-          and "const sent = s.snap(['model', 'language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
+          and "const sent = s.snap(['language', 'provider'])" in _scEL and "s.settle(sent)" in _scEL)
 
-    # ── base install: Kokoro ships with it, new configs fall back to it ──
+    # ── base install: Kokoro and Whisper base ship with it (Embedded); no GPU extra ──
     import yaml as _yaml_la
     _ex_la = _yaml_la.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
     _req_la = (REPO_CORE.parent / "requirements.txt").read_text().splitlines()
-    _gpu_in = REPO_CORE.parent / "requirements-gpu.txt"
-    _gpu_in = _gpu_in.read_text().splitlines() if _gpu_in.is_file() else []
     _readme_in = (REPO_CORE.parent / "README.md").read_text()
     check("install: requirements.txt pulls pipecat's WebRTC extra (bot.py's SmallWebRTC transport needs aiortc)",
           any(l.startswith("pipecat-ai[webrtc]==") for l in _req_la)
           and not any(l.startswith("pipecat-ai==") for l in _req_la)
           and "from pipecat.transports.smallwebrtc.transport import" in (REPO_CORE.parent / "bot.py").read_text(),
           str([l for l in _req_la if l.startswith("pipecat-ai")]))
-    check("install: requirements-gpu.txt pins the three CUDA wheels the systemd unit's LD_LIBRARY_PATH points at",
-          sorted(l.split("==")[0] for l in _gpu_in if "==" in l and not l.startswith("#"))
-          == ["nvidia-cublas-cu12", "nvidia-cuda-nvrtc-cu12", "nvidia-cudnn-cu12"]
-          and all(d in (REPO_CORE.parent / "deploy" / "lenoxvi-bot.service.example").read_text()
-                  for d in ("nvidia/cublas/lib", "nvidia/cudnn/lib", "nvidia/cuda_nvrtc/lib")), str(_gpu_in))
+    _units_la = {n: (REPO_CORE.parent / "deploy" / n).read_text() for n in ("lenoxvi.service.in", "lenoxvi-bot.service.example")}
+    _cuda_la = sorted(f"{n}: {w}" for n, t in _units_la.items()
+                      for w in ("LD_LIBRARY_PATH", "nvidia", "cuda", "requirements-gpu") if w.lower() in t.lower())
+    check("install contract: no CUDA path — no requirements-gpu.txt, requirements.txt names no GPU extra, and neither "
+          "systemd unit sets LD_LIBRARY_PATH or names an nvidia library",
+          not (REPO_CORE.parent / "requirements-gpu.txt").exists() and not _cuda_la
+          and not any(w in "\n".join(_req_la).lower() for w in ("requirements-gpu", "cuda", "nvidia")), str(_cuda_la))
     # ── install contract: what scripts/install.sh and the lenoxvi command
     # rely on. A rename here breaks a test, not a user's install. ──
-    _icfg = _yaml_la.safe_load((REPO_CORE.parent / "config.example.yaml").read_text())
-    _ic_keys = [("tts", "provider"), ("stt", "model"), ("stt", "device"), ("stt", "compute_type"),
-                ("intelligence", "kind"), ("wake", "enabled")]
+    import stt_catalog as _sc_ic
+    try:
+        import tts_catalog as _tc_ic
+    except ImportError:  # an older tree (the red probe): the check below fails instead of the suite crashing
+        _tc_ic = None
+    _ic_src = (REPO_CORE.parent / "config.example.yaml").read_text()
+    _icfg = _yaml_la.safe_load(_ic_src)
+    _ic_keys = [("intelligence", "kind"), ("wake", "enabled")]
     _ic_missing = [".".join(k) for k in _ic_keys if k[1] not in (_icfg.get(k[0]) or {})]
     check("install contract: config.example.yaml has every key the installer writes (update scripts/installer too)",
           not _ic_missing and "room_zones" in _icfg and "clip_server" in _icfg, str(_ic_missing))
+    _ic_stt = _ic_src.split("\nstt:\n", 1)[-1].split("\n# ──", 1)[0]
+    _ic_tts = _ic_src.split("\ntts:\n", 1)[-1].split("\n# ──", 1)[0]
+    check("install contract: config.example.yaml ships the Embedded defaults the installer copies, and no deleted "
+          "speech key (live or commented)",
+          "\nstt:\n" in _ic_src and "\ntts:\n" in _ic_src
+          and (_icfg.get("stt") or {}).get("provider") == getattr(_sc_ic, "DEFAULT_PROVIDER", "missing")
+          and (_icfg.get("tts") or {}).get("provider") == getattr(_tc_ic, "DEFAULT_PROVIDER", "missing")
+          and not any(k in _ic_stt for k in ("model:", "device:", "compute_type:"))
+          and "fallback:" not in _ic_tts and "pocket_voice" not in _ic_src, f"stt={_icfg.get('stt')} tts={_icfg.get('tts')}")
     _ic_paths = (REPO_CORE / "paths.py").read_text()
     check("install contract: paths.py keeps state_root/env_file/certs_dir and LVI_STATE_DIR (the unit sets it)",
           all(f"def {n}(" in _ic_paths for n in ("state_root", "env_file", "certs_dir")) and "LVI_STATE_DIR" in _ic_paths)
@@ -9955,7 +9715,6 @@ def main():
     check("install contract: the unit template runs bot.py with --host/--port/--esp32 and the state dir",
           "bot.py --host @HOST_IP@ --port 7860 --esp32" in _ic_unit and "LVI_STATE_DIR=/var/lib/lenoxvi" in _ic_unit
           and "LVI_CONFIG=/var/lib/lenoxvi/config.yaml" in _ic_unit
-          and (REPO_CORE.parent / "requirements-gpu.txt").is_file()
           and "LVI_DASHBOARD_TOKEN" in (REPO_CORE / "dashboard" / "guard.py").read_text())
     import re as _reF4
     _ex_src_F4 = (REPO_CORE.parent / "config.example.yaml").read_text()
@@ -9986,12 +9745,16 @@ def main():
     check("localai ui: the 'No LocalAI key' note shows only once LocalAI has an address (a fresh box isn't nagged)",
           "{saved?.url && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _appsrc
           and "{saved && !saved.key_set && <MissingKey label=\"LocalAI\" />}" not in _appsrc)
-    check("install: the Quick start makes a venv and names requirements-gpu.txt",
-          "python3 -m venv" in _readme_in and "requirements-gpu.txt" in _readme_in)
+    check("install: the Quick start makes a venv from requirements.txt alone and fetches Kokoro's model files first",
+          "python3 -m venv" in _readme_in and "pip install -r requirements.txt`" in _readme_in
+          and "requirements-gpu" not in _readme_in and "bash scripts/fetch_kokoro_models.sh" in _readme_in
+          and "requirements-pocket" not in _readme_in and "fetch_pocket_weights" not in _readme_in)
+    _req_files = sorted(p.name for p in REPO_CORE.parent.glob("requirements*.txt"))
+    check("tts card: Kokoro is part of the base install — requirements.txt installs kokoro-onnx, no Kokoro-only requirements file",
+          "kokoro-onnx==0.4.7" in _req_la and not [n for n in _req_files if "kokoro" in n], str(_req_files))
     check("tts card: the example config ships the Kokoro fallback; requirements.txt installs kokoro-onnx",
-          (_ex_la.get("tts") or {}).get("fallback") == "kokoro" and "kokoro-onnx==0.4.7" in _req_la
-          and "-r requirements.txt" in (REPO_CORE.parent / "requirements-kokoro.txt").read_text().splitlines(),
-          str((_ex_la.get("tts") or {}).get("fallback")))
+          (_ex_la.get("tts") or {}).get("provider") == getattr(_tc_ic, "DEFAULT_PROVIDER", "missing")
+          and "fallback" not in (_ex_la.get("tts") or {}) and "kokoro-onnx==0.4.7" in _req_la, str(_ex_la.get("tts")))
     # ── ux polish (App.jsx): names, lines, order, phones, copy ──
     def _tagsUX(src):
         out = []
@@ -10037,13 +9800,9 @@ def main():
     check("phone: a Field can't grow past its row (one column, minWidth 0); cards are one-column grids",
           '<div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>' in _fdUX
           and 'p-4 grid gap-4"' not in _appsrc and _appsrc.count('p-4 grid grid-cols-1 gap-4"') >= 9
-          and '<div className="overflow-x-auto">\n        <table id="stt-models"' in _appsrc, _fdUX[:200])
-    check("tts ui: fallback options carry the (local) tag; Kokoro says why when it's the main voice",
-          "Kokoro (local){provider === 'kokoro' ? ' — main voice' : tts?.kokoro_installed ? '' : ' — not installed'}" in _vtUX
-          and "Pocket TTS (local){tts?.pocket_installed ? '' : ' — not installed'}" in _vtUX)
-    check("copy: the STT models table says 'Whisper model'; LocalAI Test says why it's off; no glyph status marks",
-          '<th className="text-left px-4 py-2">Whisper model</th>' in _appsrc
-          and "!saved?.url ? 'Save an address first.'" in _appsrc
+          and _appsrc.count('<div className="rounded-2xl bg-[var(--surface)] overflow-x-auto">') >= 3, _fdUX[:200])
+    check("copy: LocalAI Test says why it's off; no glyph status marks",
+          "!saved?.url ? 'Save an address first.'" in _appsrc
           and not any(g in _appsrc for g in ("✓", "✗", "ⓘ")))
     check("brand: Add and Push firmware stay grey until they can run (one lime per view)",
           "className={pickValue && !stale ? BTN_PRIMARY : BTN_DEFAULT}" in _appsrc
@@ -10082,14 +9841,75 @@ def main():
           "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
           and "useLocalAIModels(provider === 'localai')" in _laVo and "useLocalAIModels(onLocalAIPick)" in _laSt)
     _provLabels = {p["name"]: p["label"] for p in client.get("/api/dashboard/stt").json().get("providers", [])}
-    check("provider ui: every TTS and STT provider says where it runs — (cloud), (local) or (host), lowercase",
-          all(s in _laVo for s in ('>ElevenLabs (cloud)<', '>Deepgram Aura (cloud)<', '>Deepgram Flux (cloud)<',
-                                   "Pocket TTS (local){", "Kokoro (local){", "LocalAI (host){"))
-          and _provLabels.get("whisper") == "Whisper (local)" and _provLabels.get("localai") == "LocalAI (host)"
-          and all(lbl.endswith(("(cloud)", "(local)", "(host)")) for lbl in _provLabels.values()), str(_provLabels))
-    check("localai ui: TTS card offers LocalAI (disabled with the reason until set up), hides the fallback picker for it",
-          "<option value=\"localai\" disabled={!!tts?.localai_problem && provider !== 'localai'}" in _laVo
-          and "{provider !== 'pocket' && provider !== 'localai' && (" in _laVo
+    # ── speech tiers ui (App.jsx): grouped provider selects; deleted fields never sent ──
+    _toU = _ws(_jsbody(_appsrc, "const tierOptions = (tiers, providers, saved) => tiers.map(tier => {"))
+    check("speech tiers: both provider selects render one <optgroup> per API tier, in the API's tier then provider order",
+          "const members = providers.filter(p => p.tier === tier.name)" in _toU
+          and "<optgroup key={tier.name} label={tier.label}>" in _toU
+          and "{tierOptions(tts?.tiers || LOADING_TIERS," in _ws(_laVo)
+          and "{tierOptions(data?.tiers || LOADING_TIERS," in _ws(_laSt)
+          and _appsrc.count("{tierOptions(") == 2
+          and "const LOADING_TIERS = [{ name: 'embedded', label: 'Embedded' }]" in _appsrc
+          and not any(s in _appsrc for s in ("(cloud)<", "(local){", "(host){", "Whisper (local)", "LocalAI (host)")),
+          _toU[:300])
+    check("speech tiers: an unavailable provider stays listed, disabled, its API reason in the text and title; "
+          "the saved one stays pickable",
+          "disabled={!p.available && p.name !== saved} title={p.reason || undefined}" in _toU
+          and "{p.available ? p.label : `${p.label} — ${p.reason || 'unavailable'}`}" in _toU
+          and "tts?.provider)}" in _ws(_laVo) and "data?.current?.provider)}" in _ws(_laSt), _toU[-300:])
+    check("speech tiers: before GET answers, each provider select shows its Embedded default (Whisper base, Kokoro)",
+          "[{ name: 'whisper', label: 'Whisper base', tier: 'embedded', available: true }]" in _laSt
+          and "[{ name: 'kokoro', label: 'Kokoro', tier: 'embedded', available: true }]" in _laVo
+          and "value={provider || 'whisper'}" in _laSt and "value={provider || 'kokoro'}" in _laVo
+          and "provider: tts?.provider || 'kokoro'," in _laVo)
+    from dashboard import routes as _rtU
+    _pkU = "pock" + "et"  # a retired name in pieces: these checks prove absence, the repo grep gate stays at zero
+
+    def _bodyKeysU(fn):
+        """Every key a save puts on `body`: its starting literal plus each `body.<key> =` assignment."""
+        start = _reui.search(r"const body = \{([^}]*)\}", fn)
+        return (set(_reui.findall(r"\w+", start.group(1))) if start else set()) | set(_reui.findall(r"\bbody\.(\w+) =", fn))
+    _sttFnU = _jsbody(_laSt, "const sttBody = () => {") + _jsbody(_laSt, "const save = async say => {")
+    _ttsFnU = _jsbody(_laVo, "const saveTTS = async say => {")
+    _sttKeysU = _bodyKeysU(_sttFnU) - {"la_model"}  # deleted before the PUT: the LocalAI route owns it
+    _ttsKeysU = _bodyKeysU(_ttsFnU)
+    _callsU = _reui.findall(r"api\('/api/dashboard/(stt|tts)'(.*?)\)", _appsrc)
+    check("speech tiers: the STT and TTS saves PUT only SttPayload / TTSPayload fields — never the deleted STT model "
+          "or TTS standby fields",
+          "delete body.la_model" in _sttFnU and bool(_sttKeysU) and bool(_ttsKeysU)
+          and _sttKeysU <= set(_rtU.SttPayload.model_fields) and "model" not in _sttKeysU
+          and _ttsKeysU <= set(_rtU.TTSPayload.model_fields) and not {_pkU + "_voice", "fallback"} & _ttsKeysU
+          and sorted(r for r, rest in _callsU if rest) == ["stt", "tts"]
+          and all(rest in ("", ", { method: 'PUT', json: body }") for _, rest in _callsU),
+          f"stt={sorted(_sttKeysU)} tts={sorted(_ttsKeysU)} calls={_callsU}")
+    check("speech tiers: Kokoro's voice and speed show on every TTS tier — 'Voice' on Embedded, 'Fallback voice' on "
+          "LocalAI and Cloud",
+          "<Field label={provider === 'kokoro' ? 'Voice' : 'Fallback voice'}>" in _laVo
+          and _reui.search(r"&&\s*\(\s*(\{/\*.*?\*/\}\s*)?<Field label=\{provider === 'kokoro'", _laVo, _reui.DOTALL) is None
+          and '<select id="tts-kokoro-voice"' in _laVo
+          and "onChange={e => t.set({ 'model:kokoro': e.target.value })}" in _laVo
+          and "{provider !== 'kokoro' &&" in _laVo
+          and "if (provider !== 'kokoro' && t.changed('model:kokoro')) body.kokoro_voice = kokoroVoice" in _ws(_ttsFnU)
+          and "...(provider === 'kokoro' ? [] : ['model:kokoro']), 'kokoro_speed']" in _ws(_laVo), _laVo[-600:])
+    check("speech tiers: the STT fallback chip reads 'embedded fallback' on the STT card and in the status bar",
+          ">embedded fallback</span>" in _laSt
+          and _fnUI("function sttChip(st) {").count("text: 'embedded fallback'") == 2
+          and "whisper fallback" not in _appsrc)
+    check("speech tiers: no Whisper model menu, download, delete or GPU chip on the STT card; no retired TTS engine "
+          "or fallback picker on the TTS card",
+          not any(s in _laSt for s in ('id="stt-model"', 'id="stt-models"', 'id="stt-progress"', "/api/dashboard/stt/model/",
+                                        "data?.gpu", "st.device", "custom_model", "data?.models", "download"))
+          # LocalAI's own pocket-tts backend keeps its preset list; only the embedded engine's names must be gone
+          and not any(s in _appsrc for s in (_pkU + "_voice", _pkU + "_installed", "provider === '" + _pkU + "'",
+                                             "provider !== '" + _pkU + "'", "p === '" + _pkU + "'",
+                                             'id="tts-fallback"', "tts?.fallback", "gpu", "stt_model"))
+          and "{...sttChip(status?.stt)}" in _appsrc)
+    check("speech tiers: STT provider labels are plain names — the tier group says where each runs",
+          _provLabels == {"whisper": "Whisper base", "localai": "LocalAI", "deepgram": "Deepgram Nova-3",
+                          "elevenlabs": "ElevenLabs Scribe v2"}, str(_provLabels))
+    check("localai ui: TTS card offers LocalAI from the API's list (disabled with its reason until set up) and names "
+          "Kokoro as its stand-in",
+          "{tierOptions(tts?.tiers || LOADING_TIERS," in _ws(_laVo)
           and "If LocalAI is down: Kokoro on this appliance." in _laVo)
     check("localai ui: the TTS card never shows a model it isn't holding ('pick a model'), and Save refuses an empty model or voice",
           "{provider === 'localai' && !model && options.length > 0 && <option value=\"\" disabled>pick a model</option>}" in _laVo
@@ -10099,17 +9919,14 @@ def main():
           "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null" in _laVo
           and "laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw" in _laVo
           and 'id="tts-localai-voice"' in _laVo)
-    check("tts ui: the fallback picker offers Kokoro and Pocket, each pickable while saved",
-          "<option value=\"kokoro\" disabled={(!tts?.kokoro_installed || provider === 'kokoro') && fallback !== 'kokoro'}>" in _laVo
-          and "<option value=\"pocket\" disabled={!tts?.pocket_installed && fallback !== 'pocket'}>" in _laVo
-          and "fallback: ['pocket', 'kokoro'].includes(tts?.fallback) ? tts.fallback : 'off'," in _laVo)
     check("localai ui: the STT card's LocalAI model saves on the LocalAI route, never inside the /stt body",
           "body.la_model = laModel" in _laSt and "delete body.la_model" in _laSt
           and "api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })" in _laSt
           and "If LocalAI is down: Whisper base on this appliance." in _laSt)
-    _laChip = _fnUI("function sttChip(st, configuredModel) {")
-    check("localai ui: the STT chip says 'localai <model>', and 'whisper fallback' linking to the LocalAI card when it's down",
+    _laChip = _fnUI("function sttChip(st) {")
+    check("localai ui: the STT chip says 'localai <model>', and 'embedded fallback' linking to the LocalAI card when it's down",
           "return { text: `localai ${st.localai_model || ''}`.trim() }" in _laChip and "href: '#localai'" in _laChip
+          and "text: 'embedded fallback', href: '#localai'" in _laChip
           and "localai: 'LocalAI'" in _appsrc)
 
     # ── node setup ui (App.jsx): the System tab's USB setup panel ──
