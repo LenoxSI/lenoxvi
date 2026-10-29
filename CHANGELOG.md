@@ -13,6 +13,13 @@ The two version streams are independent.
   later; LocalAI is its first option. Dashboard API: the tier is `local` (was `localai`) in `tiers` and in
   each provider's `tier`.
 
+### Fixed
+- Long agent turns no longer go quiet or finish unannounced: after 30 s a filler line says the answer will come
+  ("This one's taking a while. I'll tell you when it's done."), replacing the 25 s lines, and when a new question
+  interrupts a request the agent was already working on, its answer is still spoken after the current reply,
+  starting "About your earlier request:" (change or turn off the lead-in with `intelligence.late_reply_prefix`;
+  `""` drops the late answer as before). (#2)
+
 ## [0.8.0] — 2026-10-29 — Three speech tiers: Embedded, LocalAI, Cloud
 
 Speech comes in three tiers on both cards: **Embedded** (this machine: Whisper base and Kokoro, no keys, no GPU),

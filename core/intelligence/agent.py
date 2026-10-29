@@ -65,7 +65,8 @@ def _normalize(text: str) -> str:
 # measure 20-40s+ server-side (2026-09-15); the old single-filler design
 # spent its only line at 3s and left the rest as dead air.
 # Tier contract (every line, any pool):
-#   - <2s spoken (they ride the duck holder)
+#   - <2s spoken (they ride the duck holder); the last tier's long-wait
+#     line, which promises a report, may run ~3s
 #   - >=3 words so echo containment can catch the Sonos echo (the
 #     2026-09-15 double-fire lesson; 2-word "On it." is grandfathered —
 #     the echo gate covers its own playback window)
@@ -79,7 +80,12 @@ def _normalize(text: str) -> str:
 _DEFAULT_TIERS = [
     (3.0, ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]),
     (12.0, ["Almost there now.", "Still working on that.", "Taking a minute."]),
-    (25.0, ["This is taking a bit.", "Give me a few more seconds.", "Just hang tight."]),
+    # Long wait: past here a tool-heavy turn can run for minutes. If the
+    # user moves on meanwhile, a call already running reports late
+    # (intelligence.late_reply_prefix), so the line promises that report.
+    (30.0, ["This one's taking a while. I'll tell you when it's done.",
+            "Still on it. I'll let you know when it's done.",
+            "This is a long one. I'll tell you when it's ready."]),
 ]
 
 _LAST_FILLER = ""
@@ -409,6 +415,25 @@ class IntelligenceAgent(FrameProcessor):
         # inside this gap stay silent.
         self._supersede_ack_ts: float = 0.0
         self._ack_gap = float(cfg_env("intelligence", "supersede_ack_gap", "LVI_SUPERSEDE_ACK_GAP", 45.0))
+        # Late results: a turn superseded by a NEW question whose call was
+        # already running keeps going (the agent finishes the work anyway),
+        # so its reply is spoken after the current one with this lead-in —
+        # the user hears what got done instead of asking again and having
+        # it done twice. "" = off: the late result is dropped.
+        self._late_prefix = str(cfg_env("intelligence", "late_reply_prefix", "LVI_LATE_REPLY_PREFIX",
+                                        "About your earlier request:") or "").strip()
+        # (epoch, by a new question) of the turn being superseded; False = a
+        # join (same question, more words: its late result is dropped).
+        self._superseded: tuple[int, bool] | None = None
+        # The live turn's epoch once it has pushed its reply (or apology):
+        # held late results wait until then.
+        self._answered_epoch = -1
+        self._late_pending: list[tuple[str, str]] = []  # (question, reply), in the order they finished
+        self._late_tasks: set[asyncio.Task] = set()
+        self._late_flusher: asyncio.Task | None = None
+        # Session end (cleanup / CancelFrame) drops every late result. The
+        # epoch alone can't tell this from a supersede: both bump it.
+        self._session_ended = False
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
@@ -721,20 +746,27 @@ class IntelligenceAgent(FrameProcessor):
                         # blocks on a slow intelligence (filler/reply
                         # collisions and stuck LEDs share this root
                         # cause). A new question supersedes: old task
-                        # cancelled, its late reply discarded by the
-                        # epoch check at every await, no history write.
+                        # cancelled, nothing spoken in its place, no
+                        # history write. A call still queued is never
+                        # sent; one already running finishes, and if a
+                        # NEW question superseded it (not a join) its
+                        # reply is spoken late, after the current one
+                        # (_watch_late).
                         superseded = False
                         if self._turn_task is not None and not self._turn_task.done():
                             superseded = True
+                            self._superseded = (self._turn_epoch, not joining)
                             self._turn_task.cancel()
                             try:
                                 await asyncio.shield(self._turn_task)
                             except (asyncio.CancelledError, Exception):
                                 pass
+                            self._superseded = None
                             logger.info(
                                 f"intelligence_agent: turn superseded after "
                                 f"{time.monotonic() - self._turn_started:.1f}s — "
-                                f"reply discarded, no history write")
+                                f"no reply in its place, no history write "
+                                f"(a call already running may report late)")
                         self._turn_epoch += 1
                         epoch = self._turn_epoch
                         self._turn_started = time.monotonic()
@@ -778,11 +810,19 @@ class IntelligenceAgent(FrameProcessor):
         await super().cleanup()
 
     async def _end_turn(self) -> None:
-        """Cancel the in-flight turn for good. The epoch bump makes every
-        epoch check fail, so even a turn that resumes pushes nothing and
-        writes no history. The blocking call's thread runs on; its result
-        is dropped."""
+        """Session end: cancel the in-flight turn for good. The epoch bump
+        makes every epoch check fail, so even a turn that resumes pushes
+        nothing and writes no history. The blocking call's thread runs on;
+        its result is dropped — and so is every late result, held or still
+        to come (_session_ended: unlike a supersede, nothing reports late)."""
+        self._session_ended = True
         self._turn_epoch += 1
+        for text, _ in self._late_pending:
+            logger.info(f"intelligence_agent: late result dropped (the session ended) [{text[:60]}]")
+        self._late_pending.clear()
+        for t in [*self._late_tasks, self._late_flusher]:
+            if t is not None and not t.done():
+                t.cancel()
         task, self._turn_task = self._turn_task, None
         if task is not None and not task.done():
             task.cancel()
@@ -797,20 +837,25 @@ class IntelligenceAgent(FrameProcessor):
 
     async def _run_turn(self, text: str, epoch: int) -> None:
         """One turn as a background task. Every await
-        checks the epoch — a superseded turn discards its reply, skips
-        the history write, and dies quietly. CancelledError propagates
-        (task.cancel from the supersede path); everything else is the
-        broad-catch: the user never gets dead silence on an intelligence failure."""
+        checks the epoch — a superseded turn speaks nothing in its place,
+        skips the history write, and dies quietly; a call it already had
+        running may still report late (_watch_late). CancelledError
+        propagates (task.cancel from the supersede path); everything else
+        is the broad-catch: the user never gets dead silence on an
+        intelligence failure."""
         filler_spoken = False
-        ask = None
+        ask = call = None
+        settled = False  # the call answered or failed while the turn still waited on it
         # The turn is now with the intelligence: show "thinking" on the ring
         # until speech (filler or reply) takes over. Cosmetic and
         # fire-and-forget: LedSender.send never raises.
         if self._led is not None and epoch == self._turn_epoch:
             self._led.send("bot-thinking")
         try:
-            ask = asyncio.get_running_loop().run_in_executor(
-                _INTEL_POOL, self._ask_intelligence, text)
+            # The pool's own future too: the finally tells a call still
+            # queued (cancel succeeds) from one already running.
+            call = _INTEL_POOL.submit(self._ask_intelligence, text)
+            ask = asyncio.wrap_future(call)
             failed = False
             reply = None
             # Tiered fillers (option B, 2026-10-03): wait to each tier's
@@ -852,8 +897,9 @@ class IntelligenceAgent(FrameProcessor):
             if reply is None:
                 # every tier spent, intelligence still working — wait it out
                 reply = await ask
+            settled = True
             if epoch != self._turn_epoch:
-                return  # superseded while thinking — discard, no history
+                return  # ended while thinking — discard, no history
             self._register_echo(reply)
             # A failed call never reached the intelligence — don't write the
             # exchange into server-side history.
@@ -869,6 +915,10 @@ class IntelligenceAgent(FrameProcessor):
             # turn may append meanwhile.
             if not failed and self._sticky and self._room:
                 await asyncio.to_thread(self._save_history, list(self._history))
+            # Held late results go right after this reply — after its save,
+            # so a late result's own save (both exchanges) lands last.
+            self._answered_epoch = epoch
+            self._kick_late()
         except asyncio.CancelledError:
             raise  # supersede path — die quietly, no user-facing output
         except Exception as e:
@@ -876,6 +926,7 @@ class IntelligenceAgent(FrameProcessor):
             # point; ONE broad catch guards the whole turn — the last
             # defense before user-facing silence. A superseded turn that
             # fails is still superseded: no history write either way.
+            settled = True
             logger.error(f"intelligence_agent: intelligence call failed"
                          f"{' after filler' if filler_spoken else ''}: {e}")
             # A failed turn must not dedup its own retry: the user hears the
@@ -887,11 +938,93 @@ class IntelligenceAgent(FrameProcessor):
                 return
             await self.push_frame(
                 TTSSpeakFrame(text="Sorry — I can't reach my intelligence right now."))
+            self._answered_epoch = epoch
+            self._kick_late()
         finally:
             # Superseded, ended or failed: the shield kept the call alive
             # through the filler waits, so drop it here. One still queued
             # for a pool thread is never sent (a stale question must not
             # reach the agent later or hold a slot); one already running
-            # finishes and its result is dropped.
+            # finishes, and _watch_late decides whether it reports late.
+            if call is not None and not settled and not call.cancel():
+                self._watch_late(text, call, epoch)
             if ask is not None and not ask.done():
                 ask.cancel()
+
+    def _watch_late(self, text: str, call, epoch: int) -> None:
+        """A turn ended while its call was already running (it can't be
+        recalled: the agent finishes the work). Superseded by a NEW question,
+        the result is spoken late; otherwise it is dropped."""
+        sup = self._superseded
+        if self._session_ended:
+            why = "the session ended"
+        elif sup is None or sup[0] != epoch:
+            why = "the turn was cancelled"
+        elif not sup[1]:
+            why = "the rest of the question joined it"
+        elif not self._late_prefix:
+            why = "intelligence.late_reply_prefix is off"
+        else:
+            task = asyncio.create_task(self._late_reply(text, call))
+            self._late_tasks.add(task)
+            task.add_done_callback(self._late_tasks.discard)
+            return
+        logger.info(f"intelligence_agent: late result dropped ({why}) [{text[:60]}]")
+
+    async def _late_reply(self, text: str, call) -> None:
+        """Wait out a superseded turn's running call; queue a non-empty
+        reply to be spoken. A failure or an empty reply says nothing."""
+        try:
+            reply = await asyncio.wrap_future(call)
+        except asyncio.CancelledError:
+            logger.info(f"intelligence_agent: late result dropped (the session ended) [{text[:60]}]")
+            raise
+        except Exception as e:  # noqa: BLE001 — a late failure stays quiet
+            logger.info(f"intelligence_agent: late result dropped (the call failed: {e}) [{text[:60]}]")
+            return
+        reply = str(reply or "").strip()
+        if not reply:
+            logger.info(f"intelligence_agent: late result dropped (empty reply) [{text[:60]}]")
+            return
+        if self._session_ended:
+            logger.info(f"intelligence_agent: late result dropped (the session ended) [{text[:60]}]")
+            return
+        self._late_pending.append((text, reply))
+        if self._reply_due() or self._vad_active:
+            until = "the current reply" if self._reply_due() else "the user stops talking"
+            logger.info(f"intelligence_agent: late result held until {until} [{text[:60]}]")
+        self._kick_late()
+
+    def _reply_due(self) -> bool:
+        """A live turn hasn't pushed its reply (or apology) yet."""
+        return (self._turn_task is not None and not self._turn_task.done()
+                and self._answered_epoch != self._turn_epoch)
+
+    def _kick_late(self) -> None:
+        """Start the one late-result speaker, if anything is held."""
+        if self._late_pending and (self._late_flusher is None or self._late_flusher.done()):
+            self._late_flusher = asyncio.create_task(self._speak_late())
+
+    async def _speak_late(self) -> None:
+        """Speak held late results in the order they finished, each with
+        the lead-in. Never before a live turn's own reply (that turn kicks
+        this again once it has pushed it — frame order plays this after),
+        never while the user is talking, never after the session ended."""
+        while self._late_pending and not self._session_ended:
+            if self._reply_due():
+                return
+            if self._vad_active:
+                await asyncio.sleep(0.05)
+                continue
+            text, reply = self._late_pending.pop(0)
+            line = f"{self._late_prefix} {reply}"
+            # Into history like any answered turn, so a re-ask has context
+            # and isn't silently done again.
+            self._history.append({"role": "user", "content": text})
+            self._history.append({"role": "assistant", "content": reply})
+            self._history = self._history[-self._max_history:]
+            self._register_echo(line)
+            logger.info(f"intelligence_agent: late result spoken [{text}] -> [{reply[:120]}]")
+            await self.push_frame(TTSSpeakFrame(text=line))
+            if self._sticky and self._room:
+                await asyncio.to_thread(self._save_history, list(self._history))

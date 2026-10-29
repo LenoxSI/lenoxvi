@@ -123,11 +123,15 @@ intelligence:
                         # dropped (the lull-timer double-fire fix)
   supersede_ack_gap: 45 # seconds: after "Hold on — switching." is spoken,
                         # further interruptions inside this gap switch silently
+  late_reply_prefix: "About your earlier request:"  # a question interrupted by a new
+                        # one whose work was already running is still answered,
+                        # after the current reply, with this lead-in; "" = off
+                        # (the late answer is dropped)
   # Tiered fillers: one line per latency tier so a slow intelligence turn doesn't
   # go silent after the first ack. `after` = seconds from turn start.
-  # Keep each line <2s spoken, >=3 words (echo containment), never
-  # command-shaped. A flat string list still works = single ack tier at
-  # intelligence.filler_after_secs (default 3.0).
+  # Keep each line <2s spoken (the last tier's report promise ~3s), >=3 words
+  # (echo containment), never command-shaped. A flat string list still works =
+  # single ack tier at intelligence.filler_after_secs (default 3.0).
   fillers:
     - after: 3.0
       lines: ["On it.", "Working on it…", "Give me a sec.", "Let me check…", "One moment."]
@@ -136,11 +140,11 @@ intelligence:
         - "Almost there now."
         - "Still working on that."
         - "Taking a minute."
-    - after: 25.0
+    - after: 30.0
       lines:
-        - "This is taking a bit."
-        - "Give me a few more seconds."
-        - "Just hang tight."
+        - "This one's taking a while. I'll tell you when it's done."
+        - "Still on it. I'll let you know when it's done."
+        - "This is a long one. I'll tell you when it's ready."
 
 # Session modes (fresh | sticky per node — dashboard checkbox). Sticky
 # rooms keep conversation memory across node reconnects and bot restarts
