@@ -8,6 +8,8 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-29 — Three speech tiers: Embedded, LocalAI, Cloud
+
 Speech comes in three tiers on both cards: **Embedded** (this machine: Whisper base and Kokoro, no keys, no GPU),
 **LocalAI** (a server on your network) and **Cloud**. LocalAI and Cloud always fall back to Embedded.
 
