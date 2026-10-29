@@ -12,7 +12,7 @@ from stt_catalog import TIER_NAMES, TIERS  # noqa: F401
 # two lanes picked by tts.model (Flash -> TTS websocket, v3/v4 -> Text-to-Dialogue).
 PROVIDERS = [
     {"name": "kokoro", "label": "Kokoro", "tier": "embedded", "key_var": None},
-    {"name": "localai", "label": "LocalAI", "tier": "localai", "key_var": None},
+    {"name": "localai", "label": "LocalAI", "tier": "local", "key_var": None},
     {"name": "elevenlabs", "label": "ElevenLabs", "tier": "cloud", "key_var": "ELEVENLABS_API_KEY"},
     {"name": "deepgram-flux", "label": "Deepgram Flux", "tier": "cloud", "key_var": "DEEPGRAM_API_KEY"},
     {"name": "deepgram", "label": "Deepgram Aura-2", "tier": "cloud", "key_var": "DEEPGRAM_API_KEY"},

@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Changed
+- The STT and TTS dropdowns' LocalAI group is now **Local**, so more servers on your network can join it
+  later; LocalAI is its first option. Dashboard API: the tier is `local` (was `localai`) in `tiers` and in
+  each provider's `tier`.
+
 ## [0.8.0] — 2026-10-29 — Three speech tiers: Embedded, LocalAI, Cloud
 
 Speech comes in three tiers on both cards: **Embedded** (this machine: Whisper base and Kokoro, no keys, no GPU),

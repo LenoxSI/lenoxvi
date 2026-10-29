@@ -76,7 +76,7 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 | Wake gate | "Hey Jarvis" out of the box. Train your own. |
 | Turn-taking | Echo containment and filler lines while the agent thinks. |
 | Rooms | Each mic node maps to a speaker zone and can use its own agent. Sessions are sticky or fresh per room. |
-| Local or cloud | Three speech tiers: Embedded on this machine, LocalAI on your network, or Cloud. LocalAI and Cloud fall back to Embedded. |
+| Local or cloud | Three speech tiers: Embedded on this machine, Local on your network (LocalAI), or Cloud. Local and Cloud fall back to Embedded. |
 | Firmware | Push node images over the air from the dashboard. |
 | Dashboard | LAN-only. Keys, zones, voices and models in one place. |
 
@@ -93,7 +93,7 @@ Speech to text and text to speech each run in one of three tiers. Pick one per c
 | Tier<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Speech to text<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> | Text to speech<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> | Falls back to<br><img src="docs/readme/spacer.png" width="180" height="1" alt=""> |
 |---|---|---|---|
 | Embedded | Whisper base, on this machine's CPU | Kokoro, on this machine's CPU | — |
-| LocalAI | The faster-whisper model your LocalAI serves | Any LocalAI voice: Kokoro, Pocket and more | Whisper base and Kokoro |
+| Local | The faster-whisper model your [LocalAI](#localai) serves | Any LocalAI voice: Kokoro, Pocket and more | Whisper base and Kokoro |
 | Cloud | Deepgram Nova-3 or ElevenLabs Scribe v2 | ElevenLabs Flash v2.5 or v4 Turbo, Deepgram Flux or Aura-2 | Whisper base and Kokoro |
 
 Embedded is the default. It needs no keys and no GPU, and it is fixed: bigger Whisper models, a GPU and more voices
@@ -113,7 +113,7 @@ again. Kokoro's voice and speed on the TTS card set the fallback voice too.
 
 ## LocalAI
 
-Run speech models on another machine on your network (a GPU box, say) with [LocalAI](https://github.com/mudler/LocalAI). Audio stays in the house. This is the tier for bigger Whisper models, a GPU and more voices, Pocket among them. Pick **LocalAI** on the STT card, the TTS card, or both.
+Run speech models on another machine on your network (a GPU box, say) with [LocalAI](https://github.com/mudler/LocalAI). Audio stays in the house. This is the Local tier: bigger Whisper models, a GPU and more voices, Pocket among them. Pick **LocalAI** under Local on the STT card, the TTS card, or both.
 
 1. On the LocalAI host: install `ffmpeg` (LocalAI needs it for every transcription), and set an API key (`LOCALAI_API_KEY`).
 2. Add a faster-whisper model, e.g. `faster-whisper-small.yaml` in LocalAI's models folder:

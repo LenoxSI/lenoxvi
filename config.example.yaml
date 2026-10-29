@@ -38,8 +38,8 @@ vad:
 
 # ── Speech-to-text ─────────────────────────────────────────────────────
 # Three tiers, the same on the TTS card: Embedded runs on this machine (no
-# keys, no GPU), LocalAI on a server on your network (localai block below),
-# Cloud with its key in .env. LocalAI and Cloud fall back to Embedded on
+# keys, no GPU), Local on a server on your network (localai, block below),
+# Cloud with its key in .env. Local and Cloud fall back to Embedded on
 # their own. Unset or unknown = whisper.
 stt:
   provider: whisper      # whisper (Embedded: faster-whisper base on the CPU) |
@@ -49,16 +49,16 @@ stt:
 
 # ── Text-to-speech ───────────────────────────────────────────────────────
 # Three tiers on the TTS card: Embedded (kokoro, on this machine, no keys),
-# LocalAI (localai block below) and Cloud (elevenlabs | deepgram-flux |
+# Local (localai, block below) and Cloud (elevenlabs | deepgram-flux |
 # deepgram, Aura-2). API keys stay in .env only (System · Keys) — secrets
-# never ride config.yaml (it ships in the public repo). LocalAI and Cloud
+# never ride config.yaml (it ships in the public repo). Local and Cloud
 # fall back to Kokoro on their own, with the Kokoro voice below. Unset or
 # unknown = kokoro. Deepgram voice catalogs: developers.deepgram.com/docs/
 # flux-tts/voices and developers.deepgram.com/docs/tts-models.
 tts:
   provider: kokoro
   # kokoro_voice: af_heart                # Embedded voice, and the fallback voice behind
-  #                                       # LocalAI and Cloud (28 English voices;
+  #                                       # Local and Cloud (28 English voices;
   #                                       # af_/am_ American, bf_/bm_ British)
   # kokoro_speed: 1.0                     # 0.5–1.5, 0.05 steps (unset = 1.0)
   #                                       # (model files: scripts/fetch_kokoro_models.sh)

@@ -10,16 +10,17 @@ from __future__ import annotations
 
 # The three speech tiers, in display order — one copy for both cards
 # (tts_catalog imports it). Embedded runs on this machine with no keys and
-# no GPU; LocalAI is a speech server on the LAN; Cloud is an internet vendor.
+# no GPU; Local is a speech server on your network (LocalAI today, room for
+# more); Cloud is an internet vendor.
 TIERS = [
     {"name": "embedded", "label": "Embedded"},
-    {"name": "localai", "label": "LocalAI"},
+    {"name": "local", "label": "Local"},
     {"name": "cloud", "label": "Cloud"},
 ]
 TIER_NAMES = [t["name"] for t in TIERS]
 
 # Embedded speech-to-text is fixed and CPU-only. Bigger models or a GPU
-# belong to the LocalAI tier.
+# belong to the Local tier (LocalAI).
 EMBEDDED_MODEL = "base"
 EMBEDDED_DEVICE = "cpu"
 EMBEDDED_COMPUTE = "int8"
@@ -47,10 +48,10 @@ LANGUAGE_CODES = [lang["code"] for lang in LANGUAGES]
 
 
 # Who turns speech into text, in card order. Every provider sits in one
-# tier; LocalAI and Cloud fall back to Embedded (Whisper base).
+# tier; Local and Cloud fall back to Embedded (Whisper base).
 PROVIDERS = [
     {"name": "whisper", "label": "Whisper base", "tier": "embedded"},
-    {"name": "localai", "label": "LocalAI", "tier": "localai"},
+    {"name": "localai", "label": "LocalAI", "tier": "local"},
     {"name": "deepgram", "label": "Deepgram Nova-3", "tier": "cloud"},
     {"name": "elevenlabs", "label": "ElevenLabs Scribe v2", "tier": "cloud"},
 ]
