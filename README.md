@@ -3,9 +3,9 @@
   <img alt="LenoxVI" src="dashboard-ui/public/lenoxvi-horizontal-lime-on-light.svg" width="420">
 </picture>
 
-# LenoxVI
+Multi-zone voice for your AI agent: a mic in each room, the reply on that room's Sonos or WiiM speaker, music ducked while it talks. Everything is tuned from a web dashboard.
 
-High quality multi-zone audio for your AI agent, with mic and room routing + audio ducking. Local, cloud or hybrid based on your use case. Audio routes through Sonos or WiiM audio speakers. Mics from ReSpeaker (Array, Flex) or Waveshare, including in-ceiling microphones matching architectural speakers. Web dashboard for easy and fast tuning of voice pipeline!
+Mics: ReSpeaker (Array, Flex) or Waveshare, including in-ceiling mics that match architectural speakers.
 
     mic node → WiFi/WebRTC → wake gate → speech to text →
     intelligence (Hermes / OpenClaw / Nanobot) → text to speech →
@@ -19,7 +19,7 @@ The wake word always runs on your hardware. Speech and voice can stay local or g
 
 Ubuntu 22.04 / 24.04 / 26.04, Debian 12 / 13 or Raspberry Pi OS (64-bit), on x86_64 or arm64. No Docker.
 
-On a Raspberry Pi 5 the fully local voice works but is slow: Whisper base takes about 1.6 s per spoken command and Kokoro speaks a little slower than real time, so a local reply starts about 3.5 s after you stop talking, plus the intelligence's own time. For snappier replies on a Pi, use a cloud voice or a smaller Whisper model.
+A Raspberry Pi 5 works, but a fully local reply starts about 3.5 s after you stop talking. Use a cloud voice or a smaller Whisper model for snappier replies.
 
 ```bash
 sudo apt install git          # Debian and Raspberry Pi OS images may not have it
@@ -63,6 +63,10 @@ For development. Python 3.12+. From the repo root:
 4. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
 5. `python bot.py --host <bot-host-LAN-IP> --port 7860 --esp32`, then open `https://<bot-host-LAN-IP>:7860/dashboard`
 
+Local voices: `bash scripts/fetch_kokoro_models.sh` fetches Kokoro's model files once. Pocket is optional: `pip install -r requirements-pocket.txt && bash scripts/fetch_pocket_weights.sh`.
+
+Reply clips, uploaded wake models and firmware, and session history are written under the repo folder. Set `LVI_STATE_DIR` to keep them somewhere else.
+
 **Hey Jarvis** works out of the box. `/client` on the same host is a browser mic for a first test.
 
 ## Features
@@ -78,11 +82,9 @@ For development. Python 3.12+. From the repo root:
 
 ## Dashboard
 
-Demo data.
+![Voice view of the dashboard, demo data](docs/readme/voice.png)
 
-![Voice view of the dashboard](docs/readme/voice.png)
-
-![System view of the dashboard](docs/readme/system.png)
+![System view of the dashboard, demo data](docs/readme/system.png)
 
 ## Speech to text
 
@@ -95,8 +97,6 @@ Demo data.
 | ElevenLabs Scribe v2 | ❌ | The configured Whisper model |
 
 ### Whisper models
-
-Turbo and Medium need a GPU.
 
 | Model<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | Size<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Needs<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Best for<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> |
 |---|---|---|---|
@@ -123,17 +123,7 @@ Turbo and Medium need a GPU.
 | Kokoro | ✅ | Pocket, if installed |
 | LocalAI (your network) | ✅ | Kokoro, always |
 
-### Local voices
-
-Kokoro ships with every install (`requirements.txt`); fetch its model files once:
-
-    bash scripts/fetch_kokoro_models.sh
-
-Pocket is optional:
-
-    pip install -r requirements-pocket.txt && bash scripts/fetch_pocket_weights.sh
-
-Pick one in the dashboard's TTS panel, or set either as the fallback behind a cloud voice (new configs start with Kokoro). Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
+Kokoro ships with every install and Pocket is optional. Pick one on the dashboard's TTS card, or set either as the fallback behind a cloud voice.
 
 ## LocalAI
 
@@ -144,11 +134,10 @@ Run speech models on another machine on your network (a GPU box, say) with [Loca
 
        name: faster-whisper-small
        backend: faster-whisper
-       known_usecases:
-         - transcript
+       known_usecases: [transcript]
        parameters:
-         model: small        # or large-v3-turbo on a GPU
-       # cuda: true          # on a GPU
+         model: small    # large-v3-turbo on a GPU
+       # cuda: true      # on a GPU
 
    Restart LocalAI after adding a model so it shows in its model list. A Kokoro model from LocalAI's gallery covers speech.
 3. On the dashboard: System · LocalAI → the address (`192.0.2.50:8080`), System · Keys → the LocalAI key, **Test** to see what it serves, then pick its models on the STT and TTS cards and restart.
@@ -194,7 +183,7 @@ Not covered yet: nodes don't check the bot's TLS certificate when they connect, 
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Models keep their own licenses: the stock openWakeWord wake-word models are non-commercial (see [Wake word](#wake-word)), and the Pocket TTS weights need attribution (CC BY 4.0).
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Models keep their own licenses: the stock openWakeWord wake-word models are non-commercial (see [Wake word](#wake-word)), and the Pocket TTS weights need attribution (CC BY 4.0). Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
 
 LenoxVI is a [LenoxSI](https://lenoxsi.com) project · [lenoxai.io](https://lenoxai.io)
 
@@ -210,5 +199,3 @@ Bugs and questions: [open an issue](https://github.com/LenoxSI/lenoxvi/issues).
 - `deploy/` — example systemd unit
 - `scripts/` — ops tools
 - `tests/` — automated checks; they run from a fresh clone against `tests/fixtures/config.yaml`. Steps that play audio on a real speaker or scan the LAN only run with `LVI_TEST_LIVE=1`
-
-Reply clips, uploaded wake models and firmware, and session history are written under the repo folder. Set `LVI_STATE_DIR` to keep them somewhere else.
