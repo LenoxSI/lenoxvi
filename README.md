@@ -19,7 +19,7 @@ The wake word always runs on your hardware. Speech and voice can stay local or g
 
 Ubuntu 22.04 / 24.04 / 26.04, Debian 12 / 13 or Raspberry Pi OS (64-bit), on x86_64 or arm64. No Docker.
 
-A Raspberry Pi 5 works, but a fully local reply starts about 3.5 s after you stop talking. Use a cloud voice or a smaller Whisper model for snappier replies.
+A Raspberry Pi 5 works, but a fully local reply starts about 3.5 s after you stop talking. Use LocalAI or a cloud voice for snappier replies.
 
 ```bash
 sudo apt install git          # Debian and Raspberry Pi OS images may not have it
@@ -29,12 +29,12 @@ sudo bash scripts/install.sh
 ```
 
 The installer checks the machine, installs only the system packages that are missing (it asks first), and asks
-three questions: this machine's LAN address, whether speech-to-text runs on the GPU or the CPU, and whether to
-protect the dashboard with a token. Then it installs the newest release, downloads the speech models, starts the
-`lenoxvi` service and prints the dashboard address. A few minutes on a fresh box.
+two questions: this machine's LAN address and whether to protect the dashboard with a token. Then it installs the
+newest release, downloads the speech models (Whisper base and Kokoro), starts the `lenoxvi` service and prints the
+dashboard address. A few minutes on a fresh box.
 
-It needs no keys: the voice is local (Kokoro) and the intelligence answers with an echo until you pick one on the
-dashboard. Keys, voices, rooms and speakers are all set there.
+It needs no keys and no GPU: speech runs on the machine itself ([Embedded](#speech)), and the intelligence answers
+with an echo until you pick one on the dashboard. Keys, voices, rooms and speakers are all set there.
 
 - Code goes to `/opt/lenoxvi` (read-only to the bot). Settings, keys, certs and models go to `/var/lib/lenoxvi`.
 - It never installs GPU drivers, never reboots, and never overwrites an existing config or keys file. Running it
@@ -49,7 +49,7 @@ dashboard. Keys, voices, rooms and speakers are all set there.
 | `lenoxvi status` | Service state, version and dashboard address (add `sudo` for the address) |
 | `sudo lenoxvi logs [-f]` | The last 100 log lines; `-f` keeps following |
 | `sudo lenoxvi restart` | Restarts the bot and waits for the dashboard |
-| `sudo lenoxvi reconfigure` | Changes the LAN address, the speech-to-text profile or the dashboard token |
+| `sudo lenoxvi reconfigure` | Changes the LAN address or the dashboard token |
 | `sudo lenoxvi upgrade [--to vX.Y.Z]` | Moves to the newest release (or the one given); goes back on its own if it doesn't come up |
 | `sudo lenoxvi uninstall [--purge]` | Removes LenoxVI and keeps your data; `--purge` also deletes settings, keys and models |
 
@@ -57,13 +57,13 @@ dashboard. Keys, voices, rooms and speakers are all set there.
 
 For development. Python 3.12+. From the repo root:
 
-1. `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt` (on an NVIDIA GPU host add `-r requirements-gpu.txt`; Debian and Ubuntu need `sudo apt install python3-venv` first)
+1. `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt` (Debian and Ubuntu need `sudo apt install python3-venv` first)
 2. `cp config.example.yaml config.yaml` (the voice, intelligence and speakers are set later on the dashboard)
-3. `cp .env.example .env` and set `ELEVENLABS_API_KEY` and `LVI_TTS_VOICE_ID` for the default voice, plus the key for your intelligence (`LVI_HERMES_KEY`, `LVI_OPENCLAW_KEY` or `LVI_NANOBOT_KEY`)
+3. `cp .env.example .env` and set the key for your intelligence (`LVI_HERMES_KEY`, `LVI_OPENCLAW_KEY` or `LVI_NANOBOT_KEY`). Cloud voices are optional; their keys go in on the dashboard (System · Keys)
 4. `bash scripts/make-cert.sh <bot-host-LAN-IP>` — mic access needs HTTPS
 5. `python bot.py --host <bot-host-LAN-IP> --port 7860 --esp32`, then open `https://<bot-host-LAN-IP>:7860/dashboard`
 
-Local voices: `bash scripts/fetch_kokoro_models.sh` fetches Kokoro's model files once. Pocket is optional: `pip install -r requirements-pocket.txt && bash scripts/fetch_pocket_weights.sh`.
+Local voices: `bash scripts/fetch_kokoro_models.sh` fetches Kokoro's model files once. Run it before the first start: Kokoro is the default voice and the fallback behind LocalAI and cloud voices.
 
 Reply clips, uploaded wake models and firmware, and session history are written under the repo folder. Set `LVI_STATE_DIR` to keep them somewhere else.
 
@@ -76,7 +76,7 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 | Wake gate | "Hey Jarvis" out of the box. Train your own. |
 | Turn-taking | Echo containment and filler lines while the agent thinks. |
 | Rooms | Each mic node maps to a speaker zone and can use its own agent. Sessions are sticky or fresh per room. |
-| Local or cloud | Whisper, Pocket and Kokoro run on your hardware, or on a LocalAI server on your network. Cloud providers can fall back to local ones. |
+| Local or cloud | Three speech tiers: Embedded on this machine, LocalAI on your network, or Cloud. LocalAI and Cloud fall back to Embedded. |
 | Firmware | Push node images over the air from the dashboard. |
 | Dashboard | LAN-only. Keys, zones, voices and models in one place. |
 
@@ -86,24 +86,22 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 
 ![System view of the dashboard, demo data](docs/readme/system.png)
 
-## Speech to text
+## Speech
 
-✅ runs on your hardware. ❌ goes to the cloud.
+Speech to text and text to speech each run in one of three tiers. Pick one per card on the dashboard's Voice tab.
 
-| Provider<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> | Local<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Fallback<br><img src="docs/readme/spacer.png" width="340" height="1" alt=""> |
-|---|---|---|
-| Whisper | ✅ | — |
-| Deepgram Nova-3 | ❌ | The configured Whisper model |
-| ElevenLabs Scribe v2 | ❌ | The configured Whisper model |
-
-### Whisper models
-
-| Model<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | Size<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Needs<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Best for<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> |
+| Tier<br><img src="docs/readme/spacer.png" width="140" height="1" alt=""> | Speech to text<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> | Text to speech<br><img src="docs/readme/spacer.png" width="220" height="1" alt=""> | Falls back to<br><img src="docs/readme/spacer.png" width="180" height="1" alt=""> |
 |---|---|---|---|
-| `large-v3-turbo` | 1.6 GB | GPU | Best all-round. The default. |
-| `medium` | 1.5 GB | GPU | Faster, solid in noise. |
-| `small` | 0.5 GB | CPU is fine | Snappy in quiet rooms. |
-| `base` | 0.15 GB | CPU is fine | No GPU, or the fastest option. |
+| Embedded | Whisper base, on this machine's CPU | Kokoro, on this machine's CPU | — |
+| LocalAI | The faster-whisper model your LocalAI serves | Any LocalAI voice: Kokoro, Pocket and more | Whisper base and Kokoro |
+| Cloud | Deepgram Nova-3 or ElevenLabs Scribe v2 | ElevenLabs Flash v2.5 or v4 Turbo, Deepgram Flux or Aura-2 | Whisper base and Kokoro |
+
+Embedded is the default. It needs no keys and no GPU, and it is fixed: bigger Whisper models, a GPU and more voices
+come from [LocalAI](#localai). Audio leaves the house only on Cloud.
+
+Both Embedded models load at startup, so the fallback is always ready. When LocalAI or a cloud provider stops
+answering, this machine listens with Whisper base and speaks with Kokoro, then goes back once the provider answers
+again. Kokoro's voice and speed on the TTS card set the fallback voice too.
 
 ## Intelligence
 
@@ -113,21 +111,9 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 | OpenClaw | OpenClaw Gateway, model `openclaw/<agent>` | Sticky per room via a session key | Same as Hermes |
 | Nanobot | OpenAI-compatible API: one message plus `session_id` | Nanobot keeps it | Set in the nanobot agent: LenoxVI cannot send it a system message |
 
-## Text to speech
-
-| Provider<br><img src="docs/readme/spacer.png" width="300" height="1" alt=""> | Local<br><img src="docs/readme/spacer.png" width="120" height="1" alt=""> | Fallback<br><img src="docs/readme/spacer.png" width="340" height="1" alt=""> |
-|---|---|---|
-| ElevenLabs Flash v2.5 or v4 Turbo | ❌ | Kokoro or Pocket |
-| Deepgram Flux or Aura-2 | ❌ | Kokoro or Pocket |
-| Pocket | ✅ | — |
-| Kokoro | ✅ | Pocket, if installed |
-| LocalAI (your network) | ✅ | Kokoro, always |
-
-Kokoro ships with every install and Pocket is optional. Pick one on the dashboard's TTS card, or set either as the fallback behind a cloud voice.
-
 ## LocalAI
 
-Run speech models on another machine on your network (a GPU box, say) with [LocalAI](https://github.com/mudler/LocalAI). Audio stays in the house. Pick **LocalAI** on the STT card, the TTS card, or both.
+Run speech models on another machine on your network (a GPU box, say) with [LocalAI](https://github.com/mudler/LocalAI). Audio stays in the house. This is the tier for bigger Whisper models, a GPU and more voices, Pocket among them. Pick **LocalAI** on the STT card, the TTS card, or both.
 
 1. On the LocalAI host: install `ffmpeg` (LocalAI needs it for every transcription), and set an API key (`LOCALAI_API_KEY`).
 2. Add a faster-whisper model, e.g. `faster-whisper-small.yaml` in LocalAI's models folder:
@@ -139,7 +125,7 @@ Run speech models on another machine on your network (a GPU box, say) with [Loca
          model: small    # large-v3-turbo on a GPU
        # cuda: true      # on a GPU
 
-   Restart LocalAI after adding a model so it shows in its model list. A Kokoro model from LocalAI's gallery covers speech.
+   Restart LocalAI after adding a model so it shows in its model list. For speech, add a Kokoro model from LocalAI's gallery, or Pocket through LocalAI's `pocket-tts` backend.
 3. On the dashboard: System · LocalAI → the address (`192.0.2.50:8080`), System · Keys → the LocalAI key, **Test** to see what it serves, then pick its models on the STT and TTS cards and restart.
 
 If LocalAI stops answering, this appliance listens with Whisper base and speaks with Kokoro, sentence by sentence, and goes back to LocalAI once it answers again. LenoxVI never installs or changes models on LocalAI.
@@ -183,7 +169,7 @@ Not covered yet: nodes don't check the bot's TLS certificate when they connect, 
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Models keep their own licenses: the stock openWakeWord wake-word models are non-commercial (see [Wake word](#wake-word)), and the Pocket TTS weights need attribution (CC BY 4.0). Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Models keep their own licenses: the stock openWakeWord wake-word models are non-commercial (see [Wake word](#wake-word)). Kokoro's model is Apache-2.0 and kokoro-onnx is MIT; its phonemes come from espeak-ng (GPL-3.0), loaded as a shared library and not bundled.
 
 LenoxVI is a [LenoxSI](https://lenoxsi.com) project · [lenoxai.io](https://lenoxai.io)
 

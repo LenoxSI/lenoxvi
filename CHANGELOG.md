@@ -8,6 +8,42 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+Speech comes in three tiers on both cards: **Embedded** (this machine: Whisper base and Kokoro, no keys, no GPU),
+**LocalAI** (a server on your network) and **Cloud**. LocalAI and Cloud always fall back to Embedded.
+
+### Breaking
+- Embedded Pocket is removed (`core/tts_pocket.py`, `requirements-pocket.txt`, `scripts/fetch_pocket_weights.sh`).
+  Pocket lives on as a LocalAI model: serve it with LocalAI's `pocket-tts` backend and pick LocalAI on the TTS card.
+- Whisper on this machine is `base` on the CPU (int8), fixed. The model menu (small, medium, large-v3-turbo), the
+  model downloads and the GPU path (`requirements-gpu.txt`, the CUDA library paths in the service) are gone: for a
+  bigger model or a GPU, run it on LocalAI.
+- `tts.fallback` is removed: Kokoro always stands by behind LocalAI and every cloud voice, speaking with
+  `tts.kokoro_voice` and `tts.kokoro_speed`. Cloud voices that had `tts.fallback: off` now get the Kokoro standby too.
+- An unset or unknown `tts.provider` now means Kokoro (it meant ElevenLabs). An unknown `stt.provider` still means
+  Whisper. An unknown value on either card logs one line naming it.
+- Installer: `--stt` is removed (it is an unknown option now). It asks two questions (address, dashboard token);
+  `lenoxvi reconfigure` asks for the address and offers a new token; `lenoxvi status` has no `stt:` line.
+- Removed settings, read nowhere any more: `stt.model`, `stt.device`, `stt.compute_type`, `tts.pocket_voice`,
+  `tts.fallback`, and the env overrides `LVI_STT_MODEL`, `LVI_STT_DEVICE`, `LVI_STT_COMPUTE`, `LVI_TTS_POCKET_VOICE`.
+  LenoxVI never rewrites your `config.yaml`: delete leftover keys by hand.
+- Dashboard API: fields nothing reads are gone. `/status` drops `stt_model`, `wake_model` and `active_room`,
+  and its STT status drops `device` (Embedded is fixed); `GET /tts` drops `kokoro_installed`,
+  `kokoro_files_missing`, `kokoro_problem` and `localai_problem` (each provider's `available` and `reason` in
+  `providers` say the same).
+
+### Changed
+- STT and TTS cards: one provider dropdown each, grouped by tier (Embedded, LocalAI, Cloud). A cloud option without
+  its key stays visible but disabled, with "add the key on System · Keys". Labels are plain names ("Whisper base",
+  "LocalAI", "Deepgram Nova-3", "ElevenLabs Scribe v2", "Kokoro", "Deepgram Flux", "Deepgram Aura-2").
+- The TTS card shows Kokoro's voice and speed on every tier: "Voice" on Embedded, "Fallback voice" on LocalAI and
+  Cloud.
+- The fallback chip reads "embedded fallback" (was "whisper fallback").
+- Startup always loads Whisper base and Kokoro, whatever the providers, so the fallback is ready (about 750 MB of
+  memory with both on a Raspberry Pi 5).
+- `requirements-kokoro.txt` is removed; Kokoro has been part of `requirements.txt` since 0.7.0.
+- README: a Speech section with the three tiers replaces the Whisper models table and the per-provider fallback
+  lists; the install section says two questions.
+
 ## [0.7.1] — 2026-10-28 — One-command installer, signed firmware updates
 
 ### Added
