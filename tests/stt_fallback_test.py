@@ -28,7 +28,7 @@ import stt_catalog as cat
 # ── catalog ──────────────────────────────────────────────────────────
 check("provider catalog: Whisper base first, then LocalAI, then Deepgram Nova-3, then ElevenLabs Scribe v2",
       [(p["name"], p["label"], p.get("tier")) for p in getattr(cat, "PROVIDERS", [])]
-      == [("whisper", "Whisper base", "embedded"), ("localai", "LocalAI", "localai"),
+      == [("whisper", "Whisper base", "embedded"), ("localai", "LocalAI", "local"),
           ("deepgram", "Deepgram Nova-3", "cloud"), ("elevenlabs", "ElevenLabs Scribe v2", "cloud")],
       str(getattr(cat, "PROVIDERS", None)))
 check("deepgram language: auto -> multi, a code passes through, empty -> multi",

@@ -22,21 +22,22 @@ import stt_catalog
 import tts_catalog
 
 # ── catalogs ─────────────────────────────────────────────────────────
-check("speech tiers: three tiers in display order — Embedded, LocalAI, Cloud",
+check("speech tiers: three tiers in display order — Embedded, Local, Cloud (LocalAI is a Local provider)",
       [(t["name"], t["label"]) for t in stt_catalog.TIERS]
-      == [("embedded", "Embedded"), ("localai", "LocalAI"), ("cloud", "Cloud")], str(stt_catalog.TIERS))
+      == [("embedded", "Embedded"), ("local", "Local"), ("cloud", "Cloud")]
+      and stt_catalog.tier_of("localai") == tts_catalog.tier_of("localai") == "local", str(stt_catalog.TIERS))
 check("speech tiers: one copy of the tiers — tts_catalog re-exports stt_catalog's",
       tts_catalog.TIERS is stt_catalog.TIERS and tts_catalog.TIER_NAMES is stt_catalog.TIER_NAMES)
 check("speech tiers: Embedded STT is fixed — faster-whisper base on the CPU, int8",
       (stt_catalog.EMBEDDED_MODEL, stt_catalog.EMBEDDED_DEVICE, stt_catalog.EMBEDDED_COMPUTE) == ("base", "cpu", "int8"))
 check("speech tiers: STT providers in card order, plain labels, one tier each",
       [(p["name"], p["label"], p["tier"]) for p in stt_catalog.PROVIDERS]
-      == [("whisper", "Whisper base", "embedded"), ("localai", "LocalAI", "localai"),
+      == [("whisper", "Whisper base", "embedded"), ("localai", "LocalAI", "local"),
           ("deepgram", "Deepgram Nova-3", "cloud"), ("elevenlabs", "ElevenLabs Scribe v2", "cloud")],
       str(stt_catalog.PROVIDERS))
 check("speech tiers: TTS providers in card order, plain labels, tier and key",
       [(p["name"], p["label"], p["tier"], p["key_var"]) for p in tts_catalog.PROVIDERS]
-      == [("kokoro", "Kokoro", "embedded", None), ("localai", "LocalAI", "localai", None),
+      == [("kokoro", "Kokoro", "embedded", None), ("localai", "LocalAI", "local", None),
           ("elevenlabs", "ElevenLabs", "cloud", "ELEVENLABS_API_KEY"),
           ("deepgram-flux", "Deepgram Flux", "cloud", "DEEPGRAM_API_KEY"),
           ("deepgram", "Deepgram Aura-2", "cloud", "DEEPGRAM_API_KEY")],
