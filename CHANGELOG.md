@@ -8,6 +8,8 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-28 — One-command installer, signed firmware updates
+
 ### Added
 - Apache License 2.0 (`LICENSE`, `NOTICE`). Models keep their own terms: the stock wake-word models are
   non-commercial, the Pocket TTS weights need attribution.
@@ -29,10 +31,9 @@ The two version streams are independent.
   "Run from a clone (manual)".
 
 ### Changed
-- The project is now LenoxVI: repo github.com/LenoxSI/lenoxvi, CLI `lenoxvi`, service `lenoxvi`, paths
-  `/opt/lenoxvi` + `/var/lib/lenoxvi`, env prefix `LVI_`.
-- Installer: says "intelligence", not "brain"; `uninstall --purge` also deletes the install log. README: what to expect on a Raspberry Pi 5.
-- The repository moved to github.com/LenoxSI/lenoxvi; README links updated.
+- Dashboard: the LenoxVI logo in the header and the README, a new favicon set (SVG, ICO and an Apple touch icon),
+  and success/warning colours that match the LenoxSI design system.
+- Installer: `uninstall --purge` also deletes the install log. README: what to expect on a Raspberry Pi 5.
 - Dashboard: the voice-ID box shows a generic placeholder.
 - Default filler lines for slow replies are plainer: after 12 s "Almost there now.", "Still working on that.",
   "Taking a minute."; after 25 s "This is taking a bit.", "Give me a few more seconds.", "Just hang tight.".
@@ -41,6 +42,8 @@ The two version streams are independent.
   still names the secrets file directly. Without `LVI_STATE_DIR` nothing moves.
 
 ### Fixed
+- A firmware image still being uploaded is never served to a node (the half-written temp file returns 404).
+- WiiM: if the bot stops while a reply's play command is in flight, the music volume is still put back.
 - First run: `config.example.yaml` has no `<PLACEHOLDER>` values left to fill (the voice, intelligence URL, speaker
   host IP and room mapping are commented out and set on the dashboard; `room_zones: {}`); the Hub's "set a HF_TOKEN"
   notice no longer shows on the first model download; the LocalAI card's "No LocalAI key" note waits until LocalAI
