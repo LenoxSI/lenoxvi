@@ -20,6 +20,11 @@ The two version streams are independent.
   starting "About your earlier request:" (change or turn off the lead-in with `intelligence.late_reply_prefix`;
   `""` drops the late answer as before). (#2)
 
+### Security
+- aiohttp 3.14.4 (was 3.14.3): fixes eight aiohttp advisories, several in the HTTP server that serves reply clips
+  to Sonos speakers on your network (no request timeout, multipart file-descriptor exhaustion, request smuggling,
+  unbounded memory/CPU use).
+
 ## [0.8.0] — 2026-10-29 — Three speech tiers: Embedded, LocalAI, Cloud
 
 Speech comes in three tiers on both cards: **Embedded** (this machine: Whisper base and Kokoro, no keys, no GPU),

@@ -27,7 +27,7 @@ lameenc==1.8.4
 sonos-websocket==0.2.0
 fastapi==0.141.1
 uvicorn==0.53.0
-aiohttp==3.14.3
+aiohttp==3.14.4
 # Dashboard (mapping UI served at /dashboard): soco = Sonos LAN
 # discovery, ruamel.yaml = comment-preserving config.yaml writes.
 # Voice keeps working without them (register_dashboard skips the mount).
