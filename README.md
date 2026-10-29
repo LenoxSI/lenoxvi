@@ -74,7 +74,7 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 | Feature<br><img src="docs/readme/spacer.png" width="200" height="1" alt=""> | What<br><img src="docs/readme/spacer.png" width="560" height="1" alt=""> |
 |---|---|
 | Wake gate | "Hey Jarvis" out of the box. Train your own. |
-| Turn-taking | Optional wake-word barge-in, echo containment, and filler lines while the agent thinks. |
+| Turn-taking | Echo containment and filler lines while the agent thinks. |
 | Rooms | Each mic node maps to a speaker zone and can use its own agent. Sessions are sticky or fresh per room. |
 | Local or cloud | Whisper, Pocket and Kokoro run on your hardware, or on a LocalAI server on your network. Cloud providers can fall back to local ones. |
 | Firmware | Push node images over the air from the dashboard. |
