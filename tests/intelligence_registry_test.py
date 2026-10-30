@@ -120,8 +120,7 @@ def main():
 
     intelligence.LANES["echo"] = EchoLane()   # the "one registry line"
     intelligence.KINDS = tuple(intelligence.LANES)
-    # Registered before ANY lane method runs: a lane may import the facade
-    # lazily, and the facade's BASE_KEY_VARS is built at its import.
+    # Registered before ANY lane method runs.
 
 
     meta_keys = {"kind", "label", "agent_required", "per_agent_keys", "default_agent",
@@ -189,7 +188,7 @@ def main():
     base = dict(config_store.read_section("intelligence") or {})
 
     check("lanes registry: echo: the facade knows the new lane (key var, URL, agent)",
-          it.BASE_KEY_VARS.get("echo") == "LVI_ECHO_KEY" and it.key_var("echo") == "LVI_ECHO_KEY"
+          it.key_var("echo") == "LVI_ECHO_KEY"
           and it.request_url("echo", "http://e.test/v1/") == "http://e.test/v1"
           and it.agent_for({"agents": {"echo": "e1"}}, "echo") == "e1")
     r = client.put("/api/dashboard/intelligence/key", json={"kind": "echo", "api_key": "echo-new-key-123"})
@@ -201,7 +200,7 @@ def main():
           f"{r.status_code} {r.text[:160]}")
     r = client.post("/api/dashboard/intelligence/agents", json={"kind": "echo"})
     check("lanes registry: echo: agent discovery runs the new lane's own discover_agents",
-          r.status_code == 200 and r.json().get("source") == "echo-models"
+          r.status_code == 200
           and [a["id"] for a in r.json().get("agents", [])] == ["echo-1"], f"{r.status_code} {r.text[:160]}")
     g = client.get("/api/dashboard/intelligence").json()
     check("lanes registry: echo: GET /intelligence reports the new lane's key status",

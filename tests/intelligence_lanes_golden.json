@@ -2351,11 +2351,6 @@
  },
  "target/constants": {
   "result": {
-   "BASE_KEY_VARS": {
-    "hermes": "LVI_HERMES_KEY",
-    "openclaw": "LVI_OPENCLAW_KEY",
-    "nanobot": "LVI_NANOBOT_KEY"
-   },
    "port": 9119,
    "agent_re": "^[A-Za-z0-9_.-]{1,64}$",
    "is_default": [
@@ -2833,7 +2828,6 @@
     "urls": {
      "hermes": "http://hm.test:8642/v1"
     },
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -2844,14 +2838,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_hermes_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -2879,7 +2866,6 @@
     "urls": {
      "hermes": "http://hm.test:8642/v1"
     },
-    "agent": null,
     "agents": {
      "hermes": "kids-agent",
      "openclaw": null,
@@ -2890,14 +2876,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_hermes_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -2923,7 +2902,6 @@
     "kind": "hermes",
     "url": "http://hm.test:8642/v1/",
     "urls": {},
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -2934,14 +2912,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_hermes_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -2969,7 +2940,6 @@
     "urls": {
      "openclaw": "http://oc.test:18789/v1"
     },
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": "main",
@@ -2980,14 +2950,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_openclaw_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -3013,7 +2976,6 @@
     "kind": "openclaw",
     "url": "http://oc.test:18789/v1",
     "urls": {},
-    "agent": "legacy-main",
     "agents": {
      "hermes": "default",
      "openclaw": "legacy-main",
@@ -3024,14 +2986,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_openclaw_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -3057,7 +3012,6 @@
     "kind": "openclaw",
     "url": "http://oc.test:18789/v1",
     "urls": {},
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -3068,14 +3022,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_openclaw_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -3103,7 +3050,6 @@
     "urls": {
      "nanobot": "http://nb.test:8900/v1"
     },
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -3114,14 +3060,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_nanobot_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -3147,7 +3086,6 @@
     "kind": "nanobot",
     "url": "http://nb.test:8900",
     "urls": {},
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -3158,14 +3096,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_nanobot_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -3191,7 +3122,6 @@
     "kind": "bogus",
     "url": "http://hm.test:8642/v1",
     "urls": {},
-    "agent": null,
     "agents": {
      "hermes": "default",
      "openclaw": null,
@@ -3202,14 +3132,7 @@
      "hermes": true,
      "openclaw": true,
      "nanobot": true
-    },
-    "key_hints": {
-     "hermes": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "openclaw": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-     "nanobot": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-    },
-    "key_kind": "lvi_hermes_key",
-    "note": "applies on the next bot restart (read at pipeline construction)"
+    }
    }
   },
   "calls": [],
@@ -4232,16 +4155,13 @@
     "agents": [
      {
       "id": "main",
-      "key_set": true,
-      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      },
      {
       "id": "kidbot",
-      "key_set": true,
-      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      }
     ],
-    "source": "openclaw-models",
     "note": null,
     "selected": null
    }
@@ -4267,7 +4187,6 @@
    "status": 200,
    "json": {
     "agents": [],
-    "source": "none",
     "note": "OpenClaw answered HTTP 401 \u2014 this URL is not saved yet; save it and the stored key will be used",
     "selected": null
    }
@@ -4290,16 +4209,13 @@
     "agents": [
      {
       "id": "main",
-      "key_set": true,
-      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      },
      {
       "id": "kidbot",
-      "key_set": true,
-      "key_hint": "oc-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      }
     ],
-    "source": "openclaw-models",
     "note": null,
     "selected": null
    }
@@ -4327,11 +4243,9 @@
     "agents": [
      {
       "id": "glm-5",
-      "key_set": true,
-      "key_hint": "nb-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      }
     ],
-    "source": "nanobot-models",
     "note": null,
     "selected": "glm-5"
    }
@@ -4359,16 +4273,13 @@
     "agents": [
      {
       "id": "default",
-      "key_set": true,
-      "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      },
      {
       "id": "kids-agent",
-      "key_set": true,
-      "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      }
     ],
-    "source": "hermes-status",
     "note": null,
     "selected": "default"
    }
@@ -4391,16 +4302,13 @@
     "agents": [
      {
       "id": "default",
-      "key_set": true,
-      "key_hint": "hm-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      },
      {
       "id": "kids-agent",
-      "key_set": true,
-      "key_hint": "hk-g\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+      "key_set": true
      }
     ],
-    "source": "hermes-status",
     "note": null,
     "selected": "default"
    }

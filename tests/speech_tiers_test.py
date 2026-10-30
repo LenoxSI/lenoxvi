@@ -279,7 +279,7 @@ class _EnvSpy(dict):
 
 
 _STUBBED = ("IntelligenceAgent", "StubIntelligence", "SileroVADAnalyzer", "WakeWordFilter",
-            "SonosOutput", "WiiMOutput", "VADProcessor", "RecorderTap", "Pipeline")
+            "SonosOutput", "WiiMOutput", "VADProcessor", "Pipeline")
 _RUNNER_ARGS = types.SimpleNamespace(webrtc_connection=types.SimpleNamespace(pc_id="suite-pc-tiers"))
 _KEYS = {"ELEVENLABS_API_KEY": "suite-key-not-real", "DEEPGRAM_API_KEY": "suite-key-not-real",
          "LVI_TTS_PROVIDER": None, "LVI_STT_PROVIDER": None}

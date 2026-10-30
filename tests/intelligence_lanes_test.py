@@ -277,7 +277,7 @@ def main():
             "http://h:8900/v1", "", "https://h/api/v1"]
     scenario("target/request_url", lambda: [[k, u, a, it.request_url(k, u, a)] for k in kinds for u in urls
                                              for a in ("", "default", "kids-agent")])
-    scenario("target/constants", lambda: {"BASE_KEY_VARS": it.BASE_KEY_VARS, "port": it.HERMES_STATUS_PORT,
+    scenario("target/constants", lambda: {"port": it.HERMES_STATUS_PORT,
                                           "agent_re": it.AGENT_RE.pattern,
                                           "is_default": [it.is_default_agent(a) for a in ("", None, "default", "x")]})
     env = dict(keys)

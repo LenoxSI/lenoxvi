@@ -370,7 +370,7 @@ BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" re
 standin = sla.LocalAIWhisper("faster-whisper-small", lambda: fw)
 segs, info = standin.transcribe(io.BytesIO(b"WAV1"), language="en", beam_size=1, vad_filter=False)
 check("stt localai: up -> the text comes from LocalAI and the appliance model is untouched",
-      [s.text for s in segs] == ["remote words"] and fw.calls == [] and sla.active() == "localai"
+      [s.text for s in segs] == ["remote words"] and fw.calls == [] and la.down_reason() is None
       and info.language == "en")
 os.environ["LVI_LOCALAI_MODEL_STT"] = "faster-whisper-small"
 check("stt localai: status while up says localai + the configured model",
@@ -383,7 +383,7 @@ check("stt localai: then LocalAI is marked down with the reason", "503" in (la.d
 n = len(SEEN)
 standin.transcribe(io.BytesIO(b"WAV3"), language=None)
 check("stt localai: while down, later turns skip LocalAI entirely (no request sent)",
-      len(SEEN) == n and fw.calls[-1][0] == b"WAV3" and sla.active() == "whisper")
+      len(SEEN) == n and fw.calls[-1][0] == b"WAV3" and sla.status().get("active") == "whisper")
 st = sla.status()
 check("stt localai: status says whisper fallback + the reason",
       st.get("active") == "whisper" and "503" in (st.get("fallback_reason") or "") and st.get("fallback_rooms") == [])
@@ -407,9 +407,10 @@ check("stt localai: a 500 that names what failed -> that clip goes to the applia
       fw.calls and fw.calls[-1][0] == b"WAV5" and la.down_reason() is None, str(la.down_reason()))
 BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":"remote words"}', 0)
 n = len(SEEN)
+fw.calls.clear()
 segs, _info = standin.transcribe(io.BytesIO(b"WAV6"), language="en")
 check("stt localai: the next turn asks LocalAI again",
-      len(SEEN) == n + 1 and [s.text for s in segs] == ["remote words"] and sla.active() == "localai")
+      len(SEEN) == n + 1 and [s.text for s in segs] == ["remote words"] and fw.calls == [])
 la._reset_for_tests()
 BEHAVIOUR["/v1/audio/transcriptions"] = (404, "application/json", b'{"error":{"message":"model gone"}}', 0)
 fw.calls.clear()

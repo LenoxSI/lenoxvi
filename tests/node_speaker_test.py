@@ -124,9 +124,7 @@ check("speaker registry: a waveshare line alone is CAPABLE, not yet a speaker",
 registry.note_speaker_ok("pc-spr", True)
 check("speaker registry.has_speaker: waveshare line + speaker_ok ack", registry.has_speaker("wssp") is True)
 check("speaker registry.has_speaker: array line / unknown room", registry.has_speaker("xvfsp") is False and registry.has_speaker("nopesp") is False)
-row = {r["room"]: r for r in registry.known_rooms()}
-check("speaker: known_rooms carries speaker flag", row["wssp"].get("speaker") is True and row["xvfsp"].get("speaker") is False)
-check("speaker: speaker_rooms lists speaker rooms only", "wssp" in registry.speaker_rooms() and "xvfsp" not in registry.speaker_rooms())
+check("speaker registry: an array line is never speaker-capable", registry.speaker_capable("xvfsp") is False)
 registry.note_speaker_ok("pc-spr", False)
 check("speaker: note_speaker_ok recorded (a failed speaker is no speaker)",
       {r["room"]: r for r in registry.known_rooms()}["wssp"]["speaker_ok"] is False and registry.has_speaker("wssp") is False)

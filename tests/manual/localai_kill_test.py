@@ -32,13 +32,16 @@ wav = open(os.path.join(HERE, "..", "fixtures", "golden", "clip1.wav"), "rb").re
 stt_local.preload_shared_model()
 base = stt_local.LocalWhisperSTTService._shared_model
 la.set_cooldown(5)
-m = stt_localai.LocalAIWhisper(la.discover()["stt"][0], lambda: base)
+FELL_BACK = []  # Whisper base was handed the clip
+m = stt_localai.LocalAIWhisper(la.discover()["stt"][0], lambda: FELL_BACK.append(1) or base)
 
 
 def hear():
+    FELL_BACK.clear()
     t0 = time.monotonic()
     segs, _ = m.transcribe(io.BytesIO(wav), language="en")
-    return " ".join(s.text.strip() for s in segs), stt_localai.active(), (time.monotonic() - t0) * 1000
+    eng = "whisper" if FELL_BACK else "localai"
+    return " ".join(s.text.strip() for s in segs), eng, (time.monotonic() - t0) * 1000
 
 
 text, eng, ms = hear()

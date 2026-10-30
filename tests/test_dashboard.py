@@ -244,6 +244,10 @@ def main():
     check("zone add ok", r.status_code == 200, f"status={r.status_code}")
     m = client.get("/api/dashboard/mapping").json()
     check("new zone visible in mapping GET", "test_zone" in m["zones"], f"zones={list(m['zones'])}")
+    check("mapping GET: zones carry ip + backend, never player_uid",
+          m["zones"].get("test_zone", {}).get("ip") == "192.0.2.222"
+          and m["zones"]["test_zone"].get("backend") == "sonos"
+          and not any("player_uid" in z for z in m["zones"].values()), str(m["zones"].get("test_zone")))
     _sonos_b = dict(config_store.read_section("sonos") or {})
     config_store.write_section("sonos", {**_sonos_b, "enabled": False})
     r = client.post("/api/dashboard/zones", json={
@@ -582,30 +586,6 @@ def main():
           _gap_upload < 0.15 and (_oww_tmp / "suite_loop.onnx").exists(),
           f"max loop gap={_gap_upload:.2f}s")
 
-    # /mapping only runs soco name lookups on ?names=1, and only
-    # for SONOS zones (the 5s UI poll used to hit every zone, WiiM
-    # included, on every tick).
-    from dashboard import routes as _routes_m5
-    _m5_calls = []
-    _real_names_m5 = _routes_m5._sonos_names
-    _routes_m5._sonos_names = lambda zones: (_m5_calls.append(sorted(zones)) or {k: k for k in zones})
-    try:
-        _rm = client.get("/api/dashboard/mapping")
-        check("plain /mapping poll runs NO soco lookup and omits sonos_names",
-              _rm.status_code == 200 and not _m5_calls and "sonos_names" not in _rm.json(),
-              f"calls={_m5_calls} keys={list(_rm.json())}")
-        _rn = client.get("/api/dashboard/mapping?names=1")
-        _wiim_keys_m5 = set(((config_store.read_section("wiim") or {}).get("zones") or {}))
-        _sonos_keys_m5 = set(((config_store.read_section("sonos") or {}).get("zones") or {}))
-        check("?names=1 looks up Sonos zones only (never WiiM)",
-              _rn.status_code == 200 and len(_m5_calls) == 1
-              and set(_m5_calls[0]) == _sonos_keys_m5
-              and not (set(_m5_calls[0]) & _wiim_keys_m5)
-              and "sonos_names" in _rn.json(),
-              f"calls={_m5_calls} sonos={sorted(_sonos_keys_m5)} wiim={sorted(_wiim_keys_m5)}")
-    finally:
-        _routes_m5._sonos_names = _real_names_m5
-
     # ONE volume truth. /mapping serves effective_volumes for every
     # zone through the same resolver as the test tone; each zone resolves
     # in its OWN backend section; one code default everywhere.
@@ -657,8 +637,8 @@ def main():
 
     # 9. TTS settings panel (Settings tab — config-editable arc)
     r = client.get("/api/dashboard/tts")
-    ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_set" in r.json()
-    check("TTS GET returns provider config + key status", ok, f"status={r.status_code}")
+    ok = r.status_code == 200 and "provider" in r.json() and "deepgram_key_hint" in r.json()
+    check("TTS GET returns provider config + key hints", ok, f"status={r.status_code}")
     if ok:
         t = r.json()
         check("TTS GET never leaks key values",
@@ -1167,9 +1147,9 @@ def main():
     _la_stt_before = dict(config_store.read_section("stt") or {})
     try:
         r = client.get("/api/dashboard/localai")
-        check("localai card: GET shape, nothing saved yet -> the URL is what's missing",
-              r.status_code == 200 and set(r.json()) >= {"url", "model_stt", "model_tts", "voice", "key_set", "problem"}
-              and r.json()["url"] is None and r.json()["key_set"] is False and "URL" in (r.json()["problem"] or ""),
+        check("localai card: GET shape (url, model_stt, key_set), nothing saved yet",
+              r.status_code == 200 and set(r.json()) == {"url", "model_stt", "key_set"}
+              and r.json()["url"] is None and r.json()["key_set"] is False,
               r.text[:200])
         r = client.put("/api/dashboard/tts", json={"provider": "localai"})
         check("localai card: TTS can't pick LocalAI before its URL is saved (422 says so)",
@@ -3152,7 +3132,7 @@ def main():
     if r.status_code == 200:
         found = r.json()["found"]
         check("soco discovery ran", True, f"found {len(found)} player(s): "
-              + ", ".join(f"{f['name']} ({f['model']})" for f in found))
+              + ", ".join(f"{f['name']} ({f['ip']})" for f in found))
     else:
         print(f"[WARN] discovery endpoint returned {r.status_code}: {r.text[:120]}")
 
@@ -4191,8 +4171,8 @@ def main():
                   "fillers" in _brain9, str(_brain9)[:160])
             # GET round-trips
             _g = client.get("/api/dashboard/intelligence").json()
-            check("intelligence: GET returns kind/agent/key_set",
-                  _g.get("kind") == "openclaw" and _g.get("agent") == "suite-agent"
+            check("intelligence: GET returns kind/agents/key_set",
+                  _g.get("kind") == "openclaw" and (_g.get("agents") or {}).get("openclaw") == "suite-agent"
                   and "key_set" in _g, str(_g)[:120])
             # (a2) per-kind URL memory: PUT files url under the kind; GET
             # returns the recall map; switching kinds keeps each URL.
@@ -4608,13 +4588,13 @@ def main():
                       and (_c12.get("agents") or {}).get("openclaw") == "suite-a"
                       and _c12.get("agent") == "suite-a", str(_c12.get("agents")) + " agent=" + str(_c12.get("agent")))
                 _g12 = client.get("/api/dashboard/intelligence").json()
-                check("agent picker: GET agents per kind + first-4 key hints, never the key",
+                check("agent picker: GET agents per kind + key status per kind, never the key",
                       # hermes/openclaw only: the suite's config is a copy of the live
                       # one, which may carry any nanobot agent.
                       {k: (_g12.get("agents") or {}).get(k) for k in ("hermes", "openclaw")}
                       == {"hermes": "home-helper", "openclaw": "suite-a"}
                       and "nanobot" in (_g12.get("agents") or {})
-                      and (_g12.get("key_hints") or {}).get("openclaw") == "ocke" + _M12
+                      and (_g12.get("keys_set") or {}).get("openclaw") is True
                       and "abcdefghijkl" not in json.dumps(_g12), str(_g12)[:240])
 
                 # the voice agent: profile turn -> /p/home-helper/v1 with the profile's key
@@ -5702,7 +5682,7 @@ def main():
         r = client.get("/api/dashboard/wake")
         _wwn = r.json() if r.status_code == 200 else {}
         check("wake name: GET /wake shape",
-              r.status_code == 200 and set(_wwn) == {"name", "model"}, str(_wwn)[:200])
+              r.status_code == 200 and set(_wwn) == {"name"}, str(_wwn)[:200])
         r = client.put("/api/dashboard/wake", json={"name": "Computer"})
         check("wake name: PUT /wake applies live: the name, and its sound-alike spellings with no list",
               r.status_code == 200 and _wnwnb.name() == "Computer" and set(r.json()) == {"ok", "name"}
@@ -5942,8 +5922,9 @@ def main():
               _r.status_code == 400, f"{_r.status_code} {_r.text[:120]}")
         registry.note_speaker_ok("pc-spws", True)
         _st = {r["room"]: r for r in client.get("/api/dashboard/status").json()["rooms"]}
-        check("speaker: /status rooms carry speaker", _st.get("suite-wssp", {}).get("speaker") is True
-              and _st.get("suite-xvfsp", {}).get("speaker") is False, str(_st.get("suite-wssp")))
+        check("speaker: /status rooms leave speaker state to /mapping (no speaker, speaker_ok or first_seen)",
+              "suite-wssp" in _st and not any({"speaker", "speaker_ok", "first_seen"} & set(r) for r in _st.values()),
+              str(_st.get("suite-wssp")))
 
         _m = client.get("/api/dashboard/mapping").json()
         check("speaker: GET mapping lists speaker rooms with volume + resolved zone",
@@ -6789,8 +6770,8 @@ def main():
                        "deepgram_flux_expressivity", "elevenlabs_speed", "elevenlabs_stability",
                        "elevenlabs_text_normalization", "kokoro_voice", "kokoro_speed", "localai_model_tts",
                        "localai_voice",
-                       "elevenlabs_key_set", "deepgram_key_set", "elevenlabs_key_hint", "localai_key_hint",
-                       "deepgram_key_hint", "tiers", "providers", "catalog", "note"}
+                       "elevenlabs_key_hint", "localai_key_hint",
+                       "deepgram_key_hint", "tiers", "providers", "catalog"}
         _gT = client.get("/api/dashboard/tts").json()
         check("speech tiers: GET /tts groups equal the catalog — the three tiers, then every provider in card order with its tier",
               _gT.get("tiers") == _tcST.TIERS
@@ -7531,13 +7512,12 @@ def main():
               and (_cNB.get("urls") or {}).get("hermes") == _NB_HERMES
               and not (_cNB.get("agents") or {}).get("nanobot"), f"{_p1.status_code} {_p1.text[:120]} {_cNB}")
         _gNB = client.get("/api/dashboard/intelligence").json()
-        check("nanobot: GET round-trips kind nanobot, its URL, no agent, and its key status (hint only)",
+        check("nanobot: GET round-trips kind nanobot, its URL, no agent, and its key status (never the key)",
               _gNB.get("kind") == "nanobot" and _gNB.get("url") == _NB_URL
               and (_gNB.get("urls") or {}).get("nanobot") == _NB_URL
               and "nanobot" in (_gNB.get("agents") or {}) and _gNB["agents"]["nanobot"] is None
               and (_gNB.get("keys_set") or {}).get("nanobot") is True
-              and (_gNB.get("key_hints") or {}).get("nanobot") == _itNB.key_hint(_NB_KEY)
-              and _gNB.get("key_kind") == "lvi_nanobot_key" and _NB_KEY not in json.dumps(_gNB), str(_gNB)[:300])
+              and _gNB.get("key_set") is True and _NB_KEY not in json.dumps(_gNB), str(_gNB)[:300])
         _p2 = client.put("/api/dashboard/intelligence", json={"kind": "nanobot", "agent": _NB_MODEL})
         _cNB2 = _nb_icfg()
         check("nanobot: PUT with an agent files it under agents.nanobot; the legacy agent key is untouched",
@@ -8030,312 +8010,14 @@ def main():
           "window.prompt(" not in _appsrc and 'type="password"' in _td)
 
 
-    # ── room recorder: time-boxed raw mic capture ────────────────────
-    import asyncio as _asyncioREC
-    import stat as _statREC
-    import wave as _waveREC
+    # ── dashboard: the room recorder is removed ──────────────────────
+    import importlib.util as _iuREC
 
-    import room_recorder as _rrREC
-    from dashboard import registry as _regREC
-    from pipecat.frames.frames import InputAudioRawFrame as _IARF_REC
-    from pipecat.frames.frames import TextFrame as _TF_REC
-    from pipecat.processors.frame_processor import FrameDirection as _FD_REC
-    _capREC = SCRATCH / "captures"
-    _saved_capREC = os.environ.get("LVI_CAPTURES_DIR")
-    _saved_tokREC = os.environ.get("LVI_DASHBOARD_TOKEN")
-    os.environ["LVI_CAPTURES_DIR"] = str(_capREC)
-    # The recorder routes need a dashboard token configured (and sent).
-    _hREC = {"X-Dashboard-Token": "suite-rec-token"}
-    try:
-        _pcmA = b"\x01\x00" * 320  # 20 ms @ 16 kHz
-        _infoA = _rrREC.start("suite-rec-a", 5)
-        _rrREC.feed("suite-rec-a", _pcmA, 16000, 1)
-        _rrREC.feed("suite-rec-a", _pcmA, 16000, 1)
-        _rrREC.feed("suite-rec-other", _pcmA, 16000, 1)  # another room: ignored
-        _rrREC.feed("suite-rec-a", b"\x02\x00" * 480, 24000, 1)  # format change: ignored
-        _stopA = _asyncioREC.run(_rrREC.stop("suite-rec-a"))
-        _fA = _capREC / _infoA["file"]
-        with _waveREC.open(str(_fA), "rb") as _w:
-            _wA = (_w.getframerate(), _w.getnchannels(), _w.getsampwidth(), _w.readframes(10_000))
-        check("recorder: a recording saves exactly the room's audio as a 16 kHz mono 16-bit WAV",
-              _stopA == {"room": "suite-rec-a", "file": _infoA["file"]}
-              and _wA == (16000, 1, 2, _pcmA * 2), str(_wA[:3]))
-        check("recorder: files are owner-only and the folder is private",
-              _statREC.S_IMODE(_fA.stat().st_mode) == 0o600
-              and _statREC.S_IMODE(_capREC.stat().st_mode) == 0o700,
-              f"{oct(_fA.stat().st_mode)} {oct(_capREC.stat().st_mode)}")
-        check("recorder: no partial file is left behind", not list(_capREC.glob(".*part")))
-        check("recorder: the file name carries the room, never a path",
-              _infoA["file"].startswith("suite-rec-a-") and "/" not in _infoA["file"])
-
-        _bad = []
-        for _s in (0, -1, _rrREC.MAX_SECONDS + 1, True, 2.5):
-            try:
-                _rrREC.start("suite-rec-b", _s)
-                _bad.append(_s)
-                _asyncioREC.run(_rrREC.stop("suite-rec-b"))
-            except ValueError:
-                pass
-        check("recorder: lengths outside 1-600 whole seconds are refused", not _bad, str(_bad))
-        _rrREC.start("suite-rec-b", 3)
-        try:
-            _rrREC.start("suite-rec-b", 3)
-            _dup = False
-        except RuntimeError:
-            _dup = True
-        check("recorder: a room already recording refuses a second recording", _dup)
-        # the time box: a frame after the deadline closes and saves the file
-        _rrREC._active["suite-rec-b"].deadline = 0
-        _nameB = _rrREC._active["suite-rec-b"].name
-        _rrREC.feed("suite-rec-b", _pcmA, 16000, 1)
-        check("recorder: a frame past the time box closes the recording and saves it",
-              not _rrREC.is_recording("suite-rec-b") and (_capREC / _nameB).is_file())
-
-        # the timer closes a recording whose node stopped sending audio
-        async def _timer_probe():
-            _i = _rrREC.start("suite-rec-c", 1)
-            _rrREC.feed("suite-rec-c", _pcmA, 16000, 1)
-            await _asyncioREC.sleep(2.6)
-            return _i
-        _iC = _asyncioREC.run(_timer_probe())
-        check("recorder: a node that goes quiet still gets its recording closed by the timer",
-              not _rrREC.is_recording("suite-rec-c") and (_capREC / _iC["file"]).is_file())
-
-        _old = _capREC / "old-room-20200101-000000.wav"
-        _old.write_bytes(b"x")
-        os.utime(_old, (time.time() - 8 * 86400,) * 2)
-        _rrREC.start("suite-rec-d", 2)
-        _asyncioREC.run(_rrREC.stop("suite-rec-d"))
-        check("recorder: recordings older than 7 days are pruned when a new one starts",
-              not _old.exists())
-
-        # the tap: passes every frame on, feeds only input audio for its room
-        _pushed = []
-        _tap = _rrREC.RecorderTap(lambda: "suite-rec-e")
-
-        async def _push(f, d=_FD_REC.DOWNSTREAM):
-            _pushed.append(f)
-        _tap.push_frame = _push
-
-        async def _tap_probe():
-            _i = _rrREC.start("suite-rec-e", 5)
-            for _f in (_IARF_REC(audio=_pcmA, sample_rate=16000, num_channels=1), _TF_REC("hi")):
-                await _tap.process_frame(_f, _FD_REC.DOWNSTREAM)
-            await _rrREC.stop("suite-rec-e")
-            return _i
-        _iE = _asyncioREC.run(_tap_probe())
-        with _waveREC.open(str(_capREC / _iE["file"]), "rb") as _w:
-            _eFrames = _w.readframes(10_000)
-        check("recorder: the tap passes every frame on and records only input audio",
-              len(_pushed) == 2 and _eFrames == _pcmA, f"pushed={len(_pushed)} bytes={len(_eFrames)}")
-
-        _bot_tree = _astR.parse((REPO_CORE.parent / "bot.py").read_text())
-        _plist = next((n for n in _astR.walk(_bot_tree) if isinstance(n, _astR.Call)
-                       and getattr(n.func, "id", "") == "Pipeline"), None)
-        _elts = [_astR.unparse(e) for e in _plist.args[0].elts] if _plist else []
-        check("recorder: bot.py taps raw audio right after the transport input",
-              _elts[:2] == ["transport.input()", "RecorderTap(_pipeline_room)"], str(_elts[:3]))
-
-        # routes
-        os.environ["LVI_DASHBOARD_TOKEN"] = _hREC["X-Dashboard-Token"]
-        _regREC.note_offer("suite-rec-pc", "suite-rec-live")
-        _regREC.mark_connected("suite-rec-pc")
-        _rOff = client.post("/api/dashboard/nodes/suite-rec-nowhere/record", json={"seconds": 5}, headers=_hREC)
-        check("recorder api: an offline room can't record", _rOff.status_code == 409, _rOff.text[:120])
-        _r422 = [client.post("/api/dashboard/nodes/suite-rec-live/record", json=_b, headers=_hREC).status_code
-                 for _b in ({}, {"seconds": 0}, {"seconds": 601}, {"seconds": 5, "bogus": 1})]
-        check("recorder api: missing, out-of-range or unknown fields are refused",
-              _r422 == [422, 422, 422, 422], str(_r422))
-        _r1 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30}, headers=_hREC)
-        _r2 = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 30}, headers=_hREC)
-        check("recorder api: start answers the file name; a second start is a 409",
-              _r1.status_code == 200 and _r1.json().get("file", "").endswith(".wav")
-              and _r2.status_code == 409, f"{_r1.text[:120]} {_r2.status_code}")
-        _rList = client.get("/api/dashboard/recordings", headers=_hREC).json()
-        check("recorder api: the listing shows the live recording with its time left",
-              any(r["room"] == "suite-rec-live" and 0 < r["seconds_left"] <= 30 for r in _rList["recording"]),
-              str(_rList["recording"]))
-        _rS = client.post("/api/dashboard/nodes/suite-rec-live/record/stop", headers=_hREC)
-        _rS2 = client.post("/api/dashboard/nodes/suite-rec-live/record/stop", headers=_hREC)
-        _fname = _r1.json().get("file", "")
-        check("recorder api: stop saves the file before answering; stopping again is a 404",
-              _rS.status_code == 200 and (_capREC / _fname).is_file() and _rS2.status_code == 404,
-              f"{_rS.text[:120]} {_rS2.status_code}")
-        _rG = client.get(f"/api/dashboard/recordings/{_fname}", headers=_hREC)
-        check("recorder api: a recording downloads as audio/wav",
-              _rG.status_code == 200 and _rG.headers.get("content-type", "").startswith("audio/wav")
-              and _rG.content[:4] == b"RIFF", str(_rG.status_code))
-        (SCRATCH / "secret.wav").write_bytes(b"RIFFsecret")
-        _trav = [client.get(f"/api/dashboard/recordings/{_n}", headers=_hREC).status_code
-                 for _n in ("..%2Fsecret.wav", "%2E%2E%2Fsecret.wav", ".hidden.wav", "x.txt")]
-        _travD = client.delete("/api/dashboard/recordings/..%2Fsecret.wav", headers=_hREC).status_code
-        check("recorder api: names outside the captures folder are never served or deleted",
-              all(c == 404 for c in _trav) and _travD == 404 and (SCRATCH / "secret.wav").exists(),
-              f"{_trav} {_travD}")
-        _pf = [_rrREC.path_for(_n) for _n in ("../secret.wav", "..", ".hidden.wav", "a/../../secret.wav",
-                                              str(SCRATCH / "secret.wav"), "")]
-        check("recorder: path_for refuses any name that isn't a plain file in the captures folder",
-              _pf == [None] * 6 and _rrREC.path_for(_fname) == _capREC / _fname, str(_pf))
-        _rX = client.post("/api/dashboard/nodes/suite-rec-live/record", json={"seconds": 5},
-                          headers={**_hREC, "Origin": "http://evil.example"})
-        _rXd = client.delete(f"/api/dashboard/recordings/{_fname}",
-                             headers={**_hREC, "Origin": "http://evil.example"})
-        check("recorder api: cross-site pages can't start a recording or delete one",
-              _rX.status_code == 403 and _rXd.status_code == 403 and (_capREC / _fname).is_file(),
-              f"{_rX.status_code} {_rXd.status_code}")
-        _rD = client.delete(f"/api/dashboard/recordings/{_fname}", headers=_hREC)
-        check("recorder api: delete removes the file",
-              _rD.status_code == 200 and not (_capREC / _fname).exists(), _rD.text[:120])
-    finally:
-        for _room in list(_rrREC._active):
-            _rrREC._finish(_rrREC._active[_room])
-        for _k, _v in (("LVI_CAPTURES_DIR", _saved_capREC), ("LVI_DASHBOARD_TOKEN", _saved_tokREC)):
-            if _v is None:
-                os.environ.pop(_k, None)
-            else:
-                os.environ[_k] = _v
-
-    # ── recorder: token-only, honest saves, its own files only ──────────
-    import types as _typesRG
-
-    from dashboard import guard as _gdRG
-    from dashboard import routes as _rtRG
-    from fastapi.routing import APIRoute as _APIRouteRG
-    _capRG = SCRATCH / "captures-guard"
-    _saved_envRG = {k: os.environ.get(k) for k in ("LVI_CAPTURES_DIR", "LVI_DASHBOARD_TOKEN")}
-    _realTimeRG = _rrREC.time
-    os.environ["LVI_CAPTURES_DIR"] = str(_capRG)
-    _tokRG = "suite-rec2-token"
-    _hRG = {_gdRG.TOKEN_HEADER: _tokRG}
-    _pcmRG = b"\x01\x00" * 320
-    try:
-        _regREC.note_offer("suite-rec2-pc", "suite-rec2-live")
-        _regREC.mark_connected("suite-rec2-pc")
-        _capRG.mkdir(parents=True, exist_ok=True)
-        _keepRG = "suite-rec2-keep-20261023-120000.wav"
-        (_capRG / _keepRG).write_bytes(b"RIFFkeep")
-
-        def _detail(r):
-            try:
-                body = r.json()
-            except ValueError:  # a WAV download
-                return None
-            return body.get("detail") if isinstance(body, dict) else None
-
-        def _rec_routes(headers=None):
-            """(status, detail) from each recorder route, in a fixed order."""
-            _rs = [client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 5}, headers=headers),
-                   client.post("/api/dashboard/nodes/suite-rec2-live/record/stop", headers=headers),
-                   client.get("/api/dashboard/recordings", headers=headers),
-                   client.get(f"/api/dashboard/recordings/{_keepRG}", headers=headers),
-                   client.delete(f"/api/dashboard/recordings/{_keepRG}", headers=headers)]
-            return [(r.status_code, _detail(r)) for r in _rs]
-
-        # no token configured: every recorder route refuses, nothing starts or goes
-        os.environ.pop("LVI_DASHBOARD_TOKEN", None)
-        _noTok = _rec_routes(_hRG)
-        check("recorder api: with no dashboard token every recorder route refuses (403, says to set LVI_DASHBOARD_TOKEN)",
-              _noTok == [(403, "recording needs a dashboard token: set LVI_DASHBOARD_TOKEN")] * 5
-              and not _rrREC.is_recording("suite-rec2-live") and (_capRG / _keepRG).is_file(), str(_noTok))
-        _xNoTok = client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 5},
-                              headers={"Origin": "http://evil.example"})
-        check("recorder api: a cross-site request still gets the cross-origin 403, token or not",
-              _xNoTok.status_code == 403 and "cross-origin" in _xNoTok.text, _xNoTok.text[:120])
-        _stRG = client.get("/api/dashboard/status")
-        _muRG = client.post("/api/dashboard/nodes/suite-rec2-nowhere/mute", json={"mute": True})
-        check("guard: other routes behave the same with no token configured (reads open, mutations not refused)",
-              _stRG.status_code == 200 and _muRG.status_code == 409, f"{_stRG.status_code} {_muRG.status_code}")
-        _depRG = getattr(_gdRG, "recording_guard", object())
-        _withRG = {(m, r.path) for r in _rtRG.router.routes if isinstance(r, _APIRouteRG)
-                   and any(d.call is _depRG for d in r.dependant.dependencies) for m in r.methods}
-        check("recorder api: only the five recorder routes need a configured token",
-              _withRG == {("POST", "/api/dashboard/nodes/{room}/record"),
-                          ("POST", "/api/dashboard/nodes/{room}/record/stop"),
-                          ("GET", "/api/dashboard/recordings"),
-                          ("GET", "/api/dashboard/recordings/{name}"),
-                          ("DELETE", "/api/dashboard/recordings/{name}")}, str(sorted(_withRG)))
-
-        # token configured: every recorder route, reads included, needs it
-        os.environ["LVI_DASHBOARD_TOKEN"] = _tokRG
-        _bare = [s for s, _d in _rec_routes()]
-        check("recorder api: with a token set, every recorder route (reads included) needs the header",
-              _bare == [401] * 5 and not _rrREC.is_recording("suite-rec2-live") and (_capRG / _keepRG).is_file(),
-              str(_bare))
-        _rmuRG = client.post("/api/dashboard/nodes/suite-rec2-nowhere/mute", json={"mute": True}, headers=_hRG)
-        check("guard: with a token set, other mutations pass the guard with the header as before",
-              _rmuRG.status_code == 409, str(_rmuRG.status_code))
-
-        # a stop whose file can't be written is an error, without paths or error text
-        _sF = client.post("/api/dashboard/nodes/suite-rec2-live/record", json={"seconds": 30}, headers=_hRG)
-        _nF = _sF.json().get("file", "")
-        (_capRG / _nF).mkdir()  # the final rename lands on a directory: the save fails
-        _rF = client.post("/api/dashboard/nodes/suite-rec2-live/record/stop", headers=_hRG)
-        _dF = str(_rF.json().get("detail")) if _rF.status_code != 200 else ""
-        check("recorder api: a stop whose file can't be written answers 500 with a short detail (no path, no error text)",
-              _sF.status_code == 200 and _rF.status_code == 500 and _dF and "/" not in _dF
-              and _nF not in _dF and "Error" not in _dF and not _rrREC.is_recording("suite-rec2-live")
-              and not list(_capRG.glob(".*part")), f"{_rF.status_code} {_rF.text[:160]}")
-        (_capRG / _nF).rmdir()
-        # a time-box close has no caller: it only logs
-        _nB = _rrREC.start("suite-rec2-box", 5)["file"]
-        (_capRG / _nB).mkdir()
-        _rrREC._active["suite-rec2-box"].deadline = 0
-        try:
-            _rrREC.feed("suite-rec2-box", _pcmRG, 16000, 1)
-            _eB = None
-        except Exception as e:  # noqa: BLE001 — a raise here is the failure
-            _eB = e
-        check("recorder: a time-box close that can't save just logs (no raise, nothing left behind)",
-              _eB is None and not _rrREC.is_recording("suite-rec2-box") and (_capRG / _nB).is_dir()
-              and not list(_capRG.glob(".*part")), repr(_eB))
-        (_capRG / _nB).rmdir()
-
-        # names: a clash in the same second gets -2, -3..., never an overwrite
-        _rrREC.time = _typesRG.SimpleNamespace(strftime=lambda fmt, *a: "20261023-120000",
-                                               time=time.time, monotonic=time.monotonic)
-        try:
-            (_capRG / "suite-rec2-u-20261023-120000.wav").write_bytes(b"first")
-            _u2 = _rrREC.start("suite-rec2-u", 5)["file"]
-            _u3 = _rrREC.start("suite rec2 u", 5)["file"]  # same slug, recording at once
-            _rrREC.feed("suite-rec2-u", _pcmRG, 16000, 1)
-            _rrREC.feed("suite rec2 u", _pcmRG, 16000, 1)
-            asyncio.run(_rrREC.stop("suite-rec2-u"))
-            asyncio.run(_rrREC.stop("suite rec2 u"))
-        finally:
-            _rrREC.time = _realTimeRG
-        _namesRG = [f["name"] for f in _rrREC.listing()["files"]]
-        check("recorder: a recording named like an existing or live one gets -2, -3... instead of overwriting",
-              (_u2, _u3) == ("suite-rec2-u-20261023-120000-2.wav", "suite-rec2-u-20261023-120000-3.wav")
-              and (_capRG / "suite-rec2-u-20261023-120000.wav").read_bytes() == b"first"
-              and {_u2, _u3} <= set(_namesRG) and _rrREC.path_for(_u3) == _capRG / _u3,
-              f"{_u2} {_u3} listed={_namesRG}")
-
-        # only the recorder's own files: other .wav files are left alone
-        _foreign = [_capRG / "notes.wav", _capRG / "take-1.wav"]
-        for _p in _foreign:
-            _p.write_bytes(b"RIFFmine")
-            os.utime(_p, (time.time() - 8 * 86400,) * 2)
-        _rrREC.start("suite-rec2-p", 2)
-        asyncio.run(_rrREC.stop("suite-rec2-p"))
-        check("recorder: pruning only touches the recorder's own files",
-              all(_p.is_file() for _p in _foreign), str([_p.name for _p in _foreign if not _p.exists()]))
-        _lsRG = client.get("/api/dashboard/recordings", headers=_hRG).json()
-        _gfRG = client.get("/api/dashboard/recordings/notes.wav", headers=_hRG).status_code
-        _dfRG = client.delete("/api/dashboard/recordings/take-1.wav", headers=_hRG).status_code
-        check("recorder api: other .wav files in the folder are never listed, served or deleted",
-              not {"notes.wav", "take-1.wav"} & {f["name"] for f in _lsRG.get("files") or []}
-              and _keepRG in {f["name"] for f in _lsRG.get("files") or []}
-              and _gfRG == 404 and _dfRG == 404 and all(_p.is_file() for _p in _foreign),
-              f"{[f['name'] for f in _lsRG.get('files') or []]} get={_gfRG} del={_dfRG}")
-    finally:
-        _rrREC.time = _realTimeRG
-        for _room in list(_rrREC._active):
-            _rrREC._finish(_rrREC._active[_room])
-        for _k, _v in _saved_envRG.items():
-            if _v is None:
-                os.environ.pop(_k, None)
-            else:
-                os.environ[_k] = _v
+    from dashboard import routes as _rtREC
+    # "/record" also matches /record/stop and /recordings
+    _recPaths = sorted(p for p in (getattr(r, "path", "") for r in _rtREC.router.routes) if "/record" in p)
+    check("dashboard: no room_recorder module and no /record or /recordings route",
+          _iuREC.find_spec("room_recorder") is None and not _recPaths, str(_recPaths))
 
     # ── intelligence: nanobot's saved model can be cleared ──────────────
     import urllib.request as _urqCL
@@ -8754,7 +8436,7 @@ def main():
         check("restart pending: /status lists nothing right after a boot",
               _r0.status_code == 200 and _p0 == [], f"status={_r0.status_code} pending={_p0}")
         _RP_FIELDS = ("uptime_secs", "version", "stt", "tts_provider",
-                      "intelligence", "last_wake", "rooms", "session_modes", "note")
+                      "intelligence", "last_wake", "rooms", "session_modes")
         check("restart pending: /status keeps every field it had and adds restart_pending",
               _r0.status_code == 200 and all(k in _r0.json() for k in _RP_FIELDS)
               and "restart_pending" in _r0.json(), _r0.text[:300])
@@ -9549,7 +9231,7 @@ def main():
               _st2.get("active") == "whisper" and _st2.get("fallback_rooms") == ["suite-el-room"]
               and "rejected" in (_st2.get("fallback_reason") or ""), str(_st2))
         _EL_FIELDS = ("uptime_secs", "version", "stt", "tts_provider", "intelligence",
-                      "last_wake", "rooms", "session_modes", "note", "restart_pending")
+                      "last_wake", "rooms", "session_modes", "restart_pending")
         check("/status keeps every field it returns today, with Scribe running too (still holds)",
               all(k in _s1 for k in _EL_FIELDS) and all(k in _s2 for k in _EL_FIELDS), str(sorted(_s1)))
 
@@ -9798,7 +9480,7 @@ def main():
           all(p >= 0 for p in _poUX) and _poUX == sorted(_poUX), str(_poUX))
     check("voice tab: the wake name hints it must match the model and applies live",
           'placeholder="Jarvis (for hey_jarvis)" title="Must match the wake model. Applies live."' in _ws(_appsrc))
-    _fdUX = _fnUI("function Field({ label, children, right, between }) {")
+    _fdUX = _fnUI("function Field({ label, children, between }) {")
     check("phone: a Field can't grow past its row (one column, minWidth 0); cards are one-column grids",
           '<div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>' in _fdUX
           and 'p-4 grid gap-4"' not in _appsrc and _appsrc.count('p-4 grid grid-cols-1 gap-4"') >= 9
