@@ -93,7 +93,7 @@ _LaneKind = Literal[intelligence.KINDS]
 
 
 class MappingPayload(BaseModel):
-    # extra='forbid': an unwrapped dict (pre-2026-10-07 React bug) must
+    # extra='forbid': an unwrapped dict (the old React bug) must
     # 422 LOUDLY, never silently become room_zones={} via the default
     # factory — that default was a silent-wipe landmine (three real
     # wipes shipped to config.yaml before this guard existed).
@@ -115,9 +115,9 @@ class ZonePayload(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     ip: str = Field(min_length=7, max_length=64)
     # player_uid is a SONOS concept (RINCON_…).
-    # It used to be required for every backend with min_length=8, while the
-    # UI sends '' for WiiM — so adding a WiiM zone from the dashboard 422'd
-    # every time, and the suite papered over it with a fake RINCON.
+    # Optional for a reason: the UI sends '' for WiiM — required with
+    # min_length=8 it 422'd every dashboard WiiM add, and the suite papered
+    # over it with a fake RINCON.
     # Optional at the field; the validator below requires it for sonos only.
     player_uid: str | None = Field(default=None, max_length=64)
     backend: str = Field(default="sonos", pattern="^(sonos|wiim)$")
@@ -714,7 +714,7 @@ async def test_zone(name: str):
 
     # Zone keys are free text (native Sonos names — "Sonos Port") but a
     # filename is not: the Port's audioClip fetcher fails on raw spaces
-    # (2026-10-04 — test tone silent on 'Sonos Port', fine on
+    # (test tone silent on 'Sonos Port', fine on
     # 'living_room'; replies never hit this because their names are
     # generated). Slugify before it reaches the filesystem/URL.
     slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
@@ -1095,9 +1095,9 @@ _LOCALAI_POCKET_VOICES = (
 )
 
 # The dashboard's pick-lists come FROM HERE via
-# GET /tts — the UI used to hardcode its own copies (12 of 40 Aura, 16 of
-# 36 Flux), so most accepted voices were unpickable and a configured
-# aura-2-zeus-en couldn't even display. One catalog, one owner.
+# GET /tts — a hardcoded UI copy (12 of 40 Aura, 16 of 36 Flux) left
+# most accepted voices unpickable and a configured aura-2-zeus-en
+# couldn't even display. One catalog, one owner.
 # "pocket" is not a provider: it is LocalAI's pocket-tts voice list.
 TTS_CATALOG = {
     "elevenlabs": list(_ELEVENLABS_MODELS),
@@ -1180,7 +1180,7 @@ class TTSKeyPayload(BaseModel):
     # smuggle a WHOLE extra env var into .env (e.g. LVI_RESTART_COMMAND),
     # which the next restart would execute. Alphanumeric + _ . - only.
     # Verified against the three real production keys before shipping:
-    # all pass (2026-10-04).
+    # all pass.
     model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
     api_key: str = Field(min_length=8, max_length=256,
                          pattern=r"^[A-Za-z0-9_.\-]+$")
@@ -1763,8 +1763,8 @@ class IntelligencePayload(BaseModel):
         return self
 
 
-# One lane, one variable, named for its intelligence (naming law
-# 2026-10-08). Single source for the dashboard routes — GET status, key
+# One lane, one variable, named for its intelligence (naming law).
+# Single source for the dashboard routes — GET status, key
 # save, and the Test probe all read this map. Built from the lane registry.
 INTELLIGENCE_KEY_VARS = {k: lane.base_key_var for k, lane in intelligence.LANES.items()}
 
@@ -1798,7 +1798,7 @@ async def get_intelligence():
     _env = _saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
-    # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
+    # Key law (strict): each kind reads exactly ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY; nanobot:
     # LVI_NANOBOT_KEY. No cross-kind fallback anywhere (a fallback turned a
     # missing key into a silent wrong-token outage once).
@@ -1918,11 +1918,11 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     agent = intelligence_target.agent_for(intelligence_cfg, kind)
     url = intelligence_target.request_url(
         kind, intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "", agent)
-    # Key law (strict, 2026-10-08): each kind reads EXACTLY ONE variable —
+    # Key law (strict): each kind reads EXACTLY ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
     # fallback anywhere (this probe previously read the now-DELETED
     # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
-    # caught in the 2026-10-08 naming sweep).
+    # caught in the naming sweep).
     _kv = intelligence_target.key_var(kind, agent) or default_lane.base_key_var
     key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:
@@ -2058,7 +2058,7 @@ async def restart_bot():
 # wake threshold 0.30-0.60 (TV exploits fired 0.40-0.51; real wakes
 # 0.84-1.00), awake timeout, VAD confidence/min_volume, turn lull, echo
 # dedup. Writes are read-merge-write PER SECTION — never a blind section
-# replace (the 2026-10-04 filler-clobber lesson).
+# replace (the filler-clobber lesson).
 
 
 class VoiceTuningPayload(BaseModel):
@@ -2551,8 +2551,8 @@ def _check_firmware_image(tmp: Path, size: int, track: str) -> str:
         raise HTTPException(status_code=400, detail="file too small to be a firmware image")
     # Version from the embedded descriptor: the .bin carries a 32-byte
     # SPI image header, then esp_app_desc_t — magic 0xABCD5432 (LE) at
-    # byte 32, version[32] at byte 48 (measured against the real image
-    # 2026-09-29; an offset of 24 was wrong and rejected a good bin).
+    # byte 32, version[32] at byte 48 (measured against the real image;
+    # an offset of 24 was wrong and rejected a good bin).
     with open(tmp, "rb") as f:
         head = f.read(256)
     if head[32:36] != b"\x32\x54\xcd\xab":

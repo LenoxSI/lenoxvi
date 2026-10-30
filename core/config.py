@@ -35,7 +35,7 @@ CONFIG_PATH = os.getenv("LVI_CONFIG", str(_REPO_ROOT / "config.yaml"))
 # `<backend>.clip_volume`. ONE value for every
 # reader — sonos_output had 70, wiim_output/dashboard 35, the React UI 70,
 # so a config missing the key played Sonos at 70 while the slider showed
-# something else. 35 = the direct-path value, tuned by ear 2026-10-04
+# something else. 35 = the direct-path value, tuned by ear
 # (70 was the obsolete through-the-Triad-matrix value).
 DEFAULT_CLIP_VOLUME = 35
 

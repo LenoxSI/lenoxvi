@@ -23,14 +23,14 @@ git -C "$DIR" bundle create "$BUNDLE" main --tags
 WANT_REV="$(git -C "$DIR" rev-parse main)"
 scp -q "$BUNDLE" "$HOST:/tmp/lenoxvi.bundle"
 # Gitignored runtime files travel alongside the bundle — the host's
-# config.yaml/AGENTS.md/CLAUDE.md are NOT in git anymore (2026-09-20).
+# config.yaml/AGENTS.md/CLAUDE.md are NOT in git anymore.
 #
 # CONFIG AUTHORITY: the host's
 # config.yaml is the LIVE one — the dashboard edits it at runtime. The
 # VM copy is a bootstrap/editing convenience ONLY. So: PULL host ->
 # VM first, then ship everything EXCEPT config.yaml. Never push config.
 # (The old push-every-sync clobbered dashboard-written room_zones
-# twice on 2026-09-29/30 before this fix.)
+# twice before this fix.)
 scp -q "$HOST:~/projects/lenoxvi/config.yaml" "$DIR/config.yaml"
 scp -q "$DIR/AGENTS.md" "$DIR/CLAUDE.md" "$HOST:/tmp/" 2>/dev/null || true
 # set -e inside the remote command, as its own statement: a failed fetch or

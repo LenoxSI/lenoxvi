@@ -38,7 +38,7 @@ class OpenClawLane(Lane):
                 {"role": "user", "content": text},
             ],
         }
-        # Sticky continuity rides the header (proven live 2026-10-05:
+        # Sticky continuity rides the header (proven live:
         # seed/recall under the same key). Fresh sends nothing — and
         # the agent's own memory files may still recall earlier facts
         # (documented boundary, README row).
@@ -49,7 +49,7 @@ class OpenClawLane(Lane):
     def inspect_reply(self, reply):
         # Reasoning-preamble meter: the OpenClaw agent
         # on GLM 5.3 intermittently merges planning text into `content`
-        # (measured live 2026-10-05, 2 of 8 spike calls). A voice assistant
+        # (measured live, 2 of 8 spike calls). A voice assistant
         # speaks content verbatim — so MEASURE, never silently strip (no
         # delimiter exists; a heuristic strip risks eating real answers).
         # Data first, fix decided later (source suppression preferred).

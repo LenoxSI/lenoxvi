@@ -34,7 +34,7 @@ run() {  # run <expect PASS|REFUSE> <label> <track> [repo]
   fi
 }
 
-# Branch fold (2026-10-16): both lines build from `main`; the line is -DBOARD.
+# Branch fold: both lines build from `main`; the line is -DBOARD.
 git -C "$T/fw" checkout -q main
 run PASS   "array track, checkout on main"                        array
 run PASS   "flex track, checkout on main"                         flex

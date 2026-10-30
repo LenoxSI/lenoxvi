@@ -44,7 +44,7 @@ import wake_name
 
 # Stock default (bundled with openwakeword); config wake.model overrides.
 WAKE_MODEL = wake_name.DEFAULT_MODEL
-WAKE_THRESHOLD = 0.40  # round 2 (2026-09-19): real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
+WAKE_THRESHOLD = 0.40  # round 2: real wakes 0.84-1.00; 0.35 nearly let a marginal 0.38 wake through
 AWAKE_TIMEOUT = 15.0  # no audio activity for this long -> back to IDLE (config: wake.awake_timeout > env: LVI_AWAKE_TIMEOUT)
 # Ongoing speech keeps the AWAKE window open (VAD's UserSpeakingFrame
 # heartbeat), but only this long into one continuous stretch: a TV that never
@@ -126,7 +126,7 @@ class WakeWordFilter(FrameProcessor):
         self._last_activity = time.monotonic()
         self._clip_until = 0.0   # end of the sounding speaker clip (note_speech); 0 = none
         self._bot_stopped = True  # transport has no reply in flight
-        # Window forensics (2026-10-03): track what the MIC delivered
+        # Window forensics: track what the MIC delivered
         # during an AWAKE window so a speechless close can name its own
         # cause. Observed: wake 0.98, then 7s of silence —
         # VAD never fired and nothing in the journal could say whether
@@ -199,7 +199,7 @@ class WakeWordFilter(FrameProcessor):
         now = time.monotonic()
 
         if isinstance(frame, InputAudioRawFrame):
-            # Feed the wake listener in EVERY state (2026-09-19): starving OWW
+            # Feed the wake listener in EVERY state: starving OWW
             # during AWAKE/LOCKED spliced a multi-second hole in its spectrogram
             # buffer; on resume it false-fired 0.93-0.98 within 50ms of gate
             # close — an endless close->rewake loop that kept the ring purple
@@ -301,7 +301,7 @@ class WakeWordFilter(FrameProcessor):
             # speaking (her voice can't re-trigger STT); echo-gate blocked =
             # Sonos clip still sounding (SonosOutput blocks it for clip
             # duration + margin; clips play ASYNC after the bot's browser
-            # audio ends — observed live 2026-09-15).
+            # audio ends — observed live).
             if self._state is TurnState.LOCKED:
                 # A speaker clip outlived the transport's reply: release when
                 # the clip really ends, and count the follow-up from there.
@@ -346,7 +346,7 @@ class WakeWordFilter(FrameProcessor):
                 if (now - self._last_activity) > self._awake_timeout:
                     self._state = TurnState.IDLE
                     if not self._vad_fired:
-                        # Window forensics (2026-10-03): the window closed
+                        # Window forensics: the window closed
                         # with VAD never firing. Name the cause so the
                         # journal can distinguish a stalled mic track from
                         # below-threshold speech on the NEXT occurrence:
@@ -401,8 +401,8 @@ class WakeWordFilter(FrameProcessor):
             if self._state is TurnState.AWAKE:
                 self._last_activity = now
         elif isinstance(frame, UserSpeakingFrame):
-            # Still talking: a long sentence must not time out mid-way (the
-            # timeout used to count from speech START). Capped per stretch.
+            # Still talking: a long sentence must not time out mid-way.
+            # Capped per stretch.
             if (self._state is TurnState.AWAKE and self._speaking_since is not None
                     and now - self._speaking_since < SPEECH_HOLD_MAX):
                 self._last_activity = now

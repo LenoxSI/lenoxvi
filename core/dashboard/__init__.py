@@ -86,11 +86,11 @@ def register_dashboard(app) -> None:
     app.add_middleware(OfferTeeMiddleware)
     app.include_router(router)
 
-    # HeroUI rebuild (2026-10-07): FastAPI serves the
+    # HeroUI rebuild: FastAPI serves the
     # prebuilt React app from dashboard-ui/dist — a fresh clone needs
     # zero node toolchain (dist/ is committed; the build stays dev-side,
     # npm run build in dashboard-ui/).
-    # 2026-10-16: the legacy page.html fallback is DELETED —
+    # The legacy page.html fallback is DELETED —
     # dead since the dist/ commit and actively wrong vs the API (its
     # intelligence key save omits `kind`; extra=forbid 422s it). A
     # clone without dist/ gets an honest 404 naming the build step,
@@ -116,7 +116,7 @@ def register_dashboard(app) -> None:
     # references them with './' paths that resolve against the SITE
     # root from /dashboard (no trailing slash). Serve each one at both
     # root and /dashboard/ so the lockups load either way (bug 1 fix,
-    # 2026-10-07: 404s on /lenoxvi-horizontal-on-dark.svg).
+    # 404s on /lenoxvi-horizontal-on-dark.svg).
     from fastapi import Response as _Resp
 
     @app.get("/{root_file}", include_in_schema=False)

@@ -407,7 +407,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # "last connected" room. The offer tee has already correlated
     # {room, pc_id} by the time the pipeline runs (send-time tee), so
     # room_for_pc is exact here.
-    # pc_id SOURCE FIX (measured 2026-10-03): SmallWebRTCTransport is a
+    # pc_id SOURCE FIX (measured): SmallWebRTCTransport is a
     # facade — it holds ._client, not ._webrtc_connection, so the
     # original attribute walk always returned None and every wake since
     # 10-01 recorded room=null. The runner args carry the connection as
@@ -443,7 +443,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     # Session mode for THIS pipeline's room (fresh default; sticky rooms
     # keep conversation memory across reconnects/restarts — config
-    # `session_modes`, dashboard checkbox 2026-10-03).
+    # `session_modes`, dashboard checkbox).
     _room = _pipeline_room()
     _session_mode = (cfg("session_modes") or {}).get(_room, "fresh")
 
@@ -501,7 +501,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
     # behind a blocked processor — IntelligenceAgent holds the queue 3-40s on
     # intelligence calls and every LED message used to arrive as one late burst
-    # (measured 2026-09-30: the ring held stale purple through the whole
+    # (measured): the ring held stale purple through the whole
     # "On it." -> answer gap). One output transport, shared by the pipeline
     # and the LED wire; per-pipeline LedSender = per-node targeting free.
     from led_state import LedSender
@@ -614,7 +614,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
                 *([stt_timer] if stt_timer else []),
                 intelligence,
                 tts,
-                # Per-zone backend dispatch (2026-10-04): BOTH output
+                # Per-zone backend dispatch: BOTH output
                 # backends live in the pipeline; each reply is claimed by
                 # whichever backend owns the zone at SPEECH time (the
                 # other skips it — the same zone-ownership check that
@@ -683,7 +683,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         # Dashboard command replies + liveness probes (firmware 1.1.0).
         # NOTE: the smallwebrtc transport registers "on_app_message" —
         # NOT "on_client_message" (that name is the RTVI processor's;
-        # using it silently never fires, measured 2026-09-29).
+        # using it silently never fires, measured).
         # Signature is (message, sender) where sender IS the pc_id
         # string (transport.py:578 passes connection.pc_id directly) —
         # not a connection object.
@@ -761,8 +761,8 @@ if __name__ == "__main__":
 
     wrap_uvicorn_run(uvicorn, str(_paths.certs_dir()))
 
-    # Whisper at STARTUP, not on the first voice turn (2026-10-15, TODO "RSS
-    # step"): the fixed Embedded model (stt_catalog: base on the CPU, int8)
+    # Whisper at STARTUP, not on the first voice turn: the fixed Embedded
+    # model (stt_catalog: base on the CPU, int8)
     # for every STT provider — it listens, or stands by behind LocalAI or a
     # cloud provider — so one call, no provider check. Non-fatal — a failure
     # leaves the lazy load in LocalWhisperSTTService.ensure_model() in charge.

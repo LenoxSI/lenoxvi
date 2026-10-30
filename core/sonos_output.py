@@ -90,7 +90,7 @@ class ClipServer:
     def url_for(self, filename: str) -> str:
         from urllib.parse import quote
         # Quote the path component: a filename with spaces/reserved chars
-        # breaks the Sonos audioClip fetcher silently (2026-10-04, the
+        # breaks the Sonos audioClip fetcher silently (the
         # "Sonos Port" test tone). Safe for every existing name.
         return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
@@ -249,7 +249,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # and stalled behind the intelligence.
         self._wake_gate = wake_gate
         self._led = led
-        # Duck holder (2026-09-30): the audioClip duck only held while a
+        # Duck holder: the audioClip duck only held while a
         # REPLY clip sounded — the rest of the awake window (user speaking,
         # follow-up listening) ran at full music volume straight into an
         # open mic, and VAD+STT transcribed lyrics as user turns. While
@@ -277,7 +277,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         self._reply_loading = 0
         # Duration-timed end-of-speaking LED (see process_frame): a loop
         # timer, cancelled on new speech / session teardown. (Re-added
-        # 2026-09-30 — the duck-holder insertion clobbered this line and
+        # — the duck-holder insertion clobbered this line and
         # every TTS frame threw AttributeError, killing reply dispatch.)
         self._end_of_speech_timer = None
         # Optional sync callable returning a zone NAME for the reply clip
@@ -302,7 +302,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # layer (zone_volume_overrides below) is the slider's instant one.
         self._zone = sonos.get("default_zone")  # read for old configs; never a reply fallback
         self._duck_while_awake = bool(sonos.get("duck_while_awake", True))
-        # Opportunistic clip pruning (2026-09-20): once per pipeline at
+        # Opportunistic clip pruning: once per pipeline at
         # setup() (in a thread: the glob/stat/unlink pass grows with clips/)
         # AND hourly via _clip_prune_loop (a quiet month with no restarts
         # must not grow clips/ — the node holds one long-lived session, so
@@ -335,7 +335,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         self._barge_epoch = 0
         if not self._enabled:
             logger.info("sonos_output disabled in config.yaml")
-        # Zone capability audit (2026-09-30): audioClip works on every S2
+        # Zone capability audit: audioClip works on every S2
         # player (Era/Arc/Roam/Five/Ray/SYMFONISK included) but NOT on S1
         # legacy gear — and our playback path can't notice: we construct
         # SonosWebsocket(ip, player_id=uid) with the id from config, which
@@ -384,7 +384,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         if removed:
             logger.info(f"sonos_output: pruned {removed} clip(s) older than {self._retention_days}d")
         # Eternal duck-holder: poll the wake gate, hold the audioClip
-        # duck while she's listening (2026-09-30).
+        # duck while she's listening.
         self._start_duck_holder()
 
     async def cleanup(self):
@@ -571,7 +571,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                     # passes, refreshing silence over the tail is
                     # silence-for-silence — a gapless handoff from "she
                     # stopped talking" to "still listening" (kills the
-                    # ~1s full-volume blip after every reply, 2026-09-30).
+                    # ~1s full-volume blip after every reply).
                     next_refresh = min(next_refresh, self._clip_active_until)
                     continue
                 if time.monotonic() >= next_refresh:

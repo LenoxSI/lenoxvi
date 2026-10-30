@@ -268,9 +268,8 @@ def on_message(message, pc_id: str) -> None:
 
     # Room rename: the registry relabels, and the room_zones mapping key
     # must follow — otherwise the rename silently orphans the node's
-    # zone mapping (the node's zone was lost when it
-    # renamed to bedroom-mic1, measured 2026-09-29) and the
-    # mapping table keeps a ghost row for the old name.
+    # zone mapping and the mapping table keeps a ghost row for the old
+    # name.
     if cmd == "set_name" and data.get("ok"):
         info = data.get("data") if isinstance(data.get("data"), dict) else None
         old = registry.room_for_pc(pc_id)

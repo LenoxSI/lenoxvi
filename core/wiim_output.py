@@ -154,9 +154,9 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         """Pipecat lifecycle hook — the ONLY reliable place to start the
         shared clip server (SonosOutput does the same). The constructor
         can't await; without this the WiiM fetches a URL nobody serves
-        and replies die silently (2026-10-04 bedroom outage: LEDs cycled,
-        zero audio — nothing listening on 8765 because no SonosOutput
-        existed in the pipeline to start it). Same singleton as Sonos —
+        and replies die silently (LEDs cycled, zero audio — nothing
+        listening on 8765 because no SonosOutput existed in the pipeline
+        to start it). Same singleton as Sonos —
         one server, one port, all backends."""
         await super().setup(setup)
         if self._enabled:

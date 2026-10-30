@@ -22,7 +22,7 @@
 #   ./scripts/deploy_firmware.sh --track flex minor             # 1.0.1 -> 1.1.0
 #   ./scripts/deploy_firmware.sh --track array --version 1.2.0
 # Track law: one name per line, everywhere. Every line builds from the
-# firmware repo's `main` branch (2026-10-16 branch fold), chosen by -DBOARD:
+# firmware repo's `main` branch, chosen by -DBOARD:
 #   array  XVF3800 mic-array board  -DBOARD=array  tags array-vX.Y.Z
 #          build/array/array_esp32.bin -> firmware/array/ (/firmware/array/*;
 #          the legacy /firmware/version URL also serves this track)
@@ -49,7 +49,7 @@ case "$TRACK" in
 esac
 
 # ── 0. Preflight: the checkout must be the firmware repo's `main` ──────────
-# Since the 2026-10-16 branch fold one source tree builds both lines; the
+# Since the branch fold one source tree builds both lines; the
 # line is the -DBOARD passed to the build below (= $TRACK), never whatever
 # happens to be checked out. A different branch (an old per-line branch, a
 # feature branch) is refused: it could carry the other line's code. Backstops
@@ -85,7 +85,7 @@ if [ "${DEPLOY_PREFLIGHT_ONLY:-}" = "1" ]; then
   exit 0
 fi
 
-# WiFi credentials are NEVER baked into an OTA image (2026-10-15): these
+# WiFi credentials are NEVER baked into an OTA image: these
 # images are served over plain HTTP to the whole LAN (/firmware/...), so a
 # baked password is readable by anyone who can fetch the .bin. Nodes read
 # WiFi from NVS (tknode: wifi_ssid/wifi_pass — dashboard WiFi flow); the
@@ -110,7 +110,7 @@ source "$HOME/esp-idf/export.sh" >/dev/null
 # Data-channel message logging is debug-only and prints set_wifi payloads
 # (the WiFi password) to serial — never in a deployed image. unset (not an
 # empty assignment: the old firmware CMake treated set-but-empty as ON, so
-# this line used to ENABLE it on every script build, 2026-10-13). Also
+# this line used to ENABLE it on every script build). Also
 # protects against a value inherited from the caller's shell.
 unset LOG_DATACHANNEL_MESSAGES
 # Same for the bench-only mic-level serial log: never in a published image.

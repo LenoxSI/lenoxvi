@@ -313,7 +313,7 @@ def note_offer(pc_id, room):
         _drain_held(pc_id, label)
     else:
         _room_by_pc[pc_id] = label
-        # The OTHER race order (fw=None bug, 2026-10-09): fw_push landed
+        # The OTHER race order (fw=None bug): fw_push landed
         # while pc_id had NO entry at all (room=None — note_firmware held
         # it in _fw_by_pc). This branch never drained the hold, so the
         # version stranded in _fw_by_pc forever and the Nodes table showed
@@ -455,7 +455,7 @@ def known_rooms():
                 # board line, one of NODE_LINES (fw_push, 1.2.19+); None =
                 # older firmware that doesn't say.
                 "line": rec.get("line"),
-                # TTS health (2026-10-16): None until this room's
+                # TTS health: None until this room's
                 # pipeline reports — False = the node hears but can't
                 # speak (dead TTS service; pipecat never revives it
                 # in-session).

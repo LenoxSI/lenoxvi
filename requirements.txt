@@ -1,5 +1,5 @@
-# LenoxVI — runtime dependencies (top-level, version-pinned to what's
-# as of 2026-09-20; pipecat 1.13.0 since 2026-10-21).
+# LenoxVI — runtime dependencies (top-level, version-pinned to what
+# ships; pipecat 1.13.0).
 # Host Python: 3.14. numpy==2.5.3 needs >=3.12; on older interpreters pip
 # fails the install — by design, not by accident: this file pins the
 # appliance, and a version that resolves differently on a dev box is a
@@ -7,7 +7,7 @@
 # Transitive deps resolve from these pins; if a fresh install ever needs
 # more, add it here rather than committing a 174-line `pip freeze`.
 #
-# Provenance note (2026-09-20 review): pipecat-ai[runner] pulls
+# Provenance note: pipecat-ai[runner] pulls
 # pipecat-ai-prebuilt only via its [runner] extra; bot.py imports
 # pipecat.runner.run, which hard-imports pipecat_ai_prebuilt, so it is
 # a direct runtime dep of this repo, not transitive.

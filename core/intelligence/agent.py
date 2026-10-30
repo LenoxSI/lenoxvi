@@ -60,15 +60,15 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
-# Tiered fillers (option B, 2026-10-03): one spoken line per latency tier so
+# Tiered fillers (option B): one spoken line per latency tier so
 # a slow intelligence turn doesn't go silent after the first ack. Tool-heavy turns
-# measure 20-40s+ server-side (2026-09-15); the old single-filler design
+# measure 20-40s+ server-side; the old single-filler design
 # spent its only line at 3s and left the rest as dead air.
 # Tier contract (every line, any pool):
 #   - <2s spoken (they ride the duck holder); the last tier's long-wait
 #     line, which promises a report, may run ~3s
 #   - >=3 words so echo containment can catch the Sonos echo (the
-#     2026-09-15 double-fire lesson; 2-word "On it." is grandfathered —
+# double-fire lesson; 2-word "On it." is grandfathered —
 #     the echo gate covers its own playback window)
 #   - never command-shaped: a leaked filler reaches the intelligence as USER text
 # Config shape (intelligence.fillers) — tiered list (preferred):
@@ -349,7 +349,7 @@ class IntelligenceAgent(FrameProcessor):
                 f"intelligence_agent: no intelligence key set ({self._key_var}) "
                 f"— kind={self._kind}; turns will fail until it is set")
         self._model = _use["model"]
-        # Output cap (2026-10-04, the 16k-degenerate-reply incident): the
+        # Output cap (the 16k-degenerate-reply incident): the
         # intelligence request carried no max_tokens, so a runaway model loop
         # could monologue until the context window died (measured: one
         # 16,145-token reply "degenerated into garbage" mid-session).
@@ -404,7 +404,7 @@ class IntelligenceAgent(FrameProcessor):
         self._turn_task: asyncio.Task | None = None
         self._turn_epoch: int = 0
         self._turn_started: float = 0.0
-        # Supersede-ack rate limit (2026-10-07, a two-person session): the ack
+        # Supersede-ack rate limit (a two-person session): the ack
         # ("Hold on — switching.") is useful for one deliberate interrupt,
         # but in a two-person conversation consecutive utterances supersede
         # repeatedly and the assistant says it three times in ten seconds — sounds
@@ -437,7 +437,7 @@ class IntelligenceAgent(FrameProcessor):
         # Echo containment: her last spoken texts (reply + filler) — a
         # transcription that contains a chunk of these IS her echo, whenever
         # it arrives (duration gates lose the race when her Sonos reply talks
-        # over the mic and whisper transcribes late; measured live 2026-09-15).
+        # over the mic and whisper transcribes late; measured live).
         self._echo_texts: list[str] = []
         # Dead-TTS phantom arming: echo texts
         # exist so a late transcript of her SPEECH can be dropped. A dead
@@ -447,8 +447,8 @@ class IntelligenceAgent(FrameProcessor):
         # suite default); a service that dies mid-clip after speaking
         # partially still arms — defense-in-depth.
         self._tts_is_usable = tts_is_usable
-        # Session modes (fresh | sticky, per node — dashboard checkbox,
-        # 2026-10-03): sticky rooms keep conversation memory across node
+        # Session modes (fresh | sticky, per node — dashboard checkbox):
+        # sticky rooms keep conversation memory across node
         # reconnects AND bot restarts via a disk stash; fresh rooms start
         # every session clean (privacy default — a bedroom mic must not
         # accumulate memory nobody asked for).
@@ -629,7 +629,7 @@ class IntelligenceAgent(FrameProcessor):
             logger.warning(
                 f"intelligence_agent: {leak} "
                 f"({_PREAMBLE_HITS[0]} this process) — reply[:80]={reply[:80]!r}")
-        # Client-side output cap (2026-10-04): Hermes's api_server IGNORES
+        # Client-side output cap: Hermes's api_server IGNORES
         # the request's max_tokens (verified live: max_tokens:5 returned a
         # 360-char reply with finish_reason stop; api_server.py has zero
         # references). Real OpenAI-compat endpoints honor the field, but
@@ -858,7 +858,7 @@ class IntelligenceAgent(FrameProcessor):
             ask = asyncio.wrap_future(call)
             failed = False
             reply = None
-            # Tiered fillers (option B, 2026-10-03): wait to each tier's
+            # Tiered fillers (option B): wait to each tier's
             # cumulative `after` mark; on timeout speak ONE line from
             # that tier's pool and keep waiting.
             tiers = _filler_tiers()

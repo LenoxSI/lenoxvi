@@ -61,7 +61,7 @@ class HermesLane(Lane):
             ],
         }
         headers = {}
-        # X-Hermes-Session-Key (2026-10-04): the api_server keys
+        # X-Hermes-Session-Key: the api_server keys
         # dashboard-visible session continuity on THIS header, not
         # the body's `conversation` field — the label in the body
         # alone left voice sessions invisible in the Hermes admin

@@ -92,7 +92,7 @@ def main():
     #     BACKGROUND task, so the ASGI app call does not return until
     #     the session ends. The tee must correlate at response-SEND
     #     time (before connected), NOT after the app call returns
-    #     (session end — measured live 2026-09-29).
+    #     (session end — measured live).
     _pc_counter = 0
 
     @app.post("/api/offer")
@@ -110,7 +110,7 @@ def main():
         return {"sdp": "v=0 answer", "type": "answer", "pc_id": pc_id}
 
     dashboard.register_dashboard(app)
-    # Mirror the LIVE app (2026-10-13): pipecat's runner installs this
+    # Mirror the LIVE app: pipecat's runner installs this
     # app-wide RequestValidationError handler AFTER register_dashboard
     # (pipecat/runner/run.py). It reads the body (multipart → "Stream
     # consumed" 500) and logs errors with their `input` (key leak). The
@@ -138,7 +138,7 @@ def main():
     r = client.get("/dashboard")
     check("GET /dashboard -> 200 html", r.status_code == 200 and "dashboard" in r.text)
 
-    # 2026-10-16: page.html fallback DELETED — dist/ missing
+    # Page.html fallback DELETED — dist/ missing
     # must 404 naming the build step, never serve a stale page.
     # (REPO_CORE anchors this the same way __init__.py resolves ui_index:
     # parents[2] of core/dashboard/__init__.py == REPO_CORE.parent.)
@@ -276,7 +276,7 @@ def main():
                    json={"room_zones": {"bedroom": "nonexistent_zone"}})
     check("mapping PUT rejects unknown zone", r.status_code == 400, f"status={r.status_code}")
 
-    # 7b. mapping-wipe guards (2026-10-07 bug: the React UI sent a BARE
+    # 7b. mapping-wipe guards (bug: the React UI sent a BARE
     # merged dict — no room_zones wrapper — and Pydantic's default_factory
     # silently turned it into {} and the route wiped all mappings; three
     # real wipes hit production config before these guards existed).
@@ -304,7 +304,7 @@ def main():
     else:
         print("[SKIP] no real zone in config — skipping live Sonos test")
 
-    # 8m. Small-fix pins (fixed 2026-10-08)
+    # 8m. Small-fix pins
     import importlib
     import config as _cfg_mod
     _saved_cwd = os.getcwd()
@@ -916,7 +916,7 @@ def main():
     # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
     # runs on the same host as prod). LVI_RESTART_COMMAND used to override
     # the command, but that env hook was a prod code-exec lane
-    # (found 2026-10-04) and is now deleted. The suite monkeypatches
+    # and is now deleted. The suite monkeypatches
     # subprocess.run IN THIS PROCESS so systemd-run never executes while
     # the route's code is fully exercised.
     real_run = subprocess.run
@@ -943,7 +943,7 @@ def main():
     finally:
         subprocess.run = real_run
 
-    # Mute error honesty (2026-10-09, the lying-error incident):
+    # Mute error honesty (the lying-error incident):
     # a node answering {ok: false, data: "unknown cmd"} to set_mute must
     # 501 with the per-line TRUTH (array = physical button, flex needs
     # 1.1.0+) — never the old lie "(firmware 1.1.0+ required)" that
@@ -1074,7 +1074,7 @@ def main():
     check("forbidden writes left config.yaml byte-identical",
           _hl_m7.sha256(_cfg_path_m7.read_bytes()).hexdigest() == _sha_m7, "")
 
-    # 2026-10-16: the legacy manifest-only POST route is
+    # The legacy manifest-only POST route is
     # REMOVED — the upload route is the only manifest writer (version and
     # track come from the image itself, board-identity-guarded). A bare
     # manifest write could point the array track at anything.
@@ -1083,7 +1083,7 @@ def main():
     check("legacy POST /firmware/version removed (404, never a bare manifest write)",
           r_leg.status_code == 404, f"status={r_leg.status_code} body={r_leg.text[:100]}")
 
-    # 2026-10-13 key-leak pin: a key PUT that fails validation must not
+    # Key-leak pin: a key PUT that fails validation must not
     # put the key in the response OR any log line (pipecat's handler
     # logged Pydantic's `input` = the full key to journald).
     from loguru import logger as _lg_leak
@@ -1307,9 +1307,8 @@ def main():
     check("clip server url_for works (quotes filenames)",
           _url.endswith("/probe.mp3") and _url.startswith("http://"), f"url={_url}")
 
-    # Reply-time backend dispatch regression (the
-    # 2026-10-04 bedroom outage): bot.py must wire BOTH output
-    # backends into the pipeline UNCONDITIONALLY. The old build-time
+    # Reply-time backend dispatch regression: bot.py must wire BOTH
+    # output backends into the pipeline UNCONDITIONALLY. The old build-time
     # ternary picked one backend before the offer tee correlated the
     # room, so a WiiM room could land on a Sonos-only pipeline and every
     # reply died in a skip warning. Dispatch happens at SPEECH time:
@@ -1375,7 +1374,7 @@ def main():
     _routes_nanobot = _routes_registry and "nanobot" in _lanes_reg.KINDS
     check("nanobot: bot.py: intelligence dispatch routes nanobot to the real agent (not the echo stub)",
           _routes_nanobot, "construction ternary must accept kind nanobot")
-    # Naming rule (2026-10-17): the intelligence step is named for what it
+    # Naming rule: the intelligence step is named for what it
     # is, not for one of its two kinds. The dispatch's live branch must
     # build IntelligenceAgent, and the old module must be gone — a stale
     # core/hermes_agent.py would shadow-import fine and hide a half rename.
@@ -1458,7 +1457,7 @@ def main():
               for r in _reg.known_rooms()),
           f"rooms={_reg.known_rooms()}")
 
-    # The OTHER race order (fw=None bug, 2026-10-09): fw_push lands
+    # The OTHER race order (fw=None bug): fw_push lands
     # while pc_id has NO binding at all (no connect, no tee yet) — the
     # version is held in _fw_by_pc; note_offer's NON-provisional branch
     # must drain it too. Old code stranded the hold forever here.
@@ -1609,7 +1608,7 @@ def main():
     check("node health: a 1.2.37+ node's timed-out command opens no settling window (its retry goes out at once)",
           _nh_settles is False, f"settling={_nh_settles}")
 
-    # Mute state (2026-10-16, firmware 1.2.11+): the node reports its mic-mute
+    # Mute state (firmware 1.2.11+): the node reports its mic-mute
     # state — fw_push carries "muted" at connect, mute_push fires when an
     # array node's PHYSICAL button is pressed. Same race handling as fw.
     def _room_rec(name):
@@ -1711,7 +1710,7 @@ def main():
     # Flex .bin there would be OTA'd by an array node (cross-flash).
     # Board identity: real images carry exactly one OTA-track
     # URL format; the route refuses an image whose own track differs.
-    # 2026-10-16: one track vocabulary (array | flex); 1.2.9+ images
+    # One track vocabulary (array | flex); 1.2.9+ images
     # also carry a per-line project name. "legacy" = array <=1.2.8's
     # track-less URL format (still a valid array witness on node_esp32).
     _MARK5B = {"flex": b"%.*s/firmware/flex/%s", "array": b"%.*s/firmware/array/%s",
@@ -1919,7 +1918,7 @@ def main():
         check("firmware track: app_bin_version.py --track: flex/array/none/both -> flex/array/''/''",
               _cli == {"flex": "flex", "array": "array", "none": "", "both": ""}, str(_cli))
 
-        # 2026-10-16: firmware names — one vocabulary, per-line files.
+        # Firmware names — one vocabulary, per-line files.
         _rn = client.post("/api/dashboard/firmware/upload",
                           files={"file": ("x.bin", _fake_image5b("1.9.4", "array"),
                                           "application/octet-stream")},
@@ -2027,7 +2026,7 @@ def main():
               and "Waveshare ESP32-S3-AUDIO track" in _xa.text,
               f"{_xw.status_code} {_xw.text[:140]} | {_xa.status_code} {_xa.text[:140]}")
 
-        # ── signed firmware (core/firmware_signing.py, note 071): the bot holds
+        # ── signed firmware (core/firmware_signing.py): the bot holds
         # an RSA-3072 key and signs every image it serves. ──
         import firmware_signing as _fsg
         from loguru import logger as _lgSG
@@ -2226,7 +2225,7 @@ def main():
                 _upTmp.unlink(missing_ok=True)
             check("firmware track OTA: an upload still being written (*.uploading) is never served (track and legacy URL 404)",
                   _upT == 404 and _upL == 404, f"{_upT} {_upL}")
-            # signing (note 071): unsigned app images never go out; boot files aren't app images
+            # signing: unsigned app images never go out; boot files aren't app images
             _flxSG = Path("firmware/flex/flex_esp32.bin")
             _keepFlx = _flxSG.read_bytes() if _flxSG.is_file() else None
             try:
@@ -2516,7 +2515,7 @@ def main():
     check("tuning write preserves wake.enabled (merge, not replace)",
           wake_after.get("enabled") is True, f"wake={wake_after}")
 
-    # Load-anchored speech timers (2026-10-05): the v4
+    # Load-anchored speech timers: the v4
     # dialogue lane's gen->load gap made generation-anchored timers fire
     # early — end-of-speech LED flipped the ring to 'listening' mid-reply,
     # echo gate reopened the mic, note_speech capped the LOCKED release.
@@ -3110,7 +3109,7 @@ def main():
     check("status exposes tts_provider",
           bool(s.get("tts_provider")), f"tts_provider={s.get('tts_provider')!r}")
 
-    # 2026-10-16 TTS health tap: tracked TTS services (bot.py TTSTracked)
+    # TTS health tap: tracked TTS services (bot.py TTSTracked)
     # relay pipecat's set_usable() verdicts per room — status carries
     # them so a hears-but-can't-speak node is visible without journald.
     registry.note_tts("tts-suite-down", "elevenlabs", False)
@@ -4273,7 +4272,7 @@ def main():
                 check("intelligence: openclaw lane: LVI_OPENCLAW_KEY wins (naming law 2026-10-08)",
                       _oc_hdr.get("authorization") == "Bearer suite-openclaw-key-not-real",
                       str(_oc_hdr.get("authorization")))
-                # strict key law (2026-10-08): NO cross-kind fallback —
+                # strict key law: NO cross-kind fallback —
                 # without LVI_OPENCLAW_KEY the openclaw lane must fail with
                 # a clear error naming its OWN variable, never silently
                 # auth with another intelligence's token (a real wrong-token 401).
@@ -4452,7 +4451,7 @@ def main():
             finally:
                 _routes9._write_env_key = _saved_wek9
 
-            # Agent picker + masked key hints (2026-10-17): agents
+            # Agent picker + masked key hints: agents
             # discovered per provider, remembered per kind; a Hermes profile
             # routes to <base>/p/<agent>/v1 with ITS OWN key; set keys show
             # their first 4 characters, never more.
@@ -4826,7 +4825,7 @@ def main():
         finally:
             _os.environ.pop("LVI_HERMES_KEY", None)
 
-    # Dead-TTS containment (2026-10-16): with the
+    # Dead-TTS containment: with the
     # ElevenLabs websocket dead, her UNspoken weather answer still armed as
     # echo text, and the user's repeat question scored 71% bag-of-words overlap
     # (5 of 7 words, only 'springfield' content — s/the/on/today counted) —
@@ -4894,7 +4893,7 @@ def main():
           "tts_is_usable" in _bot_src12 and "tts_usable_probe" in _bot_src12,
           "bot.py missing the dead-TTS wire")
 
-    # TTS reconnect-on-next-utterance (2026-10-16 follow-on): pipecat
+    # TTS reconnect-on-next-utterance (follow-on): pipecat
     # writes a websocket TTS service off permanently once its 3 reconnect
     # attempts exhaust — and an unusable service refuses every speak, so the
     # run_tts reconnect can never fire again; the room stays mute until a
@@ -5205,7 +5204,7 @@ def main():
         _l4_root.unlink(missing_ok=True)
         (_l4_models / _l4_name).unlink(missing_ok=True)
 
-    # Session leak (2026-10-15) — dead sessions' pipeline graphs are one
+    # Session leak — dead sessions' pipeline graphs are one
     # big reference cycle; Python 3.14.4's incremental GC never reclaimed
     # them (10.4 GB / 406 threads after ~110 sessions). run_bot reclaims
     # deterministically when the pipeline ends, and the local STT closes the
@@ -5311,7 +5310,7 @@ def main():
     finally:
         _BWS.cleanup = _saved_cleanup
 
-    # RSS-step fix (2026-10-15): Whisper loads at bot STARTUP (fresh heap +
+    # RSS-step fix: Whisper loads at bot STARTUP (fresh heap +
     # warm-up + malloc_trim), not inside the first voice turn of an aged,
     # fragmented process (768 MB -> 2.8 GB). The preload must use exactly the
     # model/device/precision run_bot's STT uses, or the bot loads twice.
@@ -8333,7 +8332,7 @@ def main():
           and "muted ? 'Unmute' : 'Mute'" in _appsrc
           and 'muted ? BTN_WARNING' not in _appsrc and 'muted ? BTN_PRIMARY' not in _appsrc,
           f"mute button uses BTN_WARNING: {'muted ? BTN_WARNING' in _appsrc}")
-    # UX round 3 (2026-10-24).
+    # UX round 3.
     _cssUX = (REPO_CORE.parent / "dashboard-ui" / "src" / "index.css").read_text()
     check("ux3: fields are one shade lighter than the card with no border; dropdowns draw a chevron 12px in and size like a text box",
           "const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'" in _appsrc

@@ -101,7 +101,7 @@ intelligence:
   model: hermes-agent
   max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards
                         # against runaway replies (the 16k-token
-                        # degenerate reply incident, 2026-10-04)
+                        # degenerate reply incident)
   zone: Kitchen        # conversation tag prefix: voice-<zone>-<id>
   lull_secs: 0.6        # silence after speech before the turn flushes to the
                         # intelligence; lower = snappier but risks clipping slow talkers
@@ -142,7 +142,7 @@ sonos:
   enabled: true
   default_zone: Kitchen      # legacy, still accepted; an unmapped room's reply plays nowhere
   # Voice-clip volume (0-100). 70 was the through-matrix sweet spot;
-  # 35 is the ear-tuned direct-to-amp value (2026-10-04).
+  # 35 is the ear-tuned direct-to-amp value.
   clip_volume: 35
   # 48h retention: clips are served once, then garbage.
   clip_retention_days: 7
@@ -172,7 +172,7 @@ sonos:
   #       ip: 192.0.2.22
   #       player_uid: RINCON_xxxxxxxxxxxx1400
 
-# ── WiiM output (interrupt-no-restore; 2026-10-04 arrival verify) ──────
+# ── WiiM output (interrupt-no-restore) ──────
 # playPromptUrl is a STUB on current firmware: acks
 # OK, never fetches. Replies play via setPlayerCmd:play as MAIN media —
 # music stops, nothing restores. Volume snapshots/restores around the

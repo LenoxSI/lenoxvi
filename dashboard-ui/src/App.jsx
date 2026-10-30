@@ -961,7 +961,7 @@ function intelligenceChip(status, intel) {
     if (!profile && !intel.key_set)
       return { tone: 'warning', text: 'no key', href: '#keys', title: `No ${label} key saved. Add it on the Keys card.` }
   }
-  // Brand chips (2026-10-08): the colours come from the lane list. Inline
+  // Brand chips: the colours come from the lane list. Inline
   // styles — these are foreign brands, they don't earn design tokens.
   // Chip shows the brand only — the agent id lives in the Intelligence
   // section: strip " · <agent>" from the label.
@@ -1082,7 +1082,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll,
   // rebooting (or already renamed) and its failure overwrote the success.
   const [sending, setSending] = useState(false)
 
-  // Refresh the button from the NODE's truth on every mount (2026-10-07):
+  // Refresh the button from the NODE's truth on every mount:
   // component state dies on page refresh, but the node remembers its mute
   // state — the button must re-derive it, or "Muted" un-highlights and the
   // UI lies about a muted mic. One GET per mount, NOT per 5s poll (that
@@ -1152,7 +1152,7 @@ function NodeActions({ room, online, lastSeen, reportedMuted, setMsg, reloadAll,
   // Raw POST — callers own the busy lifecycle (the wifi flow is
   // two-stage: busy must STAY 'wifi' after a successful scan; a
   // helper that auto-cleared busy killed the SSID form — caught
-  // live 2026-10-07, "scan complete but no list").
+  // live, "scan complete but no list").
   const post = (verb, json) =>
     api(`/api/dashboard/nodes/${encodeURIComponent(room)}/${verb}`, { method: 'POST', json })
 
@@ -1473,11 +1473,10 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
   }
 
   const zoneNames = Object.keys(mapping?.zones || {})
-  // Rows = mapped rooms ∪ connected nodes. Rows
-  // used to come from room_zones alone, so a node that had connected but
-  // was never mapped had NO row — a fresh install could not map its first
-  // node from the React UI (regression vs page.html; also why a third
-  // node couldn't onboard). Sorted by name, the same order the Nodes list uses.
+  // Rows = mapped rooms ∪ connected nodes: without the union, a node
+  // that connected but was never mapped had NO row — a fresh install
+  // could not map its first node from the React UI. Sorted by name, the
+  // same order the Nodes list uses.
   const mappedRooms = Object.keys(mapping?.room_zones || {})
   const unmappedRooms = (status?.rooms || []).map(r => r.room)
     .filter(r => r && !mappedRooms.includes(r))
@@ -2565,9 +2564,8 @@ function OwwPanel({ setMsg, reloadAll }) {
   )
 }
 // Pick-lists come from GET /tts `catalog` —
-// the server's accepted values, one owner. The UI used to hardcode its
-// own copies (12 of 40 Aura, 16 of 36 Flux): most voices were unpickable
-// and a configured aura-2-zeus-en couldn't display.
+// the server's accepted values, one owner: a hardcoded UI copy left
+// most voices unpickable and a configured aura-2-zeus-en couldn't display.
 const EL_MODEL_LABELS = { eleven_flash_v2_5: 'flash v2.5', eleven_v4_turbo: 'v4 turbo' }
 const ttsLabel = v =>
   v.startsWith('aura-2-') ? 'aura-2 ' + v.slice(7).replace(/-en$/, '')
@@ -3134,8 +3132,8 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   // first load, on provider switch, on URL change, and on the refresh
   // button. Each entry carries key status + the masked key hint.
   const [found, setFound] = useState({})  // kind -> {agents, note, selected, loading}
-  // Drafts against the saved config (useDraft). Per-kind URL and agent
-  // (2026-10-08): the lanes live at different addresses, so each kind keeps
+  // Drafts against the saved config (useDraft). Per-kind URL and agent:
+  // the lanes live at different addresses, so each kind keeps
   // its own drafts (url:<kind>, agent:<kind>) and switching kinds only
   // changes which ones show. An agent left unpicked shows the saved one,
   // else the first listed (a lane that runs without an agent keeps '': its
@@ -3362,7 +3360,7 @@ export default function App() {
 
   // Poll hygiene. One refresh cycle at a time —
   // a call that lands mid-cycle doesn't stack a second wave of 5 GETs
-  // (slow /mapping used to pile them up); it marks the cycle dirty and
+  // (a slow /mapping piles them up); it marks the cycle dirty and
   // gets the CURRENT cycle's promise, which loops once more so a save's
   // `await reloadAll()` still resolves on post-save data. Hidden tabs skip
   // the interval; becoming visible refreshes immediately.
