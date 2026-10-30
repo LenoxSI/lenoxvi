@@ -1263,7 +1263,7 @@ conversation features shipped and verified the same day.
   `POST /nodes/{room}/session-mode`; status carries `session_modes`.
   Spec: **sticky = stash + server-side continuity**. Verified: a
   "what's the last thing I asked you" test across a node restart AND a bot
-  restart answered correctly from restored history (`6aec78e`)
+  restart answered correctly from restored history
 - **Tiered fillers** — one spoken line per latency tier so a slow intelligence turn
   no longer goes silent after the first ack: tier 1 acks at 3s (the classic
   pool), tier 2 reports progress at 12s, tier 3 reassures at 25s, then the
@@ -1272,18 +1272,17 @@ conversation features shipped and verified the same day.
   configs unchanged). All lines <2s spoken; tier 2/3 lines meet the ≥3-word
   echo-containment contract. Verified: all three tiers fire in sequence on
   a long turn, and rotation never repeats a line within a session
-  (`de385c1`)
 - **Wake-window forensics** — an AWAKE window that closes without VAD now
   logs delivered-frame count, peak amplitude, echo-gate state, and
   whether VAD ever fired, so the next silent failure names its own cause
   (frames=0 = stalled track; low peak = below-threshold speech;
-  echo_blocked = a Sonos clip swallowed it) (`a55b2ec`)
+  echo_blocked = a Sonos clip swallowed it)
 
 ### Fixed
 - **pc_id capture was a silent no-op** (regression) — `SmallWebRTCTransport`
   is a facade holding `._client`, not `._webrtc_connection`; the runner args
   carry the connection directly. Wakes had been recording `room: null` in
-  the status API (`a55b2ec`)
+  the status API
 - **Wi-Fi `set_wifi` lying verify** (firmware 1.1.1) — NVS writes never
   reached the live WiFi driver (config only pushed at boot), so a wrong
   password re-associated on the OLD creds and acked "connected" in 1.2s —
@@ -1312,7 +1311,7 @@ unchanged on a single-node setup.
 ### Added
 - **Zone capability audit at startup**: every configured zone is checked
   against the all-S2 audioClip scope at boot — an unsupported player is
-  logged before it can eat a reply mid-conversation (`fb2e585`)
+  logged before it can eat a reply mid-conversation
 
 ### Fixed
 - **Intelligence failure after the filler no longer goes silent**: the post-filler
@@ -1320,7 +1319,6 @@ unchanged on a single-node setup.
   an exception raised in another handler's body) — the user hears
   "Sorry — I can't reach my intelligence right now" instead of dead air, and the
   outage reply never enters the server-side history as a fake memory
-  (`897de5d`)
 - **Duck-holder hardening**: every Sonos call is timeout-bounded; a dead
   websocket is dropped and reconnected on the next poll tick instead of
   retrying forever on the corpse; the wake gate's LOCKED state has a
@@ -1329,19 +1327,19 @@ unchanged on a single-node setup.
   only when the holder is enabled and the turn is live, and lands AFTER
   the echo gate so the mic still reopens at the last syllable; duck
   ownership starts when the clip LOADS, not at generation end; the holder
-  dies in `cleanup()`, not just on CancelFrame (`634af8f`)
+  dies in `cleanup()`, not just on CancelFrame
 - **Event loop unblocked**: MP3 encodes (reply clips, duck clip, dashboard
   test tones) and soco calls (name lookups, UPnP discovery) run in
   threads; dashboard node commands (restart/scan/rename/Wi-Fi) ride the
   direct data-channel wire via the output transport — a 40s intelligence call
-  can no longer stall a command into a 504 (`7ae9ecb`)
+  can no longer stall a command into a 504
 - **Multi-node architecture**: room identity is per-pipeline — replies,
   wake records, and ducks resolve through THIS connection's pc_id instead
   of the global last-connected room; one openWakeWord Model per pipeline
   (the class-shared model mixed concurrent sessions' rolling buffers and
   every reconnect reset the live session's buffers); two physical nodes
   sharing a room name now log a loud rename warning instead of silently
-  evicting each other into a reconnect loop (`a23187a`)
+  evicting each other into a reconnect loop
 
 ## [0.3.1] — 2026-09-30
 
@@ -1360,7 +1358,7 @@ state).
   refresh lands silence-on-silence — the duck is gapless from wake to
   sleep, no full-volume blips between reply and listening. Gate close
   cancels the holder and the music unducks once. Echo gate + LED timing
-  stay tied to SPEECH-only duration (`9b4000d`, `3d28fa7`, `20d5d25`)
+  stay tied to SPEECH-only duration
 - **LED direct wire** (`core/led_state.py`): LED state messages ride
   the WebRTC data channel directly (output transport `send_message`),
   bypassing the pipeline — a blocked intelligence call stalls pipeline frames
@@ -1368,20 +1366,19 @@ state).
   through the whole "On it." → answer gap. Speaking
   state now fires from SonosOutput's real-time TTS frames downstream
   of the intelligence; end-of-speaking is duration-timed to actual playback
-  (`d02075a`, `69d9c5f`)
 - Dashboard: firmware push reads the version from the uploaded image's
   embedded app descriptor (magic-checked; manual version entry removed);
   uploads stage to a temp file and swap atomically — a rejected upload
-  can never clobber the served image (`6f04906`, `a09aa80`)
+  can never clobber the served image
 
 ### Changed
 - Firmware binary renamed to the generic `node_esp32.bin` across
   the OTA chain (served name, manifest, deploy script, upload dest,
   firmware CMake project name) — generic naming;
-  version untouched, node unaffected (equal-version skip) (`c73832c`)
+  version untouched, node unaffected (equal-version skip)
 - Zone keys are now the player's native Sonos name (a player's
   native name IS its name) — dashboard displays live Sonos names
-  verbatim (`bbed6cd`, `c2062f3`)
+  verbatim
 
 ### Fixed
 - Command channel end-to-end: `on_app_message` transport handler
@@ -1389,15 +1386,13 @@ state).
   envelopes, room eviction for stale same-room sessions (504s into a
   zombie session), NVS writes on an internal-RAM stack (PSRAM stack +
   flash-cache suspend = double fault), asymmetric liveness protocol
-  (probe/pong without reply-to-reply loop) (`fd3fb32`…`3a9da0d`)
+  (probe/pong without reply-to-reply loop)
 - Renames carry the `room_zones` mapping key — no ghost rows, no
-  orphaned zone routing (`7465111`)
+  orphaned zone routing
 - Sync pipeline: host `config.yaml` is now authoritative —
   `sync_host.sh` PULLS it to the dev machine, never pushes (push-every-sync
-  clobbered dashboard-written `room_zones` twice) (`26208bf`)
-- Stale-session disconnects no longer mark a live room offline
-  (`b7137d0`); payload schemas drop the redundant `room` field
-  (`8777e85`)
+  clobbered dashboard-written `room_zones` twice)
+- Stale-session disconnects no longer mark a live room offline; payload schemas drop the redundant `room` field
 
 ## [0.3.0] — 2026-09-29
 
@@ -1409,22 +1404,20 @@ management, and test clips, all served by the bot process itself.
   mapping page, live node list, Sonos LAN discovery (soco), per-zone
   test clips, status strip. Served by the bot's own FastAPI app on
   :7860 (same pattern as firmware_server); no new process or port
-  (`ce8b35f`)
 - Offer tee (pure ASGI): correlates the node firmware's `room` field
   in POST /api/offer with pipecat's server-side pc_id at
   response-send time — the pipeline runs as the offer request's
   background task, so session-end correlation is minutes too late
-  (measured live; `ce81afb`)
+  (measured live)
 - Room-aware reply routing: wake gate `on_wake` hook + SonosOutput
   `zone_selector` — a wake in a mapped room plays the reply clip in
   that room's zone; unmapped falls back to `sonos.default_zone`
-  (`ce8b35f`)
 - Dashboard config writes: comment-preserving config.yaml round-trip
   (ruamel.yaml), atomic write + rolling backup, config cache
-  invalidated so reads reflect writes immediately (`ce8b35f`)
+  invalidated so reads reflect writes immediately
 - `room_zones:` and `dashboard.enabled:` config sections; new deps
   soco 0.31.4 + ruamel.yaml 0.19.1 (optional at boot — voice runs
-  without them, `f47f6a0`)
+  without them)
 - `scripts/test_dashboard.py`: 20-check offline test harness (fakes /api/offer
   in both immediate and background-task shapes; exercises the tee,
   registry, config round-trips, validation, and a live Sonos test
@@ -1471,12 +1464,12 @@ new tuning knobs.
 - requirements.txt: fresh-clone booby traps — missing `lameenc`,
   `sonos-websocket`, `pipecat-ai-prebuilt` (fresh install died at the
   first spoken reply); TTS code default was the repo's own
-  measured-broken `eleven_v3` (`3db43e4`)
+  measured-broken `eleven_v3`
 - OWW wake gate fed 640 samples per chunk (1280 *bytes* labeled "80ms")
   — half openWakeWord's canonical 1280-sample frame, 2x inference on
-  the 24/7 hot path; now 2560 bytes (`443b8e2`)
+  the 24/7 hot path; now 2560 bytes
 - containment_test Case 3 had `or True` — an assertion structurally
-  unable to fail; now asserts real output (`766bd4d`)
+  unable to fail; now asserts real output
 - intelligence outage now speaks a fallback line instead of filler-then-silence
 
 ### Added
@@ -1498,26 +1491,26 @@ whisper STT → Hermes intelligence → ElevenLabs TTS → Sonos audioClip overl
 running as a systemd service.
 
 ### Added
-- Initial bot: local whisper ears, stub intelligence, ElevenLabs mouth (`8a8e8a8`)
+- Initial bot: local whisper ears, stub intelligence, ElevenLabs mouth
 - sonos_output: Sonos audioClip overlay — clip volume ~70, ~200ms load,
-  opportunistic clip pruning at startup (`20c2a72`)
-- config.yaml as the single tuning surface (yaml > `LVI_*` env > code default) (`96ce51b`)
-- systemd service: boot survival, crash-restart, journald logging (`3a588e0`)
-- `scripts/sync_host.sh`: bundle-based host sync, no creds on hosts (`11b16eb`)
-- requirements.txt with pinned top-level deps (pipecat 1.11.0) (`f4d4203`)
+  opportunistic clip pruning at startup
+- config.yaml as the single tuning surface (yaml > `LVI_*` env > code default)
+- systemd service: boot survival, crash-restart, journald logging
+- `scripts/sync_host.sh`: bundle-based host sync, no creds on hosts
+- requirements.txt with pinned top-level deps (pipecat 1.11.0)
 
 ### Changed
 - `.env` is secrets-only (3 lines); all behavior lives in config.yaml;
-  `config.example.yaml` is the committed template (`1993d34`, `c67ff7c`)
-- Clip retention 7d → 48h (serve-once garbage) (`ca0e4fb`)
-- README rewritten: config surface and fresh-clone path documented (`fc10870`, `127f4a6`)
-- AGENTS.md/CLAUDE.md carried by sync_host (reset deleted them) (`1434922`)
+  `config.example.yaml` is the committed template
+- Clip retention 7d → 48h (serve-once garbage)
+- README rewritten: config surface and fresh-clone path documented
+- AGENTS.md/CLAUDE.md carried by sync_host (reset deleted them)
 
 ### Removed
 - Chatterbox local TTS lane removed entirely — production TTS is
-  ElevenLabs only (`fede243` → parked `5b593c8` → removed `1ce3941`)
-- Dead one-shot scripts: replay_clip, sonos_voice_test, ws_probe (`05157f8`)
+  ElevenLabs only (added, then parked, then removed)
+- Dead one-shot scripts: replay_clip, sonos_voice_test, ws_probe
 
 ### Fixed
 - TTS voice clobber: yaml default overrode production — pinned
-  eleven_flash_v2_5 (`fb0cf94`)
+  eleven_flash_v2_5
