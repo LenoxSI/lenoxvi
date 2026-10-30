@@ -6,7 +6,7 @@ written relative to the cwd while the firmware server read from the repo,
 so they only lined up because systemd starts the bot in the repo. Every
 call reads the environment at call time (tests point LVI_STATE_DIR at a
 scratch folder). The older per-file overrides still win: LVI_MODELS_DIR,
-LVI_SESSIONS, LVI_ENV_FILE (and LVI_CAPTURES_DIR in room_recorder).
+LVI_SESSIONS, LVI_ENV_FILE.
 With LVI_STATE_DIR unset every path is exactly where it always was (the repo).
 """
 import os

@@ -16,7 +16,6 @@ from typing import Any, Callable
 import localai
 from loguru import logger
 
-_ACTIVE = {"engine": "localai"}
 _BASE_LOCK = threading.Lock()
 _BASE = {"failed": None}
 
@@ -56,13 +55,7 @@ class _Info:
 
 
 def _reset_for_tests() -> None:
-    _ACTIVE["engine"] = "localai"
     _BASE["failed"] = None
-
-
-def active() -> str:
-    """Which engine heard the last utterance: "localai" or "whisper"."""
-    return _ACTIVE["engine"]
 
 
 def status() -> dict:
@@ -108,8 +101,6 @@ class LocalAIWhisper:
             except Exception as e:  # noqa: BLE001 — never lose the clip to a client bug
                 logger.warning(f"stt localai: {type(e).__name__} — Whisper base takes this turn")
             else:
-                _ACTIVE["engine"] = "localai"
                 return [_Segment(text)], _Info(language)
-        _ACTIVE["engine"] = "whisper"
         return self._fallback().transcribe(io.BytesIO(data), language=language,
                                            beam_size=beam_size, vad_filter=vad_filter)

@@ -3,7 +3,6 @@
 // upgrade slot (alt 1) only; alt 0 is the chip's recovery copy and is never selected.
 
 export const XMOS_VENDOR_ID = 0x2886
-export const XMOS_LINES = ['array', 'flex']
 export const XMOS_IMAGES = {
   array: {
     repo: 'respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY',

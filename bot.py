@@ -45,7 +45,6 @@ import intelligence as intelligence_lanes
 from sonos_output import SonosOutput
 from wiim_output import WiiMOutput
 from stt_local import LocalWhisperSTTService
-from room_recorder import RecorderTap
 from wake_word import WakeWordFilter
 import keys_catalog
 import tts_text
@@ -607,8 +606,6 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         Pipeline(
             [
                 transport.input(),
-                # room recorder tap: raw node audio, before any gating
-                RecorderTap(_pipeline_room),
                 # wake gate AFTER the source (frames flow downstream from
                 # transport.input()), BEFORE VAD/STT: gates audio in IDLE/LOCKED
                 *([wake_filter] if wake_filter else []),

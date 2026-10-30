@@ -26,7 +26,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -38,14 +38,13 @@ import intelligence
 from intelligence import target as intelligence_target
 import node_speaker
 from paths import clips_dir, firmware_dir, models_dir, state_root, wake_root
-import room_recorder
 import stt_catalog
 import tts_catalog
 import tts_kokoro
 import wake_name
 
 from . import config_store, node_command, registry
-from .guard import mutation_guard, recording_guard
+from .guard import mutation_guard
 
 class _DashboardRoute(APIRoute):
     """Dashboard routes answer their OWN validation errors (2026-10-13).
@@ -84,8 +83,6 @@ router = APIRouter(prefix="/api/dashboard", route_class=_DashboardRoute)
 # Every mutating route gets the Origin/Host guard (+optional
 # LVI_DASHBOARD_TOKEN check) — see guard.py.
 GUARD = [Depends(mutation_guard)]
-# The recorder routes also need a token to be configured at all.
-RECORDER_GUARD = [*GUARD, Depends(recording_guard)]
 
 
 # ── models ───────────────────────────────────────────────────────────
@@ -190,7 +187,7 @@ async def status():
         # "intelligence" — one name, everywhere (naming rule).
         "intelligence": _intelligence_label(),
         "last_wake": registry.last_wake(),
-        "rooms": registry.known_rooms(),
+        "rooms": [{k: v for k, v in r.items() if k != "speaker_ok"} for r in registry.known_rooms()],
         # Session modes (fresh | sticky per node) — the dashboard renders
         # these as the per-node checkbox; sticky rooms keep conversation
         # memory across reconnects/restarts.
@@ -198,7 +195,6 @@ async def status():
         # Saved settings the running bot hasn't loaded yet (labels only).
         # Off the loop: the key half reads .env.
         "restart_pending": await asyncio.to_thread(_restart_pending),
-        "note": "config edits apply on the next bot restart",
     }
 
 
@@ -298,58 +294,18 @@ def _backend_of(name: str) -> str:
     return "wiim" if name in _wiim_zones() else "sonos"
 
 
-def _sonos_names(zones: dict) -> dict:
-    """Live player_name per zone key (soco, per-IP). Missing/unreachable
-    players just don't get a name — the config key still displays.
-    Display-only: the Sonos-side
-    name shows verbatim for mapping UX; routing stays keyed on the
-    config key + UID so a Sonos-side rename can't orphan a mapping.
-    SYNC soco network calls — caller MUST run this in a thread (this
-    is the voice pipeline's event loop)."""
-    out = {}
-    for key, z in zones.items():
-        ip = (z or {}).get("ip")
-        if not ip:
-            continue
-        try:
-            import soco
-
-            player = soco.SoCo(ip)
-            uid = player.uid
-            if (z or {}).get("player_uid") and uid != z.get("player_uid"):
-                logger.warning(f"zones: '{key}' UID mismatch — sonos says {uid}, config says {z.get('player_uid')}")
-            out[key] = player.player_name
-        except ImportError:
-            break  # soco absent: skip the whole enrichment, keys still display
-        except Exception as e:
-            logger.debug(f"zones: sonos name fetch failed for '{key}' ({ip}): {e}")
-    return out
-
-
 @router.get("/mapping")
-async def get_mapping(names: bool = False):
+async def get_mapping():
     zones = _all_zones()
     out = {
         "room_zones": dict(config_store.read_section("room_zones") or {}),
         "room_agents": dict(config_store.read_section("room_agents") or {}),
         **_agent_default(),
-        "zones": zones,
-        "default_zone": cfg("sonos", "default_zone"),
-        # Per-zone clip volumes (slider lane): config copy + live layer,
-        # merged across both output backends.
-        "zone_volumes": {**(cfg("sonos", "zone_volumes") or {}),
-                         **(cfg("wiim", "zone_volumes") or {})},
-        "clip_volume": cfg("sonos", "clip_volume"),
+        "zones": {name: {k: v for k, v in z.items() if k != "player_uid"} for name, z in zones.items()},
         # What each zone ACTUALLY plays at — the slider's only
         # source (the UI's own `?? 70` fallback disagreed with the backends).
         "effective_volumes": {z: effective_zone_volume(z) for z in zones},
     }
-    # Sonos display names are OPT-IN (?names=1). The
-    # React UI polls /mapping every 5s and never reads them, yet every poll
-    # ran soco network calls against EVERY zone — including WiiM IPs,
-    # which a Sonos client can't answer (an offline player = a timeout per
-    # poll). Sonos zones only. Still threaded when asked (this
-    # is the voice pipeline's event loop).
     # speaker nodes — their private built-in zone (never in "zones").
     # Listed when the board can have one, or config already maps it there
     # (an offline node after a restart keeps its row).
@@ -363,8 +319,6 @@ async def get_mapping(names: bool = False):
                "speaker_ok": online.get(room, {}).get("speaker_ok")}
         for room in spk_rooms
     }
-    if names:
-        out["sonos_names"] = await asyncio.to_thread(_sonos_names, _zones())
     return out
 
 
@@ -537,32 +491,11 @@ async def discover_zones():
         # soco UPnP discovery blocks 5s+ — off the event loop.
         for z in await asyncio.to_thread(soco.discover, timeout=5) or []:
             try:
-                # soco API (0.31.4): SoCo has NO .model_name attribute —
-                # model lives in get_speaker_info()["model_name"] (a
-                # per-device UPnP call, so it rides the SAME thread as
-                # discovery). player_name IS a direct attribute
-                # (cached from get_speaker_info). The first cut read
-                # z.model_name, which raised AttributeError per device —
-                # the swallow-all handler turned "found the Port" into
-                # {"found": []} silently (2026-10-03, dashboard button test).
-                info = await asyncio.to_thread(z.get_speaker_info) or {}
-                model = (info.get("model_name") or "").strip()
-                # soco reports "Sonos Port"/"Sonos Amp" with the prefix —
-                # normalize before the supported check, else the flag lies
-                # false for the exact device the audioClip path is proven on.
-                model_norm = model.removeprefix("Sonos").strip()
-                found.append(
-                    {
-                        "ip": z.ip_address,
-                        "name": z.player_name,
-                        "uid": z.uid,
-                        "model": model,
-                        # The proven audioClip path is S2 Port/Amp only;
-                        # everything else is at the
-                        # user's own risk and labeled as such.
-                        "supported": model_norm in ("Port", "Amp"),
-                    }
-                )
+                # player_name is cached by get_speaker_info (a per-device
+                # UPnP call): run it in the thread so the read below never
+                # blocks the event loop.
+                await asyncio.to_thread(z.get_speaker_info)
+                found.append({"ip": z.ip_address, "name": z.player_name, "uid": z.uid})
             except Exception as e:  # one flaky device must not kill the scan
                 logger.warning(f"discover: skipped a device: {e!r}")
     except Exception as e:
@@ -1064,56 +997,6 @@ async def set_node_mute(room: str, payload: MutePayload):
     return reply  # {"ok": true, "data": {"muted": bool}}
 
 
-class RecordPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    seconds: int = Field(ge=1, le=room_recorder.MAX_SECONDS)
-
-
-@router.post("/nodes/{room}/record", dependencies=RECORDER_GUARD)
-async def start_recording(room: str, payload: RecordPayload):
-    """Record this room's raw mic audio for `seconds` (max 10 min) to a
-    WAV on the appliance. Only an online room; one recording per room."""
-    _room_online(room)
-    try:
-        return {"ok": True, **room_recorder.start(room, payload.seconds)}
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
-
-
-@router.post("/nodes/{room}/record/stop", dependencies=RECORDER_GUARD)
-async def stop_recording(room: str):
-    try:
-        done = await room_recorder.stop(room)
-    except OSError:
-        # The recorder logged why; the answer carries no path or error text.
-        raise HTTPException(status_code=500, detail="the recording could not be saved") from None
-    if done is None:
-        raise HTTPException(status_code=404, detail=f"'{room}' is not recording")
-    return {"ok": True, **done}
-
-
-@router.get("/recordings", dependencies=RECORDER_GUARD)
-async def list_recordings():
-    return room_recorder.listing()
-
-
-@router.get("/recordings/{name}", dependencies=RECORDER_GUARD)
-async def get_recording(name: str):
-    p = room_recorder.path_for(name)
-    if p is None:
-        raise HTTPException(status_code=404, detail="no such recording")
-    return FileResponse(p, media_type="audio/wav", filename=p.name)
-
-
-@router.delete("/recordings/{name}", dependencies=RECORDER_GUARD)
-async def delete_recording(name: str):
-    p = room_recorder.path_for(name)
-    if p is None:
-        raise HTTPException(status_code=404, detail="no such recording")
-    p.unlink()
-    return {"ok": True, "deleted": name}
-
-
 @router.get("/nodes/{room}/info", dependencies=GUARD)
 async def node_info(room: str):
     """Live node state (2026-10-07): the dashboard refreshes its Mute
@@ -1356,8 +1239,6 @@ async def get_tts():
         "kokoro_speed": _cfg_env("kokoro_speed", "LVI_TTS_KOKORO_SPEED"),
         "localai_model_tts": _localai_saved()["model_tts"],
         "localai_voice": _localai_saved()["voice"],
-        "elevenlabs_key_set": bool(_os.getenv("ELEVENLABS_API_KEY")),
-        "deepgram_key_set": bool(_os.getenv("DEEPGRAM_API_KEY")),
         # First 4 characters of a set key, so a wrong key is recognisable.
         "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
         "localai_key_hint": intelligence_target.key_hint(_saved_env().get("LVI_LOCALAI_KEY")),
@@ -1370,8 +1251,6 @@ async def get_tts():
         # pick-lists (elevenlabs = model ids; deepgram* and kokoro = voices;
         # pocket = LocalAI's pocket-tts voices for the LocalAI voice picker).
         "catalog": TTS_CATALOG,
-        "note": "provider/voice/model apply on next bot restart; keys apply "
-                "on next bot restart (read at pipeline construction)",
     }
 
 
@@ -1777,9 +1656,10 @@ class LocalAIPayload(BaseModel):
 
 @router.get("/localai")
 async def get_localai():
-    """Saved LocalAI settings + whether its key is saved. Never the key."""
+    """Saved LocalAI URL + speech-to-text model, and whether its key is
+    saved. Never the key."""
     s = _localai_saved()
-    return {**s, "key_set": bool(_key_saved_value("LVI_LOCALAI_KEY")), "problem": _localai_problem()}
+    return {"url": s["url"], "model_stt": s["model_stt"], "key_set": bool(_key_saved_value("LVI_LOCALAI_KEY"))}
 
 
 @router.put("/localai", dependencies=GUARD)
@@ -1921,8 +1801,7 @@ async def get_intelligence():
     # Key law (strict, 2026-10-08): each kind reads exactly ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY; nanobot:
     # LVI_NANOBOT_KEY. No cross-kind fallback anywhere (a fallback turned a
-    # missing key into a silent wrong-token outage once). key_kind names
-    # the variable.
+    # missing key into a silent wrong-token outage once).
     # keys_set: status for EVERY kind, so the UI chip shows
     # the key of the kind on screen, not the kind in config.
     _kv = INTELLIGENCE_KEY_VARS.get(kind, intelligence.LANES[intelligence.DEFAULT_KIND].base_key_var)
@@ -1930,16 +1809,11 @@ async def get_intelligence():
         "kind": kind,
         "url": intelligence_cfg.get("url") or _env.get("LVI_HERMES_URL"),
         "urls": intelligence_cfg.get("urls") or {},
-        "agent": intelligence_cfg.get("agent"),
         # Live agent per kind (hermes "default" = the main agent).
         "agents": {k: (intelligence_target.agent_for(intelligence_cfg, k) or lane.default_agent)
                    for k, lane in intelligence.LANES.items()},
         "key_set": bool(_env.get(_kv)),
         "keys_set": {k: bool(_env.get(v)) for k, v in INTELLIGENCE_KEY_VARS.items()},
-        "key_hints": {k: intelligence_target.key_hint(_env.get(v))
-                      for k, v in INTELLIGENCE_KEY_VARS.items()},
-        "key_kind": _kv.lower() if _env.get(_kv) else None,
-        "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
 
@@ -2103,7 +1977,7 @@ class IntelligenceAgentsPayload(BaseModel):
 
 @router.post("/intelligence/agents", dependencies=GUARD)
 async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
-    """List the agents the provider offers, each with key status + hint.
+    """List the agents the provider offers, each with key status.
     OpenClaw: its /v1/models. Nanobot: its /v1/models (its one configured
     model). Hermes: the profiles on its gateway (the Hermes dashboard's
     public status route; falls back to the default agent). Never returns a
@@ -2121,8 +1995,9 @@ async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
         intelligence_target.discover_agents, payload.kind, url, _saved_env(), 4.0,
         icfg.get(lane.status_url_key) if lane.status_url_key else None,
         attach_key)
-    result["selected"] = intelligence_target.agent_for(icfg, payload.kind) or lane.default_agent
-    return result
+    return {"agents": [{"id": a["id"], "key_set": a["key_set"]} for a in result["agents"]],
+            "note": result.get("note"),
+            "selected": intelligence_target.agent_for(icfg, payload.kind) or lane.default_agent}
 
 
 @router.post("/intelligence/test", dependencies=GUARD)
@@ -2361,7 +2236,6 @@ async def get_voice_tuning():
         "vad_min_volume": vad.get("min_volume"),
         "lull_secs": intelligence_cfg.get("lull_secs"),
         "dedup_window": intelligence_cfg.get("dedup_window"),
-        "note": "applies on the next bot restart (read at pipeline construction)",
     }
 
 
@@ -2437,10 +2311,6 @@ def _oww_active_path() -> Path:
         return Path(value).resolve()
 
 
-def _oww_current() -> str:
-    return _oww_active_path().name
-
-
 def _oww_validate(data: bytes) -> None:
     """Load-and-one-test-inference against the SAME library and shape the
     pipeline feeds (loaded-gun rule: a model that can't run
@@ -2501,7 +2371,7 @@ async def oww_list_models():
         out.append({"name": key, "size": p.stat().st_size if p.is_file() else 0,
                     "source": "stock", "license": wake_name.STOCK_LICENSE,
                     "path": str(p.resolve()), "selected": p.resolve() == active})
-    return {"models": out, "current": active.name}
+    return {"models": out}
 
 
 # One swap lock per model name: same-name uploads each stage to their
@@ -2611,8 +2481,8 @@ class WakePayload(BaseModel):
 
 @router.get("/wake")
 async def get_wake():
-    """The wake name card: the name (wake.name, "" if unset) and the model."""
-    return {"name": wake_name.name(), "model": wake_name.model_value()}
+    """The wake name card: the name (wake.name, "" if unset)."""
+    return {"name": wake_name.name()}
 
 
 @router.put("/wake", dependencies=GUARD)

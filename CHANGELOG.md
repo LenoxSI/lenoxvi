@@ -8,6 +8,26 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Breaking
+- The room recorder is removed: `POST /api/dashboard/nodes/<room>/record`, `POST …/record/stop`,
+  `GET /api/dashboard/recordings`, `GET` and `DELETE /api/dashboard/recordings/<file>` are gone, and so is
+  `LVI_CAPTURES_DIR`. Old recordings in `captures/` are not deleted for you (git still ignores the folder).
+- `GET /api/dashboard/mapping` no longer takes `?names=1` (no `sonos_names` lookup).
+- Dashboard API fields nothing read are removed:
+  - `GET /status`: `note`; on each room, `first_seen`, `speaker` and `speaker_ok` (`speaker_ok` stays on
+    `/mapping`'s `speakers`).
+  - `GET /mapping`: `default_zone`, `zone_volumes`, `clip_volume`, and `player_uid` on each zone
+    (`effective_volumes` is the volume to read).
+  - `GET /tts`: `elevenlabs_key_set`, `deepgram_key_set`, `note` (the `*_key_hint` fields remain; `/stt` keeps
+    its `*_key_set`).
+  - `GET /intelligence`: `agent` (read `agents`), `key_hints`, `key_kind`, `note`.
+  - `GET /voice-tuning`: `note`.
+  - `GET /localai`: `model_tts`, `voice`, `speed`, `problem` (it now answers `url`, `model_stt`, `key_set`).
+  - `GET /wake`: `model`.
+  - `GET /oww/models`: `current` (each model's `selected` marks the active one).
+  - `POST /intelligence/agents`: `source`, and `key_hint` on each agent.
+  - `POST /zones/discover`: `model`, `supported` on each player.
+
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
 A patch release: aiohttp 3.14.4 closes eight advisories (several in the clip server), long agent turns now keep you

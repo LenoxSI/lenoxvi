@@ -93,7 +93,6 @@ test('xmos: contract — frozen API and pinned images', () => {
   assert.equal(typeof XmosDfu, 'function'); assert.equal(typeof XmosDfu.request, 'function')
   assert.ok(new XmosError('no-line', 'm') instanceof Error)
   assert.equal(x.XMOS_VENDOR_ID, 0x2886)
-  assert.deepEqual(x.XMOS_LINES, ['array', 'flex'])
   assert.deepEqual(Object.keys(XMOS_IMAGES).sort(), ['array', 'flex'])
   assert.equal(XMOS_IMAGES.array.sha256, 'd60d0bc2c7f5a67ffa9c9206e066b2d8f1ccb49ebba673f3a7bcff1cf197dfb2')
   assert.equal(XMOS_IMAGES.flex.sha256, 'd1132b7e779818923072396315304a5dd2324aa56969b4111b30678f968a7c6a')

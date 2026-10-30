@@ -247,7 +247,7 @@ const H2 = ({ children }) => (
   <h2 className="font-display text-[18px] leading-[28px] font-semibold m-0">{children}</h2>
 )
 
-function Section({ id, title, note, action, children }) {
+function Section({ id, title, note, children }) {
   return (
     <section id={id} className="grid grid-cols-1 gap-3 scroll-mt-[110px]">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -255,20 +255,19 @@ function Section({ id, title, note, action, children }) {
           <H2>{title}</H2>
           {note ? <p className="text-[14px] leading-5 text-[var(--muted)] m-0 max-w-[680px]">{note}</p> : null}
         </div>
-        {action}
       </div>
       {children}
     </section>
   )
 }
 
-function Field({ label, children, right, between }) {
+function Field({ label, children, between }) {
   // grid-cols-1 + minWidth 0: a long select can't widen the field past its
   // row (an implicit grid track grows to the content on phones).
   return (
     <div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>
       <span className="text-[12px] font-medium text-[var(--muted)]">{label}</span>
-      <div className={`flex items-center gap-2 flex-wrap${right ? ' justify-end' : ''}${between ? ' justify-between' : ''}`}>
+      <div className={`flex items-center gap-2 flex-wrap${between ? ' justify-between' : ''}`}>
         {children}
       </div>
     </div>

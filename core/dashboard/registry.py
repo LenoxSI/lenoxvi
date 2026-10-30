@@ -31,7 +31,7 @@ _version = "unknown"
 
 _boot_time = None
 _room_by_pc = {}  # pc_id -> room ("unknown" = provisional, awaiting offer tee)
-_known_rooms = {}  # room -> {"online": bool, "first_seen": ts, "last_seen": ts}
+_known_rooms = {}  # room -> {"online": bool, "last_seen": ts}
 _out_by_pc = {}  # pc_id -> output transport (DIRECT data-channel wire)
 _fw_by_pc = {}  # pc_id -> running fw version (held through the provisional window)
 _muted_by_pc = {}  # pc_id -> mic mute state (held the same way as fw)
@@ -158,7 +158,7 @@ def note_firmware(pc_id: str, version: str) -> None:
         # version keyed by pc_id; note_offer promotes it with the room.
         _fw_by_pc[pc_id] = version
         return
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["fw"] = version
 
 
@@ -174,7 +174,7 @@ def note_line(pc_id: str, line: str) -> None:
     if not room or room == PROVISIONAL:
         _line_by_pc[pc_id] = line
         return
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["line"] = line
     rec["speaker_ok"] = None  # new session: last boot's speaker proof is void
 
@@ -198,10 +198,6 @@ def capable_rooms() -> list:
     return sorted(r for r in _known_rooms if r != PROVISIONAL and speaker_capable(r))
 
 
-def speaker_rooms() -> list:
-    return sorted(r for r in _known_rooms if r != PROVISIONAL and has_speaker(r))
-
-
 def note_speaker_ok(pc_id: str, ok) -> bool:
     """The node's set_speaker reply says whether its speaker came up this
     boot (None until it answers). Returns True when this is the FIRST proof
@@ -209,7 +205,7 @@ def note_speaker_ok(pc_id: str, ok) -> bool:
     room = _room_by_pc.get(pc_id)
     if not room or room == PROVISIONAL or not isinstance(ok, bool):
         return False
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     became = ok is True and rec.get("speaker_ok") is not True
     rec["speaker_ok"] = ok
     return became
@@ -240,7 +236,7 @@ def note_boot_flags(pc_id: str, rejected, wifi_rollback) -> None:
     if not room or room == PROVISIONAL:
         _boot_flags_by_pc[pc_id] = flags
         return
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["fw_rejected"], rec["wifi_rollback"] = flags
 
 
@@ -248,7 +244,7 @@ def note_muted_room(room: str, muted: bool) -> None:
     """Mute state by room (the set_mute route's ack lands here)."""
     if not room or room == PROVISIONAL:
         return
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["muted"] = bool(muted)
 
 
@@ -262,7 +258,7 @@ def _drain_held(pc_id, label) -> None:
     held_flags = _boot_flags_by_pc.pop(pc_id, None)
     if held_fw is None and held_muted is None and held_line is None and held_flags is None:
         return
-    rec = _known_rooms.setdefault(label, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(label, {"online": False})
     if held_fw:
         rec["fw"] = held_fw
     if held_line:
@@ -283,7 +279,7 @@ def note_tts(room: str | None, provider: str, usable: bool) -> None:
     ignored (browser sessions have no room TTS worth reporting)."""
     if not room or room == PROVISIONAL:
         return
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": time.time()})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["tts_provider"] = provider
     rec["tts_usable"] = bool(usable)
 
@@ -309,9 +305,7 @@ def note_offer(pc_id, room):
         _room_by_pc[pc_id] = label
         if PROVISIONAL not in _room_by_pc.values():
             _known_rooms.pop(PROVISIONAL, None)
-        rec = _known_rooms.setdefault(
-            label, {"online": False, "first_seen": time.time()}
-        )
+        rec = _known_rooms.setdefault(label, {"online": False})
         rec["online"] = True
         rec["last_seen"] = time.time()
         # fw_push raced the tee (connect window): carry the held version
@@ -339,7 +333,7 @@ def mark_connected(pc_id):
         if pc_id:
             _room_by_pc[pc_id] = room
     now = time.time()
-    rec = _known_rooms.setdefault(room, {"online": False, "first_seen": now})
+    rec = _known_rooms.setdefault(room, {"online": False})
     rec["online"] = True
     rec["last_seen"] = now
 
@@ -444,14 +438,13 @@ def last_wake():
 
 
 def known_rooms():
-    """[{room, online, first_seen, last_seen}] sorted by name."""
+    """[{room, online, last_seen, ...}] sorted by name."""
     out = []
     for room, rec in _known_rooms.items():
         out.append(
             {
                 "room": room,
                 "online": bool(rec.get("online")),
-                "first_seen": rec.get("first_seen"),
                 "last_seen": rec.get("last_seen"),
                 "fw": rec.get("fw"),  # running version (fw_push, 1.1.2)
                 # fw_push, 1.2.41+: the OTA version this node rolled back
@@ -472,9 +465,9 @@ def known_rooms():
                 # reported it (older firmware); the dashboard then asks
                 # get_info instead.
                 "muted": rec.get("muted"),
-                # built-in speaker (board line) + whether it came up
-                # this boot (set_speaker reply; None = not answered yet).
-                "speaker": speaker_capable(room),
+                # whether the built-in speaker came up this boot
+                # (set_speaker reply; None = not answered yet). Read by
+                # /mapping's speakers; /status leaves it out.
                 "speaker_ok": rec.get("speaker_ok"),
             }
         )

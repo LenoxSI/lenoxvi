@@ -24,11 +24,6 @@ leave it unset (nothing changes); set it if you expose the dashboard
 beyond the LAN (against advice) or just want belt-and-suspenders. The
 dashboard page prompts for it once and remembers it in localStorage.
 Read routes stay open either way.
-
-Recording a room is the exception: hearing a room is not the same trust as
-editing a mapping, so the recorder routes (start, stop, list, download,
-delete) refuse outright unless LVI_DASHBOARD_TOKEN is set, and with it set
-they require the token like every guarded route.
 """
 
 import hmac
@@ -105,13 +100,3 @@ def mutation_guard(request: Request) -> None:
             raise HTTPException(
                 status_code=401, detail="dashboard: invalid or missing token"
             )
-
-
-def recording_guard() -> None:
-    """FastAPI dependency for the recorder routes, after mutation_guard:
-    no token configured = no recording, for anyone on the LAN."""
-    if not os.environ.get("LVI_DASHBOARD_TOKEN", ""):
-        raise HTTPException(
-            status_code=403,
-            detail="recording needs a dashboard token: set LVI_DASHBOARD_TOKEN",
-        )

@@ -34,7 +34,6 @@ import urllib.parse
 import intelligence
 from intelligence.base import AGENT_RE, get_json  # noqa: F401 — re-exported
 
-BASE_KEY_VARS = {kind: lane.base_key_var for kind, lane in intelligence.LANES.items()}
 # The Hermes web dashboard's public status route lists the gateway's
 # profiles (the API server itself has no list endpoint).
 HERMES_STATUS_PORT = 9119
@@ -111,15 +110,6 @@ def http_error_message(err, key=None) -> str:
     if key:
         msg = msg.replace(key, "***")
     return " ".join(msg.split())[:200] or str(getattr(err, "reason", "") or "no detail")
-
-
-_get_json = get_json
-
-
-def _entry(kind: str, agent_id: str, env) -> dict:
-    var = key_var(kind, agent_id)
-    value = env.get(var) if var else None
-    return {"id": agent_id, "key_set": bool(value), "key_hint": key_hint(value)}
 
 
 def same_target(a: str, b: str) -> bool:
