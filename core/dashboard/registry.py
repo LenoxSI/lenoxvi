@@ -1,6 +1,6 @@
 """registry — runtime node/room state for the dashboard (process memory).
 
-Identity model (measured 2026-09-29 against the live stack):
+Identity model (measured against the live stack):
 - The mic node's firmware bakes a `room` string into every /api/offer
   JSON body (its zone-routing key, set at firmware build time). It sends
   NO per-device id and NO pc_id — pipecat generates pc_id SERVER-SIDE
@@ -251,7 +251,7 @@ def note_muted_room(room: str, muted: bool) -> None:
 def _drain_held(pc_id, label) -> None:
     """Release everything held for pc_id through the connect window (fw
     version, mute state) onto the now-known room record. EVERY path that
-    binds pc_id -> label must call this (the fw=None bug, 2026-10-09)."""
+    binds pc_id -> label must call this (the fw=None bug)."""
     held_fw = _fw_by_pc.pop(pc_id, None)
     held_muted = _muted_by_pc.pop(pc_id, None)
     held_line = _line_by_pc.pop(pc_id, None)

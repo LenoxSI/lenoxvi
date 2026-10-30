@@ -5,7 +5,7 @@ bundlePolicy=MAX_BUNDLE (added for screen share). With aiortc 1.15 the SDP
 answer then carries NO ICE candidates and a 0.0.0.0 connection address. The
 nodes run libpeer, which has no trickle ICE: the answer is the only place they
 learn where the bot is, so they never start connectivity checks and never
-connect (every node offline, 2026-10-21; tests/webrtc_answer_test.py pins it).
+connect (every node offline; tests/webrtc_answer_test.py pins it).
 
 Our nodes are audio + data channel only — no screen share — so aiortc's default
 bundle policy (the pipecat 1.11 behaviour) is the right one. apply() swaps the

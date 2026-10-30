@@ -7,7 +7,7 @@ the room to the app. This middleware tees the offer request body
 (room) and the answer response body (pc_id) WITHOUT consuming or
 mutating them, and records the pair in the dashboard registry.
 
-LANDMINE (measured live 2026-09-29): the bot pipeline runs as a
+LANDMINE (measured live): the bot pipeline runs as a
 Starlette BACKGROUND TASK of the offer request — `app(scope, receive,
 send)` does not return until the WebRTC session ENDS (the bot sets
 idle_timeout_secs=None). Correlating after `await self.app(...)`

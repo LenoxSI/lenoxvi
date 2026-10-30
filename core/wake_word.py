@@ -5,12 +5,12 @@ transcriptions: in IDLE/LOCKED the audio never reaches STT, so the GPU
 doesn't transcribe chatter and nothing can reach the intelligence. The wake
 listener itself always hears everything.
 
-Turn semantics (plan of record, 2026-09-15):
+Turn semantics (plan of record):
 - IDLE: audio feeds OWW only. The wake phrase (score >= threshold) -> AWAKE.
 - AWAKE: audio flows to VAD/STT (the intelligence works normally). Falls back to
   IDLE after AWAKE_TIMEOUT of no speech-start or bot-turn activity.
 - LOCKED: bot speaking. STT is gated; the wake listener is still fed
-  (since 2026-09-19 — starving OWW mid-turn caused false rewakes) but its
+  (starving OWW mid-turn caused false rewakes) but its
   score is ignored outside IDLE, so her voice can't re-wake herself, even
   if she literally says the wake phrase (e.g. when asked to repeat it).
 

@@ -17,7 +17,7 @@ it is mapped, and nothing is ducked for it.
 The processor is pass-through: frames continue downstream, so the browser
 client keeps its audio while Sonos gets the same reply.
 
-LED ring (2026-09-30): this processor is the REAL-TIME speaking signal —
+LED ring: this processor is the REAL-TIME speaking signal —
 it sits directly downstream of TTS, so TTSStarted/TTSStopped frames
 reach it the moment speech starts/ends, even while IntelligenceAgent is
 blocked on an intelligence call (the wake gate's speaking view rides upstream
@@ -183,7 +183,7 @@ def _write_clip(path: Path, data: bytes) -> None:
 
 
 async def _clip_prune_loop(clips_dir: Path, retention_days: int):
-    """Hourly clip prune (2026-09-20): the old construction-time-only prune
+    """Hourly clip prune: the old construction-time-only prune
     never fired on a quiet month — the node holds ONE long-lived session, so
     SonosOutput constructs ~once per boot, not per session. This task runs
     every hour regardless of restarts/sessions. Lives and dies with the bot

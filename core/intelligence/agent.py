@@ -508,9 +508,9 @@ class IntelligenceAgent(FrameProcessor):
     def _register_echo(self, text: str) -> None:
         """Arm `text` for echo containment — unless the TTS service is
         known-dead: it makes no sound, so its texts can never echo back,
-        and their words kept eating real follow-ups (2026-10-16: three
-        phantom texts held after a websocket death and swallowed the
-        user's repeat question)."""
+        and their words kept eating real follow-ups (three phantom
+        texts held after a websocket death and swallowed the user's
+        repeat question)."""
         if self._tts_is_usable is not None and not self._tts_is_usable():
             return
         self._echo_texts.append(text)

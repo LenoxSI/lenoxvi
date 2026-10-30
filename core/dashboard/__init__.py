@@ -6,7 +6,7 @@ extra process, no new ports, no build step.
 
 Design contract:
 - The page is the prebuilt React app in dashboard-ui/dist. The old
-  page.html thin JSON skin was deleted 2026-10-16 (dead since the
+  page.html thin JSON skin is deleted (dead since the
   HeroUI port, actively wrong vs the API). Endpoints are the stable
   contract (they are also what a future host-side integration would
   consume).

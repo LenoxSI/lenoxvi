@@ -3,7 +3,7 @@
 The nodes run libpeer: no trickle ICE, so the ANSWER is the only place they
 learn the bot's ICE candidates — an answer without `a=candidate` lines means
 the node never starts connectivity checks and never connects (pipecat 1.13's
-MAX_BUNDLE default did exactly that: every node offline, 2026-10-21). libpeer
+MAX_BUNDLE default did exactly that: every node offline). libpeer
 also copies each SDP line into a 256-byte buffer, so no line may reach 256.
 
 No network peer needed: aiortc answers a libpeer-shaped offer in-process,

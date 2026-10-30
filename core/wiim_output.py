@@ -2,7 +2,7 @@
 
 Sibling of sonos_output.py, same FrameProcessor contract (TTSStarted /
 TTSAudioRaw / TTSStopped → MP3 → clip server URL → play), but with WiiM
-semantics established by the 2026-10-04 arrival verify:
+semantics established by the arrival verify:
 
   - playPromptUrl is a STUB on this firmware generation (Linkplay
     4.8.827634): acks OK, never fetches. NOT used.

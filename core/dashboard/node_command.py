@@ -15,7 +15,7 @@ Liveness contract (zombie fix, ASYMMETRIC): the node probes every 5 min with
 {"evt":"cmd_result","cmd":"probe","data":"probe"}; the bot MUST answer
 {"cmd":"pong"} or the node reboots its session. The node consumes the
 pong silently — NO reply-to-reply (symmetric ping/pong looped ~1/sec
-for 12 min, measured 2026-09-29). This handler answers
+for 12 min, measured). This handler answers
 automatically — a quiet house never false-reboots a node.
 """
 

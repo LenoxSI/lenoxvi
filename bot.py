@@ -708,7 +708,7 @@ def _reclaim_session() -> None:
     Every session builds a fresh pipeline (wake model, Silero VAD, resamplers,
     WebRTC transport) that forms one big reference cycle, so refcounting can't
     free it — only the cyclic GC can. Python 3.14's incremental collector never
-    reached those cycles on this bot: measured 2026-10-14/15, ~74 MB + ~4
+    reached those cycles on this bot: measured, ~74 MB + ~4
     native threads per dead session, 110 sessions → 10.4 GB RSS / 406 threads,
     and one manual gc.collect() (injected via sys.remote_exec) freed 80 threads
     + 1.2 GB at once. The per-session native threads are NOT the openWakeWord

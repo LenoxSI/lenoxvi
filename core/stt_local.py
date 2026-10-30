@@ -144,7 +144,7 @@ def _rss_mb() -> int:
 def _trim_heap(why: str) -> None:
     """Hand freed heap back to the OS (glibc malloc_trim). Loading a model
     streams its weights through RAM; in a long-lived, fragmented heap that
-    transient peak was KEPT (2026-10-15: the first voice turn of a 7.5 h-old
+    transient peak was KEPT (the first voice turn of a 7.5 h-old
     process took the bot 768 MB -> 2.8 GB, of which only ~612 MB was the
     model's real cost). Never raises."""
     try:

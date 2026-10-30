@@ -9697,6 +9697,43 @@ def main():
     check("node setup ui: the file row names the expected image and its hash",
           "xmosImageName(dfu.line)" in _nsUI and "sha256.slice(0, 12)" in _nsUI, "no expected file shown")
 
+    # ── comment hygiene: zero calendar dates in comments and docstrings ──
+    # House law: dates are provenance git blame already carries, and dated
+    # incident narration leaks house history into a public repo. Full dates
+    # only (bare years are fine); comments AND docstrings of tracked .py
+    # files; string literals (test data) are not scanned. ────────────
+    import ast as _astCH
+    import io as _ioCH
+    import re as _reCH
+    import tokenize as _tkCH
+    _DRX_CH = _reCH.compile(r"\b(?:19|20)\d\d[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])\b"
+                            r"|\b(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])[-/](?:19|20)\d\d\b")
+    _dates_CH = []
+    for _py in REPO_CORE.parent.rglob("*.py"):
+        _rel = _py.relative_to(REPO_CORE.parent)
+        if any(_p.startswith(".") for _p in _rel.parts[:-1]) or "node_modules" in _rel.parts:
+            continue
+        try:
+            _src = _py.read_text(encoding="utf-8", errors="replace")
+            _texts = [t.string for t in _tkCH.generate_tokens(_ioCH.StringIO(_src).readline)
+                      if t.type == _tkCH.COMMENT]
+            _tree = _astCH.parse(_src)
+        except (SyntaxError, _tkCH.TokenError, IndentationError, ValueError):
+            continue
+        for _n in _astCH.walk(_tree):
+            if isinstance(_n, (_astCH.Module, _astCH.ClassDef, _astCH.FunctionDef, _astCH.AsyncFunctionDef)):
+                _b = _n.body
+                if (_b and isinstance(_b[0], _astCH.Expr)
+                        and isinstance(getattr(_b[0], "value", None), _astCH.Constant)
+                        and isinstance(_b[0].value.value, str)):
+                    _texts.append(_b[0].value.value)
+        for _t in _texts:
+            _m = _DRX_CH.search(_t)
+            if _m:
+                _dates_CH.append(f"{_rel}: {_m.group(0)}")
+    check("comment hygiene: zero calendar dates in comments and docstrings",
+          not _dates_CH, "; ".join(_dates_CH[:6]))
+
     # cleanup: restore nothing (throwaway dir), but show diff summary
     print()
     print(f"scratch dir kept for inspection: {SCRATCH}")

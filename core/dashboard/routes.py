@@ -47,7 +47,7 @@ from . import config_store, node_command, registry
 from .guard import mutation_guard
 
 class _DashboardRoute(APIRoute):
-    """Dashboard routes answer their OWN validation errors (2026-10-13).
+    """Dashboard routes answer their OWN validation errors.
 
     pipecat's runner installs an app-wide RequestValidationError handler
     (pipecat/runner/run.py:_configure_server_app) that (1) calls
@@ -285,7 +285,7 @@ def _all_zones() -> dict:
     """Merged zone namespace with backend tags: every zone (Sonos overlay
     or WiiM interrupt) in one dict. The backend tag decides which output
     path plays replies and how the test/volume routes behave
-    (2026-10-04, WiiM arrival)."""
+    (WiiM arrival)."""
     return {**{k: {**v, "backend": "sonos"} for k, v in _zones().items()},
             **{k: {**v, "backend": "wiim"} for k, v in _wiim_zones().items()}}
 
@@ -520,7 +520,7 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
     Two layers, one call: writes `sonos.zone_volumes` in config.yaml
     (durable, survives restarts) AND updates sonos_output's live override
     so the NEXT clip uses it immediately — volume tuning is a by-ear
-    loop and the restart contract would make it useless (2026-10-04).
+    loop and the restart contract would make it useless.
     Resolution: live override > config per-zone > global clip_volume.
     """
     from sonos_output import zone_volume_overrides
@@ -972,8 +972,8 @@ class MutePayload(BaseModel):
 
 @router.post("/nodes/{room}/mute", dependencies=GUARD)
 async def set_node_mute(room: str, payload: MutePayload):
-    """Mic mute. Flex since 1.1.0; BOTH lines since firmware 1.2.11
-    (2026-10-16): persisted on the node (survives reboot/OTA), and on an
+    """Mic mute. Flex since 1.1.0; BOTH lines since firmware 1.2.11:
+    persisted on the node (survives reboot/OTA), and on an
     array node it drives the same XMOS pin as the physical Mute button
     (red LED). The node echoes its resulting state in the ack; the room
     record follows it (and follows physical presses via mute_push).
@@ -999,7 +999,7 @@ async def set_node_mute(room: str, payload: MutePayload):
 
 @router.get("/nodes/{room}/info", dependencies=GUARD)
 async def node_info(room: str):
-    """Live node state (2026-10-07): the dashboard refreshes its Mute
+    """Live node state: the dashboard refreshes its Mute
     button from the node's OWN answer — get_info returns muted (flex
     1.1.0+; older firmware omits the key = unmuted). Component state
     dies on page refresh; the node's truth doesn't — this is the
@@ -1355,7 +1355,7 @@ _ENV_BACKUPS_KEPT = 3
 def _backup_env(env_path) -> None:
     """Before a key is REPLACED: copy .env to .env.bak-<time> (0600) and
     keep the newest few — a bad paste stays recoverable. A key line is
-    never deleted (the 2026-10-08 lesson), and neither is its last copy."""
+    never deleted, and neither is its last copy."""
     import os as _os
     import re as _re
     from datetime import datetime as _dt
@@ -2622,10 +2622,10 @@ async def upload_firmware(
 ):
     """Upload a firmware .bin; version comes from the image's embedded
     ESP app descriptor (magic 0xABCD5432 at byte 24; version string at
-    byte 48, NUL-padded — measured against the real image 2026-09-29,
+    byte 48, NUL-padded — measured against the real image,
     same string the node self-reports via get_info). Manifest written
     atomically in the same step: no typed-version mismatch is
-    possible (manual version entry removed 2026-09-29).
+    possible (manual version entry removed).
 
     Track-aware: the uploader declares which hardware line
     the image is for (array | flex | waveshare — one track vocabulary);

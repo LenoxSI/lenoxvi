@@ -25,8 +25,8 @@ line. Two independent witnesses:
        array <=1.2.8  "%.*s/firmware/%s"        (legacy URL, still served)
 
 Rule: exactly one URL marker is required. A named image (1.2.9+) must ALSO
-name the same line; a `node_esp32` image is judged by its marker alone (the
-2026-10-15 guard; verified 2026-10-16 against the served array 1.2.8 and
+name the same line; a `node_esp32` image is judged by its marker alone
+(verified against the served array 1.2.8 and
 flex 1.2.8 images). Anything else is None — never guessed onto a track.
 """
 

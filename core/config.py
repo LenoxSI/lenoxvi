@@ -1,4 +1,4 @@
-"""config — single source of truth for LenoxVI tunables (2026-09-19).
+"""config — single source of truth for LenoxVI tunables.
 
 config.yaml is where humans tune the bot. Precedence for every knob:
 
