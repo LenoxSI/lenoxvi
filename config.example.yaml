@@ -46,6 +46,9 @@ stt:
   #                      # localai | deepgram (Nova-3, DEEPGRAM_API_KEY) |
   #                      # elevenlabs (Scribe v2, ELEVENLABS_API_KEY)
   # language: en         # unset = auto-detect per utterance
+  # revive_cooldown_secs: 30   # min seconds between retries of a Local or Cloud
+  #                             # provider after it fell back to Embedded
+  #                             # (0 = retry as often as the fallback allows)
 
 # ── Text-to-speech ───────────────────────────────────────────────────────
 # Three tiers on the TTS card: Embedded (kokoro, on this machine, no keys),

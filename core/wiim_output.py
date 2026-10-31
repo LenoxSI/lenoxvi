@@ -403,7 +403,9 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
             try:
                 await asyncio.wait_for(self._restore_volume(ip, token, timeout=2.0),
                                        timeout=_RESTORE_ON_CANCEL_S)
-            except BaseException:  # noqa: BLE001 — best effort; the cancel itself still propagates
+            except Exception as e:  # noqa: BLE001 — best effort; the cancel itself still propagates
+                logger.warning(f"wiim_output: music volume restore on stop failed on '{zone_name}' ({ip}): {e!r}")
+            except BaseException:  # noqa: BLE001 — a second cancel mid-restore; the first still propagates
                 pass
             raise
         try:

@@ -46,6 +46,8 @@ The two version streams are independent.
   instead of failing every session build.
 - One failed duck-clip create no longer disables ducking for the rest of the session: the holder retries
   on the next wake, or every 30 s while awake.
+- WiiM: a failed music-volume restore while the bot is stopping is now logged with the zone instead of
+  being swallowed; `stt.revive_cooldown_secs` is documented in config.example.yaml.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
