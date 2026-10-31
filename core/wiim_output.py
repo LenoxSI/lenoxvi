@@ -24,7 +24,7 @@ semantics established by the arrival verify:
 
 Config: wiim: {enabled, default_zone, zones: {name: {ip}}, zone_volumes}
 — the same knob set Sonos has, minus player_uid (HTTP API is UID-less).
-default_zone is still read (old configs load fine) but no longer routes
+default_zone is still accepted (old configs load fine) but no longer routes
 replies: a room with no speaker mapping stays silent until it is mapped.
 Zone volume resolution mirrors sonos_output: live override (dashboard
 slider) > config wiim.zone_volumes > global clip_volume.
@@ -37,7 +37,9 @@ import time
 import urllib.request
 import urllib.parse
 import uuid
+from pathlib import Path
 
+import yaml
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -137,13 +139,13 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         # Optional sync callable returning the reply zone NAME (same
         # contract as SonosOutput's zone_selector — bot.py's _reply_zone).
         self._zone_selector = zone_selector
-        from config import cfg
-        wiim = cfg("wiim") or {}
         # enabled / zones / zone_volumes / clip_volume are read at reply time
         # (zone_config.LiveZoneConfig): adding the first WiiM zone on the
         # dashboard (which also enables the backend) reaches sessions that
-        # are already running. The clip server binds on first use.
-        self._zone = wiim.get("default_zone")  # read for old configs; never a reply fallback
+        # are already running. The clip server binds on first use. An
+        # explicit config_path (suite fixtures only) is read directly.
+        if config_path:
+            self._static_section = (yaml.safe_load(Path(config_path).read_text()) or {}).get("wiim") or {}
         # Clip server: process-wide singleton in sonos_output — bound in
         # setup() via shared_clip_server().
         self._clip_server = None

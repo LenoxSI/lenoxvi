@@ -64,6 +64,8 @@ The two version streams are independent.
   a healthy reconnect over to Whisper and dropped the turn's audio.
 - Local voices (Kokoro, LocalAI) read phone numbers ("555-123-4567", "(555) 123-4567", "+1 555 123 4567",
   "1-800-555-0199") and bare runs of ten or more digits digit by digit, instead of as billions or group by group.
+- Sonos: with the backend disabled, the duck holder no longer dips music on a mapped player or warns about
+  the duck clip; enabling the backend from the dashboard still ducks on sessions already running.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

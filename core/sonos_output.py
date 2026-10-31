@@ -10,7 +10,7 @@ Config (config.yaml):
     clip_server:
       host_ip, port
 
-default_zone is still read (old configs load fine) but no longer routes
+default_zone is still accepted (old configs load fine) but no longer routes
 replies: a room with no speaker mapping (`room_zones`) stays silent until
 it is mapped, and nothing is ducked for it.
 
@@ -307,7 +307,6 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # dashboard reaches sessions that are already running. Per-zone
         # volume: config `sonos.zone_volumes` is the durable copy; the live
         # layer (zone_volume_overrides below) is the slider's instant one.
-        self._zone = sonos.get("default_zone")  # read for old configs; never a reply fallback
         self._duck_while_awake = bool(sonos.get("duck_while_awake", True))
         # Opportunistic clip pruning: once per pipeline at
         # setup() (in a thread: the glob/stat/unlink pass grows with clips/)
@@ -538,12 +537,16 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         next_clip_try = 0.0
         was_awake = False
         try:
-            url = await _duck_clip_url()
+            # A disabled backend prepares nothing: the clip is made on the
+            # first wake after it is enabled.
+            url = await _duck_clip_url() if self._enabled else None
             while True:
                 await asyncio.sleep(0.5)
                 gate_state = getattr(self._wake_gate, "state", None)
                 state_val = getattr(gate_state, "value", gate_state)
-                awake = state_val not in (None, "idle")
+                # `enabled` is read live: a backend switched off mid-session
+                # releases its duck like a closed gate.
+                awake = state_val not in (None, "idle") and self._enabled
                 woke, was_awake = awake and not was_awake, awake
 
                 if not awake:
@@ -665,7 +668,10 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
     def _start_duck_holder(self) -> None:
         """Fire the eternal holder loop as a loop task (safe from any
         context). Started once per pipeline at setup; cancelled at
-        CancelFrame."""
+        CancelFrame. Started even while the backend is disabled: adding the
+        first zone on the dashboard enables it on running sessions, and the
+        loop reads `enabled` live (it never ducks or prepares a clip while
+        disabled)."""
         if not self._duck_while_awake or self._duck_task is not None:
             return
         try:
