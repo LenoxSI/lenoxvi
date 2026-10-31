@@ -9758,6 +9758,345 @@ def main():
     check("node setup ui: the file row names the expected image and its hash",
           "xmosImageName(dfu.line)" in _nsUI and "sha256.slice(0, 12)" in _nsUI, "no expected file shown")
 
+    # ── upload limit: upload bodies are capped and guarded BEFORE FastAPI
+    # parses them. FastAPI spools a multipart body before it solves the
+    # route's dependencies, so a check in the route (or GUARD) runs only
+    # after the whole upload is in memory or a temp file. These drive the
+    # ASGI app directly with a lazy body: `pulled` is exactly what the app
+    # read, and a spy on the multipart parser shows whether anything was
+    # spooled at all. ──────────────────────────────────────────────────────
+    import starlette.formparsers as _sfpUL
+    from dashboard import routes as _rUL
+    _FW_CAP_UL = 0x3D0000 + 64 * 1024            # app partition + multipart allowance
+    _MODEL_CAP_UL = 50 * 1024 * 1024 + 64 * 1024
+    _BND_UL = b"suiteuploadlimit"
+
+    def _mp_head_UL(filename, fields=()):
+        out = b""
+        for _k, _v in fields:
+            out += (b"--" + _BND_UL + b'\r\nContent-Disposition: form-data; name="' + _k.encode()
+                    + b'"\r\n\r\n' + _v.encode() + b"\r\n")
+        return out + (b"--" + _BND_UL + b'\r\nContent-Disposition: form-data; name="file"; filename="'
+                      + filename.encode() + b'"\r\nContent-Type: application/octet-stream\r\n\r\n')
+
+    _MP_TAIL_UL = b"\r\n--" + _BND_UL + b"--\r\n"
+
+    def _chunks_UL(body, size=256 * 1024):
+        for _i in range(0, len(body), size):
+            yield body[_i:_i + size]
+
+    def _asgi_post_UL(path, chunks, content_length=None, headers=()):
+        """POST straight into the ASGI app. `chunks` is pulled lazily, one per
+        receive(), so `pulled` counts only the body bytes the app asked for."""
+        _it = iter(chunks)
+        _st = {"pulled": 0, "done": False}
+        _out = {"status": None, "body": b""}
+        _h = [(b"host", b"192.0.2.10"),
+              (b"content-type", b"multipart/form-data; boundary=" + _BND_UL)]
+        if content_length is not None:
+            _h.append((b"content-length", str(content_length).encode()))
+        _h += [(k.lower().encode(), v.encode()) for k, v in headers]
+        _scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+                  "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "",
+                  "query_string": b"", "headers": _h, "server": ("192.0.2.10", 80),
+                  "client": ("192.0.2.99", 50000)}
+
+        async def _receive():
+            if _st["done"]:
+                return {"type": "http.disconnect"}
+            _c = next(_it, None)
+            if _c is None:
+                _st["done"] = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            _st["pulled"] += len(_c)
+            return {"type": "http.request", "body": _c, "more_body": True}
+
+        async def _send(msg):
+            if msg["type"] == "http.response.start":
+                _out["status"] = msg["status"]
+            elif msg["type"] == "http.response.body":
+                _out["body"] += msg.get("body", b"")
+
+        asyncio.run(app(_scope, _receive, _send))
+        try:
+            _out["json"] = json.loads(_out["body"] or b"null")
+        except ValueError:
+            _out["json"] = None
+        return _out, _st["pulled"]
+
+    _parses_UL, _fw_calls_UL = [], []
+    _mpp_init_UL = _sfpUL.MultiPartParser.__init__
+    _fwdir_UL = _rUL.firmware_dir
+
+    def _spy_mpp_UL(self, *a, **k):
+        _parses_UL.append(1)
+        _mpp_init_UL(self, *a, **k)
+
+    def _spy_fwdir_UL():
+        _fw_calls_UL.append(1)
+        return _fwdir_UL()
+
+    def _fw_state_UL():
+        _d = SCRATCH / "firmware" / "array"
+        _m = _d / "version.json"
+        return (_m.read_text() if _m.exists() else None,
+                sorted(p.name for p in _d.glob("*.uploading")) if _d.is_dir() else [])
+
+    _cwd_UL, _state_UL = os.getcwd(), os.environ.get("LVI_STATE_DIR")
+    _tok_UL = os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+    os.environ["LVI_STATE_DIR"] = str(SCRATCH)
+    os.chdir(SCRATCH)
+    _sfpUL.MultiPartParser.__init__ = _spy_mpp_UL
+    _rUL.firmware_dir = _spy_fwdir_UL
+    try:
+        # A real-looking image over the cap: on a tree without the limit the
+        # route would stage, sign and serve it.
+        _big_fw_UL = _fake_image5b("1.9.5", "array")
+        _big_fw_UL += bytes(_FW_CAP_UL + 1 - len(_big_fw_UL))
+        _big_body_UL = _mp_head_UL("array_esp32.bin", [("track", "array")]) + _big_fw_UL + _MP_TAIL_UL
+        _before_UL = _fw_state_UL()
+        del _parses_UL[:], _fw_calls_UL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_big_body_UL),
+                                    content_length=len(_big_body_UL))
+        check("upload limit: a firmware upload declaring more than the cap is a 413 before a byte is read",
+              _o["status"] == 413 and _pulled == 0, f"status={_o['status']} pulled={_pulled} body={_o['body'][:120]}")
+        check("upload limit: the over-cap firmware upload never reached the multipart parser or the route "
+              "(nothing spooled, no staging file, served manifest unchanged)",
+              not _parses_UL and not _fw_calls_UL and _fw_state_UL() == _before_UL,
+              f"parses={len(_parses_UL)} route={len(_fw_calls_UL)} state={_fw_state_UL()} before={_before_UL}")
+
+        # No token: refused with GUARD's own answer, before the parse.
+        _ok_fw_UL = _fake_image5b("1.9.4", "array")
+        _ok_body_UL = _mp_head_UL("array_esp32.bin", [("track", "array")]) + _ok_fw_UL + _MP_TAIL_UL
+        os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
+        try:
+            _g401 = client.put("/api/dashboard/mapping", json={"room_zones": {}})
+            _before_UL = _fw_state_UL()
+            del _parses_UL[:], _fw_calls_UL[:]
+            _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_ok_body_UL),
+                                        content_length=len(_ok_body_UL))
+            check("upload limit: an upload without the dashboard token is refused with the guard's own status and body",
+                  _g401.status_code == 401 and _o["status"] == 401 and _o["json"] == _g401.json(),
+                  f"guard={_g401.status_code} {_g401.text[:80]} upload={_o['status']} {_o['body'][:80]}")
+            check("upload limit: the tokenless upload was refused before parsing (no body read, parser and route never ran)",
+                  _pulled == 0 and not _parses_UL and not _fw_calls_UL and _fw_state_UL() == _before_UL,
+                  f"pulled={_pulled} parses={len(_parses_UL)} route={len(_fw_calls_UL)}")
+            del _parses_UL[:], _fw_calls_UL[:]
+            _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_big_body_UL),
+                                        content_length=len(_big_body_UL),
+                                        headers=[("X-Dashboard-Token", "wrong")])
+            check("upload limit: a wrong token is refused before the size is even considered (401, nothing read)",
+                  _o["status"] == 401 and _pulled == 0 and not _parses_UL, f"status={_o['status']} pulled={_pulled}")
+            _r = client.post("/api/dashboard/firmware/upload",
+                             files={"file": ("array_esp32.bin", _ok_fw_UL, "application/octet-stream")},
+                             data={"track": "array"}, headers={"X-Dashboard-Token": "rig-secret"})
+            _man = _fw_state_UL()[0]
+            check("upload limit: an authorized normal-size firmware upload still lands exactly as before",
+                  _r.status_code == 200 and _r.json().get("version") == "1.9.4" and _r.json().get("track") == "array"
+                  and _man is not None and json.loads(_man).get("version") == "1.9.4" and not _fw_state_UL()[1],
+                  f"{_r.status_code} {_r.text[:160]}")
+        finally:
+            os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+
+        # No Content-Length (chunked): counted as it streams, cut off at the cap.
+        _huge_body_UL = (_mp_head_UL("array_esp32.bin", [("track", "array")]) + _big_fw_UL
+                         + bytes(2 * 1024 * 1024) + _MP_TAIL_UL)
+        _before_UL = _fw_state_UL()
+        del _parses_UL[:], _fw_calls_UL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_huge_body_UL))
+        check("upload limit: a chunked firmware upload is cut off with a 413 once it passes the cap "
+              "(the rest of the stream is never read)",
+              _o["status"] == 413 and _FW_CAP_UL < _pulled <= _FW_CAP_UL + 256 * 1024 and _pulled < len(_huge_body_UL),
+              f"status={_o['status']} pulled={_pulled} body={len(_huge_body_UL)}")
+        check("upload limit: the cut-off chunked upload never reached the route and left nothing staged or served",
+              not _fw_calls_UL and _fw_state_UL() == _before_UL,
+              f"route={len(_fw_calls_UL)} state={_fw_state_UL()} before={_before_UL}")
+        # A Content-Length that understates the body: the count still bites.
+        del _parses_UL[:], _fw_calls_UL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_huge_body_UL),
+                                    content_length=4096)
+        check("upload limit: a Content-Length that understates the body is caught by the byte count (413)",
+              _o["status"] == 413 and _pulled < len(_huge_body_UL) and not _fw_calls_UL,
+              f"status={_o['status']} pulled={_pulled} route={len(_fw_calls_UL)}")
+
+        # The route keeps the precise cap: the body allowance is for framing.
+        _over_img_UL = _fake_image5b("1.9.3", "array")
+        _over_img_UL += bytes(0x3D0000 + 1 - len(_over_img_UL))
+        _before_UL = _fw_state_UL()
+        _r = client.post("/api/dashboard/firmware/upload",
+                         files={"file": ("array_esp32.bin", _over_img_UL, "application/octet-stream")},
+                         data={"track": "array"})
+        check("upload limit: an image one byte over the app partition passes the body cap but the route refuses it "
+              "(400, nothing served or left staged)",
+              _r.status_code == 400 and "app partition" in _r.text and _fw_state_UL() == _before_UL,
+              f"{_r.status_code} {_r.text[:160]} state={_fw_state_UL()}")
+        _r = client.post("/api/dashboard/firmware/upload",
+                         files={"file": ("array_esp32.bin", _over_img_UL[:0x3D0000], "application/octet-stream")},
+                         data={"track": "array"})
+        check("upload limit: an image exactly the app partition size is still accepted",
+              _r.status_code == 200 and _r.json().get("size") == 0x3D0000, f"{_r.status_code} {_r.text[:160]}")
+
+        # Wake-model upload declaring over 50 MB: the body is a lazy generator,
+        # so nothing is even built unless the app pulls it.
+        _mhead_UL = _mp_head_UL("suite_ul_model.onnx")
+        _mfile_UL = _MODEL_CAP_UL + 1
+
+        def _lazy_model_UL():
+            yield _mhead_UL
+            _left = _mfile_UL
+            while _left > 0:
+                _n = min(_left, 1024 * 1024)
+                yield bytes(_n)
+                _left -= _n
+            yield _MP_TAIL_UL
+
+        del _parses_UL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/oww/models", _lazy_model_UL(),
+                                    content_length=len(_mhead_UL) + _mfile_UL + len(_MP_TAIL_UL))
+        check("upload limit: a wake-model upload declaring over 50 MB is a 413 without reading the body",
+              _o["status"] == 413 and _pulled == 0 and not _parses_UL,
+              f"status={_o['status']} pulled={_pulled} parses={len(_parses_UL)}")
+        os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
+        try:
+            _r = client.post("/api/dashboard/oww/models",
+                             files={"file": ("suite_ul_model.onnx", b"\x00" * 4096, "application/octet-stream")},
+                             headers={"X-Dashboard-Token": "rig-secret"})
+            check("upload limit: an authorized normal-size wake-model upload still reaches the model check "
+                  "(422 on garbage bytes, as before)", _r.status_code == 422, f"{_r.status_code} {_r.text[:120]}")
+            import openwakeword as _owwUL
+            _probUL = Path((_owwUL.models.get("hey_mycroft") or {}).get("model_path") or "/nonexistent.onnx")
+            if not _probUL.is_file():
+                print("[SKIP] upload limit real-model check: openwakeword's stock hey_mycroft model is not installed")
+            else:
+                _r = client.post("/api/dashboard/oww/models",
+                                 files={"file": ("zz_suite_ul.onnx", _probUL.read_bytes(), "application/octet-stream")},
+                                 headers={"X-Dashboard-Token": "rig-secret"})
+                _rd = client.delete("/api/dashboard/oww/models/zz_suite_ul.onnx?source=models",
+                                    headers={"X-Dashboard-Token": "rig-secret"})
+                check("upload limit: an authorized real wake-model upload is still accepted",
+                      _r.status_code == 200 and _r.json().get("name") == "zz_suite_ul.onnx" and _rd.status_code == 200,
+                      f"upload={_r.status_code} delete={_rd.status_code}")
+        finally:
+            os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+
+        # Non-upload routes pass straight through: the offer is still teed.
+        _ro = client.post("/api/offer", json={"sdp": "v=0\r\n", "type": "offer", "room": "suite-ul-room"})
+        _rooms_UL = {r["room"]: r for r in registry.known_rooms()}
+        check("upload limit: /api/offer is untouched by the upload middleware (still teed)",
+              _ro.status_code == 200 and _rooms_UL.get("suite-ul-room", {}).get("online") is True,
+              f"{_ro.status_code} rooms={list(_rooms_UL)}")
+        if _ro.status_code == 200 and _ro.json().get("pc_id"):
+            registry.mark_disconnected(_ro.json()["pc_id"])
+    finally:
+        _sfpUL.MultiPartParser.__init__ = _mpp_init_UL
+        _rUL.firmware_dir = _fwdir_UL
+        os.chdir(_cwd_UL)
+        if _state_UL is None:
+            os.environ.pop("LVI_STATE_DIR", None)
+        else:
+            os.environ["LVI_STATE_DIR"] = _state_UL
+        if _tok_UL is not None:
+            os.environ["LVI_DASHBOARD_TOKEN"] = _tok_UL
+
+    # ── zone test: a WiiM test clip always puts the unit's volume back. Left
+    # at the test volume, the next reply snapshots it as the music level.
+    # Fakes at the wiim_api I/O boundary. ─────────────────────────────────
+    import wiim_output as _woZT
+    _saved_ZT = (_woZT.wiim_get_status, _woZT.wiim_api)
+    _cmds_ZT, _log_ZT = [], []
+    _fail_ZT = set()  # command prefixes the fake unit refuses
+    _status_ZT = {"vol": "61"}
+
+    def _fake_status_ZT(ip, timeout=3.0):
+        return dict(_status_ZT) if _status_ZT is not None else None
+
+    def _fake_api_ZT(ip, cmd, timeout=4.0):
+        _cmds_ZT.append((ip, cmd))
+        if any(cmd.startswith(p) for p in _fail_ZT):
+            raise OSError(f"unit refused {cmd.split(':')[1]}")
+        return "OK"
+
+    def _vols_ZT():
+        return [c for ip, c in _cmds_ZT if ip == "192.0.2.58" and c.startswith("setPlayerCmd:vol:")]
+
+    from loguru import logger as _lgZT
+    _rz_ZT = client.post("/api/dashboard/zones", json={"name": "suite_wiim_zt", "backend": "wiim",
+                                                       "ip": "192.0.2.58"})
+    _hid_ZT = _lgZT.add(lambda m: _log_ZT.append(str(m)), level="WARNING")
+    _woZT.wiim_get_status, _woZT.wiim_api = _fake_status_ZT, _fake_api_ZT
+    try:
+        _fail_ZT.clear()
+        _fail_ZT.add("setPlayerCmd:play:")
+        del _cmds_ZT[:]
+        _r = client.post("/api/dashboard/zones/suite_wiim_zt/test")
+        _v = _vols_ZT()
+        check("zone test: a WiiM test whose play command fails puts the unit's volume back (still a 502)",
+              _rz_ZT.status_code == 200 and _r.status_code == 502 and len(_v) == 2
+              and _v[-1] == "setPlayerCmd:vol:61" and _cmds_ZT[-1][1] == "setPlayerCmd:vol:61",
+              f"zone={_rz_ZT.status_code} status={_r.status_code} cmds={[c for _, c in _cmds_ZT]}")
+
+        _fail_ZT.clear()
+        del _cmds_ZT[:]
+        _r = client.post("/api/dashboard/zones/suite_wiim_zt/test")
+        _v = _vols_ZT()
+        check("zone test: a WiiM test that plays restores the volume after the clip, as before",
+              _r.status_code == 200 and len(_v) == 2 and _v[-1] == "setPlayerCmd:vol:61"
+              and _cmds_ZT[-1][1] == "setPlayerCmd:vol:61",
+              f"status={_r.status_code} cmds={[c for _, c in _cmds_ZT]}")
+
+        _fail_ZT.update({"setPlayerCmd:play:", "setPlayerCmd:vol:61"})
+        del _cmds_ZT[:], _log_ZT[:]
+        _r = client.post("/api/dashboard/zones/suite_wiim_zt/test")
+        check("zone test: a failed restore after a failed play is logged naming the zone, "
+              "and the 502 still reports the play error",
+              _r.status_code == 502 and "unit refused play" in _r.text
+              and any("suite_wiim_zt" in m and "restore" in m for m in _log_ZT),
+              f"status={_r.status_code} body={_r.text[:120]} log={_log_ZT[-1:]}")
+
+        _fail_ZT.clear()
+        _fail_ZT.add("setPlayerCmd:play:")
+        _status_ZT = None
+        del _cmds_ZT[:]
+        _r = client.post("/api/dashboard/zones/suite_wiim_zt/test")
+        check("zone test: with no volume snapshot (status unreadable) nothing is restored",
+              _r.status_code == 502 and not _vols_ZT(), f"status={_r.status_code} cmds={[c for _, c in _cmds_ZT]}")
+    finally:
+        _woZT.wiim_get_status, _woZT.wiim_api = _saved_ZT
+        _lgZT.remove(_hid_ZT)
+        client.delete("/api/dashboard/zones/suite_wiim_zt")
+
+    # ── keys: the .env writer stages beside the file under '<name>.tmp'
+    # (with_suffix on a dot-file appends: '.env.env.tmp'). Driven
+    # through the real writer against a scratch .env; os.replace is the
+    # boundary that sees the temp name. ─────────────────────────────────
+    _envd_TN = SCRATCH / "tmpname-env"
+    _envd_TN.mkdir(exist_ok=True)
+    _envf_TN = _envd_TN / ".env"
+    _saved_envf_TN = os.environ.get("LVI_ENV_FILE")
+    _replaces_TN = []
+    _real_replace_TN = os.replace
+
+    def _spy_replace_TN(src, dst, *a, **k):
+        _replaces_TN.append((Path(src), Path(dst)))
+        return _real_replace_TN(src, dst, *a, **k)
+
+    os.environ["LVI_ENV_FILE"] = str(_envf_TN)
+    os.replace = _spy_replace_TN
+    try:
+        asyncio.run(_rUL._write_env_key("LVI_SUITE_TMPNAME_KEY", "suite-not-a-key-456"))
+    finally:
+        os.replace = _real_replace_TN
+        if _saved_envf_TN is None:
+            os.environ.pop("LVI_ENV_FILE", None)
+        else:
+            os.environ["LVI_ENV_FILE"] = _saved_envf_TN
+    _into_TN = [s for s, d in _replaces_TN if d == _envf_TN]
+    check("keys: the .env write stages through '.env.tmp' beside the file (not '.env.env.tmp')",
+          _into_TN == [_envd_TN / ".env.tmp"]
+          and "LVI_SUITE_TMPNAME_KEY=suite-not-a-key-456" in _envf_TN.read_text()
+          and sorted(p.name for p in _envd_TN.iterdir()) == [".env"],
+          f"staged={[p.name for p in _into_TN]} dir={sorted(p.name for p in _envd_TN.iterdir())}")
+
     # ── comment hygiene: zero calendar dates in comments and docstrings ──
     # House law: dates are provenance git blame already carries, and dated
     # incident narration leaks house history into a public repo. Full dates
