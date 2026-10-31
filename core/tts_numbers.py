@@ -5,7 +5,10 @@ Pocket (LocalAI's pocket-tts backend) reads digits one at a time ("4-4-9",
 six" and garbles "$12.50".
 spell_numbers() rewrites clock times, money, percentages, degrees,
 ordinals, years and plain numbers into words before either engine sees
-the text.
+the text. Phone numbers and bare runs of ten or more digits (no sign,
+fraction or thousands commas) are ids, not quantities, and read digit by
+digit; shorter runs and numbers written with thousands commas stay
+quantities.
 
 Local voices only. ElevenLabs and Deepgram normalise text themselves, and a
 home-made time speller in front of ElevenLabs' normalizer once garbled
@@ -22,8 +25,12 @@ _TENS = ["_", "_", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "ei
 _SCALES = ((10 ** 12, "trillion"), (10 ** 9, "billion"), (10 ** 6, "million"), (1000, "thousand"))
 _ORDINAL = {"one": "first", "two": "second", "three": "third", "five": "fifth",
             "eight": "eighth", "nine": "ninth", "twelve": "twelfth"}
-# Longer digit runs (phone numbers, ids) read better digit by digit.
+# Past this many digits nothing is a quantity anyone says: digit by digit
+# (commas, percentages and degrees included).
 _MAX_DIGITS = 15
+# A bare run this long (no sign, fraction or thousands commas) is a phone
+# number or an id; shorter ones ("1500000 people") are amounts.
+_MIN_ID_DIGITS = 10
 
 
 def _under_1000(n: int) -> str:
@@ -112,12 +119,27 @@ _PERCENT = re.compile(_SIGN + _NUM + r"\s?%")
 _ORDINALS = re.compile(r"(?<![\d.])" + _INT + r"(st|nd|rd|th)(?![A-Za-z])", re.IGNORECASE)
 # Decades: "1990s", "2010s", "'80s" (a bare "30s" may be seconds: left to the plain pass).
 _DECADE = re.compile(r"(?<![\d.,])(?:['’](\d0)|(1[1-9]\d0|20\d0))s(?![A-Za-z])")
+# Phone numbers: "555-123-4567", "555.123.4567", "(555) 123-4567",
+# "+1 555 123 4567", "1-800-555-0199".
+_PHONE = re.compile(
+    r"(?<![\w.,$+\-−])(?:"
+    r"(?:\+\d{1,3}[-. ]?)?\(\d{3}\)\s?\d{3}[-.]\d{4}"
+    r"|\+\d{1,3}([-. ])\d{3}\1\d{3}\1\d{4}"
+    r"|(?:1[-.])?\d{3}([-.])\d{3}\2\d{4}"
+    r")(?![\w\-−]|[.,]\d)")
 _ANY = re.compile(_SIGN + _NUM)
 _HAS_DIGIT = re.compile(r"[0-9]")
 
 
 def _minus(sign: str | None) -> str:
     return "minus " if sign else ""
+
+
+def _phone(m: re.Match) -> str:
+    # A comma between groups is the pause the local voices honour; a period
+    # would split the number across sentences.
+    groups = ", ".join(_digits(g) for g in re.findall(r"\d+", m.group(0)))
+    return ("plus " if m.group(0).startswith("+") else "") + groups
 
 
 def _money(m: re.Match) -> str:
@@ -190,8 +212,11 @@ def _decade(m: re.Match) -> str:
 
 def _any(m: re.Match) -> str:
     sign, whole, frac = m.groups()
-    if not sign and not frac and "," not in whole and len(whole) == 4 and 1100 <= int(whole) <= 2099:
+    bare = not sign and not frac and "," not in whole
+    if bare and len(whole) == 4 and 1100 <= int(whole) <= 2099:
         words = year_words(int(whole))
+    elif bare and len(whole) >= _MIN_ID_DIGITS:
+        words = _digits(whole)
     else:
         words = _minus(sign) + _number(whole, frac)
     # Keep a word glued to the number readable: "MP3" -> "MP three".
@@ -203,8 +228,9 @@ def _any(m: re.Match) -> str:
 
 # Most specific first. Each pass leaves words only, so a later pass never
 # sees what an earlier one wrote.
-_PASSES = ((_MONEY, _money), (_TIME, _time), (_HOUR_AMPM, _hour_ampm), (_DEGREES, _degrees),
-           (_PERCENT, _percent), (_ORDINALS, _ordinal), (_DECADE, _decade), (_ANY, _any))
+_PASSES = ((_PHONE, _phone), (_MONEY, _money), (_TIME, _time), (_HOUR_AMPM, _hour_ampm),
+           (_DEGREES, _degrees), (_PERCENT, _percent), (_ORDINALS, _ordinal), (_DECADE, _decade),
+           (_ANY, _any))
 
 
 def spell_numbers(text: str) -> str:
