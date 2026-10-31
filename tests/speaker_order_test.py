@@ -496,5 +496,95 @@ check("speaker: a failing Sonos duck clip is retried on the backoff, not every t
 check("speaker: Sonos duck holder with no duck clip still exits on cancel", r.alive and r.exited and not r.holding,
       f"alive={r.alive} exited={r.exited}")
 
+
+# Duck holder: only a live Sonos backend ducks the music.
+async def _no_host():
+    raise RuntimeError("clip_server.host_ip not set in config.yaml")
+
+
+async def _srv():
+    return SRV
+
+
+async def holder_session(enabled, server, run_s, toggle_s=None, enable_s=None):
+    """Sonos setup with duck_while_awake on, a mapped room, the gate awake.
+    With toggle_s, the backend is switched off after run_s, then on again.
+    With enable_s, a backend disabled at setup is switched on after run_s
+    (the dashboard adding the first zone to a running session)."""
+    so = kitchen(None)
+    so._enabled = enabled
+    so._clip_server = None
+    so._duck_while_awake = True
+    so._wake_gate = SimpleNamespace(state="awake")
+    ensure_calls = []
+    real_ensure = so._ensure_duck_clip
+
+    async def counted_ensure():
+        ensure_calls.append(1)
+        return await real_ensure()
+
+    so._ensure_duck_clip = counted_ensure
+    n_plays, n_logs = len(PLAYS), len(LOGS)
+    real_fp, real_scs = FrameProcessor.setup, sonos_output.shared_clip_server
+    FrameProcessor.setup, sonos_output.shared_clip_server = noop_setup, server
+    out = SimpleNamespace(off_holding=None, off_plays=None, on_ducked=None, enabled_ducked=None)
+    try:
+        await so.setup(None)
+        out.started = so._duck_task is not None
+        await asyncio.sleep(run_s)
+        out.ducked = "duck-silence.mp3" in PLAYS[n_plays:]
+        out.holding = so._duck_holding
+        if toggle_s is not None:
+            so._enabled = False
+            n_off = len(PLAYS)
+            await asyncio.sleep(toggle_s)
+            out.off_holding, out.off_plays = so._duck_holding, PLAYS[n_off:]
+            out.released = bool([m for lv, m in LOGS[n_logs:] if "duck-holder released" in m])
+            so._enabled = True
+            n_on = len(PLAYS)
+            await asyncio.sleep(toggle_s)
+            out.on_ducked = "duck-silence.mp3" in PLAYS[n_on:]
+        if enable_s is not None:
+            so._enabled = True
+            n_en = len(PLAYS)
+            await asyncio.sleep(enable_s)
+            out.enabled_ducked = "duck-silence.mp3" in PLAYS[n_en:]
+    finally:
+        task = so._duck_task
+        so._stop_duck_holder()
+        if task is not None:
+            try:
+                await asyncio.wait_for(task, 3.0)
+            except asyncio.CancelledError:
+                pass
+        FrameProcessor.setup, sonos_output.shared_clip_server = real_fp, real_scs
+    out.ensure_calls = len(ensure_calls)
+    out.warnings = [m for lv, m in LOGS[n_logs:] if lv == "WARNING" and "duck clip create failed" in m]
+    return out
+
+
+FakeSw.made = 1
+r = asyncio.run(holder_session(enabled=False, server=_no_host, run_s=1.5))
+check("speaker: Sonos disabled -> no duck clip is prepared and no 'duck clip create failed' warning",
+      r.ensure_calls == 0 and not r.warnings, f"ensure_calls={r.ensure_calls} warnings={r.warnings}")
+check("speaker: Sonos disabled -> nothing is ducked while the room is awake (duck_while_awake on, room mapped)",
+      not r.ducked and not r.holding, f"ducked={r.ducked} holding={r.holding}")
+
+r = asyncio.run(holder_session(enabled=False, server=_srv, run_s=1.0, enable_s=1.5))
+check("speaker: Sonos enabled on a running session (first zone added) -> its duck holder ducks the awake room",
+      not r.ducked and r.enabled_ducked, f"ducked_while_off={r.ducked} enabled_ducked={r.enabled_ducked}")
+
+r = asyncio.run(holder_session(enabled=True, server=_srv, run_s=1.5))
+check("speaker: Sonos enabled -> setup still starts the duck holder and it ducks the awake room",
+      r.started and r.ensure_calls >= 1 and r.ducked and r.holding and not r.warnings,
+      f"started={r.started} ensure_calls={r.ensure_calls} ducked={r.ducked} warnings={r.warnings}")
+
+r = asyncio.run(holder_session(enabled=True, server=_srv, run_s=1.5, toggle_s=1.0))
+check("speaker: Sonos switched off mid-session -> the duck holder releases the duck at its next tick",
+      r.holding and r.off_holding is False and r.off_plays == [] and r.released,
+      f"holding={r.holding} off_holding={r.off_holding} off_plays={r.off_plays} released={r.released}")
+check("speaker: Sonos switched back on mid-session -> the same duck holder ducks again",
+      r.on_ducked, f"on_ducked={r.on_ducked}")
+
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

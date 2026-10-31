@@ -372,6 +372,26 @@ check("wiim output: a failed music-volume restore on a bot stop logs a warning n
       logged("WARNING", "wiim_output:", "Hall", "unit napping"),
       f"logs={[r['message'] for r in LOGS]}")
 
+
+# ── an explicit config_path is read, not the live config ────────────
+import yaml
+from config import cfg
+
+_scratch = Path(STATE, "wiim-config.yaml")
+_scratch.write_text(yaml.safe_dump({"wiim": {
+    "enabled": False, "clip_volume": 61, "zone_volumes": {"Den": 23},
+    "zones": {"Kitchen": {"ip": "192.0.2.41"}, "Den": {"ip": "192.0.2.42"}}}}))
+_wo = wiim_output.WiiMOutput(config_path=str(_scratch), echo_gate=None, led=None)
+_got = (_wo._enabled, _wo._zones, _wo._volume, _wo._volume_for("Den"), _wo._volume_for("Kitchen"))
+check("wiim output: a config_path file supplies enabled, zones and volumes (not the live config)",
+      _got == (False, {"Kitchen": {"ip": "192.0.2.41"}, "Den": {"ip": "192.0.2.42"}}, 61, 23, 61), str(_got))
+
+_live = cfg("wiim") or {}
+_wo = wiim_output.WiiMOutput(echo_gate=None, led=None)
+check("wiim output: without config_path the zones still come from the live config",
+      _wo._zones == (_live.get("zones") or {}) and _wo._enabled == bool(_live.get("enabled")),
+      f"zones={_wo._zones} live={_live.get('zones')}")
+
 wiim_output.wiim_api, wiim_output.wiim_get_status = real_api, real_status
 wiim_output.live_wiim_volume = real_live_vol
 logger.remove(_sink)
