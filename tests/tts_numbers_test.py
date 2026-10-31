@@ -108,5 +108,39 @@ _imports = sorted({ln.split()[1].split(".")[0] for ln in _src.splitlines()
                    if ln.startswith(("import ", "from "))})
 check("tts_numbers: standard library only", set(_imports) <= {"__future__", "re"}, f"imports {_imports}")
 
+# Phone numbers and long bare digit runs read digit by digit; a phone
+# number's groups are split by a comma (the pause the local voices honour).
+for text, want in [
+    ("555-123-4567", "five five five, one two three, four five six seven"),
+    ("(555) 123-4567", "five five five, one two three, four five six seven"),
+    ("555.123.4567", "five five five, one two three, four five six seven"),
+    ("+1 555 123 4567", "plus one, five five five, one two three, four five six seven"),
+    ("1-800-555-0199", "one, eight zero zero, five five five, zero one nine nine"),
+    ("Call 555-123-4567.", "Call five five five, one two three, four five six seven."),
+    ("call 5551234567", "call five five five one two three four five six seven"),
+    ("ref 1234567890", "ref one two three four five six seven eight nine zero"),
+]:
+    got = tts_numbers.spell_numbers(text)
+    check(f"spell_numbers digit by digit: {text!r} -> {want!r}", got == want, f"got {got!r}")
+
+# Quantities stay quantities: short runs, thousands commas, decimals, money,
+# percentages, ordinals and years read as they always have.
+for text, want in [
+    ("in 2026", "in twenty twenty-six"),
+    ("250 grams", "two hundred fifty grams"),
+    ("123456", "one hundred twenty-three thousand four hundred fifty-six"),
+    ("1500000 people", "one million five hundred thousand people"),
+    ("1000000", "one million"),
+    ("123456789", "one hundred twenty-three million four hundred fifty-six thousand seven hundred eighty-nine"),
+    ("1,234,567", "one million two hundred thirty-four thousand five hundred sixty-seven"),
+    ("2.75", "two point seven five"),
+    ("$1234567", "one million two hundred thirty-four thousand five hundred sixty-seven dollars"),
+    ("1234567%", "one million two hundred thirty-four thousand five hundred sixty-seven percent"),
+    ("12.5%", "twelve point five percent"),
+    ("1234567th", "one million two hundred thirty-four thousand five hundred sixty-seventh"),
+]:
+    got = tts_numbers.spell_numbers(text)
+    check(f"spell_numbers stays a quantity: {text!r} -> {want!r}", got == want, f"got {got!r}")
+
 print(f"\n{'ALL CHECKS PASSED' if not fails else str(fails) + ' FAIL(S)'}")
 sys.exit(1 if fails else 0)
