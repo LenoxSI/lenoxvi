@@ -4,7 +4,7 @@
 - a clip that fails before it plays never arms the echo gate and never cuts
   another clip's window; the failed step is logged, nothing escapes the task
 - the happy path arms the gate for the clip before the play command
-- a failed music-volume restore is logged with the zone
+- a failed music-volume restore is logged with the zone, on a bot stop too
 
 Run: cd tests && ~/venvs/lenoxvi/bin/python wiim_output_test.py <path-to-core>
 """
@@ -339,6 +339,38 @@ check("wiim output: a failed music-volume restore logs a warning naming the zone
       f"escaped={_escaped!r} logs={[r['message'] for r in LOGS]}")
 check("wiim output: a failed music-volume restore keeps the snapshot for the next clip",
       _kept, str(wiim_output._VOL_SAVED))
+
+
+# ── a bot stop while the clip sounds: a failed restore is logged too ─
+async def stop_while_sounding():
+    wo = wiim("192.0.2.19", EchoGate(), zone="Hall")
+    task = asyncio.create_task(wo._speak_to_wiim(pcm_secs(2.0), epoch=wo._speech_epoch,
+                                                 barge=wo._barge_epoch))
+    while not any(c.startswith("setPlayerCmd:play:") for c in CMDS):
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)     # past the play command: the restore timer is running
+    task.cancel()                # the bot stops mid clip
+    try:
+        await asyncio.wait_for(task, 10)
+    except asyncio.CancelledError:
+        return "cancelled"
+    except Exception as e:  # noqa: BLE001 — the probe reports what escaped
+        return e
+    return None
+
+
+LOGS.clear()
+CMDS.clear()
+wiim_output.wiim_api = restore_fails
+try:
+    _stop = asyncio.run(stop_while_sounding())
+finally:
+    wiim_output.wiim_api = fake_api
+check("wiim output: a bot stop while the clip sounds still propagates the cancel",
+      _stop == "cancelled", repr(_stop))
+check("wiim output: a failed music-volume restore on a bot stop logs a warning naming the zone",
+      logged("WARNING", "wiim_output:", "Hall", "unit napping"),
+      f"logs={[r['message'] for r in LOGS]}")
 
 wiim_output.wiim_api, wiim_output.wiim_get_status = real_api, real_status
 wiim_output.live_wiim_volume = real_live_vol
