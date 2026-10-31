@@ -192,7 +192,7 @@ else
 fi
 
 if [ "${1:-}" = "--version" ]; then
-  NEW="$2"; shift 2
+  NEW="${2:?--version needs a version (X.Y.Z)}"; shift 2
 else
   BUMP="${1:-patch}"
   NEW=$(python3 - "$CUR" "$BUMP" <<'EOF'

@@ -55,6 +55,11 @@ The two version streams are independent.
   null, non-object entries, a malformed parked list): the agent picker shows a note instead of an error.
 - The installer and `lenoxvi upgrade` print their "no release tag" / "no release found" and "pass --host"
   guidance again: with no matching tag or no default route they used to exit silently under pipefail.
+- `scripts/restart.sh` exits non-zero when the restart fails or the bot does not stay up (a crash on a bad
+  config edit right after start), instead of always printing success. A healthy restart takes about five
+  seconds longer to report.
+- `scripts/deploy_firmware.sh --version` with no value prints a usage message instead of an unbound-variable
+  error.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
