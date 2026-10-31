@@ -14,6 +14,24 @@ file's values (suite fixtures only).
 
 from __future__ import annotations
 
+from loguru import logger
+
+_warned_bad_values: set = set()  # (key, repr(value)): read on every reply, warned once
+
+
+def _whole_number(key: str, value, instead: str) -> int | None:
+    """`value` as an int, or None for a value a hand edit got wrong. A bad
+    volume must never raise on the reply path or in the duck holder's loop."""
+    if not isinstance(value, bool):  # YAML `on`/`yes` is not a volume
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if (key, repr(value)) not in _warned_bad_values:
+        _warned_bad_values.add((key, repr(value)))
+        logger.warning(f"zone_config: {key} {value!r} is not a whole number — {instead}")
+    return None
+
 
 class LiveZoneConfig:
     _section_name = ""  # "sonos" | "wiim"
@@ -52,8 +70,13 @@ class LiveZoneConfig:
         pins = self._pins()
         if "zone_volumes" in pins:
             return pins["zone_volumes"]
-        return {k: int(v) for k, v in (self._section().get("zone_volumes") or {}).items()
-                if isinstance(v, (int, float))}
+        volumes = {}
+        for k, v in (self._section().get("zone_volumes") or {}).items():
+            vol = _whole_number(f"{self._section_name}.zone_volumes.{k}", v,
+                                "zone skipped, the global clip_volume applies")
+            if vol is not None:
+                volumes[k] = vol
+        return volumes
 
     @_zone_volumes.setter
     def _zone_volumes(self, value) -> None:
@@ -66,7 +89,10 @@ class LiveZoneConfig:
             return pins["volume"]
         from config import DEFAULT_CLIP_VOLUME
 
-        return int(self._section().get("clip_volume", DEFAULT_CLIP_VOLUME))
+        vol = _whole_number(f"{self._section_name}.clip_volume",
+                            self._section().get("clip_volume", DEFAULT_CLIP_VOLUME),
+                            f"using {DEFAULT_CLIP_VOLUME}")
+        return DEFAULT_CLIP_VOLUME if vol is None else vol
 
     @_volume.setter
     def _volume(self, value) -> None:

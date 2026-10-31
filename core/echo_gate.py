@@ -11,13 +11,16 @@ arrive after the lock releases. This gate covers that tail.
 
 Role (ratified, superseding the old "interim" framing):
 PERMANENT defense-in-depth behind the turn lock, NOT scaffolding —
-do not remove. EchoGate.block(), called from SonosOutput._speak_to_sonos,
-sets a duration (clip length + load + tail margin) whenever a clip ships; blocked() consumers drop
-echo transcriptions during that window. Layers alongside: text
+do not remove. EchoGate.block(), called by the Sonos and WiiM outputs right
+before a clip's play command (and again when the speaker acks the load),
+sets a duration (clip length + load + tail margin); blocked() consumers drop
+echo transcriptions during that window. A clip that fails before its play
+command never arms it, and a failure never relaxes it: the deadline is
+shared by every clip. Layers alongside: text
 containment (intelligence_agent._is_own_echo), dedup, wake-phrase drop.
 
 Consumers of blocked(): wake_word.py, intelligence/agent.py, intelligence/stub.py.
-Driver of block(): sonos_output.py (_speak_to_sonos).
+Drivers of block(): sonos_output.py (_load_clip), wiim_output.py (_speak_to_wiim).
 
 Zero infrastructure: one deadline timestamp, monotonic clock.
 """

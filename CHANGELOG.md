@@ -38,6 +38,14 @@ The two version streams are independent.
 - WiiM: a missing clip-server host setting or a failed bind no longer fails session setup (it warns and
   retries when speaking); a reply that fails before its play command (encode, clip write, clip server,
   voice volume) no longer deafens the mic for the clip length; a failed music-volume restore is logged.
+- Sonos: a reply that fails before it plays (encode, clip write, clip-server bind, speaker client) is
+  logged by step and no longer deafens the mic for the clip length; a failed clip write leaves no temp file
+  behind.
+- A bad `clip_volume` or per-zone volume (Sonos or WiiM) falls back with one warning instead of breaking
+  replies and the duck holder; a non-numeric or negative `sonos.clip_retention_days` falls back to 7 days
+  instead of failing every session build.
+- One failed duck-clip create no longer disables ducking for the rest of the session: the holder retries
+  on the next wake, or every 30 s while awake.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

@@ -178,8 +178,12 @@ def _write_clip(path: Path, data: bytes) -> None:
     thread writes it, and every pipeline rewrites the same duck clip."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # the prune only sees *.mp3: a stray temp would stay forever
+        raise
 
 
 async def _clip_prune_loop(clips_dir: Path, retention_days: int):
@@ -217,6 +221,9 @@ def _extract_clip_id(resp) -> str | None:
         return _walk(resp)
     except Exception:
         return None
+
+
+_DUCK_CLIP_RETRY_S = 30.0  # duck-clip create retry while awake: a broken disk must not spin an encode loop
 
 
 class SonosOutput(LiveZoneConfig, FrameProcessor):
@@ -307,7 +314,17 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         # AND hourly via _clip_prune_loop (a quiet month with no restarts
         # must not grow clips/ — the node holds one long-lived session, so
         # setup alone fires ~never). Retention: sonos.clip_retention_days.
-        retention_days = int(sonos.get("clip_retention_days", 7))
+        # A hand-edited bad value must not fail every session build; a
+        # negative one would prune every clip, including ones still playing.
+        raw_days = sonos.get("clip_retention_days", 7)
+        try:
+            retention_days = int(raw_days)
+            if isinstance(raw_days, bool) or retention_days < 0:
+                raise ValueError(raw_days)
+        except (TypeError, ValueError, OverflowError):
+            logger.warning(f"sonos_output: sonos.clip_retention_days {raw_days!r}"
+                           f" is not a whole number of days >= 0 — using 7")
+            retention_days = 7
         self._retention_days = retention_days
         if not SonosOutput._prune_task_started:
             SonosOutput._prune_task_started = True
@@ -492,22 +509,42 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         it never lapses, but never while her SPEECH is sounding (a load
         would replace her clip mid-sentence — and the reply clip's silence
         tail makes the post-reply handoff gapless); awake→idle = cancel
-        the holder clip (snappy unduck) or let it expire."""
-        url = None
-        try:
-            url = await self._ensure_duck_clip()
-        except Exception as e:
-            logger.warning(f"sonos_output: duck clip create failed: {e}")
-            return
+        the holder clip (snappy unduck) or let it expire.
+        A failed duck-clip create (disk full, clip server not bound yet) is
+        retried on the next wake or every _DUCK_CLIP_RETRY_S while awake:
+        one transient failure must not end ducking for the session."""
+        clip_failures = 0
+
+        async def _duck_clip_url():
+            nonlocal clip_failures, next_clip_try
+            try:
+                url = await self._ensure_duck_clip()
+            except Exception as e:  # noqa: BLE001 — the holder outlives a failed create and retries
+                next_clip_try = time.monotonic() + _DUCK_CLIP_RETRY_S
+                clip_failures += 1
+                if clip_failures == 1:
+                    logger.warning(f"sonos_output: duck clip create failed: {e} — retrying on wake")
+                else:
+                    logger.debug(f"sonos_output: duck clip create failed again: {e}")
+                return None
+            if clip_failures:
+                logger.info(f"sonos_output: duck clip create recovered after {clip_failures} failure(s)")
+                clip_failures = 0
+            return url
+
         sw = None
         zone_name = None
         next_refresh = 0.0
+        next_clip_try = 0.0
+        was_awake = False
         try:
+            url = await _duck_clip_url()
             while True:
                 await asyncio.sleep(0.5)
                 gate_state = getattr(self._wake_gate, "state", None)
                 state_val = getattr(gate_state, "value", gate_state)
                 awake = state_val not in (None, "idle")
+                woke, was_awake = awake and not was_awake, awake
 
                 if not awake:
                     if sw is not None:
@@ -536,6 +573,12 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                     continue
 
                 # Awake: ensure the duck is held
+                if url is None:
+                    if not woke and time.monotonic() < next_clip_try:
+                        continue
+                    url = await _duck_clip_url()
+                    if url is None:
+                        continue
                 if sw is None:
                     zone_name = self._reply_zone_name()
                     zone = self._zones.get(zone_name)
@@ -680,53 +723,66 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         if self._barged(barge):
             logger.info("sonos_output: barge-in before the clip loaded, dropped")
             return
-        # Block echo handling for exactly as long as this clip will sound:
-        # the mic will hear it off the zone speakers (no AEC by design).
-        if self._echo_gate is not None:
-            self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
+        # The echo gate is armed in _load_clip, right before the play call:
+        # a clip that fails on its way to the speaker never gates the mic
+        # (the gate is one deadline shared by every clip, so an early arm
+        # can't be taken back without cutting another clip's window).
+        #
         # Duck-tail: pad 8s of silence onto the clip so
         # the duck outlives her speech — the holder refreshes its own
         # silence over this tail (silence-for-silence, no seam). ONLY when
         # the holder is enabled AND the gate still holds the turn: with
         # ducking off (or the gate already idle), the tail would duck the
-        # music ~8s past every reply for nothing. Padded AFTER the echo
-        # gate above so the mic reopens at her last syllable, not +8s.
+        # music ~8s past every reply for nothing. The echo gate uses the
+        # unpadded `duration`, so the mic reopens at her last syllable, not +8s.
         gate_state = getattr(self._wake_gate, "state", None)
         state_val = getattr(gate_state, "value", gate_state)
         if self._duck_while_awake and state_val not in (None, "idle"):
             pcm = pcm + b"\x00" * int(2 * self._sample_rate * 8)
-        volume = self._volume_for(zone_name)
-        # MP3, not WAV — the proven-working format for Sonos audioClip
-        # (WAV is not in Sonos's documented supported set).
-        import lameenc
+        # Fire-and-forget task: a failed step (disk full, a clip server that
+        # can't bind) is logged by name and the reply is dropped.
+        step = "volume read"
+        try:
+            volume = self._volume_for(zone_name)
+            # MP3, not WAV — the proven-working format for Sonos audioClip
+            # (WAV is not in Sonos's documented supported set).
+            step = "encoder import"
+            import lameenc
 
-        # lameenc encode is CPU-bound and blocks — it
-        # runs in a thread. This coroutine IS the voice pipeline's event
-        # loop context: a blocking encode stalls audio ingest, OWW
-        # scoring and the LEDs for the encode duration every reply.
-        def _encode(pcm_bytes):
-            encoder = lameenc.Encoder()
-            encoder.set_bit_rate(96)
-            encoder.set_in_sample_rate(self._sample_rate)
-            encoder.set_channels(self._channels)
-            encoder.set_quality(2)  # highest quality = slowest encode is fine here
-            return bytes(encoder.encode(pcm_bytes)) + bytes(encoder.flush())
+            # lameenc encode is CPU-bound and blocks — it
+            # runs in a thread. This coroutine IS the voice pipeline's event
+            # loop context: a blocking encode stalls audio ingest, OWW
+            # scoring and the LEDs for the encode duration every reply.
+            def _encode(pcm_bytes):
+                encoder = lameenc.Encoder()
+                encoder.set_bit_rate(96)
+                encoder.set_in_sample_rate(self._sample_rate)
+                encoder.set_channels(self._channels)
+                encoder.set_quality(2)  # highest quality = slowest encode is fine here
+                return bytes(encoder.encode(pcm_bytes)) + bytes(encoder.flush())
 
-        mp3 = await asyncio.to_thread(_encode, pcm)
-        if self._barged(barge):
-            logger.info("sonos_output: barge-in during the encode, clip dropped")
+            step = "encode"
+            mp3 = await asyncio.to_thread(_encode, pcm)
+            if self._barged(barge):
+                logger.info("sonos_output: barge-in during the encode, clip dropped")
+                return
+
+            # Unique across pipelines and restarts: two rooms replying in the
+            # same second must never share a name (the atomic write would swap
+            # one room's reply under the other zone's fetch).
+            step = "clip write"
+            filename = f"reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
+            clip_path = clips_dir() / filename
+            # Awaited before the URL exists: the speaker never fetches a
+            # clip that isn't on disk yet.
+            await asyncio.to_thread(_write_clip, clip_path, mp3)
+            step = "clip server bind"
+            server = self._clip_server or await shared_clip_server()
+            step = "clip URL"
+            url = server.url_for(filename)
+        except Exception as e:  # noqa: BLE001 — a fire-and-forget task must name what failed
+            logger.error(f"sonos_output: reply not played on '{zone_name}': {step} failed: {e}")
             return
-
-        # Unique across pipelines and restarts: two rooms replying in the
-        # same second must never share a name (the atomic write would swap
-        # one room's reply under the other zone's fetch).
-        filename = f"reply-{int(time.time())}-{uuid.uuid4().hex[:12]}.mp3"
-        clip_path = clips_dir() / filename
-        # Awaited before the URL exists: the speaker never fetches a
-        # clip that isn't on disk yet.
-        await asyncio.to_thread(_write_clip, clip_path, mp3)
-        server = self._clip_server or await shared_clip_server()
-        url = server.url_for(filename)
         logger.info(f"sonos_output: playing clip {url} on '{zone_name}' at vol {volume}")
 
         # Loads go one at a time, in order, and a clip whose generation is
@@ -742,12 +798,16 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         return epoch != self._speech_epoch
 
     async def _load_clip(self, zone, zone_name, url, volume, duration, epoch, barge) -> None:
-        from sonos_websocket import SonosWebsocket
-
         if self._stale(epoch):
             logger.info("sonos_output: a newer reply is already queued, older clip dropped")
             return
-        sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
+        try:
+            from sonos_websocket import SonosWebsocket
+
+            sw = SonosWebsocket(zone["ip"], player_id=zone["player_uid"])
+        except Exception as e:  # noqa: BLE001 — a fire-and-forget task must name what failed
+            logger.error(f"sonos_output: reply not played on '{zone_name}': speaker client failed: {e}")
+            return
         # From connect until the load returns this reply owns the player: the
         # duck holder skips its silence loads (one racing in replaced the
         # reply on long tool turns that started from IDLE).
@@ -760,6 +820,13 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
             if self._stale(epoch):
                 logger.info("sonos_output: a newer reply arrived during connect, older clip dropped")
                 return
+            # Block echo handling for as long as this clip will sound (the mic
+            # hears it off the zone speakers, no AEC by design). Armed before
+            # the play call, with no await in between: the speaker can't sound
+            # before it. If the play call then fails, the player may already be
+            # sounding it, so the block stands.
+            if self._echo_gate is not None:
+                self._echo_gate.block(duration + 1.5)  # + Sonos load (~200ms) + tail margin
             resp = await asyncio.wait_for(
                 sw.play_clip(url, volume=volume), timeout=5.0
             )
