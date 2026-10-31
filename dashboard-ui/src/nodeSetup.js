@@ -104,6 +104,22 @@ export function checkManifest(manifest, track) {
   return null
 }
 
+/** Node setup's Save: save(), then restart() and watch(). onSaved(saved) runs as soon as the node
+ *  holds the values, so a restart that fails after it reports a saved node that still needs a
+ *  power cycle, never a failed save. Resolves { ok, saved, text }; never throws. */
+export async function saveThenRestart({ save, restart, watch, onSaved = () => {} }) {
+  let saved
+  try { saved = await save() } catch (err) { return { ok: false, text: `Save failed: ${err.message}` } }
+  onSaved(saved)
+  try {
+    await restart()
+    await watch()
+  } catch (err) {
+    return { ok: false, saved, text: `Saved ${saved.join(', ')}. The node didn't restart (${err.message}) — unplug it and plug it back in to apply.` }
+  }
+  return { ok: true, saved }
+}
+
 /** esptool.py's hard reset for the board's own USB-Serial-JTAG port: DTR low (normal boot, not
  *  download mode), RTS high (chip in reset), then RTS low. esptool-js 0.7.0's HardReset only
  *  ever lowers RTS, so its after('hard_reset') left a freshly flashed chip sitting in the flasher.

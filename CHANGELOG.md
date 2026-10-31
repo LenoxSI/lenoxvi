@@ -80,6 +80,9 @@ The two version streams are independent.
 - Config saves: a value config.yaml can't hold is refused with a clear 400 and leaves the file untouched;
   before, it answered 500 and broke every later config save until a restart.
 - Expired command timeouts and finished wake-model upload locks no longer accumulate for the life of the process.
+- XMOS flashing: a chip that stops answering fails after 5 s with a clear error instead of hanging the panel.
+- Node setup: a node that saved its settings but didn't restart says so (unplug and replug to apply) instead of
+  "Save failed".
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

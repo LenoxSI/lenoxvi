@@ -6,7 +6,7 @@
 // against the live rig.
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { isSupported, hostOfferUrl, validateSettings, NodeLink } from './nodeSetup.js'
+import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
@@ -2185,18 +2185,21 @@ function NodeSetupPanel({ setMsg }) {
     const bad = validateSettings(fields)
     if (bad) { M(bad, 'err'); return }
     setPhase('saving'); M('Saving to the node…', 'pulse')
-    try {
-      const saved = await linkRef.current.save(fields)
-      setForm(f => ({ ...f, wifi_pass: '' }))
-      // The node holds these now, whatever the restart and watch do next: the next Save compares against them.
-      setInfo(i => i && { ...i,
-        ...('name' in fields && { name: fields.name }),
-        ...('wifi_ssid' in fields && { wifi_ssid: fields.wifi_ssid }),
-        ...('bot_url' in fields && { bot_url: fields.bot_url, bot_url_saved: fields.bot_url !== '' }) })
-      M(`Saved ${saved.join(', ')}. Restarting the node…`, 'pulse')
-      await linkRef.current.restart()
-      await watch()
-    } catch (e) { setForm(f => ({ ...f, wifi_pass: '' })); setPhase(info ? 'ready' : 'unknown'); M('Save failed: ' + e.message, 'err') }
+    const r = await saveThenRestart({
+      save: () => linkRef.current.save(fields),
+      onSaved: saved => {
+        setForm(f => ({ ...f, wifi_pass: '' }))
+        // The node holds these now, whatever the restart and watch do next: the next Save compares against them.
+        setInfo(i => i && { ...i,
+          ...('name' in fields && { name: fields.name }),
+          ...('wifi_ssid' in fields && { wifi_ssid: fields.wifi_ssid }),
+          ...('bot_url' in fields && { bot_url: fields.bot_url, bot_url_saved: fields.bot_url !== '' }) })
+        M(`Saved ${saved.join(', ')}. Restarting the node…`, 'pulse')
+      },
+      restart: () => linkRef.current.restart(),
+      watch,
+    })
+    if (!r.ok) { setForm(f => ({ ...f, wifi_pass: '' })); setPhase(info ? 'ready' : 'unknown'); M(r.text, 'err') }
   }
   const flash = async () => {
     const track = info?.track || pickTrack

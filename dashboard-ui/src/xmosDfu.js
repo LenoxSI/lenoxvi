@@ -32,6 +32,10 @@ const POLL_MIN_MS = 5
 const POLL_MAX_MS = 5000
 // One block or the manifest step; the same minute the sound check gives a node.
 const WAIT_DEADLINE_MS = 60000
+// A control transfer answers in milliseconds, but WebUSB gives it no timeout of its own.
+const ANSWER_MS = 5000
+const NO_ANSWER = Symbol('no answer')
+const DFU_NAME = Object.fromEntries(Object.entries(DFU).map(([k, v]) => [v, k]))
 
 export class XmosError extends Error {
   constructor(code, message) { super(message); this.name = 'XmosError'; this.code = code }
@@ -183,8 +187,11 @@ export class XmosDfu {
     return new XmosDfu(await nav.usb.requestDevice({ filters: [{ vendorId: XMOS_VENDOR_ID }] }))
   }
 
-  constructor(device, { sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => Date.now() } = {}) {
-    this.device = device; this.sleep = sleep; this.now = now
+  // timer(fire, ms) arms the answer timeout and returns its cancel; separate from sleep, which
+  // paces the status polls and must not count the answer timers.
+  constructor(device, { sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => Date.now(),
+                        timer = (fire, ms) => { const t = setTimeout(fire, ms); return () => clearTimeout(t) } } = {}) {
+    this.device = device; this.sleep = sleep; this.now = now; this.timer = timer
     this.ifc = null; this.transferSize = 0
   }
 
@@ -196,27 +203,48 @@ export class XmosDfu {
     try { await d.claimInterface(interfaceNumber) } catch (e) { throw accessDenied(e) }
     await d.selectAlternateInterface(interfaceNumber, UPGRADE_ALT)
     this.ifc = interfaceNumber
-    const fd = parseDfuFunctional(await this._configDescriptor(), interfaceNumber)
-    if (!fd || !fd.transferSize) throw new XmosError('no-descriptor', 'The chip didn’t describe its DFU settings; not flashing it.')
-    this.transferSize = fd.transferSize
-    await this._toIdle()
+    try {
+      const fd = parseDfuFunctional(await this._configDescriptor(), interfaceNumber)
+      if (!fd || !fd.transferSize) throw new XmosError('no-descriptor', 'The chip didn’t describe its DFU settings; not flashing it.')
+      this.transferSize = fd.transferSize
+      await this._toIdle()
+    } catch (e) {
+      // The unanswered transfer still holds the interface, and the page keeps no handle on a failed open.
+      if (e.code === 'dfu-no-answer') await this.close()
+      throw e
+    }
     return this
+  }
+
+  // The transfer, or dfu-no-answer once ANSWER_MS passes without a reply. A lost transfer can't be
+  // cancelled and keeps the interface: the caller fails the flow and the device gets closed. The
+  // race keeps a handler on it, so its late rejection is no unhandled one.
+  async _answer(transfer, name, block) {
+    let cancel = () => {}
+    const late = new Promise(r => { cancel = this.timer(() => r(NO_ANSWER), ANSWER_MS) })
+    try {
+      const r = await Promise.race([transfer, late])
+      if (r !== NO_ANSWER) return r
+    } finally { cancel() }
+    const at = block === undefined ? '' : ` at block ${block}`
+    throw new XmosError('dfu-no-answer', `The chip stopped answering (${name}${at}, no reply in ${ANSWER_MS / 1000} s).`)
   }
 
   async _configDescriptor() {
     const setup = { requestType: 'standard', recipient: 'device', request: 0x06, value: 0x0200, index: 0 }
-    const head = await this.device.controlTransferIn(setup, 9)
-    const full = await this.device.controlTransferIn(setup, head.data.getUint16(2, true))
+    const head = await this._answer(this.device.controlTransferIn(setup, 9), 'GET_DESCRIPTOR')
+    const full = await this._answer(this.device.controlTransferIn(setup, head.data.getUint16(2, true)), 'GET_DESCRIPTOR')
     return new Uint8Array(full.data.buffer, full.data.byteOffset, full.data.byteLength)
   }
 
-  async _out(request, value, data) {
-    const r = await this.device.controlTransferOut(ct(request, value, this.ifc), data || new Uint8Array(0))
+  async _out(request, value, data, block) {
+    const r = await this._answer(this.device.controlTransferOut(ct(request, value, this.ifc), data || new Uint8Array(0)),
+                                 DFU_NAME[request], block)
     if (r && r.status && r.status !== 'ok') throw new XmosError('transfer', `USB transfer failed (${r.status}).`)
   }
 
-  async _status() {
-    const v = (await this.device.controlTransferIn(ct(DFU.GETSTATUS, 0, this.ifc), 6)).data
+  async _status(block) {
+    const v = (await this._answer(this.device.controlTransferIn(ct(DFU.GETSTATUS, 0, this.ifc), 6), 'GETSTATUS', block)).data
     return { status: v.getUint8(0), poll: v.getUint8(1) | (v.getUint8(2) << 8) | (v.getUint8(3) << 16), state: v.getUint8(4) }
   }
 
@@ -230,9 +258,9 @@ export class XmosDfu {
   async _waitFor(block, wanted) {
     const end = this.now() + WAIT_DEADLINE_MS
     for (;;) {
-      const s = await this._status()
+      const s = await this._status(block)
       if (s.status !== 0 || s.state === DFU_STATE.ERROR) {
-        try { await this._out(DFU.CLRSTATUS, 0) } catch { /* the error below is the news */ }
+        try { await this._out(DFU.CLRSTATUS, 0, null, block) } catch { /* the error below is the news */ }
         throw new XmosError('dfu-status', `The chip reported an error (status ${s.status}) at block ${block}.`)
       }
       if (wanted.includes(s.state)) return s
@@ -249,13 +277,13 @@ export class XmosDfu {
     let block = 0
     for (let off = 0; off < bytes.length; off += n, block++) {
       const chunk = bytes.subarray(off, Math.min(off + n, bytes.length))
-      await this._out(DFU.DNLOAD, block & 0xffff, chunk)
+      await this._out(DFU.DNLOAD, block & 0xffff, chunk, block)
       await this._waitFor(block, [DFU_STATE.DNLOAD_IDLE])
       if (onProgress) onProgress(Math.round(((off + chunk.length) / bytes.length) * 100))
     }
     let manifested = 'disconnected'
     try {
-      await this._out(DFU.DNLOAD, block & 0xffff)   // zero-length block: end of image
+      await this._out(DFU.DNLOAD, block & 0xffff, null, block)   // zero-length block: end of image
       const s = await this._waitFor(block, [DFU_STATE.IDLE, DFU_STATE.MANIFEST_WAIT_RESET])
       manifested = s.state === DFU_STATE.IDLE ? 'idle' : 'wait-reset'
     } catch (e) {
