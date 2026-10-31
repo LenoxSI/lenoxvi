@@ -1677,6 +1677,8 @@ def main():
           tuple(_fwiwst.TRACKS) == tuple(_reg.NODE_LINES) and set(_fwswst.FIRMWARE_TRACKS) == set(_fwiwst.TRACKS)
           and set(_fwiwst.TRACK_LABEL) == set(_fwiwst.TRACKS),
           f"{_fwiwst.TRACKS} {_reg.NODE_LINES} {list(_fwswst.FIRMWARE_TRACKS)} {list(_fwiwst.TRACK_LABEL)}")
+    check("firmware server: FIRMWARE_TRACKS is firmware_image.TRACKS itself (names only, one source of truth)",
+          _fwswst.FIRMWARE_TRACKS is _fwiwst.TRACKS, repr(_fwswst.FIRMWARE_TRACKS))
     _giws = (Path(__file__).resolve().parent.parent / ".gitignore").read_text().splitlines()
     check("waveshare: every firmware track dir is gitignored (built images never committed)",
           all(f"firmware/{t}/" in _giws for t in _fwiwst.TRACKS),
@@ -2176,81 +2178,72 @@ def main():
                 (_fsNS / _n).write_bytes(_b)
 
         # The OTA server (core/firmware_server.py) — first suite
-        # coverage of the node-facing routes. Tracks point at this scratch.
+        # coverage of the node-facing routes. firmware_dir() resolves under this scratch.
         import firmware_server as _fws
         from fastapi import FastAPI as _FAnm
-        _saved_tracksnm = dict(_fws.FIRMWARE_TRACKS)
-        _fws.FIRMWARE_TRACKS.update({"array": Path("firmware/array").resolve(),
-                                     "flex": Path("firmware/flex").resolve(),
-                                     "waveshare": Path("firmware/waveshare").resolve()})
+        _appnm = _FAnm()
+        _fws.register_firmware_routes(_appnm)
+        _cnm = TestClient(_appnm)
+        _legacy = _cnm.get("/firmware/version")
+        _arr = _cnm.get("/firmware/array/version")
+        _flx = _cnm.get("/firmware/flex/version")
+        check("firmware track OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
+              _legacy.status_code == 200 and _legacy.json() == _arr.json()
+              == {"version": "1.9.9", "filename": "array_esp32.bin"},
+              f"{_legacy.status_code} {_legacy.text[:80]} | {_arr.text[:80]}")
+        check("firmware track OTA: /firmware/flex/version serves the flex manifest",
+              _flx.status_code == 200 and _flx.json() == {"version": "1.9.9", "filename": "flex_esp32.bin"},
+              _flx.text[:80])
+        _lb = _cnm.get("/firmware/array_esp32.bin")
+        _tb = _cnm.get("/firmware/array/array_esp32.bin")
+        check("firmware track OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
+              _lb.status_code == 200 and _lb.content == _tb.content
+              == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
+        _wsv = _cnm.get("/firmware/waveshare/version")
+        _wsb = _cnm.get("/firmware/waveshare/waveshare_esp32.bin")
+        check("waveshare OTA: /firmware/waveshare/version + bin serve the waveshare track",
+              _wsv.status_code == 200 and _wsv.json() == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
+              and _wsb.status_code == 200
+              and _wsb.content == Path("firmware/waveshare/waveshare_esp32.bin").read_bytes(),
+              f"{_wsv.status_code} {_wsv.text[:80]} {_wsb.status_code}")
+        check("waveshare OTA: the real FIRMWARE_TRACKS table names waveshare",
+              "waveshare" in _fws.FIRMWARE_TRACKS, str(list(_fws.FIRMWARE_TRACKS)))
+        check("firmware track OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
+              _cnm.get("/firmware/node/version").status_code == 404, "")
+        check("firmware track OTA: path traversal out of a track dir 404s",
+              _cnm.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
+        _upTmp = Path("firmware/array/array_esp32.bin.k3x9q.uploading")
         try:
-            _appnm = _FAnm()
-            _fws.register_firmware_routes(_appnm)
-            _cnm = TestClient(_appnm)
-            _legacy = _cnm.get("/firmware/version")
-            _arr = _cnm.get("/firmware/array/version")
-            _flx = _cnm.get("/firmware/flex/version")
-            check("firmware track OTA: legacy /firmware/version == /firmware/array/version (array <=1.2.8 keeps updating)",
-                  _legacy.status_code == 200 and _legacy.json() == _arr.json()
-                  == {"version": "1.9.9", "filename": "array_esp32.bin"},
-                  f"{_legacy.status_code} {_legacy.text[:80]} | {_arr.text[:80]}")
-            check("firmware track OTA: /firmware/flex/version serves the flex manifest",
-                  _flx.status_code == 200 and _flx.json() == {"version": "1.9.9", "filename": "flex_esp32.bin"},
-                  _flx.text[:80])
-            _lb = _cnm.get("/firmware/array_esp32.bin")
-            _tb = _cnm.get("/firmware/array/array_esp32.bin")
-            check("firmware track OTA: legacy /firmware/<bin> and /firmware/array/<bin> serve the same array image",
-                  _lb.status_code == 200 and _lb.content == _tb.content
-                  == Path("firmware/array/array_esp32.bin").read_bytes(), f"{_lb.status_code} {_tb.status_code}")
-            _wsv = _cnm.get("/firmware/waveshare/version")
-            _wsb = _cnm.get("/firmware/waveshare/waveshare_esp32.bin")
-            check("waveshare OTA: /firmware/waveshare/version + bin serve the waveshare track",
-                  _wsv.status_code == 200 and _wsv.json() == {"version": "1.9.9", "filename": "waveshare_esp32.bin"}
-                  and _wsb.status_code == 200
-                  and _wsb.content == Path("firmware/waveshare/waveshare_esp32.bin").read_bytes(),
-                  f"{_wsv.status_code} {_wsv.text[:80]} {_wsb.status_code}")
-            check("waveshare OTA: the real FIRMWARE_TRACKS table names waveshare",
-                  "waveshare" in _saved_tracksnm
-                  and _saved_tracksnm["waveshare"].name == "waveshare", str(list(_saved_tracksnm)))
-            check("firmware track OTA: retired /firmware/node/version 404s (unknown track = no update, safe)",
-                  _cnm.get("/firmware/node/version").status_code == 404, "")
-            check("firmware track OTA: path traversal out of a track dir 404s",
-                  _cnm.get("/firmware/array/..%2F..%2Fconfig.yaml").status_code == 404, "")
-            _upTmp = Path("firmware/array/array_esp32.bin.k3x9q.uploading")
-            try:
-                _upTmp.write_bytes(b"half an image")
-                _upT = _cnm.get(f"/firmware/array/{_upTmp.name}").status_code
-                _upL = _cnm.get(f"/firmware/{_upTmp.name}").status_code
-            finally:
-                _upTmp.unlink(missing_ok=True)
-            check("firmware track OTA: an upload still being written (*.uploading) is never served (track and legacy URL 404)",
-                  _upT == 404 and _upL == 404, f"{_upT} {_upL}")
-            # signing: unsigned app images never go out; boot files aren't app images
-            _flxSG = Path("firmware/flex/flex_esp32.bin")
-            _keepFlx = _flxSG.read_bytes() if _flxSG.is_file() else None
-            try:
-                _flxSG.write_bytes(_fake_image5b("1.9.9", "flex"))
-                Path("firmware/flex/bootloader.bin").write_bytes(b"B" * 1000)
-                _rUn = _cnm.get("/firmware/flex/flex_esp32.bin")
-                _rBoot = _cnm.get("/firmware/flex/bootloader.bin")
-                check("signing: the OTA server refuses an unsigned app image (409) but serves boot files",
-                      _rUn.status_code == 409 and "not signed" in _rUn.text and _rBoot.status_code == 200,
-                      f"{_rUn.status_code} ({len(_rUn.content)} bytes) boot={_rBoot.status_code}")
-                _app2 = _FAnm()
-                _fws.register_firmware_routes(_app2)
-                _rAfter = TestClient(_app2).get("/firmware/flex/flex_esp32.bin")
-                import firmware_signing as _fsg2
-                check("signing: at startup the bot signs an unsigned served image, which then serves",
-                      _rAfter.status_code == 200 and _fsg2.has_signature(_rAfter.content)
-                      and _fsg2.signer_digest(_flxSG) == _fsg2.fingerprint(),
-                      f"{_rAfter.status_code}")
-            finally:
-                Path("firmware/flex/bootloader.bin").unlink(missing_ok=True)
-                if _keepFlx is not None:
-                    _flxSG.write_bytes(_keepFlx)
+            _upTmp.write_bytes(b"half an image")
+            _upT = _cnm.get(f"/firmware/array/{_upTmp.name}").status_code
+            _upL = _cnm.get(f"/firmware/{_upTmp.name}").status_code
         finally:
-            _fws.FIRMWARE_TRACKS.clear()
-            _fws.FIRMWARE_TRACKS.update(_saved_tracksnm)
+            _upTmp.unlink(missing_ok=True)
+        check("firmware track OTA: an upload still being written (*.uploading) is never served (track and legacy URL 404)",
+              _upT == 404 and _upL == 404, f"{_upT} {_upL}")
+        # signing: unsigned app images never go out; boot files aren't app images
+        _flxSG = Path("firmware/flex/flex_esp32.bin")
+        _keepFlx = _flxSG.read_bytes() if _flxSG.is_file() else None
+        try:
+            _flxSG.write_bytes(_fake_image5b("1.9.9", "flex"))
+            Path("firmware/flex/bootloader.bin").write_bytes(b"B" * 1000)
+            _rUn = _cnm.get("/firmware/flex/flex_esp32.bin")
+            _rBoot = _cnm.get("/firmware/flex/bootloader.bin")
+            check("signing: the OTA server refuses an unsigned app image (409) but serves boot files",
+                  _rUn.status_code == 409 and "not signed" in _rUn.text and _rBoot.status_code == 200,
+                  f"{_rUn.status_code} ({len(_rUn.content)} bytes) boot={_rBoot.status_code}")
+            _app2 = _FAnm()
+            _fws.register_firmware_routes(_app2)
+            _rAfter = TestClient(_app2).get("/firmware/flex/flex_esp32.bin")
+            import firmware_signing as _fsg2
+            check("signing: at startup the bot signs an unsigned served image, which then serves",
+                  _rAfter.status_code == 200 and _fsg2.has_signature(_rAfter.content)
+                  and _fsg2.signer_digest(_flxSG) == _fsg2.fingerprint(),
+                  f"{_rAfter.status_code}")
+        finally:
+            Path("firmware/flex/bootloader.bin").unlink(missing_ok=True)
+            if _keepFlx is not None:
+                _flxSG.write_bytes(_keepFlx)
     finally:
         os.chdir(_saved_updir5b)
         if _saved_state5b is None:
@@ -3851,10 +3844,33 @@ def main():
                 return wf, ran
 
             _wf8c, _ran8c = _asyncio.run(_wake_probe_async())
-            check("turns wake: ASYNC on_interrupt coroutine actually runs",
-                  len(_ran8c) == 1 and _wf8c._interrupt_task is not None
-                  and _wf8c._interrupt_task.done(),
-                  f"ran={len(_ran8c)} task={getattr(_wf8c, '_interrupt_task', 'missing')}")
+            check("turns wake: ASYNC on_interrupt coroutine actually runs (and its finished task is released)",
+                  len(_ran8c) == 1 and getattr(_wf8c, "_interrupt_tasks", None) == set(),
+                  f"ran={len(_ran8c)} tasks={getattr(_wf8c, '_interrupt_tasks', 'missing')}")
+
+            # A second barge-in while the first clip cancel still runs: both
+            # tasks stay referenced (none dropped mid-flight, none cancelled),
+            # and both are released once they finish.
+            async def _double_barge8():
+                wf = _WF(echo_gate=_EchoGate8(), on_wake=lambda: None, on_interrupt=lambda: None)
+                gate, done = asyncio.Event(), []
+
+                async def _slow_cancel(n):
+                    await gate.wait()
+                    done.append(n)
+                sched = getattr(wf, "_schedule_interrupt", None)
+                if sched is None:
+                    return None
+                t1, t2 = sched(_slow_cancel(1)), sched(_slow_cancel(2))
+                await asyncio.sleep(0.01)
+                held = set(wf._interrupt_tasks) == {t1, t2} and not t1.cancelled() and not t1.done()
+                gate.set()
+                await asyncio.sleep(0.01)
+                return held, sorted(done), set(wf._interrupt_tasks)
+
+            _dbl8 = _asyncio.run(_double_barge8())
+            check("turns wake: a second barge-in keeps the first clip cancel running and referenced; both are released when done",
+                  _dbl8 is not None and _dbl8[0] and _dbl8[1] == [1, 2] and _dbl8[2] == set(), str(_dbl8))
             # ── backend clip stop (fake player layers, speech-timer pattern) ──
             _CANCELS8 = []
 
