@@ -81,6 +81,23 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 webrtc_compat.apply()
 
 
+def _revive_cooldown_secs(raw, key: str) -> float:
+    """A revive_cooldown_secs value in seconds: unset or blank = 30, any
+    number 0 or more as given (0 = retry every utterance — never `or 30`,
+    a YAML 0 is falsy). Anything else warns and means 30. Uses no global
+    but logger: the suite runs it straight from this file's source."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 30.0
+    try:
+        secs = float("nan") if isinstance(raw, bool) else float(raw)
+    except (TypeError, ValueError, OverflowError):
+        secs = float("nan")
+    if 0 <= secs < float("inf"):  # NaN fails both bounds
+        return secs
+    logger.warning(f"{key}: {raw!r} is not a number of seconds (0 or more) — using 30")
+    return 30.0
+
+
 class TTSTracked:
     """Mixin: relay pipecat's set_usable() verdicts to the dashboard
     registry for this pipeline's room (a node once went silent this
@@ -136,8 +153,8 @@ class TTSTracked:
         the speak falls through to pipecat's silent skip."""
         try:
             from config import cfg_env
-            cooldown = float(cfg_env("tts", "revive_cooldown_secs",
-                                      "LVI_TTS_REVIVE_COOLDOWN", 30) or 30)
+            cooldown = _revive_cooldown_secs(cfg_env("tts", "revive_cooldown_secs", "LVI_TTS_REVIVE_COOLDOWN"),
+                                             "tts.revive_cooldown_secs")
         except Exception:
             cooldown = 30.0
         now = time.monotonic()
@@ -553,11 +570,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     _task_ref = {}
     if tts_standby is not None:
         from tts_fallback import wrap_with_fallback
-        try:
-            _cool = float(cfg_env("tts", "revive_cooldown_secs",
-                                  "LVI_TTS_REVIVE_COOLDOWN", 30) or 30)
-        except (TypeError, ValueError):
-            _cool = 30.0
+        _cool = _revive_cooldown_secs(cfg_env("tts", "revive_cooldown_secs", "LVI_TTS_REVIVE_COOLDOWN"),
+                                      "tts.revive_cooldown_secs")
 
         async def _queue(frame):
             await _task_ref["task"].queue_frame(frame)
@@ -583,10 +597,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         if _cloud is None:
             logger.warning(f"stt: provider {stt_provider} unavailable ({_cloud_why}) — local Whisper is listening")
         else:
-            try:
-                _stt_cool = float(cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30) or 30)
-            except (TypeError, ValueError):
-                _stt_cool = 30.0
+            _stt_cool = _revive_cooldown_secs(cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN"),
+                                              "stt.revive_cooldown_secs")
 
             async def _stt_queue(frame):
                 await _task_ref["task"].queue_frame(frame)
@@ -808,7 +820,8 @@ if __name__ == "__main__":
                      tts_catalog.resolve_provider(_cfg_env("tts", "provider", "LVI_TTS_PROVIDER", None)))
         if "localai" in _la_cards:
             import localai
-            localai.set_cooldown(_cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN", 30))
+            localai.set_cooldown(_revive_cooldown_secs(
+                _cfg_env("stt", "revive_cooldown_secs", "LVI_STT_REVIVE_COOLDOWN"), "stt.revive_cooldown_secs"))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"localai setup failed ({e}) — using the default probe cadence")
 

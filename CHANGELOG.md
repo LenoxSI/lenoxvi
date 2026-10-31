@@ -32,6 +32,9 @@ The two version streams are independent.
 - The speech-to-text debug log now names the engine that heard each turn: a LocalAI transcript logs
   `stt heard: […] (localai: <model>)` and a dropped phantom from LocalAI logs `stt dropped phantom […]
   (localai: <model>)`. Turns Whisper base serves — including LocalAI fallbacks — still log `local-whisper`.
+- A `revive_cooldown_secs: 0` set in config.yaml (TTS or STT) is honoured again instead of silently
+  becoming 30 seconds; all four readers parse the value the same way, and a negative or non-numeric value
+  warns and uses 30.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
