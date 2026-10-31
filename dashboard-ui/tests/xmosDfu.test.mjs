@@ -59,6 +59,7 @@ class FakeDfu {
       else this.state = ST.DNLOAD_IDLE
     } else if (this.state === ST.MANIFEST_SYNC) {
       if (this.o.manifest === 'drop') { this.gone = true; throw new Error('NetworkError: device left the bus') }
+      if (this.o.manifest === 'stuck') return this._st(0, this.o.pollMs, ST.MANIFEST)
       this.state = this.o.manifest === 'idle' ? ST.IDLE : ST.MANIFEST_WAIT_RESET
       return this._st(0, this.o.pollMs, ST.MANIFEST)
     } else if (this.state === ST.ERROR) status = this.err || 0x0e
@@ -222,6 +223,50 @@ test('xmos: a nonzero status fails even when the chip claims a normal state', as
   const d = new FakeDfu({ failAt: 2, statusOnly: true })
   const e = await (await new XmosDfu(d, quick()).open()).flash(bytes(64 * 4)).catch(err => err)
   assert.equal(e && e.code, 'dfu-status'); assert.match(e.message, /block 2/)
+})
+
+// Fake time for the status waits. Past an hour of fake time it throws a plain Error, so a
+// wait with no deadline fails the test instead of hanging it.
+const dfuClock = () => {
+  let t = 0; const slept = []
+  return { slept, now: () => t, sleep: ms => {
+    slept.push(ms); t += ms
+    return t > 3600000 ? Promise.reject(new Error('still polling after an hour')) : Promise.resolve()
+  } }
+}
+
+test('xmos: a chip stuck busy on a block fails after the wait deadline, naming the state', async () => {
+  const d = new FakeDfu({ busy: Infinity, pollMs: 1000 }); const c = dfuClock()
+  const e = await (await new XmosDfu(d, c).open()).flash(bytes(64 * 3)).catch(err => err)
+  assert.ok(e instanceof XmosError, `an XmosError, got ${e}`)
+  assert.equal(e.code, 'dfu-timeout')
+  assert.match(e.message, new RegExp(`state ${ST.DNBUSY}\\b`)); assert.match(e.message, /block 0/)
+  assert.ok(c.now() >= 60000 && c.now() <= 61000, `gave up after 60 s of chip time, not ${c.now()} ms`)
+  assert.ok(!d.log.some(l => l[0] === 'out' && l[1] === DFU.DNLOAD && l[2] === 1), 'stops writing')
+})
+
+test('xmos: a chip stuck manifesting fails after the wait deadline instead of reading as done', async () => {
+  const d = new FakeDfu({ manifest: 'stuck', pollMs: 1000 }); const c = dfuClock()
+  const e = await (await new XmosDfu(d, c).open()).flash(bytes(100)).catch(err => err)
+  assert.ok(e instanceof XmosError, `an XmosError, got ${JSON.stringify(e)}`)
+  assert.equal(e.code, 'dfu-timeout'); assert.match(e.message, new RegExp(`state ${ST.MANIFEST}\\b`))
+})
+
+test('xmos: a huge bwPollTimeout sleeps the cap, a zero one the floor', async () => {
+  const huge = quick()
+  await (await new XmosDfu(new FakeDfu({ busy: 1, pollMs: 0xffffff }), huge).open()).flash(bytes(10))
+  assert.ok(huge.slept.length > 0 && huge.slept.every(ms => ms === 5000), `slept ${huge.slept}`)
+  const zero = quick()
+  await (await new XmosDfu(new FakeDfu({ busy: 1, pollMs: 0 }), zero).open()).flash(bytes(10))
+  assert.ok(zero.slept.length > 0 && zero.slept.every(ms => ms === 5), `slept ${zero.slept}`)
+})
+
+test('xmos: the wait deadline is per block — a slow chip within it still flashes', async () => {
+  // 50 s busy on every block: past one deadline in total, inside it per block
+  const d = new FakeDfu({ busy: 50, pollMs: 1000 }); const c = dfuClock()
+  const r = await (await new XmosDfu(d, c).open()).flash(bytes(64 * 3))
+  assert.equal(r.manifested, 'wait-reset'); assert.ok(c.now() >= 150000, `took ${c.now()} ms of chip time`)
+  assert.ok(c.slept.every(ms => ms === 1000), 'an in-range bwPollTimeout is slept as given')
 })
 
 test('xmos: flash refuses before open', async () => {
