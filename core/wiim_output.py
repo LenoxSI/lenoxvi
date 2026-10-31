@@ -157,11 +157,17 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         and replies die silently (LEDs cycled, zero audio — nothing
         listening on 8765 because no SonosOutput existed in the pipeline
         to start it). Same singleton as Sonos —
-        one server, one port, all backends."""
+        one server, one port, all backends. Never fatal: a bad host_ip
+        must not fail setup for every room (speaking binds lazily and
+        reports its own error)."""
         await super().setup(setup)
         if self._enabled:
             from sonos_output import shared_clip_server
-            self._clip_server = await shared_clip_server()
+            try:
+                self._clip_server = await shared_clip_server()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"wiim_output: clip server not ready ({e}) — will retry when speaking")
+                return
             logger.info(f"wiim_output: backend ready — zones {list(self._zones)}, "
                         f"global vol {self._volume}")
 
@@ -233,10 +239,6 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         if self._barged(barge):  # barge-in while the clip was being built
             logger.info("wiim_output: barge-in before the clip loaded, dropped")
             return
-        # Echo gate: her voice will come off the WiiM speakers; block the
-        # mic from hearing the reply (no AEC by design).
-        if self._echo_gate is not None:
-            self._echo_gate.block(duration + 1.5)
 
         # MP3 (proven on this unit; WAV unreliable on LinkPlay firmware).
         # WiiM hardware fade (heard by ear): the Pro ramps
@@ -280,10 +282,14 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
         except OSError as e:
             logger.error(f"wiim_output: clip write failed: {e}")
             return
-        if self._clip_server is None:
-            from sonos_output import shared_clip_server
-            self._clip_server = await shared_clip_server()
-        url = self._clip_server.url_for(clip_path.name)
+        try:
+            if self._clip_server is None:
+                from sonos_output import shared_clip_server
+                self._clip_server = await shared_clip_server()
+            url = self._clip_server.url_for(clip_path.name)
+        except Exception as e:  # noqa: BLE001 — a clip nobody can serve is dropped, never raised out of the task
+            logger.error(f"wiim_output: clip server not ready, reply dropped: {e}")
+            return
         logger.info(f"wiim_output: playing clip {url} on '{zone_name}' ({ip}) at vol {vol}")
 
         # ── vol snapshot → set → play → confirm → restore ──
@@ -304,7 +310,7 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
             need_snap = ip not in _VOL_SAVED
             saved = _VOL_SAVED.get(ip)
 
-            def _net():
+            def _set_voice_volume():
                 before = saved
                 if need_snap:
                     st = wiim_get_status(ip)
@@ -312,6 +318,9 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
                     before = int(raw) if raw is not None else None
                 if before is not None:
                     wiim_api(ip, f"setPlayerCmd:vol:{vol}")
+                return before
+
+            def _play(before):
                 try:
                     wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
                 except Exception:
@@ -327,11 +336,23 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
                     raise
                 return before
 
+            async def _net():
+                before = await asyncio.to_thread(_set_voice_volume)
+                # Echo gate: her voice will come off the WiiM speakers; block
+                # the mic from hearing the reply (no AEC by design). Armed
+                # here, right before the play command, so a clip that fails
+                # before it never deafens the mic. The gate is one deadline
+                # shared by every clip: a failure never relaxes it. A
+                # barge-in already relaxed it; this clip is stopped below.
+                if self._echo_gate is not None and not self._barged(barge):
+                    self._echo_gate.block(duration + 1.5)
+                return await asyncio.to_thread(_play, before)
+
             # Shielded: a bot stop landing while the play command is in flight
-            # can't abandon it half-done. The thread sets the voice volume and
-            # plays either way; without this, nothing would put the music
+            # can't abandon it half-done. The steps set the voice volume and
+            # play either way; without this, nothing would put the music
             # volume back (the restore timer below never starts).
-            fut = asyncio.ensure_future(asyncio.to_thread(_net))
+            fut = asyncio.ensure_future(_net())
             try:
                 before_vol = await asyncio.shield(fut)
             except asyncio.CancelledError:
@@ -369,8 +390,8 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
                 except Exception:
                     pass  # gate hint must never break the reply
             if self._echo_gate is not None:
-                # max-extend over the entry-time block: the encode+play
-                # latency between entry and NOW ate into that window
+                # max-extend over the pre-play block: a slow play command
+                # ate into that window before the unit acked
                 self._echo_gate.block(duration + 1.5)
         # Restore the music volume after the clip sounds (interrupt-
         # no-restore RATIFIED: music doesn't come back; its volume does).
@@ -387,8 +408,8 @@ class WiiMOutput(LiveZoneConfig, FrameProcessor):
             raise
         try:
             await self._restore_volume(ip, token)
-        except Exception:
-            pass  # restore is best-effort; the reply already played
+        except Exception as e:  # noqa: BLE001 — best effort; the reply already played and the next clip retries
+            logger.warning(f"wiim_output: music volume restore failed on '{zone_name}' ({ip}): {e}")
 
     async def _undo_inflight_play(self, ip: str, fut, need_snap: bool) -> None:
         """The task was cancelled mid play command: let the command finish

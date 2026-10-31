@@ -35,6 +35,9 @@ The two version streams are independent.
 - A `revive_cooldown_secs: 0` set in config.yaml (TTS or STT) is honoured again instead of silently
   becoming 30 seconds; all four readers parse the value the same way, and a negative or non-numeric value
   warns and uses 30.
+- WiiM: a missing clip-server host setting or a failed bind no longer fails session setup (it warns and
+  retries when speaking); a reply that fails before its play command (encode, clip write, clip server,
+  voice volume) no longer deafens the mic for the clip length; a failed music-volume restore is logged.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
