@@ -27,6 +27,11 @@ The two version streams are independent.
   - `GET /oww/models`: `current` (each model's `selected` marks the active one).
   - `POST /intelligence/agents`: `source`, and `key_hint` on each agent.
   - `POST /zones/discover`: `model`, `supported` on each player.
+  - Write responses: `PUT /mapping` answers just `{"ok": true}` (no `room_zones`, `room_agents`, `changed`);
+    `PUT /voice-tuning` answers just `{"ok": true}` (no `written`); the key saves drop `replaced` (and
+    `PUT /intelligence/key` its `key_hint`); `PUT /localai` drops `restart`; `PUT /node-speaker/volume` drops
+    `sent`; `PUT /zones/<name>/volume` and `POST /nodes/<room>/session-mode` drop `before`;
+    `DELETE /zones/<name>` drops `default_zone`.
 
 ### Fixed
 - The speech-to-text debug log now names the engine that heard each turn: a LocalAI transcript logs

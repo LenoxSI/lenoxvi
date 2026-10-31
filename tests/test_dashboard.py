@@ -228,6 +228,7 @@ def main():
     before_text = cfg_test.read_text()
     r = client.put("/api/dashboard/mapping", json={"room_zones": {"bedroom": "Kitchen"}})
     check("mapping PUT ok", r.status_code == 200, f"status={r.status_code} body={r.text[:200]}")
+    check("dead fields: the mapping PUT answers just {ok} (nothing reads an echo)", r.json() == {"ok": True}, r.text[:160])
     after_text = cfg_test.read_text()
     check("config write changed the file", after_text != before_text)
     check("comment preservation (header survives)",
@@ -456,8 +457,8 @@ def main():
                                             "zones": {"zwA": {"ip": "127.0.0.7"}}})
         _d1 = client.delete("/api/dashboard/zones/zdA")
         _dz1 = (config_store.read_section("sonos") or {}).get("default_zone")
-        check("zones: deleting the default hands default to a remaining zone",
-              _d1.status_code == 200 and _dz1 == "zdB" and _d1.json().get("default_zone") == "zdB",
+        check("zones: deleting the default hands default to a remaining zone (the response doesn't echo it)",
+              _d1.status_code == 200 and _dz1 == "zdB" and "default_zone" not in _d1.json(),
               f"{_d1.status_code} default={_dz1} body={_d1.text[:120]}")
         _d2 = client.delete("/api/dashboard/zones/zdB")
         _dz2 = (config_store.read_section("sonos") or {}).get("default_zone")
@@ -1193,6 +1194,7 @@ def main():
         check("localai card: PUT normalises and saves the URL and model",
               r.status_code == 200 and config_store.read_section("localai").get("url") == "http://192.0.2.50:8080"
               and config_store.read_section("localai").get("model_stt") == "fw-small", r.text[:200])
+        check("dead fields: the localai PUT carries no 'restart'", "restart" not in r.json(), r.text[:160])
         for _bad in ("http://x\nLVI_RESTART_COMMAND=boom", "ftp://x:21", "http://x:99999", "http://x/v2/thing"):
             r = client.put("/api/dashboard/localai", json={"url": _bad})
             check(f"localai card: a bad URL is refused (422) [{_bad[:18]}]", r.status_code == 422, r.text[:120])
@@ -1290,6 +1292,7 @@ def main():
         check("key route accepts well-formed key (200)",
               r.status_code == 200 and r.json().get("api_key_set") is True,
               f"status={r.status_code} body={r.text[:120]}")
+        check("dead fields: a key save carries no 'replaced'", "replaced" not in r.json(), r.text[:120])
         env_txt = (SCRATCH / "test.env").read_text()
         check("key route writes key to scratch .env",
               "ELEVENLABS_API_KEY=validkey_0123456789abcdef" in env_txt,
@@ -2517,6 +2520,7 @@ def main():
         "vad_confidence": 0.65, "vad_min_volume": 0.55,
         "lull_secs": 0.8, "dedup_window": 8.0})
     check("tuning PUT (all six) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
+    check("dead fields: the voice-tuning PUT answers just {ok}", r.json() == {"ok": True}, r.text[:160])
     t = client.get("/api/dashboard/voice-tuning").json()
     check("tuning round-trip: all six persisted",
           t["wake_threshold"] == 0.42 and t["wake_awake_timeout"] == 12.0 and
@@ -4756,8 +4760,9 @@ def main():
                         "kind": "hermes", "agent": "default", "api_key": "hm-token-abcdefghijkl"})
                     check("agent picker: key save: hermes profile -> its own var; openclaw ignores agent; default -> base",
                           _wek12 == ["LVI_HERMES_KEY_HOME_HELPER", "LVI_OPENCLAW_KEY", "LVI_HERMES_KEY"], str(_wek12))
-                    check("agent picker: key save returns the first-4 hint, never the key",
-                          _kp12.json().get("key_hint") == "help" + _M12
+                    check("agent picker: key save names the var it wrote, never the key (no hint, no replaced flag)",
+                          _kp12.json().get("var") == "LVI_HERMES_KEY_HOME_HELPER"
+                          and "key_hint" not in _kp12.json() and "replaced" not in _kp12.json()
                           and "abcdefghijkl" not in _kp12.text + _kp12b.text + _kp12c.text, _kp12.text[:160])
                     _kb12 = client.put("/api/dashboard/intelligence/key", json={
                         "kind": "hermes", "agent": "../x", "api_key": "helperkey-abcdefghijkl"})
@@ -6094,6 +6099,8 @@ def main():
         check("speaker: volume PUT ok + written to node_speaker.volumes",
               _r.status_code == 200 and (_cfgsp().get("node_speaker") or {}).get("volumes", {}).get("suite-wssp") == 55,
               f"{_r.status_code} {_r.text[:120]}")
+        check("dead fields: the speaker volume PUT carries no 'sent' (keeps the volume the page shows)",
+              "sent" not in _r.json() and _r.json().get("volume") == 55, _r.text[:120])
         check("speaker: volume PUT pushes set_speaker with the new volume",
               _sentsp and _sentsp[-1] == ("suite-wssp", {"cmd": "set_speaker", "enabled": False, "volume": 55}),
               str(_sentsp))
@@ -8034,6 +8041,8 @@ def main():
               and _sv["zones"]["heA"]["ip"] == "192.0.2.99" and (_sv.get("zone_volumes") or {}).get("heA") == 41,
               f"{_rv.status_code} note={_sv.get('hand_note')} ip={_sv['zones']['heA'].get('ip')} "
               f"vols={_sv.get('zone_volumes')}")
+        check("dead fields: the zone volume PUT carries no 'before' (keeps the volume the page shows)",
+              "before" not in _rv.json() and _rv.json().get("volume") == 41, _rv.text[:120])
 
         def _ed_add(raw):
             raw["wiim"]["hand_note"] = "add"
@@ -8060,7 +8069,7 @@ def main():
         _sd = _he_raw().get("sonos") or {}
         check("zones: delete works from the default as it is NOW (hand-set default kept, hand edits kept)",
               _rdl.status_code == 200 and _sd.get("default_zone") == "heC"
-              and _rdl.json().get("default_zone") == "heC" and _sd.get("hand_note") == "del"
+              and "default_zone" not in _rdl.json() and _sd.get("hand_note") == "del"
               and set(_sd.get("zones") or {}) == {"heB", "heC"},
               f"{_rdl.status_code} default={_sd.get('default_zone')} body={_rdl.text[:120]} "
               f"note={_sd.get('hand_note')} zones={sorted(_sd.get('zones') or {})}")
@@ -8068,7 +8077,7 @@ def main():
         _rdl2 = client.delete("/api/dashboard/zones/heB")
         check("zones: deleting the hand-set default still hands default to a remaining zone",
               _rdl2.status_code == 200 and (_he_raw().get("sonos") or {}).get("default_zone") == "heC"
-              and _rdl2.json().get("default_zone") == "heC",
+              and "default_zone" not in _rdl2.json(),
               f"{_rdl2.status_code} {_rdl2.text[:120]}")
     finally:
         config_store.write_sections(_he_saved)
@@ -8678,6 +8687,8 @@ def main():
         check("restart pending: live saves (zone volume, mapping zone, wake name, session mode) never mark pending",
               all(r.status_code == 200 for r in (_rv, _rm, _rw, _rs)) and _p1 == [],
               f"{[(r.status_code, r.text[:80]) for r in (_rv, _rm, _rw, _rs)]} pending={_p1}")
+        check("dead fields: the session-mode POST carries no 'before' (keeps the mode the page shows)",
+              "before" not in _rs.json() and _rs.json().get("mode") == "sticky", _rs.text[:120])
         _icRP = dict(config_store.read_section("intelligence") or {})
         config_store.write_section("intelligence", {**_icRP, "urls": {**(_icRP.get("urls") or {}),
                                                                       "openclaw": "http://192.0.2.72:18789/v1"}})

@@ -402,7 +402,6 @@ async def put_mapping(payload: MappingPayload):
     sections = {"room_zones": clean}
     try:
         with config_store.LOCK:  # read-merge-write of room_agents as one step
-            before = config_store.read_section("room_zones")
             if payload.room_agents is not None:
                 sections["room_agents"] = _merge_room_agents(payload.room_agents, clean)
             config_store.write_sections(sections)  # one atomic pass
@@ -413,8 +412,7 @@ async def put_mapping(payload: MappingPayload):
     # exactly one output sounds a reply — tell every speaker node
     # whether it's now the one (a full-dict PUT can map OR unmap it).
     node_speaker.sync_all(registry.capable_rooms())
-    return {"ok": True, "room_zones": clean, "room_agents": sections.get("room_agents"),
-            "changed": (before or {}) != clean}
+    return {"ok": True}
 
 
 # ── node speaker (a node's built-in speaker zone) ────────────────
@@ -452,8 +450,8 @@ async def put_node_speaker_volume(payload: NodeSpeakerVolumePayload):
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    sent = node_speaker.sync(room)
-    return {"ok": True, "room": room, "volume": payload.volume, "sent": sent}
+    node_speaker.sync(room)
+    return {"ok": True, "room": room, "volume": payload.volume}
 
 
 @router.post("/node-speaker/test", dependencies=GUARD)
@@ -542,7 +540,6 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
             if name not in (section.get("zones") or {}):
                 raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
             vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
-            before = vols.get(name)
             if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
                 # Setting a zone back to the global value = no override needed;
                 # keep the config minimal (same pattern as session modes).
@@ -550,10 +547,10 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
             else:
                 vols[name] = payload.volume
             config_store.write_section(backend, {**section, "zone_volumes": vols})
-            return backend, vols, before
+            return backend, vols
 
     try:
-        backend, vols, before = await asyncio.to_thread(_write)
+        backend, vols = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
@@ -564,8 +561,7 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
     else:
         zone_volume_overrides(vols)
     logger.info(f"dashboard: zone '{name}' ({backend}) clip volume -> {payload.volume} (live)")
-    return {"ok": True, "zone": name, "volume": payload.volume, "before": before,
-            "backend": backend}
+    return {"ok": True, "zone": name, "volume": payload.volume, "backend": backend}
 
 
 @router.post("/zones", dependencies=GUARD)
@@ -656,10 +652,10 @@ async def delete_zone(name: str):
                     del mapping[r]
                 sections["room_zones"] = mapping
             config_store.write_sections(sections)
-            return backend, new_default, dangling
+            return backend, dangling
 
     try:
-        backend, new_default, dangling = await asyncio.to_thread(_write)
+        backend, dangling = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
@@ -667,8 +663,7 @@ async def delete_zone(name: str):
     # A speaker room mapped to the deleted zone is back on its own speaker
     # (the default) — tell its node, or it stays silent.
     node_speaker.sync_all(registry.capable_rooms())
-    return {"ok": True, "dropped_room_mappings": dangling, "backend": backend,
-            "default_zone": new_default}
+    return {"ok": True, "dropped_room_mappings": dangling, "backend": backend}
 
 
 # ── zone test (the proven clip path, zero API cost) ──────────────────
@@ -1057,7 +1052,6 @@ async def set_session_mode(room: str, payload: SessionModePayload):
     if payload.mode not in ("fresh", "sticky"):
         raise HTTPException(status_code=400, detail="mode must be 'fresh' or 'sticky'")
     modes = dict(config_store.read_section("session_modes") or {})
-    before = modes.get(room)
     if payload.mode == "fresh":
         modes.pop(room, None)  # fresh is the default — config stays minimal
     else:
@@ -1069,7 +1063,7 @@ async def set_session_mode(room: str, payload: SessionModePayload):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: session-mode '{room}' -> {payload.mode}")
-    return {"ok": True, "room": room, "mode": payload.mode, "before": before}
+    return {"ok": True, "room": room, "mode": payload.mode}
 
 
 # ── TTS settings (Settings tab — the config-editable arc's first panel) ──
@@ -1407,8 +1401,8 @@ def _backup_env(env_path) -> None:
         old.unlink(missing_ok=True)
 
 
-async def _write_env_key(var: str, value: str) -> bool:
-    """Replace-or-append `var=value` in .env. Returns True if replaced.
+async def _write_env_key(var: str, value: str) -> None:
+    """Replace-or-append `var=value` in .env.
 
     Atomic write + 0600: write_text created a
     missing .env as 0644, and a crash mid-write could truncate it.
@@ -1436,7 +1430,6 @@ async def _write_env_key(var: str, value: str) -> bool:
     if changed:
         _backup_env(env_path)
     _write_private(env_path, "\n".join(out) + "\n")
-    return replaced
 
 
 def _write_private(env_path, text: str) -> None:
@@ -1454,26 +1447,26 @@ def _write_private(env_path, text: str) -> None:
 @router.put("/tts/key/elevenlabs", dependencies=GUARD)
 async def put_tts_key_elevenlabs(payload: TTSKeyPayload):
     """ElevenLabs API key → .env (appliance-side, gitignored, never echoed)."""
-    replaced = await _write_env_key("ELEVENLABS_API_KEY", payload.api_key)
+    await _write_env_key("ELEVENLABS_API_KEY", payload.api_key)
     logger.info("dashboard: ELEVENLABS_API_KEY written to .env (value never logged)")
-    return {"ok": True, "api_key_set": True, "replaced": replaced}
+    return {"ok": True, "api_key_set": True}
 
 
 @router.put("/tts/key/deepgram", dependencies=GUARD)
 async def put_tts_key_deepgram(payload: TTSKeyPayload):
     """Deepgram API key → .env (appliance-side, gitignored, never echoed)."""
-    replaced = await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
+    await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
     logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
-    return {"ok": True, "api_key_set": True, "replaced": replaced}
+    return {"ok": True, "api_key_set": True}
 
 
 @router.put("/localai/key", dependencies=GUARD)
 async def put_localai_key(payload: TTSKeyPayload):
     """LocalAI API key → .env (LVI_LOCALAI_KEY; never echoed). Saved from the
     Keys card, like every other key."""
-    replaced = await _write_env_key("LVI_LOCALAI_KEY", payload.api_key)
+    await _write_env_key("LVI_LOCALAI_KEY", payload.api_key)
     logger.info("dashboard: LVI_LOCALAI_KEY written to .env (value never logged)")
-    return {"ok": True, "api_key_set": True, "replaced": replaced, "var": "LVI_LOCALAI_KEY"}
+    return {"ok": True, "api_key_set": True, "var": "LVI_LOCALAI_KEY"}
 
 
 # ── Keys card: every API key in one place ──
@@ -1715,7 +1708,7 @@ async def put_localai(payload: LocalAIPayload):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logger.info("dashboard: localai settings saved — applies on next restart")
-    return {"ok": True, "restart": True, **_localai_saved()}
+    return {"ok": True, **_localai_saved()}
 
 
 @router.post("/localai/test", dependencies=GUARD)
@@ -1936,10 +1929,9 @@ async def put_intelligence_key(payload: IntelligenceKeyPayload):
     the variable so the UI can say where the key went."""
     kind = payload.kind
     var = intelligence_target.key_var(kind, payload.agent or "")
-    replaced = await _write_env_key(var, payload.api_key)
+    await _write_env_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
-    return {"ok": True, "key_set": True, "replaced": replaced, "var": var, "kind": kind,
-            "key_hint": intelligence_target.key_hint(payload.api_key)}
+    return {"ok": True, "key_set": True, "var": var, "kind": kind}
 
 
 def _intelligence_probe(intelligence_cfg: dict) -> dict:
@@ -2304,7 +2296,7 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
             raise HTTPException(status_code=400, detail=str(e))
         written.update({f"{section}.{k}": v for k, v in updates.items()})
     logger.info(f"dashboard: voice-tuning saved {written} — applies on next restart")
-    return {"ok": True, "written": written}
+    return {"ok": True}
 
 
 # ── OWW models (Voice tab — one active wake model, process-wide) ─────
