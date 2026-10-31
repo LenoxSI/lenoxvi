@@ -372,6 +372,8 @@ segs, info = standin.transcribe(io.BytesIO(b"WAV1"), language="en", beam_size=1,
 check("stt localai: up -> the text comes from LocalAI and the appliance model is untouched",
       [s.text for s in segs] == ["remote words"] and fw.calls == [] and la.down_reason() is None
       and info.language == "en")
+check("stt localai: a LocalAI turn's info names the engine and model that served it",
+      getattr(info, "engine", None) == "localai: faster-whisper-small", repr(getattr(info, "engine", None)))
 os.environ["LVI_LOCALAI_MODEL_STT"] = "faster-whisper-small"
 check("stt localai: status while up says localai + the configured model",
       sla.status() == {"provider": "localai", "localai_model": "faster-whisper-small", "active": "localai"}, str(sla.status()))
@@ -379,6 +381,8 @@ BEHAVIOUR["/v1/audio/transcriptions"] = (503, "application/json", b'{"error":{"m
 segs, info = standin.transcribe(io.BytesIO(b"WAV2"), language="en", beam_size=1, vad_filter=False)
 check("stt localai: a LocalAI error sends the SAME clip to the appliance model",
       fw.calls == [(b"WAV2", "en", 1, False)] and [s.text for s in segs] == [" local words "], str(fw.calls))
+check("stt localai: a fallback turn's info carries no LocalAI engine tag",
+      getattr(info, "engine", None) is None, repr(getattr(info, "engine", None)))
 check("stt localai: then LocalAI is marked down with the reason", "503" in (la.down_reason() or ""))
 n = len(SEEN)
 standin.transcribe(io.BytesIO(b"WAV3"), language=None)
@@ -464,6 +468,49 @@ if HAVE_PIPECAT:
     BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Thanks for watching!"}', 0)
     out = asyncio.run(svc._transcribe(b"RIFF....WAVE"))
     check("stt localai: the phantom-transcript filter still runs on LocalAI text", out.text == "", repr(out.text))
+    from loguru import logger as _lg
+    _heard = []
+    _sink = _lg.add(lambda m: _heard.append(m.record["message"]), level="DEBUG",
+                    filter=lambda r: "heard:" in r["message"])
+    BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Turn on the lights."}', 0)
+    asyncio.run(svc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: the heard log names LocalAI and its model when LocalAI served the turn",
+          len(_heard) == 1 and "localai: faster-whisper-small" in _heard[0]
+          and "local-whisper" not in _heard[0], str(_heard))
+    _heard.clear()
+    BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json",
+                                             b'{"error":{"code":500,"message":"rpc error: failed to transcribe"}}', 0)
+    asyncio.run(svc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: when Whisper base takes the turn the heard log says local-whisper, not LocalAI",
+          len(_heard) == 1 and _heard[0].startswith("local-whisper heard:")
+          and "localai" not in _heard[0], str(_heard))
+    _lg.remove(_sink)
+    _phantom = []
+    _psink = _lg.add(lambda m: _phantom.append(m.record["message"]), level="DEBUG",
+                     filter=lambda r: "dropped phantom" in r["message"])
+    BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"text":" Thanks for watching!"}', 0)
+    asyncio.run(svc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: the phantom-drop log names LocalAI and its model when LocalAI heard it",
+          len(_phantom) == 1 and "localai: faster-whisper-small" in _phantom[0]
+          and "local-whisper" not in _phantom[0], str(_phantom))
+    _phantom.clear()
+
+    class _PhantomFW(FakeFW):
+        def transcribe(self, audio, language=None, beam_size=1, vad_filter=False):
+            segs, info = super().transcribe(audio, language, beam_size, vad_filter)
+            segs[0].text = " Thanks for watching!"
+            return segs, info
+    _psvc = stt_local.LocalWhisperSTTService(
+        language="en", model_override=sla.LocalAIWhisper("faster-whisper-small", lambda: _PhantomFW()))
+    BEHAVIOUR["/v1/audio/transcriptions"] = (500, "application/json",
+                                             b'{"error":{"code":500,"message":"rpc error: failed to transcribe"}}', 0)
+    asyncio.run(_psvc._transcribe(b"RIFF....WAVE"))
+    check("stt localai: when Whisper base hears the phantom the drop log says local-whisper, not LocalAI",
+          len(_phantom) == 1 and _phantom[0].startswith("local-whisper dropped phantom")
+          and "localai" not in _phantom[0], str(_phantom))
+    asyncio.run(_psvc.cleanup())
+    _lg.remove(_psink)
+    la._reset_for_tests()
     asyncio.run(svc.cleanup())
     os.environ.pop(la.KEY_VAR, None)
     la._reset_for_tests()
