@@ -408,6 +408,8 @@ async def put_mapping(payload: MappingPayload):
             config_store.write_sections(sections)  # one atomic pass
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     # exactly one output sounds a reply — tell every speaker node
     # whether it's now the one (a full-dict PUT can map OR unmap it).
     node_speaker.sync_all(registry.capable_rooms())
@@ -448,6 +450,8 @@ async def put_node_speaker_volume(payload: NodeSpeakerVolumePayload):
         config_store.write_section("node_speaker", {**section, "volumes": volumes})
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     sent = node_speaker.sync(room)
     return {"ok": True, "room": room, "volume": payload.volume, "sent": sent}
 
@@ -552,6 +556,8 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
         backend, vols, before = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     # Live layer: next clip in this zone plays at the new volume.
     if backend == "wiim":
         wiim_volume_overrides(vols)
@@ -606,6 +612,8 @@ async def add_zone(payload: ZonePayload):
         zones = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "zones": zones, "backend": payload.backend}
 
 
@@ -654,6 +662,8 @@ async def delete_zone(name: str):
         backend, new_default, dangling = await asyncio.to_thread(_write)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     # A speaker room mapped to the deleted zone is back on its own speaker
     # (the default) — tell its node, or it stays silent.
     node_speaker.sync_all(registry.capable_rooms())
@@ -718,10 +728,10 @@ async def test_zone(name: str):
 
     mp3 = await asyncio.to_thread(_encode)
 
-    # Zone keys are free text (native Sonos names — "Sonos Port") but a
+    # Zone keys are free text (native Sonos names — "Media Room") but a
     # filename is not: the Port's audioClip fetcher fails on raw spaces
-    # (test tone silent on 'Sonos Port', fine on
-    # 'living_room'; replies never hit this because their names are
+    # (test tone silent on 'Media Room', fine on
+    # 'media_room'; replies never hit this because their names are
     # generated). Slugify before it reaches the filesystem/URL.
     slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
     filename = f"test-{slug}-{int(time.time())}.mp3"
@@ -1051,6 +1061,8 @@ async def set_session_mode(room: str, payload: SessionModePayload):
         config_store.write_section("session_modes", modes)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: session-mode '{room}' -> {payload.mode}")
     return {"ok": True, "room": room, "mode": payload.mode, "before": before}
 
@@ -1308,6 +1320,8 @@ async def put_tts(payload: TTSPayload):
         config_store.write_section("tts", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: tts config saved (provider={payload.provider}) — applies on next restart")
     return {"ok": True, "provider": payload.provider}
 
@@ -1693,6 +1707,8 @@ async def put_localai(payload: LocalAIPayload):
         config_store.write_section("localai", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logger.info("dashboard: localai settings saved — applies on next restart")
     return {"ok": True, "restart": True, **_localai_saved()}
 
@@ -1865,6 +1881,8 @@ async def put_intelligence(payload: IntelligencePayload):
             config_store.write_section("intelligence", current)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         logger.info(f"dashboard: intelligence {payload.kind} URL saved (no agent yet; live lane unchanged)")
         return {"ok": True, "kind": saved_kind, "url_only": True}
     current["kind"] = payload.kind
@@ -1896,6 +1914,8 @@ async def put_intelligence(payload: IntelligencePayload):
         config_store.write_section("intelligence", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: intelligence config saved (kind={payload.kind}) — applies on next restart")
     return {"ok": True, "kind": payload.kind}
 
@@ -2232,6 +2252,8 @@ async def put_stt(payload: SttPayload):
             _stt_write(language=payload.language, provider=provider)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     cur = _stt_current()
     key_needed = stt_catalog.is_cloud(cur["provider"]) and not _stt_key_set(cur["provider"])
     return {"ok": True, "restart_needed": restart_needed, "key_needed": key_needed, "current": cur}
@@ -2273,6 +2295,8 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
             config_store.write_section(section, current)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         written.update({f"{section}.{k}": v for k, v in updates.items()})
     logger.info(f"dashboard: voice-tuning saved {written} — applies on next restart")
     return {"ok": True, "written": written}
@@ -2390,8 +2414,11 @@ async def oww_list_models():
 
 # One swap lock per model name: same-name uploads each stage to their
 # OWN temp file, and the swap into `dest` serializes so a slower upload
-# can't un-seat a finished one mid-swap.
+# can't un-seat a finished one mid-swap. A name's lock goes when its last
+# upload in flight finishes (counted, so one still staging or waiting
+# keeps the lock it will swap under).
 _OWW_UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+_OWW_UPLOAD_USERS: dict[str, int] = {}
 
 
 @router.post("/oww/models", dependencies=GUARD)
@@ -2420,6 +2447,7 @@ async def oww_upload_model(file: UploadFile = File(...)):
                                     suffix=".uploading")
     tmp = Path(tmp_name)
     lock = _OWW_UPLOAD_LOCKS.setdefault(name, asyncio.Lock())
+    _OWW_UPLOAD_USERS[name] = _OWW_UPLOAD_USERS.get(name, 0) + 1
     try:
         def _write():
             with os.fdopen(fd, "wb") as f:
@@ -2429,6 +2457,10 @@ async def oww_upload_model(file: UploadFile = File(...)):
         async with lock:
             await asyncio.to_thread(tmp.replace, dest)  # validated: swap in atomically
     finally:
+        _OWW_UPLOAD_USERS[name] -= 1
+        if not _OWW_UPLOAD_USERS[name]:
+            del _OWW_UPLOAD_USERS[name]
+            del _OWW_UPLOAD_LOCKS[name]
         # gone after the swap; a refused or dropped upload must not
         # leave its partial behind for the next upload to swap in
         await asyncio.to_thread(tmp.unlink, missing_ok=True)
@@ -2478,6 +2510,8 @@ async def oww_select_model(payload: OWWModelPayload):
         config_store.write_section("wake", current)
     except FileNotFoundError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: wake model set to '{path}' — applies on next restart")
     return {"ok": True, "model": str(path), "note": "applies on next bot restart"}
 
@@ -2517,6 +2551,8 @@ async def put_wake(payload: WakePayload):
             config_store.write_sections(touched)
         except FileNotFoundError as e:
             raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         logger.info(f"dashboard: wake {'/'.join(sorted(touched))} saved — live, no restart")
     return {"ok": True, "name": wake_name.name()}
 

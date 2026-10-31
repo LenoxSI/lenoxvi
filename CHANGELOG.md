@@ -77,6 +77,9 @@ The two version streams are independent.
   the first cancel; a backend that fails to stop its clip on barge-in is logged at debug instead of swallowed.
 - Every dashboard write (not only the uploads) is checked for the dashboard token and capped in size
   before its body is read: an unauthenticated or oversized request can no longer make the bot buffer it.
+- Config saves: a value config.yaml can't hold is refused with a clear 400 and leaves the file untouched;
+  before, it answered 500 and broke every later config save until a restart.
+- Expired command timeouts and finished wake-model upload locks no longer accumulate for the life of the process.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

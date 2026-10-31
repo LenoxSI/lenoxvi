@@ -91,7 +91,7 @@ class ClipServer:
         from urllib.parse import quote
         # Quote the path component: a filename with spaces/reserved chars
         # breaks the Sonos audioClip fetcher silently (the
-        # "Sonos Port" test tone). Safe for every existing name.
+        # "Media Room" test tone). Safe for every existing name.
         return f"http://{self._host_ip}:{self._port}/{quote(filename)}"
 
 

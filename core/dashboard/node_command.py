@@ -85,6 +85,13 @@ def _remember(seen: set, pc_id: str) -> None:
     seen.add(pc_id)
 
 
+def _drop_expired_settling(now: float) -> None:
+    # A timed-out command that is never retried (and never answered) would
+    # keep its entry for good; an expired window refuses nothing anyway.
+    for key in [k for k, deadline in _settling.items() if deadline <= now]:
+        del _settling[key]
+
+
 def _send(out, payload: dict) -> bool:
     """Direct data-channel send via the output transport: no
     pipeline, no queue_frame — a blocked intelligence can't stall commands.
@@ -146,6 +153,7 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
     async with _pending_lock:
         if key in _pending and not _pending[key].done():
             raise CommandInFlight(f"'{cmd}' already in flight for '{room}'")
+        _drop_expired_settling(time.monotonic())
         if pc_id not in _echoes_id and _settling.get(key, 0.0) > time.monotonic():
             raise CommandInFlight(f"the last '{cmd}' to '{room}' timed out and may still "
                                   "land - try again in a few seconds")
@@ -163,7 +171,9 @@ async def request(room: str, cmd: str, args: dict = None, timeout: float = 12.0)
         return await asyncio.wait_for(fut, timeout)
     except TimeoutError:
         if pc_id not in _echoes_id:  # no id to tell a late reply apart
-            _settling[key] = time.monotonic() + SETTLE_SECS
+            now = time.monotonic()
+            _drop_expired_settling(now)
+            _settling[key] = now + SETTLE_SECS
         raise
     finally:
         async with _pending_lock:

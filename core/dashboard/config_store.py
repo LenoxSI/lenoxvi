@@ -14,6 +14,7 @@ out of the web path for now).
 """
 
 import copy
+import io
 import os
 import shutil
 import threading
@@ -21,7 +22,7 @@ from pathlib import Path
 
 from loguru import logger
 from ruamel.yaml import YAML
-from ruamel.yaml.representer import RoundTripRepresenter
+from ruamel.yaml.representer import RepresenterError, RoundTripRepresenter
 
 from config import CONFIG_PATH
 
@@ -112,7 +113,7 @@ def write_section(section: str, value: dict) -> dict:
     Returns {"before": ..., "after": ...} for the API response/log.
     Raises FileNotFoundError if config.yaml is absent (fresh clone that
     skipped `cp config.example.yaml config.yaml`) or ValueError on a
-    bad key.
+    value YAML can't represent (config.yaml is left untouched).
     """
     with LOCK:
         p = _path()
@@ -155,13 +156,30 @@ def write_sections(sections: dict) -> dict:
         return {"before": before, "after": {k: dict(v) for k, v in sections.items()}}
 
 
+def _render(data) -> str:
+    """The file's text, built in memory so a value YAML can't represent is
+    refused before the backup, the tmp file or config.yaml is touched.
+
+    A fresh YAML() per dump: ruamel leaves a failed dump's output state on
+    the instance, and the next dump on it would write to that dead stream.
+    The representers live on the class (see above), so the text is the
+    same as _YAML's."""
+    buf = io.StringIO()
+    try:
+        YAML().dump(data, buf)
+    except RepresenterError as e:
+        raise ValueError(f"config.yaml can't hold this value: {e}") from None
+    return buf.getvalue()
+
+
 def _atomic_write(p: Path, data) -> None:
+    text = _render(data)
     backup = p.with_name(p.stem + ".backup" + p.suffix)
     if p.exists():
         shutil.copy2(p, backup)
     tmp = p.with_name(p.name + ".tmp")
     with open(tmp, "w") as f:
-        _YAML.dump(data, f)
+        f.write(text)
     # keep the original file's permissions (config.yaml may be 600)
     os.chmod(tmp, p.stat().st_mode & 0o777)
     os.replace(tmp, p)

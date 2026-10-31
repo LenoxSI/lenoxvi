@@ -251,7 +251,12 @@ def note_muted_room(room: str, muted: bool) -> None:
 def _drain_held(pc_id, label) -> None:
     """Release everything held for pc_id through the connect window (fw
     version, mute state) onto the now-known room record. EVERY path that
-    binds pc_id -> label must call this (the fw=None bug)."""
+    binds pc_id -> label must call this (the fw=None bug) - except
+    relabel_room: state is only held while pc_id is unbound or provisional,
+    and a set_name ack normally renames a session that already holds a real
+    label, so there is nothing to drain. relabel_room does not check that:
+    an ack for an unbound or provisional session would strand its held
+    state."""
     held_fw = _fw_by_pc.pop(pc_id, None)
     held_muted = _muted_by_pc.pop(pc_id, None)
     held_line = _line_by_pc.pop(pc_id, None)
@@ -426,7 +431,7 @@ def relabel_room(pc_id: str, info: dict | None) -> None:
         # other room's record; the offer settles it when the node reconnects.
         logger.warning(f"registry: '{old}' -> '{new}' not relabeled: another session holds '{new}'")
         return
-    _room_by_pc[pc_id] = new
+    _room_by_pc[pc_id] = new  # no _drain_held: a real label holds nothing (see _drain_held)
     rec = _known_rooms.pop(old, None)
     if rec:
         _known_rooms[new] = rec
