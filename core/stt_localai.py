@@ -48,10 +48,13 @@ class _Segment:
 
 
 class _Info:
-    __slots__ = ("language",)
+    # engine: set only when LocalAI produced the text, so the service's heard
+    # log names who served THIS clip (a fallback turn returns Whisper's info).
+    __slots__ = ("engine", "language")
 
-    def __init__(self, language):
+    def __init__(self, language, engine=None):
         self.language = language
+        self.engine = engine
 
 
 def _reset_for_tests() -> None:
@@ -101,6 +104,6 @@ class LocalAIWhisper:
             except Exception as e:  # noqa: BLE001 — never lose the clip to a client bug
                 logger.warning(f"stt localai: {type(e).__name__} — Whisper base takes this turn")
             else:
-                return [_Segment(text)], _Info(language)
+                return [_Segment(text)], _Info(language, engine=f"localai: {self.model}")
         return self._fallback().transcribe(io.BytesIO(data), language=language,
                                            beam_size=beam_size, vad_filter=vad_filter)

@@ -294,15 +294,22 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             # segments are drained, so the timer stops after the join.
             segs = list(segments)
             text = " ".join(s.text.strip() for s in segs).strip()
+            engine = getattr(info, "engine", None)
             if is_phantom_transcript(text):
-                logger.info(f"local-whisper dropped phantom [{text}]")
+                if engine:
+                    logger.info(f"stt dropped phantom [{text}] ({engine})")
+                else:
+                    logger.info(f"local-whisper dropped phantom [{text}]")
                 text = ""
             if _LAT_MODE["mode"] == "compute":
                 _LAT_MS.append((time.monotonic() - t0) * 1000)
-            return text, info.language
+            return text, info.language, engine
 
-        text, lang = await loop.run_in_executor(None, _run)
+        text, lang, engine = await loop.run_in_executor(None, _run)
         if language:
             lang = language
-        logger.debug(f"local-whisper heard: [{text}] ({lang})")
+        if engine:
+            logger.debug(f"stt heard: [{text}] ({lang}) ({engine})")
+        else:
+            logger.debug(f"local-whisper heard: [{text}] ({lang})")
         return Transcription(text=text)

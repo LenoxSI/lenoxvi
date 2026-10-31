@@ -28,6 +28,11 @@ The two version streams are independent.
   - `POST /intelligence/agents`: `source`, and `key_hint` on each agent.
   - `POST /zones/discover`: `model`, `supported` on each player.
 
+### Fixed
+- The speech-to-text debug log now names the engine that heard each turn: a LocalAI transcript logs
+  `stt heard: […] (localai: <model>)` and a dropped phantom from LocalAI logs `stt dropped phantom […]
+  (localai: <model>)`. Turns Whisper base serves — including LocalAI fallbacks — still log `local-whisper`.
+
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
 A patch release: aiohttp 3.14.4 closes eight advisories (several in the clip server), long agent turns now keep you
