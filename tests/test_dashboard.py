@@ -9801,18 +9801,19 @@ def main():
         for _i in range(0, len(body), size):
             yield body[_i:_i + size]
 
-    def _asgi_post_UL(path, chunks, content_length=None, headers=()):
-        """POST straight into the ASGI app. `chunks` is pulled lazily, one per
-        receive(), so `pulled` counts only the body bytes the app asked for."""
+    def _asgi_post_UL(path, chunks, content_length=None, headers=(), method="POST",
+                      content_type=b"multipart/form-data; boundary=" + _BND_UL):
+        """POST (or `method`) straight into the ASGI app. `chunks` is pulled
+        lazily, one per receive(), so `pulled` counts only the body bytes the
+        app asked for."""
         _it = iter(chunks)
         _st = {"pulled": 0, "done": False}
-        _out = {"status": None, "body": b""}
-        _h = [(b"host", b"192.0.2.10"),
-              (b"content-type", b"multipart/form-data; boundary=" + _BND_UL)]
+        _out = {"status": None, "body": b"", "headers": {}}
+        _h = [(b"host", b"192.0.2.10"), (b"content-type", content_type)]
         if content_length is not None:
             _h.append((b"content-length", str(content_length).encode()))
         _h += [(k.lower().encode(), v.encode()) for k, v in headers]
-        _scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+        _scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method,
                   "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "",
                   "query_string": b"", "headers": _h, "server": ("192.0.2.10", 80),
                   "client": ("192.0.2.99", 50000)}
@@ -9830,6 +9831,7 @@ def main():
         async def _send(msg):
             if msg["type"] == "http.response.start":
                 _out["status"] = msg["status"]
+                _out["headers"] = {k.lower(): v for k, v in msg.get("headers") or []}
             elif msg["type"] == "http.response.body":
                 _out["body"] += msg.get("body", b"")
 
@@ -10013,6 +10015,175 @@ def main():
             os.environ["LVI_STATE_DIR"] = _state_UL
         if _tok_UL is not None:
             os.environ["LVI_DASHBOARD_TOKEN"] = _tok_UL
+
+    # ── body limit: every dashboard write, not just the uploads, is guarded
+    # and capped BEFORE FastAPI parses its body. FastAPI reads a JSON body
+    # before the route's GUARD dependency runs, and nothing else bounds it.
+    # Same lazy-body driver as the upload limit checks; a spy on the mapping
+    # route's first call shows whether the route ran. ───────────────────────
+    import dashboard.upload_limit as _ulBL
+    from dashboard import guard as _gBL
+    from fastapi import HTTPException as _HE_BL
+    from starlette.requests import Request as _SReq_BL
+    _CAP_BL = 256 * 1024
+    _JSON_BL = b"application/json"
+    _TOK_BL = [("X-Dashboard-Token", "rig-secret")]
+
+    def _json_body_BL(size):
+        """A well-formed mapping body of exactly `size` bytes."""
+        _head, _tail = b'{"room_zones": {"Loft": "', b'"}}'
+        return _head + b"x" * (size - len(_head) - len(_tail)) + _tail
+
+    def _guard_says_BL(path, headers=()):
+        """The guard's own answer for these headers, asked directly."""
+        _scope = {"type": "http", "method": "PUT", "scheme": "http", "path": path, "root_path": "",
+                  "query_string": b"", "server": ("192.0.2.10", 80),
+                  "headers": [(b"host", b"192.0.2.10")] + [(k.lower().encode(), v.encode()) for k, v in headers]}
+        try:
+            _gBL.mutation_guard(_SReq_BL(_scope))
+        except _HE_BL as e:
+            return e.status_code, {"detail": e.detail}
+        return None
+
+    _route_BL = []
+    _all_zones_BL = _rUL._all_zones
+
+    def _spy_all_zones_BL():
+        _route_BL.append(1)
+        return _all_zones_BL()
+
+    _tok0_BL = os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+    _rz0_BL = dict(config_store.read_section("room_zones") or {})
+    _rUL._all_zones = _spy_all_zones_BL
+    try:
+        check("body limit: the default cap is one named 256 KiB constant",
+              getattr(_ulBL, "DEFAULT_BODY_CAP", None) == _CAP_BL, str(getattr(_ulBL, "DEFAULT_BODY_CAP", None)))
+        _big_BL = _json_body_BL(1024 * 1024)
+        _over_BL = _json_body_BL(_CAP_BL + 1)
+        os.environ["LVI_DASHBOARD_TOKEN"] = "rig-secret"
+
+        # No token: the guard's own refusal, before a byte of the body is read.
+        _want_BL = _guard_says_BL("/api/dashboard/mapping")
+        del _route_BL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping", _chunks_UL(_big_BL, 64 * 1024),
+                                    content_length=len(_big_BL), method="PUT", content_type=_JSON_BL)
+        check("body limit: a tokenless 1 MB mapping PUT is refused with the guard's own status and body",
+              _want_BL is not None and _want_BL[0] == 401 and (_o["status"], _o["json"]) == _want_BL,
+              f"guard={_want_BL} got={_o['status']} {_o['body'][:120]}")
+        check("body limit: the tokenless mapping PUT was refused before its body was read "
+              "(route never ran, mapping unchanged)",
+              _pulled == 0 and not _route_BL and dict(config_store.read_section("room_zones") or {}) == _rz0_BL,
+              f"pulled={_pulled} route={len(_route_BL)}")
+        _zbody_BL = json.dumps({"name": "Loft", "backend": "wiim", "ip": "192.0.2.61"}).encode()
+        _zones0_BL = client.get("/api/dashboard/mapping").json()["zones"]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/zones", [_zbody_BL], content_length=len(_zbody_BL),
+                                    content_type=_JSON_BL)
+        check("body limit: a tokenless small zone add is refused by the guard, not the size, and never read",
+              (_o["status"], _o["json"]) == _want_BL and _pulled == 0
+              and client.get("/api/dashboard/mapping").json()["zones"] == _zones0_BL,
+              f"status={_o['status']} json={_o['json']} pulled={_pulled}")
+
+        # Authorized but over the default cap: declared → 413 unread.
+        del _route_BL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping", _chunks_UL(_over_BL, 64 * 1024),
+                                    content_length=len(_over_BL), headers=_TOK_BL, method="PUT",
+                                    content_type=_JSON_BL)
+        check("body limit: an authorized JSON body declaring one byte over 256 KiB is a 413 before a byte is read "
+              "(Connection: close, route never ran)",
+              _o["status"] == 413 and _pulled == 0 and not _route_BL
+              and _o["headers"].get(b"connection") == b"close",
+              f"status={_o['status']} pulled={_pulled} route={len(_route_BL)} headers={_o['headers']}")
+        _o, _pulled = _asgi_post_UL("/api/dashboard/zones/Loft", _chunks_UL(_over_BL, 64 * 1024),
+                                    content_length=len(_over_BL), headers=_TOK_BL, method="DELETE",
+                                    content_type=_JSON_BL)
+        check("body limit: an authorized DELETE declaring an over-cap body is a 413 too (every write method is covered)",
+              _o["status"] == 413 and _pulled == 0, f"status={_o['status']} pulled={_pulled}")
+        _at_BL = _json_body_BL(_CAP_BL)
+        del _route_BL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping", _chunks_UL(_at_BL, 64 * 1024),
+                                    content_length=len(_at_BL), headers=_TOK_BL, method="PUT",
+                                    content_type=_JSON_BL)
+        check("body limit: an authorized body of exactly 256 KiB still reaches the route (its own 400, not a 413)",
+              _o["status"] == 400 and _pulled == len(_at_BL) and len(_route_BL) == 1,
+              f"status={_o['status']} pulled={_pulled} route={len(_route_BL)} body={_o['body'][:120]}")
+
+        # Authorized, chunked (no Content-Length): cut off once it passes the cap.
+        _huge_BL = _json_body_BL(2 * 1024 * 1024)
+        del _route_BL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping", _chunks_UL(_huge_BL, 64 * 1024),
+                                    headers=_TOK_BL, method="PUT", content_type=_JSON_BL)
+        check("body limit: an authorized chunked JSON body is cut off with a 413 once it passes 256 KiB "
+              "(the rest is never read, route never ran)",
+              _o["status"] == 413 and _CAP_BL < _pulled <= _CAP_BL + 64 * 1024 and not _route_BL
+              and dict(config_store.read_section("room_zones") or {}) == _rz0_BL,
+              f"status={_o['status']} pulled={_pulled} route={len(_route_BL)}")
+
+        # The router 307s a trailing slash to the real path and matches case
+        # exactly: neither variant may reach a route around the guard.
+        del _route_BL[:]
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping/", _chunks_UL(_big_BL, 64 * 1024),
+                                    content_length=len(_big_BL), method="PUT", content_type=_JSON_BL)
+        check("body limit: a tokenless PUT to the trailing-slash mapping path is refused by the guard, unread",
+              (_o["status"], _o["json"]) == _want_BL and _pulled == 0 and not _route_BL,
+              f"status={_o['status']} pulled={_pulled} route={len(_route_BL)}")
+        _sbody_BL = json.dumps({"room_zones": {"Loft": "Kitchen"}}).encode()
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping/", [_sbody_BL], content_length=len(_sbody_BL),
+                                    headers=_TOK_BL, method="PUT", content_type=_JSON_BL)
+        check("body limit: an authorized trailing-slash PUT only earns the router's redirect to the real path "
+              "(route never ran)",
+              _o["status"] == 307 and _o["headers"].get(b"location", b"").endswith(b"/api/dashboard/mapping")
+              and _pulled == 0 and not _route_BL,
+              f"status={_o['status']} location={_o['headers'].get(b'location')} route={len(_route_BL)}")
+        _o, _pulled = _asgi_post_UL("/API/Dashboard/mapping", _chunks_UL(_big_BL, 64 * 1024),
+                                    content_length=len(_big_BL), method="PUT", content_type=_JSON_BL)
+        check("body limit: a case variant of the mapping path reaches no route (404, nothing read, mapping unchanged)",
+              _o["status"] == 404 and _pulled == 0 and not _route_BL
+              and dict(config_store.read_section("room_zones") or {}) == _rz0_BL,
+              f"status={_o['status']} pulled={_pulled} route={len(_route_BL)}")
+
+        # Guards: normal saves, reads, the offer and the uploads are unchanged.
+        _zones_BL = client.get("/api/dashboard/mapping").json()["zones"]
+        _zone_BL = "Kitchen" if "Kitchen" in _zones_BL else next(iter(_zones_BL), None)
+        _r = client.put("/api/dashboard/mapping", json={"room_zones": {"suite-bl-room": _zone_BL}},
+                        headers=dict(_TOK_BL))
+        check("body limit: an authorized normal mapping save still lands exactly as before",
+              _r.status_code == 200 and client.get("/api/dashboard/mapping").json()["room_zones"]
+              == {"suite-bl-room": _zone_BL}, f"zone={_zone_BL} {_r.status_code} {_r.text[:160]}")
+        _t0_BL = client.get("/api/dashboard/voice-tuning").json()
+        _lull_BL = 0.9 if _t0_BL.get("lull_secs") != 0.9 else 1.1
+        _r = client.put("/api/dashboard/voice-tuning", json={"lull_secs": _lull_BL}, headers=dict(_TOK_BL))
+        check("body limit: an authorized normal voice tuning save still lands exactly as before",
+              _r.status_code == 200 and client.get("/api/dashboard/voice-tuning").json().get("lull_secs") == _lull_BL,
+              f"{_r.status_code} {_r.text[:160]}")
+        if _t0_BL.get("lull_secs") is not None:
+            client.put("/api/dashboard/voice-tuning", json={"lull_secs": _t0_BL["lull_secs"]}, headers=dict(_TOK_BL))
+        _o, _pulled = _asgi_post_UL("/api/dashboard/mapping", _chunks_UL(_big_BL, 64 * 1024),
+                                    content_length=len(_big_BL), method="GET", content_type=_JSON_BL)
+        check("body limit: a tokenless GET with an over-cap declared body is untouched (200, the mapping)",
+              _o["status"] == 200 and isinstance((_o["json"] or {}).get("room_zones"), dict),
+              f"status={_o['status']} body={_o['body'][:120]}")
+        _ro = client.post("/api/offer", json={"sdp": "v=0\r\n" + "a=x\r\n" * (_CAP_BL // 5), "type": "offer",
+                                              "room": "suite-bl-room"})
+        _rooms_BL = {r["room"]: r for r in registry.known_rooms()}
+        check("body limit: an /api/offer over the default cap is untouched (still answered and teed)",
+              _ro.status_code == 200 and _rooms_BL.get("suite-bl-room", {}).get("online") is True,
+              f"{_ro.status_code} rooms={list(_rooms_BL)}")
+        if _ro.status_code == 200 and _ro.json().get("pc_id"):
+            registry.mark_disconnected(_ro.json()["pc_id"])
+        _fwb_BL = (_mp_head_UL("array_esp32.bin", [("track", "suite-no-track")]) + bytes(1024 * 1024)
+                   + _MP_TAIL_UL)
+        _o, _pulled = _asgi_post_UL("/api/dashboard/firmware/upload", _chunks_UL(_fwb_BL),
+                                    content_length=len(_fwb_BL), headers=_TOK_BL)
+        check("body limit: an authorized 1 MB firmware upload keeps its own cap (read whole, the route's own 400)",
+              _o["status"] == 400 and "unknown track" in _o["body"].decode(errors="replace")
+              and _pulled == len(_fwb_BL),
+              f"status={_o['status']} pulled={_pulled} body={_o['body'][:120]}")
+    finally:
+        _rUL._all_zones = _all_zones_BL
+        config_store.write_section("room_zones", _rz0_BL)
+        os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+        if _tok0_BL is not None:
+            os.environ["LVI_DASHBOARD_TOKEN"] = _tok0_BL
 
     # ── zone test: a WiiM test clip always puts the unit's volume back. Left
     # at the test volume, the next reply snapshots it as the music level.
