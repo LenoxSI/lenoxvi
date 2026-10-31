@@ -27,12 +27,15 @@ class FakeDfu {
   constructor(o = {}) {
     this.o = { alts: [0, 1, 2], cls: 0xfe, sub: 0x01, protocol: 2, transferSize: 64, tolerant: false, functional: true,
                busy: 1, pollMs: 7, failAt: -1, statusOnly: false, manifest: 'wait-reset', start: ST.IDLE, stuck: false,
-               openError: null, claimError: null, resetError: false, ...o }
+               openError: null, claimError: null, resetError: false, hangIn: null, hangAfter: 0, hangDnload: -1, ...o }
     this.configuration = null
     this.configurations = [{ configurationValue: 1, interfaces: [{ interfaceNumber: 0, alternates: this.o.alts.map(a => ({
       alternateSetting: a, interfaceClass: this.o.cls, interfaceSubclass: this.o.sub, interfaceProtocol: this.o.protocol, interfaceName: null })) }] }]
     this.log = []; this.chunks = []; this.alt = null; this.state = this.o.start; this.busyLeft = 0; this.err = 0; this.gone = false
+    this.pending = []
   }
+  // A transfer the chip never answers: WebUSB gives it no timeout. The test can fail it later.
+  _hang() { return new Promise((_, reject) => this.pending.push(reject)) }
   async open() { this.log.push(['open']); if (this.o.openError) throw this.o.openError }
   async close() { this.log.push(['close']) }
   async selectConfiguration(v) { this.log.push(['config', v]); this.configuration = this.configurations[0] }
@@ -52,6 +55,7 @@ class FakeDfu {
     }
     assert.equal(s.request, DFU.GETSTATUS, 'only GETSTATUS reads')
     this.log.push(['status'])
+    if (this.state === this.o.hangIn && this.chunks.length >= this.o.hangAfter) return this._hang()
     let status = 0
     if (this.state === ST.DNLOAD_SYNC) {
       if (this.err) { status = this.err; this.state = this.o.statusOnly ? ST.DNLOAD_IDLE : ST.ERROR }
@@ -69,6 +73,7 @@ class FakeDfu {
     if (this.gone) throw new Error('NotFoundError: device gone')
     const len = data ? data.byteLength : 0
     this.log.push(['out', s.request, s.value, len, this.alt])
+    if (s.request === DFU.DNLOAD && len && s.value === this.o.hangDnload) return this._hang()
     if (s.request === DFU.DNLOAD) {
       assert.equal(this.alt, 1, 'DNLOAD only on the upgrade slot')
       if (len) {
@@ -267,6 +272,87 @@ test('xmos: the wait deadline is per block — a slow chip within it still flash
   const r = await (await new XmosDfu(d, c).open()).flash(bytes(64 * 3))
   assert.equal(r.manifested, 'wait-reset'); assert.ok(c.now() >= 150000, `took ${c.now()} ms of chip time`)
   assert.ok(c.slept.every(ms => ms === 1000), 'an in-range bwPollTimeout is slept as given')
+})
+
+// The answer timer fires on the next macrotask: by then every fake transfer that answers has.
+const soon = () => {
+  const set = []
+  return { set, timer: (fire, ms) => { set.push(ms); const t = setImmediate(fire); return () => clearImmediate(t) } }
+}
+// What p settles to, or 'hung' after a real 900 ms: a flow with no answer timeout fails the
+// check instead of hanging the suite.
+const settle = p => {
+  let t
+  return Promise.race([p.then(v => ({ v }), e => ({ e })), new Promise(r => { t = setTimeout(r, 900, 'hung') })])
+    .finally(() => clearTimeout(t))
+}
+// Unhandled rejections seen while fn runs, plus two macrotasks after it for late ones.
+const unhandled = async fn => {
+  const seen = []; const on = e => seen.push(e)
+  process.on('unhandledRejection', on)
+  try { await fn(); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)) }
+  finally { process.off('unhandledRejection', on) }
+  return seen
+}
+
+test('xmos: a status read that never answers fails the flash with dfu-no-answer, naming the block', async () => {
+  const d = new FakeDfu({ hangIn: ST.DNLOAD_SYNC, hangAfter: 3 }); const t = soon()
+  const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+  const r = await settle(dfu.flash(bytes(64 * 6)))
+  assert.notEqual(r, 'hung', 'flash returned')
+  assert.ok(r.e instanceof XmosError, `an XmosError, got ${JSON.stringify(r)}`)
+  assert.equal(r.e.code, 'dfu-no-answer'); assert.match(r.e.message, /GETSTATUS/); assert.match(r.e.message, /block 2\b/)
+  assert.ok(t.set.length > 0 && t.set.every(ms => ms === 5000), `answer timer ${t.set}`)
+  assert.ok(!d.log.some(l => l[0] === 'out' && l[1] === DFU.DNLOAD && l[2] === 3), 'stops writing')
+  // the page closes the chip after a failed flash; the flow doesn't close it twice
+  assert.ok(!d.log.some(l => l[0] === 'close'), 'not closed by flash()')
+})
+
+test('xmos: a status read that never answers while manifesting fails, never reads as done', async () => {
+  const d = new FakeDfu({ hangIn: ST.MANIFEST_SYNC }); const t = soon()
+  const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+  const r = await settle(dfu.flash(bytes(100)))
+  assert.notEqual(r, 'hung', 'flash returned')
+  assert.equal(r.v, undefined, `resolved as ${JSON.stringify(r.v)}`)
+  assert.ok(r.e instanceof XmosError, `an XmosError, got ${JSON.stringify(r)}`)
+  assert.equal(r.e.code, 'dfu-no-answer'); assert.match(r.e.message, /GETSTATUS/)
+  assert.ok(!d.log.some(l => l[0] === 'reset'), 'no reset after a failed manifest')
+})
+
+test('xmos: a block write that never answers fails with dfu-no-answer naming DNLOAD and the block', async () => {
+  const d = new FakeDfu({ hangDnload: 1 }); const t = soon()
+  const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+  const r = await settle(dfu.flash(bytes(64 * 4)))
+  assert.notEqual(r, 'hung', 'flash returned')
+  assert.equal(r.e && r.e.code, 'dfu-no-answer'); assert.match(r.e.message, /DNLOAD/); assert.match(r.e.message, /block 1\b/)
+})
+
+test('xmos: a chip that stops answering during open fails and is released', async () => {
+  const d = new FakeDfu({ hangIn: ST.IDLE }); const t = soon()
+  const r = await settle(new XmosDfu(d, { ...quick(), timer: t.timer }).open())
+  assert.notEqual(r, 'hung', 'open returned')
+  assert.equal(r.e && r.e.code, 'dfu-no-answer'); assert.match(r.e.message, /GETSTATUS/)
+  assert.ok(d.log.some(l => l[0] === 'close'), 'the device is closed: the page keeps no handle on a failed open')
+})
+
+test('xmos: a transfer that lost to the answer timer and fails later is no unhandled rejection', async () => {
+  const d = new FakeDfu({ hangIn: ST.DNLOAD_SYNC }); const t = soon()
+  let r
+  const seen = await unhandled(async () => {
+    const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+    r = await settle(dfu.flash(bytes(64)))
+    for (const reject of d.pending) reject(new Error('AbortError: the device was closed'))
+  })
+  assert.notEqual(r, 'hung', 'flash returned'); assert.equal(r.e && r.e.code, 'dfu-no-answer')
+  assert.equal(d.pending.length, 1)
+  assert.deepEqual(seen.map(String), [])
+})
+
+test('xmos: with a live answer timer, a chip that answers flashes as before', async () => {
+  const d = new FakeDfu({ busy: 2 }); const t = soon()
+  const r = await (await new XmosDfu(d, { ...quick(), timer: t.timer }).open()).flash(bytes(64 * 3 + 5))
+  assert.equal(r.manifested, 'wait-reset')
+  assert.deepEqual(d.log.filter(l => l[0] === 'out' && l[1] === DFU.DNLOAD).map(l => l[3]), [64, 64, 64, 5, 0])
 })
 
 test('xmos: flash refuses before open', async () => {

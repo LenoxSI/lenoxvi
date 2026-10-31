@@ -653,3 +653,46 @@ test('watchLink blames the host when the node reached Wi-Fi, then keeps restarti
   assert.deepEqual(states.slice(0, 2), ['wifi_up', 'wifi_connecting'])
   await link.close()
 })
+
+// Node setup's Save: the node is saved, restarted and watched; each step is a fake here.
+const saveSteps = ({ saveErr, restartErr, watchErr } = {}) => {
+  const calls = []
+  return {
+    calls,
+    save: async () => { calls.push('save'); if (saveErr) throw new Error(saveErr); return ['name', 'bot_url'] },
+    onSaved: (saved) => calls.push(['onSaved', saved]),
+    restart: async () => { calls.push('restart'); if (restartErr) throw new Error(restartErr) },
+    watch: async () => { calls.push('watch'); if (watchErr) throw new Error(watchErr) },
+  }
+}
+
+test('save then restart: a restart failure after a good save says it saved, not "Save failed"', async () => {
+  const s = saveSteps({ restartErr: 'the board did not answer the restart' })
+  const r = await ns.saveThenRestart(s)
+  assert.equal(r.ok, false)
+  assert.equal(r.text, "Saved name, bot_url. The node didn't restart (the board did not answer the restart) — unplug it and plug it back in to apply.")
+  assert.doesNotMatch(r.text, /Save failed/)
+  assert.deepEqual(r.saved, ['name', 'bot_url'])
+  assert.deepEqual(s.calls, ['save', ['onSaved', ['name', 'bot_url']], 'restart'], 'values applied before the restart; no watch')
+})
+
+test('save then restart: a watch that throws after a good save is the same outcome', async () => {
+  const s = saveSteps({ watchErr: 'the board stopped answering over USB' })
+  const r = await ns.saveThenRestart(s)
+  assert.equal(r.ok, false); assert.match(r.text, /^Saved name, bot_url\. The node didn't restart \(the board stopped answering over USB\)/)
+  assert.deepEqual(s.calls, ['save', ['onSaved', ['name', 'bot_url']], 'restart', 'watch'])
+})
+
+test('save then restart: a failed save is still "Save failed" and nothing is applied or restarted', async () => {
+  const s = saveSteps({ saveErr: 'no reply to set' })
+  const r = await ns.saveThenRestart(s)
+  assert.deepEqual(r, { ok: false, text: 'Save failed: no reply to set' })
+  assert.deepEqual(s.calls, ['save'])
+})
+
+test('save then restart: save, restart and watch all fine is the plain success path', async () => {
+  const s = saveSteps()
+  const r = await ns.saveThenRestart(s)
+  assert.deepEqual(r, { ok: true, saved: ['name', 'bot_url'] })
+  assert.deepEqual(s.calls, ['save', ['onSaved', ['name', 'bot_url']], 'restart', 'watch'])
+})
