@@ -442,6 +442,82 @@ check("speech tiers: Kokoro files missing -> the cloud voice still builds, no st
       and "scripts/fetch_kokoro_models.sh" in _without[0], f"error={_p.error} warnings={_without}")
 tts_kokoro.kokoro_available = _real_kokoro_available
 
+# ── bot.py: revive_cooldown_secs — one parse for all four readers ────
+# A YAML 0 is falsy: `float(cfg_env(...) or 30)` turned the documented
+# "0 = every utterance" into 30. Code pins first (ast.unparse), then the
+# helper run alone from bot.py's source, then one real session.
+_COOL_HELPER = "_revive_cooldown_secs"
+_cool_reads = [c for c in ast.walk(_BOT_TREE) if isinstance(c, ast.Call)
+               and getattr(c.func, "id", "") in ("cfg_env", "_cfg_env") and len(c.args) >= 3
+               and all(isinstance(a, ast.Constant) for a in c.args[:3]) and c.args[1].value == "revive_cooldown_secs"]
+_cool_or = [ast.unparse(b) for b in ast.walk(_BOT_TREE) if isinstance(b, ast.BoolOp) and isinstance(b.op, ast.Or)
+            and any(v is r for v in b.values for r in _cool_reads)]
+check("speech tiers: no revive_cooldown_secs read in bot.py is followed by `or 30` (a YAML 0 is falsy)",
+      len(_cool_reads) == 4 and not _cool_or, f"reads={len(_cool_reads)} or={_cool_or}")
+_cool_parent = {id(a): n for n in ast.walk(_BOT_TREE) if isinstance(n, ast.Call) for a in n.args}
+_cool_wrapped = [_cool_parent.get(id(r)) for r in _cool_reads]
+check(f"speech tiers: all four revive_cooldown_secs reads go through {_COOL_HELPER}(read, '<section>.revive_cooldown_secs')",
+      len(_cool_reads) == 4
+      and all(p is not None and getattr(p.func, "id", "") == _COOL_HELPER and p.args and p.args[0] is r
+              and len(p.args) == 2 and isinstance(p.args[1], ast.Constant)
+              and p.args[1].value == f"{r.args[0].value}.revive_cooldown_secs"
+              for r, p in zip(_cool_reads, _cool_wrapped)),
+      str([ast.unparse(p) if p is not None else ast.unparse(r) for r, p in zip(_cool_reads, _cool_wrapped)]))
+check("speech tiers: revive_cooldown_secs is read twice per section under the same env names (tts x2, stt x2)",
+      sorted((r.args[0].value, r.args[2].value) for r in _cool_reads)
+      == [("stt", "LVI_STT_REVIVE_COOLDOWN")] * 2 + [("tts", "LVI_TTS_REVIVE_COOLDOWN")] * 2,
+      str([ast.unparse(r) for r in _cool_reads]))
+
+_cool_def = next((n for n in _BOT_TREE.body if isinstance(n, ast.FunctionDef) and n.name == _COOL_HELPER), None)
+_cool_fn, _cool_err, _cool_logged = None, None, []
+if _cool_def is not None:
+    _cool_ns = {"logger": types.SimpleNamespace(warning=_cool_logged.append)}
+    try:
+        exec(compile(ast.Module(body=[_cool_def], type_ignores=[]), "bot.py", "exec"), _cool_ns)
+        _cool_fn = _cool_ns[_COOL_HELPER]
+    except Exception as e:  # noqa: BLE001 — reported by the check below
+        _cool_err = f"{type(e).__name__}: {e}"
+
+
+def _cool_run(raw):
+    """(result, warnings) of the helper on raw, keyed tts.revive_cooldown_secs."""
+    _cool_logged.clear()
+    try:
+        out = _cool_fn(raw, "tts.revive_cooldown_secs")
+    except Exception as e:  # noqa: BLE001 — a raise is itself the failure
+        out = f"raised {type(e).__name__}: {e}"
+    return out, list(_cool_logged)
+
+
+check(f"speech tiers: {_COOL_HELPER} is a top-level bot.py function that runs alone (logger is its only global)",
+      _cool_fn is not None, _cool_err or f"no top-level {_COOL_HELPER} in bot.py")
+if _cool_fn is not None:
+    for _raw, _want in ((0, 0.0), ("0", 0.0), (12, 12.0), ("12.5", 12.5), (None, 30.0), ("", 30.0), ("  ", 30.0)):
+        _out, _logs = _cool_run(_raw)
+        check(f"speech tiers: revive_cooldown_secs {_raw!r} -> {_want} with no warning",
+              type(_out) is float and _out == _want and not _logs, f"got={_out!r} warnings={_logs}")
+    for _raw in ("abc", -5, "-5", True, "nan", "inf"):
+        _out, _logs = _cool_run(_raw)
+        check(f"speech tiers: revive_cooldown_secs {_raw!r} -> 30.0 with one warning naming the key",
+              type(_out) is float and _out == 30.0 and len(_logs) == 1 and "tts.revive_cooldown_secs" in _logs[0],
+              f"got={_out!r} warnings={_logs}")
+
+# The real session: a YAML 0 reaches the Kokoro standby's switcher (which
+# floors it at its own 1 s minimum); unset stays 30.
+tts_kokoro.kokoro_available = lambda: True
+try:
+    _cool_zero = _probe(_tts("elevenlabs", revive_cooldown_secs=0), env={**_KEYS, "LVI_TTS_REVIVE_COOLDOWN": None})
+    _cool_unset = _probe(_tts("elevenlabs"), env={**_KEYS, "LVI_TTS_REVIVE_COOLDOWN": None})
+finally:
+    tts_kokoro.kokoro_available = _real_kokoro_available
+_cz, _cu = (getattr(p.locals.get("tts"), "_lenoxvi_cooldown", None) for p in (_cool_zero, _cool_unset))
+check("speech tiers: tts.revive_cooldown_secs: 0 in config.yaml reaches the TTS switcher as 0 (floored to its 1 s minimum), not 30",
+      _cool_zero.error is None and _cz == max(0.0, tts_fallback._MIN_COOLDOWN),
+      f"error={_cool_zero.error} cooldown={_cz}")
+check("speech tiers: tts.revive_cooldown_secs unset -> the TTS switcher waits 30 s, no warning",
+      _cool_unset.error is None and _cu == 30.0 and not [ln for ln in _cool_unset.warnings if "revive_cooldown" in ln],
+      f"error={_cool_unset.error} cooldown={_cu}")
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)
