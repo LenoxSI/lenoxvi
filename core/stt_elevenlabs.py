@@ -148,10 +148,12 @@ class OnDemandElevenLabsSTTService(ElevenLabsRealtimeSTTService):
             yield frame
 
     async def _open(self):
-        t0 = time.monotonic()
         try:
             self._held_dropped = 0
             async with self._conn_lock:       # after any idle close still tearing down
+                # The budget starts now: a slow teardown we waited behind is
+                # not the new connect's fault.
+                t0 = time.monotonic()
                 if self._receive_task is not None and self._receive_task.done():
                     self._receive_task = None  # the old loop ended: _connect starts a new one
                 await self._connect()

@@ -60,6 +60,8 @@ The two version streams are independent.
   seconds longer to report.
 - `scripts/deploy_firmware.sh --version` with no value prints a usage message instead of an unbound-variable
   error.
+- ElevenLabs STT: a slow teardown of an idle socket no longer eats the next connect's budget, which failed
+  a healthy reconnect over to Whisper and dropped the turn's audio.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
