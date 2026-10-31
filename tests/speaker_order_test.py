@@ -14,6 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 CORE = sys.argv[1] if len(sys.argv) > 1 else "../core"
 sys.path.insert(0, CORE)
@@ -258,6 +259,242 @@ finally:
     wiim_output.live_wiim_volume = real_live_vol
 check("speaker: WiiM put back the music volume when the bot stopped during the play command",
       VOLS == [45, 20] and not _left_saved, f"vols={VOLS} saved_left={_left_saved}")
+
+# ── Sonos reply failures, bad config values, duck-holder recovery ───
+import uuid
+
+import lameenc  # noqa: F401 — the real encoder, put back after the broken-encoder probe
+import yaml
+from config import DEFAULT_CLIP_VOLUME
+from echo_gate import EchoGate
+from loguru import logger as _logger
+
+LOGS = []
+_logger.add(lambda m: LOGS.append((m.record["level"].name, m.record["message"])), level="DEBUG")
+FIXTURE_SONOS = yaml.safe_load(Path(os.environ["LVI_TEST_CONFIG"]).read_text())["sonos"]
+ZONES = {"Kitchen": {"ip": "192.0.2.21", "player_uid": "RINCON_TEST_KITCHEN"},
+         "Hall": {"ip": "192.0.2.22", "player_uid": "RINCON_TEST_HALL"}}
+
+
+def logged(level, needle):
+    return [m for lv, m in LOGS if lv == level and needle in m]
+
+
+class GateProbeSw(FakeSw):
+    """Records how long the echo gate still has to run when play is called."""
+    gate = None
+    seen: ClassVar[list] = []
+
+    async def play_clip(self, url, volume=None):
+        if GateProbeSw.gate is not None:
+            GateProbeSw.seen.append(GateProbeSw.gate._blocked_until - time.monotonic())
+        return await super().play_clip(url, volume)
+
+
+sys.modules["sonos_websocket"] = SimpleNamespace(SonosWebsocket=GateProbeSw)
+
+
+def kitchen(gate):
+    so = sonos_output.SonosOutput(echo_gate=gate, zone_selector=lambda: "Kitchen", led=None)
+    so._enabled = True
+    so._zones = dict(ZONES)
+    so._clip_server = SRV
+    so._duck_while_awake = False
+    return so
+
+
+class BrokenEncoder:
+    def __init__(self):
+        raise RuntimeError("encoder broke")
+
+
+def _replace_fails(src, dst):
+    raise OSError(28, "No space left on device")
+
+
+async def _bind_fails():
+    raise OSError(98, "Address already in use")
+
+
+async def reply_fails(step, prearm):
+    """One 1 s reply whose `step` fails; returns what the gate and log saw."""
+    gate = EchoGate()
+    GateProbeSw.gate = gate
+    if prearm:
+        gate.block(5.0)  # another clip (a filler) is still sounding
+    before = gate._blocked_until
+    so = kitchen(gate)
+    real_lame, real_os, real_scs = sys.modules.get("lameenc"), sonos_output.os, sonos_output.shared_clip_server
+    if step == "encode":
+        sys.modules["lameenc"] = SimpleNamespace(Encoder=BrokenEncoder)
+    elif step == "clip write":
+        sonos_output.os = SimpleNamespace(replace=_replace_fails)
+    elif step == "clip server bind":
+        so._clip_server = None
+        sonos_output.shared_clip_server = _bind_fails
+    n_plays, n_logs = len(PLAYS), len(LOGS)
+    escaped = None
+    try:
+        await so._speak_to_sonos(pcm_secs(1.0))
+    except Exception as e:  # noqa: BLE001 — the probe reports it
+        escaped = e
+    finally:
+        sys.modules["lameenc"], sonos_output.os = real_lame, real_os
+        sonos_output.shared_clip_server = real_scs
+    errors = [m for lv, m in LOGS[n_logs:] if lv == "ERROR"]
+    return SimpleNamespace(escaped=escaped, before=before, after=gate._blocked_until,
+                           blocked=gate.blocked(), played=len(PLAYS) - n_plays, errors=errors)
+
+
+FakeSw.made = 1
+for _step in ("encode", "clip write", "clip server bind"):
+    r = asyncio.run(reply_fails(_step, prearm=True))
+    check(f"speaker: a Sonos reply whose {_step} fails leaves another clip's echo window untouched",
+          r.after == r.before and r.blocked and r.played == 0, f"before={r.before} after={r.after}")
+    check(f"speaker: a Sonos reply whose {_step} fails logs one error naming the step, nothing escapes",
+          r.escaped is None and len(r.errors) == 1 and _step in r.errors[0], f"escaped={r.escaped!r} errors={r.errors}")
+    r = asyncio.run(reply_fails(_step, prearm=False))
+    check(f"speaker: a Sonos reply whose {_step} fails never arms the echo gate",
+          r.after == 0.0 and not r.blocked and r.escaped is None, f"after={r.after} escaped={r.escaped!r}")
+_tmp_left = [p.name for p in Path(STATE, "clips").iterdir() if p.name.endswith(".tmp")]
+check("speaker: a failed Sonos clip write leaves no temp file behind in clips/", not _tmp_left, str(_tmp_left))
+
+
+async def reply_plays():
+    gate = EchoGate()
+    GateProbeSw.gate = gate
+    GateProbeSw.seen.clear()
+    await kitchen(gate)._speak_to_sonos(pcm_secs(2.0))
+    return list(GateProbeSw.seen), gate.blocked()
+
+
+_seen, _blocked = asyncio.run(reply_plays())
+check("speaker: a Sonos reply arms the echo gate for at least its speech before play is called",
+      len(_seen) == 1 and _seen[0] >= 2.0 and _blocked, f"remaining at play={_seen}")
+
+
+async def barge_during_connect():
+    gate = EchoGate()
+    GateProbeSw.gate = gate
+    so = kitchen(gate)
+    FakeSw.made = 0  # this connect is slow: the barge-in lands inside it
+    task = asyncio.create_task(so._speak_to_sonos(pcm_secs(1.0), barge=so._barge_epoch))
+    await asyncio.sleep(0.25)
+    await so.stop_current_clip()
+    await task
+    return gate._blocked_until, gate.blocked()
+
+
+n_plays = len(PLAYS)
+_until, _blocked = asyncio.run(barge_during_connect())
+check("speaker: a barge-in while the Sonos reply connects drops it and leaves the echo gate un-armed",
+      len(PLAYS) == n_plays and _until == 0.0 and not _blocked, f"until={_until} plays={PLAYS[n_plays:]}")
+FakeSw.made = 1
+
+
+# Config values: a hand-edited config.yaml can hold anything.
+def sonos_from(**overrides):
+    path = Path(STATE, f"cfg-{uuid.uuid4().hex[:8]}.yaml")
+    path.write_text(yaml.safe_dump({"sonos": {**FIXTURE_SONOS, **overrides}}))
+
+    async def build():
+        return sonos_output.SonosOutput(config_path=str(path), echo_gate=None, led=None)
+
+    try:
+        return asyncio.run(build()), None
+    except Exception as e:  # noqa: BLE001 — the probe reports it
+        return None, e
+
+
+so, err = sonos_from()
+check("speaker: Sonos volumes from valid config are unchanged (global and per zone)",
+      err is None and so._volume == FIXTURE_SONOS["clip_volume"]
+      and so._zone_volumes == {k: int(v) for k, v in FIXTURE_SONOS["zone_volumes"].items()}
+      and so._volume_for("Hall") == FIXTURE_SONOS["zone_volumes"]["Hall"]
+      and so._retention_days == FIXTURE_SONOS["clip_retention_days"], f"err={err!r}")
+
+so, err = sonos_from(clip_volume="loud")
+try:
+    _vols = [so._volume, so._volume, so._volume_for("Kitchen")]
+except Exception as e:  # noqa: BLE001 — the probe reports it
+    _vols = [repr(e)]
+check("speaker: a non-numeric sonos.clip_volume falls back to the default with one warning",
+      _vols == [DEFAULT_CLIP_VOLUME] * 3 and len(logged("WARNING", "'loud'")) == 1, f"vols={_vols}")
+
+so, err = sonos_from(zone_volumes={"Hall": "quiet", "Kitchen": float("nan")})
+try:
+    _vols = [so._volume_for("Hall"), so._volume_for("Kitchen"), so._volume_for("Hall")]
+except Exception as e:  # noqa: BLE001 — the probe reports it
+    _vols = [repr(e)]
+_g = FIXTURE_SONOS["clip_volume"]
+check("speaker: a bad per-zone Sonos volume is skipped so the global volume applies",
+      _vols == [_g, _g, _g], f"vols={_vols}")
+check("speaker: each bad per-zone Sonos volume warns once, not on every reply",
+      len(logged("WARNING", "zone_volumes.Hall 'quiet'")) == 1
+      and len(logged("WARNING", "zone_volumes.Kitchen nan")) == 1,
+      str(logged("WARNING", "zone_volumes")))
+
+for _bad in ("abc", -1):
+    so, err = sonos_from(clip_retention_days=_bad)
+    check(f"speaker: sonos.clip_retention_days {_bad!r} -> the Sonos output still builds with 7 days, warned",
+          err is None and so._retention_days == 7 and len(logged("WARNING", f"clip_retention_days {_bad!r}")) == 1,
+          f"err={err!r} days={getattr(so, '_retention_days', None)}")
+
+
+# Duck holder: a failed duck-clip create is retried, the holder never gives up.
+async def duck_recovers(fail_first, awake_from_start, retry_s, run_s, wake_after=None):
+    calls = []
+
+    async def flaky_server():
+        calls.append(1)
+        if len(calls) <= fail_first:
+            raise OSError(98, "Address already in use")
+        return SRV
+
+    real_scs, real_retry = sonos_output.shared_clip_server, getattr(sonos_output, "_DUCK_CLIP_RETRY_S", 30.0)
+    sonos_output.shared_clip_server, sonos_output._DUCK_CLIP_RETRY_S = flaky_server, retry_s
+    so = kitchen(None)
+    so._clip_server = None
+    so._duck_while_awake = True
+    so._wake_gate = SimpleNamespace(state="awake" if awake_from_start else "idle")
+    n_plays, n_logs = len(PLAYS), len(LOGS)
+    task = asyncio.create_task(so._duck_holder_loop())
+    try:
+        if wake_after is not None:
+            await asyncio.sleep(wake_after)
+            so._wake_gate.state = "awake"
+        await asyncio.sleep(run_s)
+        alive = not task.done()
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, 3.0)
+        except asyncio.CancelledError:
+            pass
+    finally:
+        sonos_output.shared_clip_server, sonos_output._DUCK_CLIP_RETRY_S = real_scs, real_retry
+    logs = LOGS[n_logs:]
+    return SimpleNamespace(calls=len(calls), alive=alive, exited=task.done(),
+                           ducked="duck-silence.mp3" in PLAYS[n_plays:], holding=so._duck_holding,
+                           warnings=[m for lv, m in logs if lv == "WARNING" and "duck clip" in m],
+                           recovered=[m for lv, m in logs if lv == "INFO" and "recovered" in m])
+
+
+r = asyncio.run(duck_recovers(fail_first=1, awake_from_start=False, retry_s=30.0, run_s=1.5, wake_after=0.8))
+check("speaker: Sonos duck holder retries a failed duck clip on the next wake and ducks",
+      r.ducked and r.alive, f"calls={r.calls} alive={r.alive}")
+check("speaker: Sonos duck holder still exits on cancel after recovering", r.exited and not r.holding)
+
+r = asyncio.run(duck_recovers(fail_first=2, awake_from_start=True, retry_s=0.6, run_s=2.5))
+check("speaker: Sonos duck holder retries a failed duck clip on its backoff while awake and ducks",
+      r.ducked and r.calls == 3, f"calls={r.calls}")
+check("speaker: Sonos duck holder warns once for repeated duck-clip failures, then logs the recovery",
+      len(r.warnings) == 1 and len(r.recovered) == 1, f"warnings={r.warnings} recovered={r.recovered}")
+
+r = asyncio.run(duck_recovers(fail_first=99, awake_from_start=True, retry_s=30.0, run_s=2.0))
+check("speaker: a failing Sonos duck clip is retried on the backoff, not every tick",
+      r.calls == 2 and not r.ducked, f"calls={r.calls}")
+check("speaker: Sonos duck holder with no duck clip still exits on cancel", r.alive and r.exited and not r.holding,
+      f"alive={r.alive} exited={r.exited}")
 
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)
