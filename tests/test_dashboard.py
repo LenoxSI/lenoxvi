@@ -4557,6 +4557,39 @@ def main():
                       and not _it12.same_target("http://h:18789", "https://h:18789")
                       and not _it12.same_target("http://h:18789", "http://evil:1/v1"), "")
 
+                # Odd-but-valid JSON from a gateway is a discovery note, never a raise
+                # (the route calling this has no guard: a raise is a 500 in the picker).
+                _routes_keep12 = dict(_H12.routes)
+                _odd12 = {}
+                for _odd_name, _models_body, _status_body in (
+                        ("a JSON list", [1, 2], ["default"]),
+                        ("null", None, None),
+                        ("non-dict entries", {"data": ["openclaw/x", 7, {"id": "openclaw/suite-a"}]},
+                         {"profiles": ["default", "suite-b"], "parked_profiles": 5}),
+                        ("unhashable parked entries", {"data": "nope"},
+                         {"profiles": ["default"], "parked_profiles": [{"x": 1}, "suite-b"]})):
+                    _H12.routes = {"/v1/models": lambda h, b=_models_body: (200, b),
+                                   "/api/status": lambda h, b=_status_body: (200, b)}
+                    for _kind12, _url12, _kw12 in (
+                            ("openclaw", f"http://127.0.0.1:{_port12}", {}),
+                            ("hermes", "http://ignored/v1",
+                             {"status_url": f"http://127.0.0.1:{_port12}/api/status"})):
+                        try:
+                            _odd12[(_odd_name, _kind12)] = _it12.discover_agents(_kind12, _url12, _env12, **_kw12)
+                        except Exception as _e12:  # noqa: BLE001 — a raise is the failure under test
+                            _odd12[(_odd_name, _kind12)] = f"raised {type(_e12).__name__}: {_e12}"
+                _H12.routes = _routes_keep12
+                check("agent picker: openclaw discovery never raises on odd JSON (list, null, non-dict entries)",
+                      all(isinstance(v, dict) for (n, k), v in _odd12.items() if k == "openclaw")
+                      and [a["id"] for a in _odd12[("non-dict entries", "openclaw")]["agents"]] == ["suite-a"],
+                      str({n: v for (n, k), v in _odd12.items() if k == "openclaw"})[:300])
+                check("agent picker: hermes discovery never raises on odd JSON (list, null, bad parked_profiles)",
+                      all(isinstance(v, dict) for (n, k), v in _odd12.items() if k == "hermes")
+                      and [a["id"] for a in _odd12[("non-dict entries", "hermes")]["agents"]] == ["default", "suite-b"]
+                      and [a["id"] for a in _odd12[("unhashable parked entries", "hermes")]["agents"]] == ["default"]
+                      and _odd12[("null", "hermes")]["source"] == "fallback",
+                      str({n: v for (n, k), v in _odd12.items() if k == "hermes"})[:300])
+
                 # route: kind validated, URL override, hermes via the status port
                 _os.environ["LVI_OPENCLAW_KEY"] = "ockey-abcdefghijkl"
                 _os.environ["LVI_HERMES_KEY"] = "hmkey-abcdefghijkl"
@@ -6550,6 +6583,34 @@ def main():
             check(f"intelligence: an empty reply ({_content!r}) is a failed turn: apology, no history, retry allowed",
                   _sp_e == ["Sorry — I can't reach my intelligence right now."] and _hi_e == [] and _lu_e == "",
                   f"spoken={_sp_e} history={_hi_e} last={_lu_e!r}")
+    finally:
+        _urqRN2.urlopen = _real_urlopen_RN2
+
+    # A slow intelligence (the read timed out) is not an unreachable one: its own line.
+    # A connect timeout or a refused connection still is "can't reach".
+    import urllib.error as _uerrRN2
+
+    def _raise_RN2(exc):
+        def _open(req, timeout=None):
+            raise exc
+        return _open
+
+    _TIMEOUT_LINE_RN2 = "That one took too long. Ask me again in a bit."
+    _APOLOGY_RN2 = "Sorry — I can't reach my intelligence right now."
+    try:
+        _urqRN2.urlopen = _raise_RN2(TimeoutError("The read operation timed out"))
+        _sp_t, _hi_t, _lu_t = asyncio.run(_empty_probe(None))
+        check("intelligence: a read timeout says it took too long, not that it can't reach the intelligence; "
+              "no history, retry allowed",
+              _sp_t == [_TIMEOUT_LINE_RN2] and _hi_t == [] and _lu_t == "",
+              f"spoken={_sp_t} history={_hi_t} last={_lu_t!r}")
+        for _why_rn2, _exc_rn2 in (("a connect timeout", _uerrRN2.URLError(TimeoutError("timed out"))),
+                                   ("a refused connection", _uerrRN2.URLError(ConnectionRefusedError(111, "x")))):
+            _urqRN2.urlopen = _raise_RN2(_exc_rn2)
+            _sp_c, _hi_c, _lu_c = asyncio.run(_empty_probe(None))
+            check(f"intelligence: {_why_rn2} still says it can't reach the intelligence",
+                  _sp_c == [_APOLOGY_RN2] and _hi_c == [] and _lu_c == "",
+                  f"spoken={_sp_c} history={_hi_c} last={_lu_c!r}")
     finally:
         _urqRN2.urlopen = _real_urlopen_RN2
 
