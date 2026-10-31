@@ -95,8 +95,11 @@ class HermesLane(Lane):
         except Exception as e:
             return {**fallback, "note": f"Hermes dashboard not reachable ({type(e).__name__}) "
                                         f"— showing the default agent only"}
-        parked = set(data.get("parked_profiles") or [])
-        ids = [p for p in (data.get("profiles") or [])
+        if not isinstance(data, dict):
+            data = {}
+        raw_parked, raw_ids = data.get("parked_profiles"), data.get("profiles")
+        parked = {p for p in raw_parked if isinstance(p, str)} if isinstance(raw_parked, list) else set()
+        ids = [p for p in (raw_ids if isinstance(raw_ids, list) else [])
                if isinstance(p, str) and AGENT_RE.match(p) and p not in parked]
         if "default" in ids:  # default first: it is the main agent
             ids = ["default"] + [p for p in ids if p != "default"]

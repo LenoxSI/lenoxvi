@@ -856,7 +856,6 @@ class IntelligenceAgent(FrameProcessor):
             # queued (cancel succeeds) from one already running.
             call = _INTEL_POOL.submit(self._ask_intelligence, text)
             ask = asyncio.wrap_future(call)
-            failed = False
             reply = None
             # Tiered fillers (option B): wait to each tier's
             # cumulative `after` mark; on timeout speak ONE line from
@@ -901,19 +900,16 @@ class IntelligenceAgent(FrameProcessor):
             if epoch != self._turn_epoch:
                 return  # ended while thinking — discard, no history
             self._register_echo(reply)
-            # A failed call never reached the intelligence — don't write the
-            # exchange into server-side history.
-            if not failed:
-                self._history.append({"role": "user", "content": text})
-                self._history.append({"role": "assistant", "content": reply})
-                self._history = self._history[-self._max_history:]
+            self._history.append({"role": "user", "content": text})
+            self._history.append({"role": "assistant", "content": reply})
+            self._history = self._history[-self._max_history:]
             logger.info(f"intelligence_agent: [{text}] -> [{reply[:120]}]")
             await self.push_frame(TTSSpeakFrame(text=reply))
             # Sticky rooms persist after every successful turn. File I/O runs
             # off the event loop, after the reply is on its way (no new await
             # between the history write and the push); a copy, as the next
             # turn may append meanwhile.
-            if not failed and self._sticky and self._room:
+            if self._sticky and self._room:
                 await asyncio.to_thread(self._save_history, list(self._history))
             # Held late results go right after this reply — after its save,
             # so a late result's own save (both exchanges) lands last.
@@ -927,7 +923,10 @@ class IntelligenceAgent(FrameProcessor):
             # defense before user-facing silence. A superseded turn that
             # fails is still superseded: no history write either way.
             settled = True
-            logger.error(f"intelligence_agent: intelligence call failed"
+            # The read timed out: the intelligence was reached and is slow,
+            # not unreachable (a connect timeout arrives as URLError).
+            timed_out = isinstance(e, TimeoutError)
+            logger.error(f"intelligence_agent: intelligence call {'timed out' if timed_out else 'failed'}"
                          f"{' after filler' if filler_spoken else ''}: {e}")
             # A failed turn must not dedup its own retry: the user hears the
             # apology and repeats the question. Dedup exists for double-fires
@@ -936,8 +935,9 @@ class IntelligenceAgent(FrameProcessor):
                 self._last_user_text = ""
             if epoch != self._turn_epoch:
                 return
-            await self.push_frame(
-                TTSSpeakFrame(text="Sorry — I can't reach my intelligence right now."))
+            await self.push_frame(TTSSpeakFrame(
+                text="That one took too long. Ask me again in a bit." if timed_out
+                else "Sorry — I can't reach my intelligence right now."))
             self._answered_epoch = epoch
             self._kick_late()
         finally:

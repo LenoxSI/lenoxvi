@@ -48,6 +48,11 @@ The two version streams are independent.
   on the next wake, or every 30 s while awake.
 - WiiM: a failed music-volume restore while the bot is stopping is now logged with the zone instead of
   being swallowed; `stt.revive_cooldown_secs` is documented in config.example.yaml.
+- An intelligence that answers too slowly (the 120 s read timeout) now gets "That one took too long. Ask
+  me again in a bit." instead of the "can't reach my intelligence" apology, which stays for a connect timeout
+  or a refused connection.
+- Agent discovery for OpenClaw and Hermes no longer raises on odd-but-valid JSON from the gateway (a list,
+  null, non-object entries, a malformed parked list): the agent picker shows a note instead of an error.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

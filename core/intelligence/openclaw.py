@@ -78,8 +78,9 @@ class OpenClawLane(Lane):
         except Exception as e:
             return {"agents": [], "source": "none", "note": f"OpenClaw unreachable ({type(e).__name__})"}
         ids = []
-        for m in (data.get("data") or []):
-            mid = str((m or {}).get("id") or "")
+        models = data.get("data") if isinstance(data, dict) else None
+        for m in (models if isinstance(models, list) else []):
+            mid = str(m.get("id") or "") if isinstance(m, dict) else ""
             if mid.startswith("openclaw/"):
                 name = mid[len("openclaw/"):]
                 if AGENT_RE.match(name) and name not in ids:
