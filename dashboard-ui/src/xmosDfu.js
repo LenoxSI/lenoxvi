@@ -198,19 +198,19 @@ export class XmosDfu {
   async open() {
     const d = this.device
     try { await d.open() } catch (e) { throw accessDenied(e) }
-    if (!d.configuration) await d.selectConfiguration(1)
-    const { interfaceNumber } = findDfuInterface(d)
-    try { await d.claimInterface(interfaceNumber) } catch (e) { throw accessDenied(e) }
-    await d.selectAlternateInterface(interfaceNumber, UPGRADE_ALT)
-    this.ifc = interfaceNumber
     try {
+      if (!d.configuration) await d.selectConfiguration(1)
+      const { interfaceNumber } = findDfuInterface(d)
+      try { await d.claimInterface(interfaceNumber) } catch (e) { throw accessDenied(e) }
+      await d.selectAlternateInterface(interfaceNumber, UPGRADE_ALT)
+      this.ifc = interfaceNumber
       const fd = parseDfuFunctional(await this._configDescriptor(), interfaceNumber)
       if (!fd || !fd.transferSize) throw new XmosError('no-descriptor', 'The chip didn’t describe its DFU settings; not flashing it.')
       this.transferSize = fd.transferSize
       await this._toIdle()
     } catch (e) {
-      // The unanswered transfer still holds the interface, and the page keeps no handle on a failed open.
-      if (e.code === 'dfu-no-answer') await this.close()
+      // The page keeps no handle on a failed open: release the device here, whatever failed.
+      await this.close()
       throw e
     }
     return this
@@ -228,6 +228,14 @@ export class XmosDfu {
     } finally { cancel() }
     const at = block === undefined ? '' : ` at block ${block}`
     throw new XmosError('dfu-no-answer', `The chip stopped answering (${name}${at}, no reply in ${ANSWER_MS / 1000} s).`)
+  }
+
+  // Runs call() and waits for it at most ANSWER_MS, never throwing: for the last calls on a device
+  // that may already be gone or wedged (reset after the image is in, close).
+  async _settleWithin(call) {
+    let cancel = () => {}
+    const late = new Promise(r => { cancel = this.timer(() => r(NO_ANSWER), ANSWER_MS) })
+    try { await Promise.race([call(), late]) } catch { /* it may already be gone */ } finally { cancel() }
   }
 
   async _configDescriptor() {
@@ -291,9 +299,11 @@ export class XmosDfu {
       // A USB error after the last block: the chip left the bus to install the image.
       // The sound check after the replug is the verdict.
     }
-    try { await this.device.reset() } catch { /* it may already be gone */ }
+    // The image is in: a reset that never answers is treated like a chip already gone, and
+    // the sound check after the replug is the verdict.
+    await this._settleWithin(() => this.device.reset())
     return { manifested }
   }
 
-  async close() { try { await this.device.close() } catch { /* already gone */ } }
+  async close() { await this._settleWithin(() => this.device.close()) }
 }

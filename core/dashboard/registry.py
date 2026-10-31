@@ -253,10 +253,8 @@ def _drain_held(pc_id, label) -> None:
     version, mute state) onto the now-known room record. EVERY path that
     binds pc_id -> label must call this (the fw=None bug) - except
     relabel_room: state is only held while pc_id is unbound or provisional,
-    and a set_name ack normally renames a session that already holds a real
-    label, so there is nothing to drain. relabel_room does not check that:
-    an ack for an unbound or provisional session would strand its held
-    state."""
+    and relabel_room only renames a session that already holds a real label
+    (it refuses the others), so there is nothing to drain."""
     held_fw = _fw_by_pc.pop(pc_id, None)
     held_muted = _muted_by_pc.pop(pc_id, None)
     held_line = _line_by_pc.pop(pc_id, None)
@@ -344,6 +342,11 @@ def mark_connected(pc_id):
 
 
 def mark_disconnected(pc_id):
+    if pc_id:
+        # A session that drops before its offer ties it never binds: its
+        # holds go with it (pc_ids are per connection, never reused).
+        for held in (_fw_by_pc, _line_by_pc, _muted_by_pc, _boot_flags_by_pc):
+            held.pop(pc_id, None)
     room = _room_by_pc.pop(pc_id, None) if pc_id else None
     if not room:
         # Unknown pc_id: a stale session from before this boot, or a
@@ -425,6 +428,12 @@ def relabel_room(pc_id: str, info: dict | None) -> None:
     if isinstance(info, dict):
         new = info.get("name")
     if not new or new == old:
+        return
+    if not old or old == PROVISIONAL:
+        # Not tied to a room (evicted, or acked inside the connect window):
+        # only its offer may bind it, draining what it holds. The node's
+        # next offer carries the new name.
+        logger.info(f"registry: set_name ack '{new}' from a session with no room yet - not relabeled")
         return
     if room_claimed(new, pc_id):
         # Taking the name would leave two sessions in one room and drop the

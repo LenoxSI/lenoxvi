@@ -964,6 +964,11 @@ _renames_in_flight: set = set()
 
 @router.post("/nodes/{room}/name", dependencies=GUARD)
 async def set_node_name(room: str, payload: NamePayload):
+    if room.lower() in (registry.PROVISIONAL, registry.BROWSER):
+        # The registry's own labels, not a node's name: a session there has
+        # no room to rename yet (its offer ties it to one).
+        raise HTTPException(status_code=400,
+                            detail=f"'{room}' isn't a node's name - rename it once it shows up under its own name")
     _room_online(room)
     # A rename onto an existing room would overwrite its zone, agent,
     # volume and mode, and leave two sessions claiming one room.

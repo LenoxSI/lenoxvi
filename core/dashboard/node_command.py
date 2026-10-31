@@ -283,6 +283,8 @@ def on_message(message, pc_id: str) -> None:
     if cmd == "set_name" and data.get("ok"):
         info = data.get("data") if isinstance(data.get("data"), dict) else None
         old = registry.room_for_pc(pc_id)
+        if old == registry.PROVISIONAL:
+            old = None  # no room yet: nothing to carry, and the registry won't relabel it
         new = info.get("name") if info else None
         # Another live session already answers to the new name (a rename
         # that raced past the dashboard's check, or done some other way):
@@ -335,7 +337,12 @@ def on_message(message, pc_id: str) -> None:
             if _carry(modes, "session mode"):
                 writes["session_modes"] = modes
             if writes:
-                config_store.write_sections(writes)  # one atomic pass
+                try:
+                    config_store.write_sections(writes)  # one atomic pass
+                except ValueError as e:
+                    # A value config.yaml can't hold: the entries stay under the
+                    # old name, and the rename itself still lands.
+                    logger.warning(f"node_command: rename '{old}' -> '{new}': config not carried: {e}")
             # A sticky room's saved conversation follows its name too. The
             # registry relabels under the stash's lock: the live session
             # resolves its name there at every save, so a save in flight

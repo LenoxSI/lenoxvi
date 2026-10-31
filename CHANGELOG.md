@@ -83,6 +83,12 @@ The two version streams are independent.
 - XMOS flashing: a chip that stops answering fails after 5 s with a clear error instead of hanging the panel.
 - Node setup: a node that saved its settings but didn't restart says so (unplug and replug to apply) instead of
   "Save failed".
+- Node renames only apply to a node that already has a room name: an ack that arrives while the node is still
+  connecting (or after its session was replaced) no longer relabels it or moves the placeholder's settings; the
+  dashboard refuses to rename the placeholder labels; a session that drops before it is tied to a room no longer
+  leaves its held state behind; a rename whose settings can't be written still lands.
+- XMOS flashing: a reset that never answers after a good flash, or a device that never closes, no longer hangs the
+  panel; a failed connect always releases the device.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
