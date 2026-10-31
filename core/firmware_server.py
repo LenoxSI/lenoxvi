@@ -29,18 +29,15 @@ import json
 import os
 from pathlib import Path
 
+import firmware_image
 import firmware_signing
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from paths import firmware_dir
 
-FIRMWARE_ROOT = Path(__file__).resolve().parent.parent / "firmware"
-FIRMWARE_TRACKS = {
-    "array": FIRMWARE_ROOT / "array",
-    "flex": FIRMWARE_ROOT / "flex",
-    "waveshare": FIRMWARE_ROOT / "waveshare",
-}
+# Track names only: the directories resolve per request via firmware_dir().
+FIRMWARE_TRACKS = firmware_image.TRACKS
 LEGACY_TRACK = "array"   # what the track-less legacy URLs serve (see docstring)
 
 

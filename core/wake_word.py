@@ -73,7 +73,6 @@ class WakeWordFilter(FrameProcessor):
     the resolved model path is the only thing shared.
     """
 
-    _shared_oww = None  # class-level: cached model FILE path (published by first setup)
     _oww_lock = asyncio.Lock()  # serializes concurrent Model() inits
 
     def __init__(self, model_path: str = WAKE_MODEL, threshold: float = None,
@@ -92,7 +91,7 @@ class WakeWordFilter(FrameProcessor):
         # LOCKED. Default OFF (wake.barge_in config knob) — with the knob
         # off, this filter is bit-for-bit the old behavior.
         self._on_interrupt = on_interrupt
-        self._interrupt_task: asyncio.Task | None = None  # held ref so the task can't be GC'd
+        self._interrupt_tasks: set[asyncio.Task] = set()  # held refs so a running one can't be GC'd
         self._barge_in = str(cfg_env("wake", "barge_in", "LVI_BARGE_IN", "false")) \
             .strip().lower() in (True, 1, "1", "true", "yes", "on")
         self._interrupt_chain = 0
@@ -157,7 +156,6 @@ class WakeWordFilter(FrameProcessor):
         # failure we're dodging). Cost: each new session pays one Model()
         # load in a thread (~seconds, at connect time — outside the
         # audio path). Simpler is correct here.
-        WakeWordFilter._shared_oww = self._model_path  # publish the path
         async with WakeWordFilter._oww_lock:
             from openwakeword.model import Model
 
@@ -192,6 +190,16 @@ class WakeWordFilter(FrameProcessor):
     def _score(self, pcm: bytes) -> float:
         audio = np.frombuffer(pcm, dtype=np.int16)
         return float(self._oww.predict(audio)[self._name])
+
+    def _schedule_interrupt(self, coro) -> asyncio.Task:
+        """Run a barge-in callback as a task and hold it until it finishes.
+        A second barge-in while the first clip cancel is still running adds
+        its own task: neither is dropped (GC'd mid-flight) or cancelled
+        (that could abort a clip cancel halfway)."""
+        task = asyncio.get_running_loop().create_task(coro)
+        self._interrupt_tasks.add(task)
+        task.add_done_callback(self._interrupt_tasks.discard)
+        return task
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -285,7 +293,7 @@ class WakeWordFilter(FrameProcessor):
                             try:
                                 _result = self._on_interrupt()
                                 if asyncio.iscoroutine(_result):
-                                    self._interrupt_task = asyncio.get_running_loop().create_task(_result)
+                                    self._schedule_interrupt(_result)
                             except RuntimeError:
                                 pass  # no running loop (suite): nothing to schedule
                             except Exception as e:  # never break the gate

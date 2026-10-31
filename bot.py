@@ -537,8 +537,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
         for o in _outputs:
             try:
                 await o.stop_current_clip()
-            except Exception:
-                pass  # one backend's failure never blocks the other
+            except Exception as e:  # noqa: BLE001 — one backend's failure never blocks the other
+                logger.debug(f"barge-in: {type(o).__name__}.stop_current_clip failed: {e!r}")
 
     # Wake gate built once: the pipeline gets it conditionally, and
     # SonosOutput reads its state for the end-of-speech LED (purple vs
