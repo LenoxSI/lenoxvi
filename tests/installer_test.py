@@ -590,6 +590,64 @@ check("installer: never installs drivers, never reboots, never upgrades the syst
       not re.search(r"\breboot\b|shutdown -r|apt-get (dist-)?upgrade|nvidia-driver|ubuntu-drivers|ffmpeg", code),
       str(re.findall(r".{20}(?:reboot|upgrade|nvidia-driver|ubuntu-drivers|ffmpeg).{20}", code))[:300])
 
+
+# ── nothing found: no release tag, no route — the friendly stops still print ──
+def tagged_source(name, *tags):
+    d = TMP / name
+    subprocess.run(["git", "init", "-q", str(d)], check=True)
+    for cmd in (["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                ["commit", "-q", "--allow-empty", "-m", "x"], *(["tag", t] for t in tags)):
+        subprocess.run(["git", "-C", str(d), *cmd], check=True)
+    return d
+
+
+# `ip` as on a box with no default route: the route lookup fails, the address list is empty.
+noroute = TMP / "noroute"
+noroute.mkdir()
+(noroute / "ip").write_text('#!/usr/bin/env bash\nif [ "$2" = route ]; then echo "RTNETLINK answers: Network is unreachable" >&2; exit 2; fi\nexit 0\n')
+(noroute / "ip").chmod(0o755)
+NOROUTE_PATH = f"{noroute}:{STUBS}:{os.environ['PATH']}"
+
+src_none = tagged_source("src-none")
+src_vnext = tagged_source("src-vnext", "vnext", "v0.13.0-rc.1")
+src_guard = tagged_source("src-guard", "v0.9.0", "v0.10.0", "vnext")
+
+r = sh("t=$(printf 'vnext\\nv0.13.0-rc.1\\n' | newest_tag); echo \"OK tag=[$t]\"")
+check("installer lib: newest_tag with no release tag in the list prints nothing and succeeds",
+      r.returncode == 0 and "OK tag=[]" in r.stdout, out(r))
+r = sh("t=$(detect_ip); echo \"OK ip=[$t]\"", PATH=NOROUTE_PATH)
+check("installer questions: detect_ip with no default route prints nothing and succeeds",
+      r.returncode == 0 and "OK ip=[]" in r.stdout, out(r))
+r = sh("detect_ip", STUB_SRC="192.0.2.44")
+check("installer questions: detect_ip with a default route still prints its source address",
+      r.returncode == 0 and r.stdout.strip() == "192.0.2.44", out(r))
+
+for _label, _src in (("no tags at all", str(src_none)), ("no tags at all, fetched by URL", f"file://{src_none}"),
+                     ("only tags outside the release pattern (vnext, an rc)", str(src_vnext))):
+    r = install(make_prefix(), "--source", _src, "--host", "192.0.2.10")
+    check(f"installer app: a source with {_label} stops with the 'no release tag — pass --tag' guidance",
+          r.returncode != 0 and "no release tag (vX.Y.Z) found" in r.stderr and "--tag" in r.stderr,
+          f"rc={r.returncode}\n{out(r)[-400:]}")
+
+r = install(make_prefix(), "--source", str(src_guard), PATH=NOROUTE_PATH)
+check("installer questions: a whole run with no default route and no --host stops with the 'pass --host' guidance",
+      r.returncode != 0 and "couldn't work out this machine's network address — pass --host" in r.stderr,
+      f"rc={r.returncode}\n{out(r)[-400:]}")
+r = install(make_prefix(), "--source", str(src_guard), STUB_SRC="192.0.2.44")
+check("installer dry-run: with release tags and a route, the newest tag (v0.10.0 over v0.9.0, vnext ignored) "
+      "and the detected address are used",
+      r.returncode == 0 and "clone --quiet --depth 1 --branch v0.10.0" in r.stdout
+      and "address: 192.0.2.44" in r.stdout and "make-cert.sh 192.0.2.44" in r.stdout,
+      f"rc={r.returncode}\n{out(r)[-600:]}")
+
+for _label, _src in (("no tags at all", src_none), ("only tags outside the release pattern", src_vnext)):
+    r = cli(done, "upgrade", "--source", str(_src), STUB_ACTIVE="yes")
+    check(f"lenoxvi upgrade: a source with {_label} stops with 'no release found'",
+          r.returncode != 0 and f"no release found at {_src}" in r.stderr, f"rc={r.returncode}\n{out(r)[-400:]}")
+r = cli(done, "upgrade", "--source", str(src_guard), STUB_ACTIVE="yes")
+check("lenoxvi upgrade: the newest release tag is still picked (v0.10.0 over v0.9.0, vnext ignored)",
+      r.returncode == 0 and "already on v0.10.0" in r.stdout, out(r))
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)
