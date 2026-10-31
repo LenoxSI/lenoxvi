@@ -53,6 +53,8 @@ The two version streams are independent.
   or a refused connection.
 - Agent discovery for OpenClaw and Hermes no longer raises on odd-but-valid JSON from the gateway (a list,
   null, non-object entries, a malformed parked list): the agent picker shows a note instead of an error.
+- The installer and `lenoxvi upgrade` print their "no release tag" / "no release found" and "pass --host"
+  guidance again: with no matching tag or no default route they used to exit silently under pipefail.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

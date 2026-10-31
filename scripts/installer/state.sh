@@ -3,9 +3,10 @@
 # config.yaml, .env (dashboard token only), the TLS cert. Never overwrites
 # a config or .env that's already there.
 
-# detect_ip -> the IPv4 of the interface that holds the default route
+# detect_ip -> the IPv4 of the interface that holds the default route; no
+# route = empty output and status 0, so ask_questions' "pass --host" fires.
 detect_ip() {
-  ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}'
+  { ip -4 route get 1.1.1.1 2>/dev/null || true; } | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}'
 }
 
 all_ips() { ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1] " (" $2 ")"}'; }

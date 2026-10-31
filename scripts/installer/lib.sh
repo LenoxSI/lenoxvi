@@ -126,4 +126,6 @@ ask_input() {
 }
 
 # Newest release tag (vX.Y.Z, no pre-release suffix) from a tag list on stdin.
-newest_tag() { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1; }
+# None = empty output and status 0, so the caller's own "no release" message
+# fires instead of pipefail ending the run silently.
+newest_tag() { { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -1; }
