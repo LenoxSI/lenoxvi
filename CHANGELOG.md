@@ -66,6 +66,11 @@ The two version streams are independent.
   "1-800-555-0199") and bare runs of ten or more digits digit by digit, instead of as billions or group by group.
 - Sonos: with the backend disabled, the duck holder no longer dips music on a mapped player or warns about
   the duck clip; enabling the backend from the dashboard still ducks on sessions already running.
+- Dashboard uploads (firmware image, wake-word model) are checked for the dashboard token and their size
+  before the body is parsed: an unauthenticated or oversized upload is refused without being spooled, and the
+  firmware upload has a maximum (the OTA app partition size).
+- A failed WiiM zone test puts the unit's volume back.
+- The .env temp file during a key save is named `.env.tmp`.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

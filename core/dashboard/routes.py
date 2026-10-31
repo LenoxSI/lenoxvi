@@ -45,6 +45,7 @@ import wake_name
 
 from . import config_store, node_command, registry
 from .guard import mutation_guard
+from .upload_limit import FIRMWARE_IMAGE_MAX, WAKE_MODEL_MAX
 
 class _DashboardRoute(APIRoute):
     """Dashboard routes answer their OWN validation errors.
@@ -691,6 +692,11 @@ async def _clip_server():
     return await shared_clip_server()
 
 
+# Bounds the volume restore after a zone test: a napping unit can't hold
+# the request open.
+_ZONE_TEST_RESTORE_TIMEOUT_S = 2.0
+
+
 @router.post("/zones/{name}/test", dependencies=GUARD)
 async def test_zone(name: str):
     zones = _all_zones()
@@ -741,23 +747,31 @@ async def test_zone(name: str):
         # 'OK' is documented-cheap; getPlayerStatus is the real check.
         from wiim_output import wiim_api, wiim_get_status
         ip = zone["ip"]
+        before_vol = None  # set once the unit's volume is snapped
 
         def _wiim_test():
+            nonlocal before_vol
             st = wiim_get_status(ip)
             raw = st.get("vol") if st else None
             before_vol = int(raw) if raw is not None else None
             if before_vol is not None:
                 wiim_api(ip, f"setPlayerCmd:vol:{_zone_test_volume(name, backend)}")
             wiim_api(ip, "setPlayerCmd:play:" + urllib.parse.quote(url, safe=""))
-            return before_vol
 
         try:
-            before_vol = await asyncio.to_thread(_wiim_test)
+            await asyncio.to_thread(_wiim_test)
             await asyncio.sleep(duration + 0.6)
-            if before_vol is not None:
-                await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}")
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"WiiM refused the clip: {e}")
+        finally:
+            # Every way out puts the music volume back: a unit left at the
+            # test volume gets that saved as its music level by the next reply.
+            if before_vol is not None:
+                try:
+                    await asyncio.to_thread(wiim_api, ip, f"setPlayerCmd:vol:{before_vol}",
+                                            _ZONE_TEST_RESTORE_TIMEOUT_S)
+                except Exception as e:  # noqa: BLE001 — best effort; never masks the clip's own error
+                    logger.warning(f"dashboard: volume restore after the test clip failed on '{name}' ({ip}): {e}")
         logger.info(f"dashboard: test clip on '{name}' (wiim {ip}, {url})")
         return {"ok": True, "zone": name, "url": url, "backend": backend}
 
@@ -1410,7 +1424,7 @@ def _write_private(env_path, text: str) -> None:
     """Atomic 0600 write of .env. The temp file is 0600 from creation —
     created under the umask and chmod'ed after, it held every secret
     world-readable for a moment."""
-    tmp = env_path.with_suffix(".env.tmp")
+    tmp = env_path.parent / (env_path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)  # a leftover temp file keeps its old mode through O_CREAT
     with os.fdopen(fd, "w") as f:
@@ -2392,7 +2406,7 @@ async def oww_upload_model(file: UploadFile = File(...)):
     data = await file.read()
     if len(data) < 1024:
         raise HTTPException(status_code=400, detail="file too small to be a wake-word model")
-    if len(data) > 50 * 1024 * 1024:
+    if len(data) > WAKE_MODEL_MAX:
         raise HTTPException(status_code=400, detail="model too large (50MB cap)")
     # Model load + test inference (up to 50 MB) and the write run off the
     # event loop: this process also runs every room's voice pipeline.
@@ -2662,6 +2676,9 @@ async def upload_firmware(
         try:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
+                if size > FIRMWARE_IMAGE_MAX:
+                    raise HTTPException(status_code=400,
+                                        detail="image larger than the OTA app partition")
                 await asyncio.to_thread(f.write, chunk)
         finally:
             await asyncio.to_thread(f.close)
