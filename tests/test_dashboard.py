@@ -1509,6 +1509,19 @@ def main():
           and any(r["room"] == "fw-unknown-room" and r.get("fw") == "1.1.4"
                   for r in _reg.known_rooms()),
           f"held={_reg._fw_by_pc} rooms={_reg.known_rooms()}")
+    # A session that drops before its offer ties it never binds: its holds go with it.
+    for _pc_hl, _connect_hl in (("test-pc-leak-unbound", False), ("test-pc-leak-prov", True)):
+        if _connect_hl:
+            _reg.mark_connected(_pc_hl)
+        node_command.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
+                                            "ok": True, "data": {"fw": "1.1.5"}}), _pc_hl)
+        _reg.note_muted(_pc_hl, True)
+        _held_hl = _reg._fw_by_pc.get(_pc_hl) == "1.1.5" and _pc_hl in _reg._muted_by_pc
+        _reg.mark_disconnected(_pc_hl)
+        check(f"held state: a {'provisional' if _connect_hl else 'never-tied'} session's holds are dropped when it disconnects",
+              _held_hl and not any(_pc_hl in t for t in (_reg._fw_by_pc, _reg._muted_by_pc, _reg._line_by_pc,
+                                                          _reg._boot_flags_by_pc)),
+              f"held_before={_held_hl} fw={_reg._fw_by_pc.get(_pc_hl)} muted={_reg._muted_by_pc.get(_pc_hl)}")
 
     # fw_push "wifi_rollback" (firmware 1.2.35): the node rolled back to its
     # previous network after a failed Wi-Fi change — logged as a WARNING so
@@ -6423,6 +6436,63 @@ def main():
             check("rename: a sticky room's saved conversation follows the new name",
                   "suite-st2" in _hist and "suite-st1" not in _hist, str(list(_hist)))
             registry.mark_disconnected("pc-st")
+
+            # ── rename edge cases: only a session with a real room name is renamed ──
+            # The dashboard can't aim a rename at the registry's own labels.
+            registry.mark_connected("pc-prv")  # provisional: connected, offer not tied yet
+            _n_calls = len(_calls_rn)
+            _r4 = client.post(f"/api/dashboard/nodes/{registry.PROVISIONAL}/name", json={"name": "suite-prvA"})
+            check("rename edge: a rename aimed at the provisional placeholder is refused before the node is asked",
+                  _r4.status_code == 400 and len(_calls_rn) == _n_calls, f"{_r4.status_code} {_r4.text[:120]}")
+            # An ack for a provisional session: no relabel, nothing carried, held state kept for its offer.
+            config_store.write_section("session_modes", {**_sm_saved, registry.PROVISIONAL: "sticky"})
+            _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push", "ok": True,
+                                          "data": {"fw": "1.9.1"}}), "pc-prv")
+            _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
+                                          "data": {"name": "suite-prvB"}}), "pc-prv")
+            _sm = config_store.read_section("session_modes") or {}
+            check("rename edge: an ack from a provisional session relabels nothing and carries nothing",
+                  registry.room_for_pc("pc-prv") == registry.PROVISIONAL
+                  and not any(r["room"] == "suite-prvB" for r in registry.known_rooms())
+                  and _sm.get(registry.PROVISIONAL) == "sticky" and "suite-prvB" not in _sm,
+                  f"bound={registry.room_for_pc('pc-prv')} modes={ {k: v for k, v in _sm.items() if 'prv' in k or k == registry.PROVISIONAL} }")
+            check("rename edge: the provisional session's held fw is still there for its offer",
+                  registry._fw_by_pc.get("pc-prv") == "1.9.1", str(registry._fw_by_pc.get("pc-prv")))
+            registry.note_offer("pc-prv", "suite-prvC")
+            check("rename edge: ...and its offer drains it onto the real room",
+                  any(r["room"] == "suite-prvC" and r.get("fw") == "1.9.1" for r in registry.known_rooms()),
+                  str([r for r in registry.known_rooms() if r["room"].startswith("suite-prv")]))
+            registry.mark_disconnected("pc-prv")
+            # A late ack from a session the registry no longer binds (evicted or never tied).
+            _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name", "ok": True,
+                                          "data": {"name": "suite-unbB"}}), "pc-unb")
+            check("rename edge: an ack from an unbound session binds nothing",
+                  registry.room_for_pc("pc-unb") is None
+                  and not any(r["room"] == "suite-unbB" for r in registry.known_rooms()),
+                  str(registry.room_for_pc("pc-unb")))
+            config_store.write_section("session_modes", _sm_saved)
+
+            # A config value the carry can't write: the rename itself still lands.
+            config_store.write_section("room_zones", {**_rz_saved, "suite-cv1": "ZoneA"})
+            registry.mark_connected("pc-cv")
+            registry.note_offer("pc-cv", "suite-cv1")
+            _real_ws_cv = config_store.write_sections
+
+            def _refuse_ws_cv(sections):
+                raise ValueError("config.yaml can't hold this value: suite")
+            config_store.write_sections = _refuse_ws_cv
+            _err_cv = None
+            try:
+                _ncRA.on_message(json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "set_name",
+                                              "ok": True, "data": {"name": "suite-cv2"}}), "pc-cv")
+            except Exception as e:  # noqa: BLE001 — the check reports it
+                _err_cv = e
+            finally:
+                config_store.write_sections = _real_ws_cv
+            check("rename edge: a carry the config can't write is logged, and the rename still lands",
+                  _err_cv is None and registry.room_for_pc("pc-cv") == "suite-cv2",
+                  f"err={_err_cv!r} bound={registry.room_for_pc('pc-cv')}")
+            registry.mark_disconnected("pc-cv")
         finally:
             _rRN._node_cmd = _orig_cmd_rn
             _iaRN._session_stash._path = _stash_path_saved

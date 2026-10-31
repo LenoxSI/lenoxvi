@@ -27,7 +27,8 @@ class FakeDfu {
   constructor(o = {}) {
     this.o = { alts: [0, 1, 2], cls: 0xfe, sub: 0x01, protocol: 2, transferSize: 64, tolerant: false, functional: true,
                busy: 1, pollMs: 7, failAt: -1, statusOnly: false, manifest: 'wait-reset', start: ST.IDLE, stuck: false,
-               openError: null, claimError: null, resetError: false, hangIn: null, hangAfter: 0, hangDnload: -1, ...o }
+               openError: null, claimError: null, resetError: false, hangIn: null, hangAfter: 0, hangDnload: -1,
+               hangReset: false, hangClose: false, ...o }
     this.configuration = null
     this.configurations = [{ configurationValue: 1, interfaces: [{ interfaceNumber: 0, alternates: this.o.alts.map(a => ({
       alternateSetting: a, interfaceClass: this.o.cls, interfaceSubclass: this.o.sub, interfaceProtocol: this.o.protocol, interfaceName: null })) }] }]
@@ -37,11 +38,15 @@ class FakeDfu {
   // A transfer the chip never answers: WebUSB gives it no timeout. The test can fail it later.
   _hang() { return new Promise((_, reject) => this.pending.push(reject)) }
   async open() { this.log.push(['open']); if (this.o.openError) throw this.o.openError }
-  async close() { this.log.push(['close']) }
+  async close() { this.log.push(['close']); if (this.o.hangClose) return this._hang() }
   async selectConfiguration(v) { this.log.push(['config', v]); this.configuration = this.configurations[0] }
   async claimInterface(n) { this.log.push(['claim', n]); if (this.o.claimError) throw this.o.claimError }
   async selectAlternateInterface(n, a) { this.log.push(['alt', n, a]); this.alt = a }
-  async reset() { this.log.push(['reset']); if (this.o.resetError) throw new Error('NetworkError: device gone') }
+  async reset() {
+    this.log.push(['reset'])
+    if (this.o.hangReset) return this._hang()
+    if (this.o.resetError) throw new Error('NetworkError: device gone')
+  }
   _st(status, poll, state) {
     const b = Uint8Array.from([status, poll & 0xff, (poll >> 8) & 0xff, poll >> 16, state, 0])
     return { status: 'ok', data: new DataView(b.buffer) }
@@ -353,6 +358,31 @@ test('xmos: with a live answer timer, a chip that answers flashes as before', as
   const r = await (await new XmosDfu(d, { ...quick(), timer: t.timer }).open()).flash(bytes(64 * 3 + 5))
   assert.equal(r.manifested, 'wait-reset')
   assert.deepEqual(d.log.filter(l => l[0] === 'out' && l[1] === DFU.DNLOAD).map(l => l[3]), [64, 64, 64, 5, 0])
+})
+
+test('xmos: a failed open releases the device whatever the failure', async () => {
+  for (const [label, o] of [['no descriptor', { functional: false }],
+                            ['claim refused', { claimError: Object.assign(new Error('busy'), { name: 'NetworkError' }) }]]) {
+    const d = new FakeDfu(o)
+    const e = await new XmosDfu(d, quick()).open().catch(err => err)
+    assert.ok(e instanceof Error, label)
+    assert.ok(d.log.some(l => l[0] === 'close'), `${label}: closed (the page keeps no handle on a failed open)`)
+  }
+})
+
+test('xmos: a reset that never answers after a good flash still reports the manifest', async () => {
+  const d = new FakeDfu({ hangReset: true }); const t = soon()
+  const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+  const r = await settle(dfu.flash(bytes(64)))
+  assert.notEqual(r, 'hung', 'flash returned')
+  assert.equal(r.v && r.v.manifested, 'wait-reset')
+  assert.ok(d.log.some(l => l[0] === 'reset'), 'reset was asked for')
+})
+
+test('xmos: closing a wedged device returns', async () => {
+  const d = new FakeDfu({ hangClose: true }); const t = soon()
+  const dfu = await new XmosDfu(d, { ...quick(), timer: t.timer }).open()
+  assert.notEqual(await settle(dfu.close().then(() => 'closed')), 'hung')
 })
 
 test('xmos: flash refuses before open', async () => {
