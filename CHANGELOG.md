@@ -71,6 +71,8 @@ The two version streams are independent.
   firmware upload has a maximum (the OTA app partition size).
 - A failed WiiM zone test puts the unit's volume back.
 - The .env temp file during a key save is named `.env.tmp`.
+- XMOS audio-chip flashing: a chip stuck busy or manifesting now fails with a clear error after a minute
+  (it used to hang the panel, or report a false "Done"), and the chip's poll interval is clamped.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 

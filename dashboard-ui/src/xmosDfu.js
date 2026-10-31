@@ -25,6 +25,13 @@ export const DFU = { DNLOAD: 1, GETSTATUS: 3, CLRSTATUS: 4, ABORT: 6 }
 export const DFU_STATE = { IDLE: 2, DNLOAD_SYNC: 3, DNBUSY: 4, DNLOAD_IDLE: 5, MANIFEST_SYNC: 6, MANIFEST: 7, MANIFEST_WAIT_RESET: 8, ERROR: 10 }
 const UPGRADE_ALT = 1
 const WAITING = [DFU_STATE.DNLOAD_SYNC, DFU_STATE.DNBUSY, DFU_STATE.MANIFEST_SYNC, DFU_STATE.MANIFEST]
+// bwPollTimeout is 24 bits of milliseconds (one bad reply = hours). The cap stays above an
+// honest erase wait, since a status read during DNBUSY can push the chip into dfuERROR; the
+// floor keeps a chip that says 0 from spinning the tab.
+const POLL_MIN_MS = 5
+const POLL_MAX_MS = 5000
+// One block or the manifest step; the same minute the sound check gives a node.
+const WAIT_DEADLINE_MS = 60000
 
 export class XmosError extends Error {
   constructor(code, message) { super(message); this.name = 'XmosError'; this.code = code }
@@ -176,9 +183,9 @@ export class XmosDfu {
     return new XmosDfu(await nav.usb.requestDevice({ filters: [{ vendorId: XMOS_VENDOR_ID }] }))
   }
 
-  constructor(device, { sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
-    this.device = device; this.sleep = sleep
-    this.ifc = null; this.transferSize = 0; this.manifestTolerant = false
+  constructor(device, { sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => Date.now() } = {}) {
+    this.device = device; this.sleep = sleep; this.now = now
+    this.ifc = null; this.transferSize = 0
   }
 
   async open() {
@@ -192,7 +199,6 @@ export class XmosDfu {
     const fd = parseDfuFunctional(await this._configDescriptor(), interfaceNumber)
     if (!fd || !fd.transferSize) throw new XmosError('no-descriptor', 'The chip didn’t describe its DFU settings; not flashing it.')
     this.transferSize = fd.transferSize
-    this.manifestTolerant = fd.manifestTolerant
     await this._toIdle()
     return this
   }
@@ -222,6 +228,7 @@ export class XmosDfu {
   }
 
   async _waitFor(block, wanted) {
+    const end = this.now() + WAIT_DEADLINE_MS
     for (;;) {
       const s = await this._status()
       if (s.status !== 0 || s.state === DFU_STATE.ERROR) {
@@ -230,7 +237,9 @@ export class XmosDfu {
       }
       if (wanted.includes(s.state)) return s
       if (!WAITING.includes(s.state)) throw new XmosError('bad-state', `Unexpected chip state ${s.state} at block ${block}.`)
-      await this.sleep(Math.max(s.poll, 1))
+      // an XmosError: flash() reads any other error after the last block as the chip leaving the bus
+      if (this.now() >= end) throw new XmosError('dfu-timeout', `The chip stayed in state ${s.state} for ${WAIT_DEADLINE_MS / 1000} s at block ${block}.`)
+      await this.sleep(Math.min(Math.max(s.poll, POLL_MIN_MS), POLL_MAX_MS))
     }
   }
 
