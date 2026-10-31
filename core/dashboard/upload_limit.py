@@ -1,12 +1,14 @@
-"""upload_limit — pure-ASGI middleware that caps the dashboard's upload
+"""upload_limit — pure-ASGI middleware that caps the dashboard's request
 bodies and checks the mutation guard BEFORE FastAPI parses them.
 
-Why this exists: FastAPI reads and spools a multipart body before it
-solves the route's dependencies, so the GUARD dependency and every
-in-route size check run only after the whole upload is already in
-memory or a temp file. A LAN client could fill the temp directory
-without a token. This middleware sits in front of the parse, for POSTs
-to the upload paths only:
+Why this exists: FastAPI reads the whole body (spooling a multipart
+upload, buffering a JSON one) before it solves the route's dependencies,
+so the GUARD dependency and every in-route size check run only after
+the body is already in memory or a temp file, and nothing else bounds
+it. A LAN client could fill memory or the temp directory without a
+token. This middleware sits in front of the parse, for every
+POST/PUT/PATCH/DELETE under /api/dashboard/ (matched on the exact,
+case-sensitive path the router matches on):
 - the guard (guard.mutation_guard — Host, Origin, optional token) runs
   on the headers alone; a refusal answers with the guard's own status
   and body, and the body is never read;
@@ -15,9 +17,13 @@ to the upload paths only:
   `receive` (chunked bodies, or a Content-Length that lies), and the
   request ends in a 413 the moment the count passes the cap. Nothing is
   buffered here.
+The two upload paths have caps sized to their files; every other route
+gets DEFAULT_BODY_CAP. Reads (GET/HEAD/OPTIONS) and paths outside
+/api/dashboard/ (the node offer, the page and its assets) pass through
+untouched.
 
 The in-route checks stay: they are the precise, post-parse validation
-(the caps here allow for multipart framing on top of the file).
+(the upload caps here allow for multipart framing on top of the file).
 """
 
 from fastapi import HTTPException
@@ -37,6 +43,13 @@ UPLOAD_BODY_CAPS = {
     "/api/dashboard/firmware/upload": FIRMWARE_IMAGE_MAX + MULTIPART_OVERHEAD,
     "/api/dashboard/oww/models": WAKE_MODEL_MAX + MULTIPART_OVERHEAD,
 }
+# Every other dashboard write is a small JSON body: the largest the UI
+# sends, a full room mapping with per-room agents, is at most about 200
+# bytes a room.
+DEFAULT_BODY_CAP = 256 * 1024
+
+GUARDED_PREFIX = "/api/dashboard/"
+MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 class _BodyTooLarge(Exception):
@@ -66,17 +79,20 @@ class UploadLimitMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        cap = UPLOAD_BODY_CAPS.get(scope.get("path")) if scope.get("type") == "http" else None
-        if cap is None or scope.get("method") != "POST":
+        path = scope.get("path") or ""
+        if (scope.get("type") != "http" or scope.get("method") not in MUTATING_METHODS
+                or not path.startswith(GUARDED_PREFIX)):
             return await self.app(scope, receive, send)
 
-        path = scope["path"]
         try:
             mutation_guard(Request(scope))
         except HTTPException as e:
             return await _refuse(scope, receive, send, e.status_code, e.detail, e.headers)
 
-        too_large = f"upload too large for {path} (limit {cap} bytes)"
+        # A trailing slash only earns the router's redirect to the real path:
+        # size it like that path so the redirect isn't a 413 instead.
+        cap = UPLOAD_BODY_CAPS.get(path.rstrip("/"), DEFAULT_BODY_CAP)
+        too_large = f"request body too large for {path} (limit {cap} bytes)"
         declared = _declared_length(scope)
         if declared is not None and declared > cap:
             logger.warning(f"upload_limit: refused {path}: declared {declared} bytes, cap {cap}")

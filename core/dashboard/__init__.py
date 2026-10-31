@@ -85,7 +85,8 @@ def register_dashboard(app) -> None:
     # (the firmware sends `room` in the offer; pipecat generates the
     # pc_id server-side — see offer_tee.py).
     app.add_middleware(OfferTeeMiddleware)
-    # Upload bodies are capped and guarded before FastAPI parses them
+    # Every dashboard write (POST/PUT/PATCH/DELETE under /api/dashboard/)
+    # is guarded and size-capped before FastAPI parses its body
     # (see upload_limit.py).
     app.add_middleware(UploadLimitMiddleware)
     app.include_router(router)

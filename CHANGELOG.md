@@ -75,6 +75,8 @@ The two version streams are independent.
   (it used to hang the panel, or report a false "Done"), and the chip's poll interval is clamped.
 - A second barge-in while the first reply clip is still being cancelled no longer drops (or risks cancelling)
   the first cancel; a backend that fails to stop its clip on barge-in is logged at debug instead of swallowed.
+- Every dashboard write (not only the uploads) is checked for the dashboard token and capped in size
+  before its body is read: an unauthenticated or oversized request can no longer make the bot buffer it.
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
