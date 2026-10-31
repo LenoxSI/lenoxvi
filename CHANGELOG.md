@@ -8,6 +8,12 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-31 — Locked-down dashboard writes, a full bug sweep
+
+A minor release: every dashboard write is now checked for the token and capped in size before the bot reads it,
+and a full bug sweep fixes speech, speaker, dashboard, node and flashing problems. Breaking for API scripts only:
+the room recorder and dashboard API fields nothing read are removed.
+
 ### Breaking
 - The room recorder is removed: `POST /api/dashboard/nodes/<room>/record`, `POST …/record/stop`,
   `GET /api/dashboard/recordings`, `GET` and `DELETE /api/dashboard/recordings/<file>` are gone, and so is
@@ -31,69 +37,62 @@ The two version streams are independent.
     `PUT /voice-tuning` answers just `{"ok": true}` (no `written`); the key saves drop `replaced` (and
     `PUT /intelligence/key` its `key_hint`); `PUT /localai` drops `restart`; `PUT /node-speaker/volume` drops
     `sent`; `PUT /zones/<name>/volume` and `POST /nodes/<room>/session-mode` drop `before`;
-    `DELETE /zones/<name>` drops `default_zone`.
+    `DELETE /zones/<name>` drops `default_zone`. (#22)
+
+### Security
+- Every dashboard write, including the firmware and wake-word uploads, is checked for the dashboard token and
+  capped in size before its body is read. Before, an unauthenticated client on your network could make the bot
+  buffer an upload or a JSON body of any size, and the firmware upload had no maximum (it is now the OTA
+  partition size). (#23, #42)
 
 ### Fixed
-- The speech-to-text debug log now names the engine that heard each turn: a LocalAI transcript logs
-  `stt heard: […] (localai: <model>)` and a dropped phantom from LocalAI logs `stt dropped phantom […]
-  (localai: <model>)`. Turns Whisper base serves — including LocalAI fallbacks — still log `local-whisper`.
-- A `revive_cooldown_secs: 0` set in config.yaml (TTS or STT) is honoured again instead of silently
-  becoming 30 seconds; all four readers parse the value the same way, and a negative or non-numeric value
-  warns and uses 30.
-- WiiM: a missing clip-server host setting or a failed bind no longer fails session setup (it warns and
-  retries when speaking); a reply that fails before its play command (encode, clip write, clip server,
-  voice volume) no longer deafens the mic for the clip length; a failed music-volume restore is logged.
-- Sonos: a reply that fails before it plays (encode, clip write, clip-server bind, speaker client) is
-  logged by step and no longer deafens the mic for the clip length; a failed clip write leaves no temp file
-  behind.
-- A bad `clip_volume` or per-zone volume (Sonos or WiiM) falls back with one warning instead of breaking
-  replies and the duck holder; a non-numeric or negative `sonos.clip_retention_days` falls back to 7 days
-  instead of failing every session build.
-- One failed duck-clip create no longer disables ducking for the rest of the session: the holder retries
-  on the next wake, or every 30 s while awake.
-- WiiM: a failed music-volume restore while the bot is stopping is now logged with the zone instead of
-  being swallowed; `stt.revive_cooldown_secs` is documented in config.example.yaml.
-- An intelligence that answers too slowly (the 120 s read timeout) now gets "That one took too long. Ask
-  me again in a bit." instead of the "can't reach my intelligence" apology, which stays for a connect timeout
-  or a refused connection.
-- Agent discovery for OpenClaw and Hermes no longer raises on odd-but-valid JSON from the gateway (a list,
-  null, non-object entries, a malformed parked list): the agent picker shows a note instead of an error.
-- The installer and `lenoxvi upgrade` print their "no release tag" / "no release found" and "pass --host"
-  guidance again: with no matching tag or no default route they used to exit silently under pipefail.
-- `scripts/restart.sh` exits non-zero when the restart fails or the bot does not stay up (a crash on a bad
-  config edit right after start), instead of always printing success. A healthy restart takes about five
-  seconds longer to report.
-- `scripts/deploy_firmware.sh --version` with no value prints a usage message instead of an unbound-variable
-  error.
-- ElevenLabs STT: a slow teardown of an idle socket no longer eats the next connect's budget, which failed
-  a healthy reconnect over to Whisper and dropped the turn's audio.
+- Config saves: a value config.yaml can't hold is refused with a clear message and leaves the file untouched.
+  Before, it answered with a server error and broke every later config save until a restart. (#26)
 - Local voices (Kokoro, LocalAI) read phone numbers ("555-123-4567", "(555) 123-4567", "+1 555 123 4567",
   "1-800-555-0199") and bare runs of ten or more digits digit by digit, instead of as billions or group by group.
-- Sonos: with the backend disabled, the duck holder no longer dips music on a mapped player or warns about
-  the duck clip; enabling the backend from the dashboard still ducks on sessions already running.
-- Dashboard uploads (firmware image, wake-word model) are checked for the dashboard token and their size
-  before the body is parsed: an unauthenticated or oversized upload is refused without being spooled, and the
-  firmware upload has a maximum (the OTA app partition size).
-- A failed WiiM zone test puts the unit's volume back.
-- The .env temp file during a key save is named `.env.tmp`.
-- XMOS audio-chip flashing: a chip stuck busy or manifesting now fails with a clear error after a minute
-  (it used to hang the panel, or report a false "Done"), and the chip's poll interval is clamped.
-- A second barge-in while the first reply clip is still being cancelled no longer drops (or risks cancelling)
-  the first cancel; a backend that fails to stop its clip on barge-in is logged at debug instead of swallowed.
-- Every dashboard write (not only the uploads) is checked for the dashboard token and capped in size
-  before its body is read: an unauthenticated or oversized request can no longer make the bot buffer it.
-- Config saves: a value config.yaml can't hold is refused with a clear 400 and leaves the file untouched;
-  before, it answered 500 and broke every later config save until a restart.
-- Expired command timeouts and finished wake-model upload locks no longer accumulate for the life of the process.
-- XMOS flashing: a chip that stops answering fails after 5 s with a clear error instead of hanging the panel.
-- Node setup: a node that saved its settings but didn't restart says so (unplug and replug to apply) instead of
-  "Save failed".
-- Node renames only apply to a node that already has a room name: an ack that arrives while the node is still
-  connecting (or after its session was replaced) no longer relabels it or moves the placeholder's settings; the
-  dashboard refuses to rename the placeholder labels; a session that drops before it is tied to a room no longer
-  leaves its held state behind; a rename whose settings can't be written still lands.
-- XMOS flashing: a reset that never answers after a good flash, or a device that never closes, no longer hangs the
-  panel; a failed connect always releases the device.
+  (#6)
+- ElevenLabs STT: a slow teardown of an idle socket no longer eats the next connect's budget, which failed a
+  healthy reconnect over to Whisper and dropped the turn's audio. (#7)
+- An intelligence that answers too slowly (the 120 s read timeout) now gets "That one took too long. Ask me again
+  in a bit." instead of the "can't reach my intelligence" apology, which stays for a connect timeout or a refused
+  connection. Agent discovery for OpenClaw and Hermes no longer fails on odd-but-valid JSON from the gateway: the
+  agent picker shows a note instead of an error. (#5, #12)
+- A second barge-in while the first reply clip is still being cancelled no longer drops or cancels the first
+  cancel; a backend that fails to stop its clip on barge-in is logged. (#35, #36)
+- A `revive_cooldown_secs: 0` set in config.yaml (TTS or STT) is honoured again instead of silently becoming
+  30 seconds; a negative or non-numeric value warns and uses 30. `stt.revive_cooldown_secs` is now documented in
+  config.example.yaml. (#34)
+- The speech-to-text debug log names the engine that heard each turn (`localai: <model>` or `local-whisper`),
+  including dropped phantoms. (#41)
+- Sonos: a reply that fails before it plays (encode, clip write, clip server, speaker client) is logged by step
+  and no longer leaves the mic deaf for the clip length; a failed clip write leaves no temp file. One failed
+  duck-clip create no longer disables ducking for the session (it retries on the next wake, or every 30 s while
+  awake). A bad `clip_volume`, per-zone volume or `clip_retention_days` falls back with one warning instead of
+  breaking replies or every session build. (#10, #20, #21, #40)
+- Sonos: with the backend disabled, the duck holder no longer dips music on a mapped player; enabling the backend
+  from the dashboard still ducks on sessions already running. (#8)
+- WiiM: a missing clip-server host or a failed bind no longer fails session setup (it warns and retries when
+  speaking); a reply that fails before its play command no longer leaves the mic deaf for the clip length; a
+  failed music-volume restore, including while the bot stops, is logged with the zone. (#16, #17, #39)
+- A failed WiiM zone test puts the unit's volume back. (#11)
+- Node renames only apply to a node that already has a room name: a rename acknowledged while the node is still
+  connecting, or after its session was replaced, no longer relabels it or moves the placeholder's settings; the
+  dashboard refuses to rename the placeholder labels; a rename whose settings can't be written still lands.
+- Node setup: a node that saved its settings but didn't restart says so ("unplug it and plug it back in to
+  apply") instead of "Save failed". (#30)
+- XMOS audio-chip flashing never hangs the panel: a chip stuck busy or manifesting fails after a minute (it
+  could also report a false "Done"), a chip that stops answering fails after 5 s, the chip's requested poll
+  interval is clamped, a reset or close that never answers is bounded, and a failed connect always releases the
+  device. (#31, #32, #43)
+- The bot no longer keeps state for expired command timeouts, finished wake-model uploads, or sessions that drop
+  before they are tied to a room. (#24)
+- The .env temp file during a key save is named `.env.tmp`. (#27)
+- The installer and `lenoxvi upgrade` print their "no release found" and "pass --host" guidance again instead of
+  exiting silently. (#13)
+- `scripts/restart.sh` exits non-zero when the restart fails or the bot does not stay up, instead of always
+  printing success; a healthy restart takes about five seconds longer to report. (#15)
+- `scripts/deploy_firmware.sh --version` with no value prints a usage message instead of an unbound-variable
+  error. (#33)
 
 ## [0.8.1] — 2026-10-29 — Late answers, aiohttp security update
 
