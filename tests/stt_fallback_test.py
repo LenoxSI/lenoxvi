@@ -987,6 +987,26 @@ try:
         check("hardening: after that race exactly one socket is open, it is ours, and the room stays on ElevenLabs",
               r.get("open") and r.get("closed") == 1 and r.get("on_el") and not r.get("no_session"), str(r))
 
+        # The same race with a teardown LONGER than the connect budget and a
+        # server that starts the session a moment after the socket opens (as
+        # the real one does): the budget measures the connect, not the wait
+        # for the close to finish — a healthy server must not be failed over.
+        slower = _scribe(EL_PORT)
+        _orig_close2 = slower._disconnect_websocket
+
+        async def _slower_close():
+            await asyncio.sleep(1.5)          # a hung close, longer than CONNECT_TIMEOUT_SECS
+            await _orig_close2()
+        slower._disconnect_websocket = _slower_close
+        _tune(IDLE_CLOSE_SECS=1.0, CONNECT_TIMEOUT_SECS=1.0)
+        try:
+            r = _seq_run(_el_race, svc=slower, delay=0.3)
+        finally:
+            _tune(**_sel_saved)
+        check("hardening: a teardown slower than the connect budget doesn't fail a healthy connect over to Whisper",
+              r.get("closing") and r.get("on_el") and not r.get("no_session") and r.get("conns") == 2
+              and r.get("events") == [(1, 1), (1, 2), (1, 3), (2, 4), (2, 5), (2, 6)], str(r))
+
         # Out of credits / bad key / terms: an account error moves the room
         # to Whisper at once, and recovery won't switch back while it lasts.
         async def _el_account(switcher, whisper, task, until):
