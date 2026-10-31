@@ -577,6 +577,41 @@ def main():
         check("config writes: YAML 1.1 bool/null words round-trip as the exact strings",
               _rz_bh1 == {"on": "Off", "Yes": "kitchen"}, f"room_zones={_rz_bh1!r}")
         _cfg_c.write_text(_txt_bh1)  # restore: the section (and comments) as they were
+        # A value YAML can't represent is the ValueError write_section
+        # promises, refused before the disk is touched; the shared writer
+        # must keep working after it.
+        _txt_uv = _cfg_c.read_text()
+        _uv_err = None
+        try:
+            config_store.write_section("sonos", {**dict(config_store.read_section("sonos")),
+                                                 "suite_unwritable": object()})
+        except Exception as e:  # noqa: BLE001 — the check reports what was raised
+            _uv_err = e
+        check("config writes: an unrepresentable value raises ValueError and leaves config.yaml byte-identical",
+              isinstance(_uv_err, ValueError) and _cfg_c.read_text() == _txt_uv
+              and not _cfg_c.with_name(_cfg_c.name + ".tmp").exists(),
+              f"raised={type(_uv_err).__name__}: {_uv_err} unchanged={_cfg_c.read_text() == _txt_uv}")
+        _uv_after = None
+        try:
+            config_store.write_section("wake", {"threshold": 0.4, "barge_in": False})
+            _uv_after = (config_store.read_section("wake") or {}).get("threshold")
+        except Exception as e:  # noqa: BLE001 — the check reports what was raised
+            _uv_after = f"{type(e).__name__}: {e}"
+        check("config writes: a write after a refused value still lands",
+              _uv_after == 0.4, f"threshold={_uv_after!r}")
+        _cfg_c.write_text(_txt_uv)
+        # The route maps it to a 400, not a raw 500 (the stored section is
+        # where such a value would come from: request bodies are plain JSON).
+        _rs_uv = config_store.read_section
+        config_store.read_section = lambda s, d=None: (
+            {"suite-uv-held": object()} if s == "session_modes" else _rs_uv(s, d))
+        try:
+            _r_uv = client.post("/api/dashboard/nodes/suite-uv/session-mode", json={"mode": "sticky"})
+        finally:
+            config_store.read_section = _rs_uv
+        check("config writes: a route writing an unrepresentable value answers 400, config.yaml untouched",
+              _r_uv.status_code == 400 and _cfg_c.read_text() == _txt_uv,
+              f"status={_r_uv.status_code} body={_r_uv.text[:160]}")
     finally:
         if _oh_cfg_saved is None:
             os.environ.pop("LVI_CONFIG", None)
@@ -2442,6 +2477,16 @@ def main():
         check("oww upload: staging stays per-upload (mkstemp), never the shared name+'.uploading'",
               "mkstemp" in _src_bh3 and 'name + ".uploading"' not in _src_bh3,
               "shared staging is back" if 'name + ".uploading"' in _src_bh3 else "ok")
+
+        # The per-name swap locks go once their uploads finish: N distinct
+        # names (and the failed swap above) leave none behind.
+        async def _many_bh3():
+            for _i in range(20):
+                await _rRL.oww_upload_model(file=_Up_bh3(b"\x05" * 4096, name=f"suite_bh3lk{_i}.onnx"))
+        asyncio.run(_many_bh3())
+        _left_bh3 = [n for n in _rRL._OWW_UPLOAD_LOCKS if n.startswith("suite_bh3")]
+        check("oww upload: finished uploads leave no per-name swap lock behind",
+              not _left_bh3, f"{len(_left_bh3)} left, e.g. {_left_bh3[:3]}")
     finally:
         _rRL._oww_validate, _rRL._oww_dir = _val_bh3, _dir_bh3
         shutil.rmtree(_tmp_bh3, ignore_errors=True)
@@ -5213,6 +5258,43 @@ def main():
           _id14.get("ids_sent") and _id14.get("distinct_ids"), str(_id14))
     check("node command: an id-echoing node's retry goes out at once; the stale reply is ignored",
           _id14.get("late_ignored") and _id14.get("retry") == "answered muted=False", str(_id14))
+
+    # Settling windows of timed-out commands that are never retried (old
+    # firmware, a node that went away) are dropped once expired, the next
+    # time a request looks at the table — a live window still refuses.
+    async def _sweep_probe14():
+        _nc14._send = lambda out, payload: True
+        _past = time.monotonic() - 1.0
+        for _i in range(50):
+            _nc14._settling[(f"pc-t14gone-{_i}", "set_mute")] = _past
+        _nc14._settling[("pc-t14live", "set_mute")] = time.monotonic() + 30.0
+        out = {}
+        try:
+            _nc14.registry.sender_for_room = lambda room: (object(), "pc-t14sweep")
+            try:
+                await _nc14.request("suite-t14", "get_info", timeout=0.05)
+            except TimeoutError:
+                pass
+            out["expired_left"] = sum(1 for k in _nc14._settling if k[0].startswith("pc-t14gone-"))
+            _nc14.registry.sender_for_room = lambda room: (object(), "pc-t14live")
+            try:
+                await _nc14.request("suite-t14", "set_mute", {"mute": True}, timeout=0.05)
+                out["live"] = "sent"
+            except _InFlight14:
+                out["live"] = "refused"
+            except TimeoutError:
+                out["live"] = "timeout"
+            return out
+        finally:
+            _nc14._send = _saved_send14
+            _nc14.registry.sender_for_room = _saved_sender14
+            _nc14._settling.clear()
+
+    _sweep14 = _aio14.run(_sweep_probe14())
+    check("node command: expired settling windows of never-retried commands are dropped",
+          _sweep14.get("expired_left") == 0, str(_sweep14))
+    check("node command: a settling window still inside its time refuses the retry",
+          _sweep14.get("live") == "refused", str(_sweep14))
 
     # Wake-model select keys on name + SOURCE: with the
     # same basename in root and models/, a name-only select always
