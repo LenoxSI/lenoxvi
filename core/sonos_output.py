@@ -225,6 +225,29 @@ def _extract_clip_id(resp) -> str | None:
 
 _DUCK_CLIP_RETRY_S = 30.0  # duck-clip create retry while awake: a broken disk must not spin an encode loop
 
+# Replies in flight per player, shared by every session's output (one per node
+# session: two rooms mapped to one zone share its player). A clip load REPLACES
+# the active clip, so a duck holder must not load silence while ANY session's
+# reply owns the player: from its connect (count) until its speech ends (time).
+# Keyed by player, then by the owning output, so a barge-in drops only its own
+# window.
+_ZONE_LOADING: dict[str, dict[int, int]] = {}
+_ZONE_SOUNDING: dict[str, dict[int, float]] = {}
+
+
+def _player_key(zone) -> str:
+    return str(zone.get("player_uid") or zone.get("ip") or "")
+
+
+def _zone_reply_until(key: str, now: float) -> float | None:
+    """None when no session's reply owns the player; else when its window ends
+    (now, while one is still connecting). A holder's own reply is covered by
+    its own fields as well; checking it here too is harmless."""
+    if any(_ZONE_LOADING.get(key, {}).values()):
+        return now
+    until = max(_ZONE_SOUNDING.get(key, {}).values(), default=0.0)
+    return until if until > now else None
+
 
 class SonosOutput(LiveZoneConfig, FrameProcessor):
     _section_name = "sonos"
@@ -533,6 +556,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
 
         sw = None
         zone_name = None
+        zone_key = ""
         next_refresh = 0.0
         next_clip_try = 0.0
         was_awake = False
@@ -587,6 +611,7 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                     zone = self._zones.get(zone_name)
                     if not zone:
                         continue  # unmapped room or not a Sonos zone: nothing to duck
+                    zone_key = _player_key(zone)
                     from sonos_websocket import SonosWebsocket
 
                     try:
@@ -619,6 +644,12 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                     # stopped talking" to "still listening" (kills the
                     # ~1s full-volume blip after every reply).
                     next_refresh = min(next_refresh, self._clip_active_until)
+                    continue
+                sibling = _zone_reply_until(zone_key, time.monotonic())
+                if sibling is not None:
+                    # Another session's reply owns this player (two rooms on one
+                    # zone): same rule, its speech window, then its silence tail.
+                    next_refresh = min(next_refresh, sibling)
                     continue
                 if time.monotonic() >= next_refresh:
                     # (Re)load the silence clip. A loadAudioClip REPLACES
@@ -814,6 +845,10 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         except Exception as e:  # noqa: BLE001 — a fire-and-forget task must name what failed
             logger.error(f"sonos_output: reply not played on '{zone_name}': speaker client failed: {e}")
             return
+        # Every session's duck holder on this player sees it too (shared zones).
+        key, me = _player_key(zone), id(self)
+        loading = _ZONE_LOADING.setdefault(key, {})
+        loading[me] = loading.get(me, 0) + 1
         # From connect until the load returns this reply owns the player: the
         # duck holder skips its silence loads (one racing in replaced the
         # reply on long tool turns that started from IDLE).
@@ -872,11 +907,18 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
             # tail run out first and the music swell before the refresh.
             # +1.0 s covers the player's start lag; the tail is 8 s of silence.
             self._clip_active_until = time.monotonic() + duration + 1.0
+            windows = _ZONE_SOUNDING.setdefault(key, {})
+            for gone in [o for o, t in windows.items() if t <= time.monotonic()]:
+                del windows[gone]  # ended windows (sessions come and go)
+            windows[me] = self._clip_active_until
             self._reply_clip_id = _extract_clip_id(resp)
         except Exception as e:
             logger.warning(f"sonos_output: play failed on {zone_name}: {e} — generation-anchored fallback timers stand")
         finally:
             self._reply_loading -= 1
+            loading[me] -= 1
+            if not loading[me]:
+                del loading[me]
             try:
                 await asyncio.wait_for(sw.close(), timeout=2.0)
             except Exception:
@@ -895,6 +937,8 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
         self._barge_epoch += 1  # ...and in-flight ones drop their clip
         self._cancel_end_of_speech()
         self._clip_active_until = 0.0
+        for windows in _ZONE_SOUNDING.values():
+            windows.pop(id(self), None)  # the clip is dead: it owns no player now
         # Echo-gate rider: the clip is dead — its duration gate must
         # not eat the interrupting question. relax() never extends a
         # lapsed gate, and text containment stays armed.

@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Fixed
+- Sonos: with two rooms mapped to one zone, a room waking while the other's reply is playing no longer cuts that
+  reply off with its silence clip (the music duck); the waking room keeps the duck once the reply has played.
+  (#9)
+
 ## [0.9.0] — 2026-10-31 — Locked-down dashboard writes, a full bug sweep
 
 A minor release: every dashboard write is now checked for the token and capped in size before the bot reads it,
