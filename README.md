@@ -5,7 +5,7 @@
 
 High quality multi-zone audio for your AI agent, with mic and room routing + audio ducking. Local, cloud or hybrid. Works with Sonos + WiiM.
 
-Mics: ReSpeaker (Array, Flex) or Waveshare, including in-ceiling mics that match architectural speakers.
+Mics: ReSpeaker (Array, Flex) or Waveshare, including in-ceiling mics that match architectural speakers. Printable enclosure: [LenoxSI/lenoxvi-enclosures](https://github.com/LenoxSI/lenoxvi-enclosures).
 
     mic node → WiFi/WebRTC → wake gate → speech to text →
     intelligence (Hermes / OpenClaw / Nanobot) → text to speech →
