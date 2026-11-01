@@ -586,5 +586,93 @@ check("speaker: Sonos switched off mid-session -> the duck holder releases the d
 check("speaker: Sonos switched back on mid-session -> the same duck holder ducks again",
       r.on_ducked, f"on_ducked={r.on_ducked}")
 
+# Duck holder on a zone shared by two sessions (one output per node session):
+# a sibling's reply owns the player while it connects and while it sounds.
+class SharedZoneSw(FakeSw):
+    """Every load stamped (t, ip, clip). The next connection made waits `slow_next` s."""
+    loads: ClassVar[list] = []
+    slow_next = 0.0
+    t0 = 0.0
+
+    def __init__(self, ip, player_id=None):
+        super().__init__(ip, player_id)
+        self.ip = ip
+        self.delay, SharedZoneSw.slow_next = SharedZoneSw.slow_next, 0.0
+
+    async def connect(self):
+        await asyncio.sleep(self.delay or 0.01)
+
+    async def play_clip(self, url, volume=None):
+        clip = url.rsplit("/", 1)[-1]
+        SharedZoneSw.loads.append((time.monotonic() - SharedZoneSw.t0, self.ip, clip))
+        return {"clipId": f"{clip}-{self.n}"}
+
+
+async def _srv_duck():
+    return SRV.url_for("duck-silence.mp3")
+
+
+async def shared_zone(sibling_zone="Kitchen", reply_connect=0.0, duration=2.0, barge_at=None, run_s=4.5):
+    """Session A starts a reply on Kitchen at t=0; session B wakes right after it on
+    `sibling_zone` (its holder's first load is due at once) and stays awake."""
+    real_mod = sys.modules["sonos_websocket"]
+    sys.modules["sonos_websocket"] = SimpleNamespace(SonosWebsocket=SharedZoneSw)
+    SharedZoneSw.loads = []
+    a, b = kitchen(None), kitchen(None)
+    b._reply_zone_name = lambda: sibling_zone
+    b._duck_while_awake = True
+    b._wake_gate = SimpleNamespace(state="awake")
+    b._ensure_duck_clip = _srv_duck
+    SharedZoneSw.t0 = time.monotonic()
+    SharedZoneSw.slow_next = reply_connect
+    reply = asyncio.create_task(a._load_clip(ZONES["Kitchen"], "Kitchen", SRV.url_for("reply-a.mp3"), 30,
+                                             duration, a._speech_epoch, a._barge_epoch))
+    await asyncio.sleep(0)  # the reply has made its connection
+    holder = asyncio.create_task(b._duck_holder_loop())
+    try:
+        if barge_at is not None:
+            await asyncio.sleep(barge_at)
+            await a.stop_current_clip()
+        await asyncio.sleep(run_s - (barge_at or 0))
+        await reply
+    finally:
+        holder.cancel()
+        try:
+            await asyncio.wait_for(holder, 3.0)
+        except asyncio.CancelledError:
+            pass
+        sys.modules["sonos_websocket"] = real_mod
+    loads = list(SharedZoneSw.loads)
+    reply_t = next((t for t, _ip, c in loads if c == "reply-a.mp3"), None)
+    return SimpleNamespace(loads=loads, reply_t=reply_t)
+
+
+def _ducks(r, ip, start, end):
+    return [round(t, 2) for t, i, c in r.loads if c == "duck-silence.mp3" and i == ip and start <= t < end]
+
+
+def _seen(r):
+    return f"reply_t={r.reply_t and round(r.reply_t, 2)} loads={[(round(t, 2), i[-2:], c) for t, i, c in r.loads]}"
+
+
+_K, _H = ZONES["Kitchen"]["ip"], ZONES["Hall"]["ip"]
+r = asyncio.run(shared_zone(duration=2.0))
+check("speaker: shared zone: a session waking during a sibling's reply never replaces it with its silence",
+      r.reply_t is not None and _ducks(r, _K, 0.0, r.reply_t + 2.0 + 1.0 - 0.05) == [], _seen(r))
+check("speaker: shared zone: once the sibling's reply has had its window the holder ducks (in its silence tail)",
+      r.reply_t is not None and _ducks(r, _K, r.reply_t + 2.0 + 1.0 - 0.05, 99) != [], _seen(r))
+
+r = asyncio.run(shared_zone(reply_connect=1.6, duration=0.5, run_s=4.0))
+check("speaker: shared zone: a sibling's reply still connecting already owns the player",
+      r.reply_t is not None and r.reply_t >= 1.5 and _ducks(r, _K, 0.0, r.reply_t) == [], _seen(r))
+
+r = asyncio.run(shared_zone(duration=6.0, barge_at=1.0, run_s=3.0))
+check("speaker: shared zone: a barge-in on the sibling's reply frees the other holder at once",
+      r.reply_t is not None and _ducks(r, _K, 1.0, 2.2) != [], _seen(r))
+
+r = asyncio.run(shared_zone(sibling_zone="Hall", duration=2.0, run_s=2.0))
+check("speaker: shared zone: a reply on another zone doesn't hold back this zone's duck",
+      r.reply_t is not None and _ducks(r, _H, 0.0, r.reply_t + 2.0) != [], _seen(r))
+
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)
