@@ -19,6 +19,9 @@ from typing import Optional
 from loguru import logger
 from openai.types.audio import Transcription
 
+from pipecat.frames.frames import TranscriptionFrame
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_service import STTService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 import stt_catalog
@@ -267,6 +270,24 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             except Exception as e:  # never block teardown on an unused client
                 logger.debug(f"local-whisper: unused OpenAI client close: {e!r}")
             self._client = None
+
+    async def push_frame(self, frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push every transcript finalized, as pipecat 1.13 did.
+
+        Since pipecat 1.15 (pipecat-ai/pipecat#6446) SegmentedSTTService leaves
+        a stretch's transcript unfinalized when the user spoke again before it
+        was transcribed — a signal for pipecat's turn strategies, which this
+        pipeline doesn't run. The intelligence agent reads a finalized
+        transcript with no interims as a segmented final and waits for the
+        next stretch's words; unfinalized, the turn closed one lull after the
+        next stretch stopped, and a transcript slower than that was dropped.
+        """
+        if isinstance(frame, TranscriptionFrame):
+            frame.finalized = True
+            # Past SegmentedSTTService.push_frame, which would restamp it.
+            await STTService.push_frame(self, frame, direction)
+            return
+        await super().push_frame(frame, direction)
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe raw WAV audio bytes with faster-whisper.

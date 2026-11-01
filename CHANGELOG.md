@@ -8,7 +8,15 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Changed
+- pipecat 1.15.0 (was 1.13.0). Picks up upstream fixes for segmented speech-to-text (pipecat-ai/pipecat#6446,
+  pipecat-ai/pipecat#6452), a refused Deepgram Flux voice retrying forever (pipecat-ai/pipecat#6248), a
+  volume-tracker error that stopped voice detection for the rest of a session (pipecat-ai/pipecat#6425) and
+  stalled websocket sends (pipecat-ai/pipecat#6251). (#44)
+
 ### Fixed
+- Embedded and LocalAI speech-to-text: on pipecat 1.15, a question asked with a pause in the middle still waits
+  for the words after the pause; the first half is no longer sent alone when the rest is slow to transcribe. (#44)
 - Sonos: with two rooms mapped to one zone, a room waking while the other's reply is playing no longer cuts that
   reply off with its silence clip (the music duck); the waking room keeps the duck once the reply has played.
   (#9)
