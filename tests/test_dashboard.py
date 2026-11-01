@@ -5459,6 +5459,39 @@ def main():
     finally:
         _BWS.cleanup = _saved_cleanup
 
+    # ── stt finalized: every Whisper transcript leaves the STT finalized ──
+    # pipecat 1.15's SegmentedSTTService unfinalizes a stretch's transcript once
+    # the user has spoken again (its segment numbers below say so); the agent's
+    # turn gate needs it finalized to wait for the next stretch's words.
+    # Captured where it leaves for the rest of the pipeline: STTService.push_frame,
+    # past SegmentedSTTService's stamp.
+    from pipecat.frames.frames import InterimTranscriptionFrame as _ITFfin
+    from pipecat.frames.frames import TranscriptionFrame as _TFfin
+    from pipecat.services.stt_service import STTService as _STTfin
+    _fin_seen = []
+
+    async def _fin_capture(self, frame, direction=None):
+        _fin_seen.append((type(frame).__name__, getattr(frame, "finalized", None)))
+
+    _saved_stt_push = _STTfin.push_frame
+    _STTfin.push_frame = _fin_capture
+    try:
+        _svcf = _LWS.__new__(_LWS)
+        _svcf._segment_count = 2          # the user spoke again ...
+        _svcf._transcribing_segment = 1   # ... before stretch 1 was transcribed
+        _aiolk.run(_svcf.push_frame(_TFfin("turn on the", "", 0)))
+        _svcf._transcribing_segment = 2   # the latest stretch
+        _aiolk.run(_svcf.push_frame(_TFfin("kitchen lights", "", 0)))
+        _aiolk.run(_svcf.push_frame(_ITFfin("kitchen", "", 0)))
+    finally:
+        _STTfin.push_frame = _saved_stt_push
+    check("stt finalized: a stretch transcribed after the user spoke again still goes out finalized",
+          _fin_seen[:1] == [("TranscriptionFrame", True)], str(_fin_seen))
+    check("stt finalized: the latest stretch's transcript goes out finalized",
+          _fin_seen[1:2] == [("TranscriptionFrame", True)], str(_fin_seen))
+    check("stt finalized: other frames pass untouched",
+          _fin_seen[2:] == [("InterimTranscriptionFrame", None)], str(_fin_seen))
+
     # RSS-step fix: Whisper loads at bot STARTUP (fresh heap +
     # warm-up + malloc_trim), not inside the first voice turn of an aged,
     # fragmented process (768 MB -> 2.8 GB). The preload must use exactly the
