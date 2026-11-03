@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-02 — pipecat 1.15
+
+A patch release: pipecat moves from 1.13 to 1.15 for its speech-to-text, voice and voice-detection fixes,
+with our segmented speech-to-text kept on its old behaviour, plus a Sonos fix for rooms that share a zone.
+
 ### Changed
 - pipecat 1.15.0 (was 1.13.0). Picks up upstream fixes for segmented speech-to-text (pipecat-ai/pipecat#6446,
   pipecat-ai/pipecat#6452), a refused Deepgram Flux voice retrying forever (pipecat-ai/pipecat#6248), a
