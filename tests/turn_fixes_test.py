@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -244,6 +245,82 @@ for case, want_closed, want_turns in (
     else:
         check("agent: a streaming STT's late tail is never joined (only segmented STT)",
               "for tomorrow in Boston" not in " ".join(turns_j), str(turns_j))
+
+# ── segmented STT: a new stretch soon after the close continues the turn ─
+import intelligence.agent as _ia_cont
+
+_ia_cont.CONTINUATION_WINDOW = 0.6
+async def cont_probe(case):
+    ag = IntelligenceAgent(echo_gate=EchoGate(), room=f"suite-cont-{case}", session_mode="fresh")
+    ag._lull_secs = 0.2
+    turns, spoken, sup = [], [], []
+    hold = asyncio.Event()
+
+    async def rec(text, epoch):
+        turns.append(text)
+        if case == "replied" and len(turns) == 1:
+            ag._answered_epoch = epoch  # its reply is out: nothing left to join
+        try:
+            await hold.wait()
+        except asyncio.CancelledError:
+            sup.append(ag._superseded)
+            raise
+    ag._run_turn = rec
+
+    async def push(frame, direction=None):
+        if getattr(frame, "text", None) and type(frame).__name__ == "TTSSpeakFrame":
+            spoken.append(frame.text)
+    ag.push_frame = push
+
+    def final(text):
+        return TranscriptionFrame(text, "", 0, 0, 0, finalized=True)
+
+    async def tick(secs):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            await ag.process_frame(TranscriptionFrame("", "", 0), D)
+            await asyncio.sleep(0.02)
+
+    async def stretch(text):
+        await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+        if case == "streaming":
+            await ag.process_frame(InterimTranscriptionFrame(text, "", 0), D)
+        await tick(0.05)
+        await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+        await tick(0.05)
+        await ag.process_frame(final(text), D)
+
+    await stretch("What's the weather?")
+    await tick(0.4)                      # lull passes: the turn closes on part one
+    closed_on = list(turns)
+    if case == "late":
+        await tick(0.8)                  # past the continuation window
+    await stretch("yesterday")
+    await tick(0.4)
+    hold.set()
+    await asyncio.sleep(0.05)
+    return closed_on, turns, spoken, sup
+
+
+for case in ("continue", "late", "replied", "streaming"):
+    closed_on, turns_c, spoken_c, sup_c = asyncio.run(cont_probe(case))
+    if case == "continue":
+        check("agent: a new stretch soon after the close continues the thinking turn (one joined question)",
+              closed_on == ["What's the weather?"]
+              and turns_c == ["What's the weather?", "What's the weather? yesterday"], str(turns_c))
+        check("agent: a continuation drops the first call's late answer and says no 'switching'",
+              len(sup_c) == 1 and sup_c[0][1] is False and spoken_c == [], f"sup={sup_c} spoken={spoken_c}")
+    elif case == "late":
+        check("agent: a stretch after the continuation window is a new question (late answer kept)",
+              turns_c == ["What's the weather?", "yesterday"] and len(sup_c) == 1 and sup_c[0][1] is True,
+              f"{turns_c} sup={sup_c}")
+    elif case == "replied":
+        check("agent: once the turn has replied, a quick next stretch is its own question",
+              turns_c == ["What's the weather?", "yesterday"], str(turns_c))
+    else:
+        check("agent: a streaming STT's next utterance is never joined (only segmented STT)",
+              "What's the weather? yesterday" not in turns_c, str(turns_c))
+_ia_cont.CONTINUATION_WINDOW = 2.5
 
 # ── A #4: the room-agent lookup follows a rename ───────────────────
 LIVE.clear()
