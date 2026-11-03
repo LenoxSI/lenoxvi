@@ -106,6 +106,11 @@ SEGMENT_TRANSCRIPT_GRACE = 1.5
 # joined text, silently. Later than this, or once she has replied, it's
 # dropped as before.
 LATE_JOIN_WINDOW = 20.0
+# A new VAD stretch that starts this soon after a segmented close, while that
+# turn is still thinking, is the rest of the same question (a pause longer
+# than the lull): the turn restarts on the joined text, silently, and the
+# first call's answer is dropped instead of spoken late.
+CONTINUATION_WINDOW = 2.5
 
 
 def _filler_tiers() -> list[tuple[float, list[str]]]:
@@ -391,6 +396,7 @@ class IntelligenceAgent(FrameProcessor):
         self._last_flushed_text = ""  # what the last closed turn asked (late-tail join)
         self._last_flush_at = 0.0
         self._joining = False
+        self._continues = ""  # the open turn's text when a new stretch continues it
         self._last_flush_wake_only = False  # the last close was a bare "Hey <name>"
         self._last_close_segmented = False  # closed by the segmented-STT grace (Whisper/LocalAI)
         # Dedup: same utterance re-heard inside this window is treated as an
@@ -654,6 +660,15 @@ class IntelligenceAgent(FrameProcessor):
 
         final_now = False
         if isinstance(frame, VADUserStartedSpeakingFrame):
+            if self._flushed and not self._speaking:
+                # The first stretch after a close: the user resuming
+                # mid-question, or a new question.
+                self._continues = (
+                    self._last_flushed_text
+                    if (self._last_close_segmented and self._last_flushed_text
+                        and not self._last_flush_wake_only and self._reply_due()
+                        and time.monotonic() - self._last_flush_at < CONTINUATION_WINDOW)
+                    else "")
             self._speaking = True
             self._flushed = False
             self._vad_active = True
@@ -726,6 +741,13 @@ class IntelligenceAgent(FrameProcessor):
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             joining, self._joining = self._joining, False
+            continues, self._continues = self._continues, ""
+            if (continues and text and not joining and self._reply_due()
+                    and time.monotonic() - self._last_flush_at < LATE_JOIN_WINDOW):
+                logger.info(f"intelligence_agent: continuation joins the open turn [{text[:60]}]")
+                text = f"{continues} {text}"
+                joining = True
+                self._last_user_text = ""  # the joined text is new, never a dedup repeat
             self._last_flushed_text, self._last_flush_at = text, time.monotonic()
             self._last_flush_wake_only = bool(text) and _is_wake_phrase_only(text)
             if text:

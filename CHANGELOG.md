@@ -8,6 +8,11 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Fixed
+- Embedded and LocalAI speech-to-text: a question with a pause in the middle longer than the lull ("What's the
+  weather? … yesterday") is asked once, as one question. Before, the words after the pause were asked as a new
+  question and both answers were spoken. (#45)
+
 ## [0.9.1] — 2026-11-02 — pipecat 1.15
 
 A patch release: pipecat moves from 1.13 to 1.15 for its speech-to-text, voice and voice-detection fixes,
