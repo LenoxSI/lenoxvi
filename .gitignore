@@ -15,7 +15,6 @@ node_modules/
 *.onnx
 
 # agent-facing rule files — kept privately, never GitHub
-AGENTS.md
 CLAUDE.md
 # brand design kit — PRIVATE (the master copy is kept outside the repo).
 # Never GitHub, never in history. The React build bakes what
