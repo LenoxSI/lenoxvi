@@ -231,9 +231,6 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         # A stand-in with faster-whisper's transcribe() shape (LocalAI): used
         # instead of the shared model, which is then never loaded here.
         self._model_override = model_override
-        # Stretch audio kept for a later joint re-transcription, under each
-        # stretch's transcript; transcribe_joined reads it.
-        self._stretch_store = stt_joined.StretchStore()
 
     async def ensure_model(self):
         """Load the model once per process, shared across pipelines."""
@@ -336,7 +333,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         if not joint and text:
             # the stretch's audio, kept under its transcript for a later
             # joint re-transcription of the turn
-            self._stretch_store.keep(text, audio)
+            self._joint_store().keep(text, audio)
         if language:
             lang = language
         if engine:
@@ -344,6 +341,14 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         else:
             logger.debug(f"local-whisper heard: [{text}] ({lang})")
         return Transcription(text=text)
+
+    def _joint_store(self) -> stt_joined.StretchStore:
+        """The stretch store, created on first use so a service built
+        without __init__ still transcribes and joins."""
+        store = getattr(self, "_stretch_store", None)
+        if store is None:
+            store = self._stretch_store = stt_joined.StretchStore()
+        return store
 
     async def transcribe_joined(self, texts: list[str], timeout: float) -> str | None:
         """The stretches behind `texts` transcribed together, as ONE request.
@@ -356,7 +361,7 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         request fails or outruns `timeout`; the turn then asks with the
         joined per-stretch texts.
         """
-        audio = self._stretch_store.join(texts)
+        audio = self._joint_store().join(texts)
         if audio is None:
             return None
         try:
