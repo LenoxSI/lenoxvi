@@ -687,6 +687,177 @@ check("agent: a superseded call still queued is never sent; only the running one
       asked == [OLD, NEW] and spoken == [ACK, NEW_REPLY, f"{LATE} {OLD_REPLY}"],
       f"asked={asked} spoken={spoken}")
 
+# ── multi-stretch turns: the joint re-transcription before the ask ──
+JA, JB, JC = "What about", "Yeah.", "Tomorrow"
+JOINED_TXT = f"{JA} {JB}"
+CONT_TXT = f"{JOINED_TXT} {JC}"
+
+
+class _RT:
+    """The retranscribe hook: records (texts, timeout) per call. The first
+    call can hold on a gate to stretch the await open — a supersede's
+    cancel then kills it, or it swallows the cancel and answers anyway."""
+
+    def __init__(self, joint=None, hold=None, swallow=False, raises=False):
+        self.joint, self.hold, self.swallow, self.raises = joint, hold, swallow, raises
+        self.calls = []
+        self.order = []
+
+    async def __call__(self, texts, timeout):
+        self.calls.append((list(texts), timeout))
+        self.order.append("rt")
+        if self.raises:
+            raise RuntimeError("joint backend gone")
+        if self.hold is not None and len(self.calls) == 1:
+            try:
+                await self.hold.wait()
+            except asyncio.CancelledError:
+                if not self.swallow:
+                    raise
+        return self.joint if len(self.calls) == 1 else None
+
+
+def joint_agent(rt):
+    """One agent on the hermes lane; rt=None leaves the kwarg out entirely."""
+    LIVE.clear()
+    LIVE.update({"intelligence": {"kind": "hermes", "url": "http://hm.test:8642/v1",
+                                  "fillers": [{"after": 30, "lines": ["One moment."]}]}})
+    config._BOOT = LIVE
+    if rt is None:
+        return IntelligenceAgent(echo_gate=EchoGate(), room="suite-joint", session_mode="fresh")
+    return IntelligenceAgent(echo_gate=EchoGate(), room="suite-joint", session_mode="fresh",
+                            retranscribe=rt)
+
+
+async def joint_say(ag, texts):
+    """The stretches of one question, back to back, then the lull."""
+    for text in texts:
+        await ag.process_frame(VADUserStartedSpeakingFrame(), D)
+        await ag.process_frame(VADUserStoppedSpeakingFrame(), D)
+        await ag.process_frame(TranscriptionFrame(text, "", 0, 0, 0, finalized=True), D)
+        await asyncio.sleep(0.05)
+    end = time.monotonic() + 0.6
+    while time.monotonic() < end:
+        await ag.process_frame(TranscriptionFrame("", "", 0), D)
+        await asyncio.sleep(0.02)
+
+
+def joint_ears(ag, order=None):
+    """Record every ask in order, with a canned reply."""
+    asks = []
+
+    def ask(text):
+        asks.append(text)
+        if order is not None:
+            order.append("ask")
+        return "It is Wednesday."
+
+    ag._ask_intelligence = ask
+    return asks
+
+
+async def joint_probe():
+    rt = _RT("What about Wednesday?")
+    ag = joint_agent(rt)
+    ag._lull_secs = 0.2
+    asks = joint_ears(ag, rt.order)
+    await joint_say(ag, [JA, JB])
+    await until(lambda: asks and ag._turn_task.done())
+    return rt, ag, asks
+
+
+rt, ag, asks = asyncio.run(joint_probe())
+check("agent: a multi-stretch close hands the hook the stretch texts, in order, under the joint budget",
+      rt.calls == [([JA, JB], ia.RETRANSCRIBE_TIMEOUT)], str(rt.calls))
+check("agent: the joint re-transcription is awaited before the intelligence is asked",
+      rt.order == ["rt", "ask"], str(rt.order))
+check("agent: the joint text becomes the turn's question (ask and history)",
+      asks == ["What about Wednesday?"]
+      and ag._history[-2:] == [{"role": "user", "content": "What about Wednesday?"},
+                               {"role": "assistant", "content": "It is Wednesday."}],
+      f"asks={asks} hist={ag._history[-2:]}")
+
+
+async def fallback_probe(rt):
+    ag = joint_agent(rt)
+    ag._lull_secs = 0.2
+    asks = joint_ears(ag)
+    await joint_say(ag, [JA, JB])
+    await until(lambda: asks and ag._turn_task.done())
+    return asks
+
+
+asks = asyncio.run(fallback_probe(_RT(None)))
+check("agent: no joint transcription -> the turn asks the joined stretch texts",
+      asks == [JOINED_TXT], str(asks))
+asks = asyncio.run(fallback_probe(_RT(None, raises=True)))
+check("agent: a joint transcription that raises -> the joined stretch texts, the turn still answers",
+      asks == [JOINED_TXT], str(asks))
+
+
+async def supersede_probe(swallow):
+    hold = asyncio.Event()
+    rt = _RT(joint="STALE JOINT" if swallow else None, hold=hold, swallow=swallow)
+    ag = joint_agent(rt)
+    ag._lull_secs = 0.2
+    asks = joint_ears(ag)
+    spoken = []
+
+    async def push(frame, direction=None):
+        if type(frame).__name__ == "TTSSpeakFrame":
+            spoken.append(frame.text)
+    ag.push_frame = push
+    await joint_say(ag, [JA, JB])            # the turn closes, awaits the hook
+    await until(lambda: rt.calls)
+    await joint_say(ag, [JC])                # a new stretch continues the open turn
+    hold.set()
+    await until(lambda: asks and ag._turn_task.done())
+    return rt, asks, spoken
+
+
+rt, asks, spoken = asyncio.run(supersede_probe(swallow=False))
+check("agent: superseded while awaiting the hook -> the turn never asks; the continuation owns it",
+      asks == [CONT_TXT] and rt.calls[0][0] == [JA, JB]
+      and rt.calls[1][0] == [JOINED_TXT, JC] and spoken == ["It is Wednesday."],
+      f"asks={asks} calls={rt.calls} spoken={spoken}")
+rt, asks, spoken = asyncio.run(supersede_probe(swallow=True))
+check("agent: a hook that swallows the supersede's cancel still cannot ask the stale joint text",
+      asks == [CONT_TXT] and "STALE JOINT" not in asks and spoken == ["It is Wednesday."],
+      f"asks={asks} spoken={spoken}")
+
+
+async def single_probe():
+    rt = _RT("STALE")
+    ag = joint_agent(rt)
+    ag._lull_secs = 0.2
+    asks = joint_ears(ag)
+    await joint_say(ag, ["What's the weather?"])
+    await until(lambda: asks and ag._turn_task.done())
+    return rt, asks
+
+
+rt, asks = asyncio.run(single_probe())
+check("agent: a single-stretch turn never calls the hook and asks as today",
+      rt.calls == [] and asks == ["What's the weather?"], f"calls={rt.calls} asks={asks}")
+
+
+async def absent_probe():
+    ag = joint_agent(None)                  # constructed without the kwarg at all
+    ag._lull_secs = 0.2
+    seen = []
+
+    async def rec(text, epoch):             # today's two-argument turn shape
+        seen.append((text, epoch))
+    ag._run_turn = rec
+    await joint_say(ag, [JA, JB])
+    await until(lambda: seen)
+    return seen
+
+
+seen = asyncio.run(absent_probe())
+check("agent: with no retranscribe wired, a multi-stretch turn keeps today's two-argument turn call",
+      len(seen) == 1 and seen[0][0] == JOINED_TXT, str(seen))
+
 # ── pins ──────────────────────────────────────────────────────────
 src = Path(CORE, "sonos_output.py").read_text()
 check("sonos pin: the duck holder skips loads while a reply clip is loading (counter held over connect+load)",
