@@ -111,6 +111,11 @@ LATE_JOIN_WINDOW = 20.0
 # than the lull): the turn restarts on the joined text, silently, and the
 # first call's answer is dropped instead of spoken late.
 CONTINUATION_WINDOW = 2.5
+# A turn that closed over more than one stretch re-transcribes the
+# stretches' audio together (one STT request over the concatenation), so a
+# short tail stretch is not misheard for lack of context. Past this bound
+# the turn asks with the joined per-stretch text instead.
+RETRANSCRIBE_TIMEOUT = 2.0
 
 
 def _filler_tiers() -> list[tuple[float, list[str]]]:
@@ -294,7 +299,7 @@ class IntelligenceAgent(FrameProcessor):
 
     def __init__(self, lull_secs: float = 0.6, max_history: int = 10, echo_gate=None,
                  room: str = None, session_mode: str = "fresh",
-                 tts_is_usable=None, room_resolver=None, **kwargs):
+                 tts_is_usable=None, room_resolver=None, retranscribe=None, **kwargs):
         super().__init__(**kwargs)
         from config import boot_config, cfg, cfg_env
 
@@ -449,6 +454,11 @@ class IntelligenceAgent(FrameProcessor):
         # suite default); a service that dies mid-clip after speaking
         # partially still arms — defense-in-depth.
         self._tts_is_usable = tts_is_usable
+        # Joint re-transcription: the STT service's transcribe_joined
+        # (bot.py wires the LOCAL service). A multi-stretch turn awaits it
+        # before asking; None, a raise or a slow call falls back to the
+        # joined per-stretch text.
+        self._retranscribe = retranscribe
         # Session modes (fresh | sticky, per node — dashboard checkbox):
         # sticky rooms keep conversation memory across node
         # reconnects AND bot restarts via a disk stash; fresh rooms start
@@ -732,6 +742,9 @@ class IntelligenceAgent(FrameProcessor):
             self._flushed = True
             self._saw_interim = False
             self._segmented_final = False
+            # The open turn's per-stretch texts: a close over more than one
+            # stretch re-transcribes their audio together before asking.
+            parts = list(self._buffer)
             text = " ".join(self._buffer).strip()
             self._buffer.clear()
             joining, self._joining = self._joining, False
@@ -740,8 +753,13 @@ class IntelligenceAgent(FrameProcessor):
                     and time.monotonic() - self._last_flush_at < LATE_JOIN_WINDOW):
                 logger.info(f"intelligence_agent: continuation joins the open turn [{text[:60]}]")
                 text = f"{continues} {text}"
+                parts = [continues, *parts]
                 joining = True
                 self._last_user_text = ""  # the joined text is new, never a dedup repeat
+            # Multi-stretch close: hand the turn its stretch texts for the
+            # joint re-transcription. A single stretch, or no retranscribe
+            # wired, keeps today's two-argument turn call.
+            joint_parts = parts if (len(parts) > 1 and self._retranscribe) else None
             self._last_flushed_text, self._last_flush_at = text, time.monotonic()
             self._last_flush_wake_only = bool(text) and _is_wake_phrase_only(text)
             if text:
@@ -787,7 +805,8 @@ class IntelligenceAgent(FrameProcessor):
                         epoch = self._turn_epoch
                         self._turn_started = time.monotonic()
                         self._turn_task = asyncio.create_task(
-                            self._run_turn(text, epoch))
+                            self._run_turn(text, epoch, joint_parts)
+                            if joint_parts else self._run_turn(text, epoch))
                         if superseded and joining:
                             pass  # same question, more words: no "switching" ack
                         elif superseded:
@@ -851,14 +870,20 @@ class IntelligenceAgent(FrameProcessor):
         """Bind this pipeline's LED sender (bot.py, once per session)."""
         self._led = led
 
-    async def _run_turn(self, text: str, epoch: int) -> None:
+    async def _run_turn(self, text: str, epoch: int, joint_parts: list[str] | None = None) -> None:
         """One turn as a background task. Every await
         checks the epoch — a superseded turn speaks nothing in its place,
         skips the history write, and dies quietly; a call it already had
         running may still report late (_watch_late). CancelledError
         propagates (task.cancel from the supersede path); everything else
         is the broad-catch: the user never gets dead silence on an
-        intelligence failure."""
+        intelligence failure.
+
+        joint_parts: the turn's stretch texts when it closed over more
+        than one stretch — the turn first re-transcribes their audio
+        together and asks with that text when it lands in time. None, a
+        raise, or a supersede while awaiting keeps the joined per-stretch
+        text."""
         filler_spoken = False
         ask = call = None
         settled = False  # the call answered or failed while the turn still waited on it
@@ -868,6 +893,28 @@ class IntelligenceAgent(FrameProcessor):
         if self._led is not None and epoch == self._turn_epoch:
             self._led.send("bot-thinking")
         try:
+            if joint_parts and self._retranscribe is not None:
+                t0 = time.monotonic()
+                try:
+                    joint = await self._retranscribe(joint_parts, RETRANSCRIBE_TIMEOUT)
+                except Exception as e:  # noqa: BLE001 — a failed joint transcription falls back
+                    logger.info(f"intelligence_agent: joint re-transcription failed "
+                                f"({type(e).__name__}) — asking the joined stretch texts")
+                    joint = None
+                # The supersede path bumps the epoch only after this task
+                # ends, so mid-supersede the mark on _superseded is what
+                # says the turn moved on: do not ask, the continuation
+                # owns the turn.
+                sup = self._superseded
+                if epoch != self._turn_epoch or (sup is not None and sup[0] == epoch):
+                    return
+                if joint:
+                    logger.info(f"intelligence_agent: joint re-transcription "
+                                f"{time.monotonic() - t0:.1f}s -> [{joint[:60]}]")
+                    text = joint
+                else:
+                    logger.info("intelligence_agent: no joint transcription — "
+                                "asking the joined stretch texts")
             # The pool's own future too: the finally tells a call still
             # queued (cancel succeeds) from one already running.
             call = _INTEL_POOL.submit(self._ask_intelligence, text)
