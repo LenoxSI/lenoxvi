@@ -25,6 +25,7 @@ from pipecat.services.stt_service import STTService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 import stt_catalog
+import stt_joined
 
 
 class _NoHFTokenNag(logging.Filter):
@@ -230,6 +231,9 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         # A stand-in with faster-whisper's transcribe() shape (LocalAI): used
         # instead of the shared model, which is then never loaded here.
         self._model_override = model_override
+        # Stretch audio kept for a later joint re-transcription, under each
+        # stretch's transcript; transcribe_joined reads it.
+        self._stretch_store = stt_joined.StretchStore()
 
     async def ensure_model(self):
         """Load the model once per process, shared across pipelines."""
@@ -289,11 +293,13 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             return
         await super().push_frame(frame, direction)
 
-    async def _transcribe(self, audio: bytes) -> Transcription:
+    async def _transcribe(self, audio: bytes, *, joint: bool = False) -> Transcription:
         """Transcribe raw WAV audio bytes with faster-whisper.
 
         The base class hands us WAV bytes; we run the (blocking) transcribe
-        call in a thread so the event loop stays live.
+        call in a thread so the event loop stays live. joint marks the one
+        request behind transcribe_joined: that clip is not kept for later
+        joins and its time stays out of the per-command latency stat.
         """
         await self.ensure_model()
         loop = asyncio.get_running_loop()
@@ -322,11 +328,15 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
                 else:
                     logger.info(f"local-whisper dropped phantom [{text}]")
                 text = ""
-            if _LAT_MODE["mode"] == "compute":
+            if _LAT_MODE["mode"] == "compute" and not joint:
                 _LAT_MS.append((time.monotonic() - t0) * 1000)
             return text, info.language, engine
 
         text, lang, engine = await loop.run_in_executor(None, _run)
+        if not joint and text:
+            # the stretch's audio, kept under its transcript for a later
+            # joint re-transcription of the turn
+            self._stretch_store.keep(text, audio)
         if language:
             lang = language
         if engine:
@@ -334,3 +344,23 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
         else:
             logger.debug(f"local-whisper heard: [{text}] ({lang})")
         return Transcription(text=text)
+
+    async def transcribe_joined(self, texts: list[str], timeout: float) -> str | None:
+        """The stretches behind `texts` transcribed together, as ONE request.
+
+        The agent's re-transcription of a multi-stretch turn: the stretch
+        audio kept under each text is joined into one clip (stt_joined) and
+        transcribed once, so a short tail stretch carries the whole question
+        as its context instead of none. None — never a raise — when a text
+        was never kept, the join passes the retention bounds, or the one
+        request fails or outruns `timeout`; the turn then asks with the
+        joined per-stretch texts.
+        """
+        audio = self._stretch_store.join(texts)
+        if audio is None:
+            return None
+        try:
+            out = await asyncio.wait_for(self._transcribe(audio, joint=True), timeout=timeout)
+        except Exception:  # noqa: BLE001 — the turn falls back to the per-stretch text
+            return None
+        return (out.text or "").strip() or None
