@@ -43,8 +43,8 @@ for raw, want in [("on", "on"), ("off", "off"), ('"on"', "on"), ("auto", "auto")
         check(f"tts_text: config.yaml `{raw}` -> {want!r} through cfg()", got == want, f"got {got!r}")
 os.environ.pop("LVI_CONFIG", None)
 
-# Native normalization only: no home-made speller rides alongside it (the two
-# collided - ElevenLabs' normalizer garbled our spelled-out times).
+# Native normalization only: no home-made speller rides alongside it —
+# ElevenLabs' normalizer garbles spelled-out times.
 check("tts_text: no custom clock-time speller remains",
       not any(hasattr(tts_text, n) for n in ("ClockTimeFilter", "clock_filters", "spell_clock_times")))
 

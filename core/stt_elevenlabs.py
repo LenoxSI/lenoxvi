@@ -34,7 +34,7 @@ from pipecat.services.elevenlabs.stt import (
 )
 from websockets.protocol import State
 
-# Shorter than Scribe's own quiet-socket hang-up (~15 s, seen live), so we
+# Shorter than Scribe's own quiet-socket hang-up (~15 s), so we
 # usually close first; a longer gap only costs one reconnect (~175 ms, held
 # audio). Audio flows the whole time a room is awake, so this counts from
 # the room going quiet (or the bot's reply muting the mic).

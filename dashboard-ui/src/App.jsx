@@ -201,7 +201,7 @@ const sec = s => {
 
 // last_seen / last_wake times arrive as epoch SECONDS (registry
 // time.time()) — never ms, never ISO. Never treat a missing value as
-// epoch zero (the "20,713d ago" bug: = new Date(seconds-as-ms) → 1970).
+// epoch zero (= new Date(seconds-as-ms) → 1970).
 const fmtAgo = t => {
   if (!t) return '—'
   const ms = t > 1e12 ? t : t * 1000  // accept seconds or ms safely
@@ -3384,8 +3384,7 @@ export default function App() {
         if (!e.network) setMsg('status unavailable: ' + e.message, 'err', 'Status')
       }),
       // A failed /mapping rides on the mapping state (the last good data
-      // stays) so the Rooms and Zones tables can show it; it used to be
-      // swallowed and the empty list read "No mic nodes yet". The next good
+      // stays) so the Rooms and Zones tables can show it. The next good
       // load replaces it. Network errors (bot restarting) stay quiet, as for
       // /status.
       api('/api/dashboard/mapping').then(setMapping).catch(e => {

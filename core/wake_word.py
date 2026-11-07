@@ -145,11 +145,10 @@ class WakeWordFilter(FrameProcessor):
 
     async def setup(self, setup):
         await super().setup(setup)
-        # ONE Model PER PIPELINE. The old class-shared
-        # model mixed two sessions' audio in the same rolling buffers
-        # from different threads (false/missed wakes — even single-node,
-        # the ~22s zombie window ran two pipelines through one model),
-        # and every new pipeline reset() the others' buffers. What stays
+        # ONE Model PER PIPELINE. A class-shared
+        # model mixes two sessions' audio in the same rolling buffers
+        # from different threads (false/missed wakes), and every new
+        # pipeline reset() the others' buffers. What stays
         # shared: nothing stateful — just the resolved model path, and
         # this lock, which serializes concurrent Model() constructions
         # (two torch/onnx inits racing during session replacement is the
@@ -282,9 +281,8 @@ class WakeWordFilter(FrameProcessor):
                                 pass
                         if self._on_interrupt:
                             # Barge-in: bot.py's callback
-                            # is an async def — a bare call only created the
-                            # coroutine and never ran it (the same class as
-                            # the queue_frame trap). Schedule it on the
+                            # is an async def — a bare call only creates the
+                            # coroutine and never runs it. Schedule it on the
                             # running loop and KEEP THE REFERENCE (a bare
                             # fire-and-forget task can be GC'd mid-flight).
                             # Don't await inline: a Sonos cancel can take

@@ -880,10 +880,10 @@ class SonosOutput(LiveZoneConfig, FrameProcessor):
                 logger.info(f"sonos_output: barge-in during load, cancelled clip {cid}")
                 return
             # ── LOAD-ANCHORED TIMERS ──
-            # Generation-anchored timers fired early on the v4 dialogue
-            # lane (measured a 3.4s gap from generation to load):
-            # end-of-speech LED flipped the ring to listening, the echo
-            # gate reopened the mic, and note_speech capped the gate's
+            # Generation-anchored timers can fire long before the clip
+            # loads (a slow connect stretches the generation-to-load gap):
+            # end-of-speech LED flips the ring to listening, the echo
+            # gate reopens the mic, and note_speech caps the gate's
             # LOCKED safety release — all BEFORE her last syllable. The
             # clip is sounding NOW, so every speech-window timer anchors
             # HERE. `duration` (method top) is the UNPADDED speech time.

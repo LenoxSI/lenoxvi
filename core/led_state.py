@@ -1,14 +1,10 @@
 """led_state — direct data-channel LED sends, pipeline-free.
 
-Why this exists: LED messages used to ride
-the pipecat pipeline as OutputTransportMessageFrames pushed by the wake
-gate. A pipecat processor stalls frames in BOTH directions while it
-works — IntelligenceAgent blocks 3-40s on intelligence calls — so every LED message
-queued behind the intelligence and arrived as one burst when it returned. The
-node's ring held stale purple through the whole "On it." -> answer gap
-(30s): the gate logged LOCKED ~29.7 s after the speech actually
-started, and the oww-sleeping sent ~2.1 s after speech start never
-reached the node until the intelligence returned.
+Why this exists: LED messages must not ride the pipecat pipeline — a
+processor stalls frames in BOTH directions while it works
+(IntelligenceAgent blocks 3-40s on intelligence calls), so a
+pipeline-ridden LED message arrives as one late burst and the node's
+ring holds stale state through the whole "On it." -> answer gap.
 
 The fix: send straight to the WebRTC connection via the output
 transport's send_message (SmallWebRTCClient.send_message ->

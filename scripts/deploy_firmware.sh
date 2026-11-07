@@ -15,7 +15,7 @@
 #   4. The node picks the image up on its next boot: restart just that line's
 #      node(s) from the dashboard (Nodes -> Restart, ~15 s); an offline node
 #      updates on its own next boot. Synced bot code still needs its own
-#      bot restart (this script no longer does one).
+#      bot restart — run it separately.
 #
 # Usage (--track is REQUIRED — there is no default line):
 #   ./scripts/deploy_firmware.sh --track array                  # patch bump
@@ -49,7 +49,7 @@ case "$TRACK" in
 esac
 
 # ── 0. Preflight: the checkout must be the firmware repo's `main` ──────────
-# Since the branch fold one source tree builds both lines; the
+# One source tree builds both lines; the
 # line is the -DBOARD passed to the build below (= $TRACK), never whatever
 # happens to be checked out. A different branch (an old per-line branch, a
 # feature branch) is refused: it could carry the other line's code. Backstops
@@ -109,8 +109,7 @@ export IDF_PYTHON_ENV_PATH="$HOME/.espressif/python_env/idf5.3_py3.12_env"
 source "$HOME/esp-idf/export.sh" >/dev/null
 # Data-channel message logging is debug-only and prints set_wifi payloads
 # (the WiFi password) to serial — never in a deployed image. unset (not an
-# empty assignment: the old firmware CMake treated set-but-empty as ON, so
-# this line used to ENABLE it on every script build). Also
+# empty assignment: the firmware CMake treats set-but-empty as ON). Also
 # protects against a value inherited from the caller's shell.
 unset LOG_DATACHANNEL_MESSAGES
 # Same for the bench-only mic-level serial log: never in a published image.
@@ -170,8 +169,7 @@ BIN_MD5=$(md5sum "$BIN" | cut -d' ' -f1)
 # GATE on it: refuse to ship a build whose embedded version disagrees
 # with the manifest we're about to write. Kills the mismatch class
 # (manifest/binary mismatch = the node re-flashes the same fw every
-# boot) and the botched-bake class (forgot to bump CMakeLists — the
-# script used to silently ship the old version under a new number).
+# boot) and the botched-bake class (forgot to bump CMakeLists).
 BIN_VER=$(python3 "$LVI_LOCAL/scripts/app_bin_version.py" "$BIN")
 echo "==> binary self-reports version: ${BIN_VER:-<none>}"
 # Board identity: the image's compiled-in OTA URL names its own

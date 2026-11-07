@@ -1,8 +1,7 @@
 """Echo gate — duration-based echo containment, the permanent safety net.
 
 The mic hears the bot's own replies from the browser and Sonos speakers;
-without containment that's a feedback loop (observed live:
-she kept repeating herself).
+without containment that's a feedback loop.
 
 The wake-word turn lock (wake_word.py) is the primary gate — LOCKED
 while the bot speaks — but Sonos clips play ASYNC after the browser

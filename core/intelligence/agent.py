@@ -333,9 +333,8 @@ class IntelligenceAgent(FrameProcessor):
         self._routed_room = None
         if self._lane:
             self._url = self._lane.request_url(self._url, self._agent)
-        # Missing key is NOT a construction brick (the provider-
-        # switch-without-key incident): the turn fails with a clear error
-        # and the dashboard Test button reports it.
+        # Missing key is NOT a construction brick: the turn fails with a
+        # clear error and the dashboard Test button reports it.
         # Key rule (strict): each lane reads
         # EXACTLY ONE variable — hermes → LVI_HERMES_KEY, openclaw →
         # LVI_OPENCLAW_KEY. No cross-kind fallback: a fallback chain once
@@ -354,11 +353,8 @@ class IntelligenceAgent(FrameProcessor):
                 f"intelligence_agent: no intelligence key set ({self._key_var}) "
                 f"— kind={self._kind}; turns will fail until it is set")
         self._model = _use["model"]
-        # Output cap (the 16k-degenerate-reply incident): the
-        # intelligence request carried no max_tokens, so a runaway model loop
-        # could monologue until the context window died (measured: one
-        # 16,145-token reply "degenerated into garbage" mid-session).
-        # ~300 tokens ≈ 220 words ≈ 90s of speech — generous for sass,
+        # Output cap: without max_tokens a runaway model loop can monologue
+        # until the context window dies. ~300 tokens ≈ 220 words ≈ 90s of speech — generous for sass,
         # impossible for a runaway. Honored by every OpenAI-compat
         # endpoint (Hermes, Anthropic, OpenClaw — forward-compatible
         # with the intelligence.kind arc). Config-gated per house law.
@@ -488,12 +484,10 @@ class IntelligenceAgent(FrameProcessor):
         """True if `text` is essentially her own words coming back.
 
         An echo is her reply re-transcribed by the mic — so nearly ALL of
-        the transcript's words must be words she actually spoke. The old
-        0.6 bar was stopword-blind: a user's
-        repeat "What's the weather today on <town>?" scored 71% against
-        her weather ANSWER — 5 of 7 words, only the town name content; s,
-        the, on, today all counted as echo evidence — and the question
-        died as an "echo" while TTS was down. 0.9 keeps verbatim and
+        the transcript's words must be words she actually spoke. A lower
+        bar is stopword-blind: a re-asked question shares function words
+        with her previous ANSWER, so stopwords must never count as echo
+        evidence. 0.9 keeps verbatim and
         clipped-tail echoes caught (they are ~100% subsets of her words)
         and lets same-topic follow-ups through (their own question words
         are the missing percentage).

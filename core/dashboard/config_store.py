@@ -132,12 +132,9 @@ def write_section(section: str, value: dict) -> dict:
 
 def write_sections(sections: dict) -> dict:
     """Write MULTIPLE sections in ONE
-    atomic pass — one backup, one tmp write, one cache refresh. The
-    zone-delete flow used to do two write_section calls back-to-back; a
-    crash between them left config.yaml with the zone gone but its
-    dangling room mappings still pointing at it (and two backups deep
-    of history churn). Callers that need the before/after diff read the
-    sections first via read_sections.
+    atomic pass — one backup, one tmp write, one cache refresh; a multi-step
+    flow must never risk a crash between its writes. Callers that need the
+    before/after diff read the sections first via read_sections.
     """
     with LOCK:
         p = _path()

@@ -926,8 +926,7 @@ async def set_node_wifi(room: str, payload: WifiPayload):
                             timeout=8.0)
     # The immediate ack is ok:false when the node REJECTED the creds
     # before trying them (fw cmd.cpp: "missing ssid/pass", "nvs error") —
-    # the UI used to show "Wi-Fi applying…" on a 200 for a node that
-    # applied nothing. Only ok:true ("stored, rebooting to verify"; older
+    # a 200 here does NOT mean applying. Only ok:true ("stored, rebooting to verify"; older
     # firmware: "stored, connecting") means applying.
     # Never echo the password: the node's data is a status string.
     if not reply.get("ok"):
@@ -1951,9 +1950,8 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
         kind, intelligence_cfg.get("url") or _os.getenv("LVI_HERMES_URL") or "", agent)
     # Key law (strict): each kind reads EXACTLY ONE variable —
     # hermes: LVI_HERMES_KEY; openclaw: LVI_OPENCLAW_KEY. No cross-kind
-    # fallback anywhere (this probe previously read the now-DELETED
-    # LVI_BRAIN_KEY — the openclaw Test button would 401 with no key found;
-    # caught in the naming sweep).
+    # fallback anywhere, so the Test button can never 401 on a key no
+    # lane reads.
     _kv = intelligence_target.key_var(kind, agent) or default_lane.base_key_var
     key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:
@@ -2047,17 +2045,10 @@ async def post_intelligence_test():
 
 # ── bot control (Settings) ─────────────────────────────────────────────
 
-# Restart-from-the-dashboard problem: the dashboard LIVES in the bot
-# process, so a plain restart would kill the HTTP response mid-flight.
-# Resolution: hand the restart to a DETACHED systemd transient unit —
-# the user manager owns it, not us, so it fires 2s after the response
-# completes.
-#
-# LVI_RESTART_COMMAND is GONE from prod:
-# it was a generic "run this command" hook readable from .env, and the
-# newline-injection bug (since fixed at TTSKeyPayload) could have armed
-# it. The test suite now monkeypatches subprocess.run for this route
-# instead — see tests/test_dashboard.py.
+# The dashboard lives in the bot process, so a plain restart would kill the
+# HTTP response mid-flight: hand the restart to a DETACHED systemd transient
+# user unit that fires 2s after the response completes. The test suite
+# monkeypatches subprocess.run for this route — see tests/test_dashboard.py.
 
 
 @router.post("/restart", dependencies=GUARD)

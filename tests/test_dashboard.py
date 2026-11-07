@@ -402,9 +402,8 @@ def main():
         importlib.reload(_cfg_mod)
     # Zone DELETE with a dangling room mapping does ONE atomic
     # multi-section write (zone gone + mapping cleaned, same pass).
-    # The probe WiiM zone carries NO player_uid — this used to
-    # need a fake RINCON because ZonePayload required a uid for every
-    # backend (so the real UI's WiiM add 422'd every time).
+    # The probe WiiM zone carries NO player_uid — a WiiM add must not
+    # require one (the real UI's add never sends it).
     _r_add14 = client.post("/api/dashboard/zones", json={
         "name": "m14_probe_zone", "backend": "wiim", "ip": "127.0.0.9"})
     check("probe zone add ok (wiim, no player_uid)",
@@ -929,10 +928,10 @@ def main():
         "provider": "elevenlabs", "voice_id": "AbC123xyZw9876543210",
         "model": "eleven_flash_v2_5"})
 
-    # (bug-hunt) GET /tts used to read ONLY the config file: a knob the
-    # bot reads via cfg_env (bot.py) but that lived only in .env showed
-    # the code default on the panel. File > LVI_* env > the bot's default,
-    # per knob — pin provider (the panel's most consequential one).
+    # GET /tts must resolve every knob the way the bot reads it
+    # (cfg_env, bot.py): File > LVI_* env > the bot's default, per knob —
+    # a knob that lives only in .env must not show the code default on
+    # the panel. Pin provider (the panel's most consequential one).
     _saved_tts_bh6 = dict(config_store.read_section("tts") or {})
     _saved_env_bh6 = os.environ.get("LVI_TTS_PROVIDER")
     try:
@@ -950,9 +949,7 @@ def main():
             os.environ["LVI_TTS_PROVIDER"] = _saved_env_bh6
 
     # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
-    # runs on the same host as prod). LVI_RESTART_COMMAND used to override
-    # the command, but that env hook was a prod code-exec lane
-    # and is now deleted. The suite monkeypatches
+    # runs on the same host as prod). The suite monkeypatches
     # subprocess.run IN THIS PROCESS so systemd-run never executes while
     # the route's code is fully exercised.
     real_run = subprocess.run
@@ -1757,10 +1754,9 @@ def main():
           any(r.get("room") == "line-unbound-room" and r.get("line") == "array"
               for r in _st_line.get("rooms", [])), str(_st_line.get("rooms"))[:200])
 
-    # Track-aware firmware upload: the image + manifest
-    # must land in the DECLARED track's directory, and an unknown track
-    # 400s. The old route staged everything into firmware/node/ — a
-    # Flex .bin there would be OTA'd by an array node (cross-flash).
+    # Track-aware firmware upload: the image + manifest must land in the
+    # DECLARED track's directory, and an unknown track 400s — a Flex .bin
+    # in an array node's directory would be OTA'd by it (cross-flash).
     # Board identity: real images carry exactly one OTA-track
     # URL format; the route refuses an image whose own track differs.
     # One track vocabulary (array | flex); 1.2.9+ images
@@ -5112,11 +5108,10 @@ def main():
           and _dlg13._synthesize_text is _TTST13._synthesize_text,
           "TrackedElevenLabsDialogueTTSService must resolve _synthesize_text to TTSTracked's")
 
-    # Node-command error mapping: an in-flight duplicate is a
-    # 409 CONFLICT (it used to read as a naked "Gateway Timeout" 504), and a
-    # bare transport timeout (empty detail — the observed restart error shape)
-    # now says half-open + self-heals instead of an empty string the UI
-    # rendered as "Gateway Timeout".
+    # Node-command error mapping: an in-flight duplicate is a 409 CONFLICT
+    # (never a naked "Gateway Timeout" 504), and a bare transport timeout
+    # (empty detail) says half-open + self-heals instead of an empty string
+    # the UI rendered as "Gateway Timeout".
     import asyncio as _aio14
     import dashboard.node_command as _nc14
     from dashboard.node_command import (CommandInFlight as _InFlight14,

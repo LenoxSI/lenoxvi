@@ -1,10 +1,8 @@
 """Speaker-zone settings read at use time, not when a session is built.
 
-SonosOutput and WiiMOutput live as long as a node's session. They used to
-copy `enabled`, `zones`, `zone_volumes` and `clip_volume` from config in
-their constructors, so a zone added (or a volume reset) on the dashboard
-after a node connected never reached that room: the mapping said "live",
-the reply went nowhere until the node reconnected. Reading through the
+SonosOutput and WiiMOutput live as long as a node's session, so a config
+copy taken in the constructor would miss dashboard edits made after the
+node connected. Reading through the
 cached cfg() costs a dict lookup; every dashboard write clears that cache.
 
 Assigning one of these attributes pins it for this instance (test

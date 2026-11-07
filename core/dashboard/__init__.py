@@ -66,8 +66,7 @@ def register_dashboard(app) -> None:
         return
 
     # Everything past here is OUR code, not a dependency: a broken
-    # dashboard import used to fall into the same quiet "optional deps"
-    # warning and silently unmount the dashboard. Loud, with the
+    # dashboard import must not quietly unmount the dashboard. Loud, with the
     # traceback — but still never a crash: the voice pipeline mounts
     # without its UI.
     try:
@@ -91,7 +90,7 @@ def register_dashboard(app) -> None:
     app.add_middleware(UploadLimitMiddleware)
     app.include_router(router)
 
-    # HeroUI rebuild: FastAPI serves the
+    # FastAPI serves the
     # prebuilt React app from dashboard-ui/dist — a fresh clone needs
     # zero node toolchain (dist/ is committed; the build stays dev-side,
     # npm run build in dashboard-ui/).

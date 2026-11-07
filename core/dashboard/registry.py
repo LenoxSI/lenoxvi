@@ -40,8 +40,8 @@ _boot_flags_by_pc = {}  # pc_id -> (fw_rejected, wifi_rollback) from fw_push (he
 NODE_LINES = ("array", "flex", "waveshare")
 _last_wake = None  # {"time": ts, "room": str|None}
 _gate = None  # echo gate ref (set by bot.py; used to block test clips)
-_gate_by_pc = {}  # pc_id -> that session's echo gate (multi-node: one
-                  # global gate blocked the wrong room's test clips)
+_gate_by_pc = {}  # pc_id -> that session's echo gate (one gate per session,
+                  # so a test clip never blocks another room)
 
 PROVISIONAL = "unknown"
 BROWSER = "browser"  # the label of a session whose offer names no room

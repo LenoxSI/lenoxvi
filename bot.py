@@ -100,8 +100,8 @@ def _revive_cooldown_secs(raw, key: str) -> float:
 
 class TTSTracked:
     """Mixin: relay pipecat's set_usable() verdicts to the dashboard
-    registry for this pipeline's room (a node once went silent this
-    way). An ElevenLabs websocket death makes pipecat mark the
+    registry for this pipeline's room. An ElevenLabs websocket death makes
+    pipecat mark the
     service PERMANENTLY unusable after 3 failed reconnects — the node
     keeps hearing, replies silently vanish, and the only clue sat in
     journald. Fail-open by design: observability must never take down
@@ -175,10 +175,9 @@ class TTSTracked:
                                                "(staying unusable)")
 
     async def _synthesize_text(self, text, context_id):
-        # Every speak funnels through here: since pipecat 1.13 it is the one
-        # place TTSService calls run_tts, and it holds the usability gate
-        # (1.11's _push_tts_frames is gone — an override of a vanished method
-        # is never called, so the suite pins this name on TTSService itself).
+        # Every speak funnels through here — the one place TTSService calls
+        # run_tts (pipecat >= 1.13), and it holds the usability gate. The suite
+        # pins this exact name on TTSService itself.
         # A dead service normally skips silently at that gate; the revive
         # gives it one bounded shot at the websocket first. Fail-open:
         # _try_revive never raises, so a revive bug can never eat the speak.
@@ -419,7 +418,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
             logger.warning("tts: the Kokoro standby can't load — "
                            f"running WITHOUT a fallback ({tts_kokoro.INSTALL_HINT})")
     gate = EchoGate()
-    # Multi-node fix: EVERYTHING room-related resolves
+    # Multi-node rule: EVERYTHING room-related resolves
     # through THIS pipeline's own pc_id — never the registry's global
     # "last connected" room. The offer tee has already correlated
     # {room, pc_id} by the time the pipeline runs (send-time tee), so
@@ -476,10 +475,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     # Intelligence dispatch: every registered lane (intelligence.KINDS) rides
     # IntelligenceAgent — the lane owns its request envelope
-    # (core/intelligence/<kind>.py). A past bug: this ternary only
-    # matched == "hermes", so kind: openclaw fell to the echo stub and
-    # the operator got canned answers while the suite stayed green (its tests
-    # checked the agent directly, never the construction site).
+    # (core/intelligence/<kind>.py). The kind match must cover every lane in
+    # KINDS: an unmatched kind falls to the echo stub, and the suite's tests
+    # probe the agent directly, never this construction site.
     # Dead-TTS containment wire: the tracked
     # TTS service's is_usable rides into the agent so texts pushed to a
     # DEAD service are never armed as echo texts — they made no sound,
@@ -488,9 +486,8 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     # is_usable means "some service can still speak".
     tts_usable_probe = ((lambda: getattr(tts, "is_usable", True))
                         if isinstance(tts_primary, TTSTracked) else None)
-    # Case-insensitive like the agent itself (`kind: Hermes` used to fall to
-    # the canned stub here while the agent lowercased it), and loud when the
-    # kind is unknown instead of silently answering from the stub.
+    # Case-insensitive like the agent itself, and loud when the kind is
+    # unknown instead of silently answering from the stub.
     _intel_kind = str(cfg_env("intelligence", "kind", "LVI_INTELLIGENCE_KIND",
                               intelligence_lanes.DEFAULT_KIND) or intelligence_lanes.DEFAULT_KIND).strip().lower()
     if _intel_kind not in intelligence_lanes.KINDS and _intel_kind != "stub":
@@ -517,10 +514,9 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
     # LED ring goes on a DIRECT wire (led_state.py): pipeline frames stall
     # behind a blocked processor — IntelligenceAgent holds the queue 3-40s on
-    # intelligence calls and every LED message used to arrive as one late burst
-    # (measured): the ring held stale purple through the whole
-    # "On it." -> answer gap). One output transport, shared by the pipeline
-    # and the LED wire; per-pipeline LedSender = per-node targeting free.
+    # intelligence calls, so a pipeline-ridden LED message arrives as one
+    # late burst. One output transport, shared by the pipeline and the LED
+    # wire; per-pipeline LedSender = per-node targeting free.
     from led_state import LedSender
 
     out = transport.output()
@@ -715,7 +711,7 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
 
 
 def _reclaim_session() -> None:
-    """Reclaim a finished session's pipeline graph NOW (per-session leak fix).
+    """Reclaim a finished session's pipeline graph NOW.
 
     Every session builds a fresh pipeline (wake model, Silero VAD, resamplers,
     WebRTC transport) that forms one big reference cycle, so refcounting can't

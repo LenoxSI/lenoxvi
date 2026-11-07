@@ -36,8 +36,7 @@ class NodeCommandError(Exception):
 
 class CommandInFlight(NodeCommandError):
     """A duplicate command is already awaiting this node's reply — a
-    CONFLICT, not a timeout (this used to raise a bare
-    TimeoutError, so a double-click read as a 'Gateway Timeout')."""
+    CONFLICT, not a timeout."""
 
 
 class NoLiveSession(NodeCommandError):
