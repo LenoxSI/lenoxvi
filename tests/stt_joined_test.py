@@ -224,6 +224,27 @@ check("stt: a model_override stand-in (the LocalAI lane) serves the joint reques
       and payload(model.calls[2]) == payload(HEAD) + payload(TAIL),
       f"out={out!r} calls={len(model.calls)}")
 
+
+async def bare_probe():
+    # A service built without __init__ (the dashboard's phantom fixture
+    # builds one bare, attrs set by hand): transcribing and joining still
+    # work — the store creates itself on first use.
+    model = _FakeModel([JA, JOINT])
+    svc = sl.LocalWhisperSTTService.__new__(sl.LocalWhisperSTTService)
+    svc._fw_model = model
+    svc._language = None
+
+    async def _noop():
+        return None
+    svc.ensure_model = _noop
+    await svc._transcribe(HEAD)
+    return model, await svc.transcribe_joined([JA], timeout=5.0)
+
+
+model, out = asyncio.run(bare_probe())
+check("stt: a service built without __init__ still transcribes and joins",
+      out == JOINT and len(model.calls) == 2, f"out={out!r} calls={len(model.calls)}")
+
 sl.LocalWhisperSTTService._shared_model = None
 
 if FAILS:
