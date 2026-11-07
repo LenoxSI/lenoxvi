@@ -9,6 +9,10 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Embedded and LocalAI speech-to-text: a question the turn closes over more than one speech stretch ("What about …
+  Wednesday?") is transcribed once more, as one clip, before it is asked — a short tail stretch is no longer misheard
+  with no context. Single-stretch turns are untouched, and a joint transcription that fails or is too slow asks with
+  the joined stretch texts as before. (#46)
 - Embedded and LocalAI speech-to-text: a question with a pause in the middle longer than the lull ("What's the
   weather? … yesterday") is asked once, as one question. Before, the words after the pause were asked as a new
   question and both answers were spoken. (#45)

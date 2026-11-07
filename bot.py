@@ -493,9 +493,14 @@ async def run_bot(transport: SmallWebRTCTransport, runner_args: RunnerArguments)
     if _intel_kind not in intelligence_lanes.KINDS and _intel_kind != "stub":
         logger.error(f"intelligence.kind '{_intel_kind}' is not one of {sorted(intelligence_lanes.KINDS)} "
                      f"— this room answers from the offline stub")
+    # Joint re-transcription: a turn that closed over more than one
+    # stretch re-asks its stretches' audio as one clip through the LOCAL
+    # stt service — built above, before any cloud fallback wraps it — so
+    # a short tail stretch is not transcribed without context.
     intelligence = (IntelligenceAgent(echo_gate=gate, room=_room, room_resolver=_pipeline_room,
                                 session_mode=_session_mode,
-                                tts_is_usable=tts_usable_probe)
+                                tts_is_usable=tts_usable_probe,
+                                retranscribe=stt.transcribe_joined)
              if _intel_kind in intelligence_lanes.KINDS
              else StubIntelligence(echo_gate=gate))
 
