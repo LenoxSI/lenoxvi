@@ -1849,7 +1849,6 @@ class IntelligenceKeyPayload(BaseModel):
 @router.get("/intelligence")
 async def get_intelligence():
     """Current Intelligence config + key status. Never returns the key."""
-    import os as _os
     _env = _saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
@@ -2412,7 +2411,6 @@ def _oww_validate(data: bytes) -> None:
     """Load-and-one-test-inference against the SAME library and shape the
     pipeline feeds (loaded-gun rule: a model that can't run
     never lands on disk, so a restart can never wake-brick the bot)."""
-    import io
 
     import onnxruntime as ort
 

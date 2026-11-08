@@ -26,7 +26,6 @@ scripts/deploy_firmware.sh — both refuse an image whose own identity
 """
 
 import json
-import os
 from pathlib import Path
 
 import firmware_image

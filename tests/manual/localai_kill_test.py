@@ -2,7 +2,6 @@
 mid-run. Silent. Same env as localai_live_test.py, plus LVI_KILL_CMD /
 LVI_START_CMD (shell commands that stop/start LocalAI).
 """
-import asyncio
 import io
 import os
 import subprocess

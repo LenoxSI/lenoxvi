@@ -17,7 +17,6 @@ deploy_firmware.sh uses this so the SHIPPED manifest can
 never disagree with the binary it ships — the bin is the truth, the
 script's counter is not.
 """
-import struct
 
 MAGIC = bytes([0x32, 0x54, 0xCD, 0xAB])
 
