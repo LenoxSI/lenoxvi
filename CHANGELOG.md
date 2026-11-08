@@ -13,6 +13,10 @@ The two version streams are independent.
   path on the LocalAI host) turns the chatterbox voice picker into a dropdown of the declared voices plus `default`
   (the card stores the path; an undeclared stored value keeps the free-text input). Chatterbox has no preset
   voices — a per-request voice is honored only as a reference-audio path. (#63)
+- Ruff gates the Python tree: `ruff.toml` (the default rule set only, `target-version = "py313"`) and a
+  dev-only `requirements-dev.txt` pin (`ruff==0.17.4` — never the runtime venv); the AGENTS.md Commands
+  block carries the bare `ruff check .`. The first sweep's fixes ride in the same change — imports placed
+  below the path/env setup by design keep targeted `# noqa` marks. (#62)
 
 ### Changed
 - The read-only node status `GET /api/dashboard/nodes/<room>/info` no longer asks for the dashboard token:

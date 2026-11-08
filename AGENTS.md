@@ -21,6 +21,7 @@ One test at a time — each test's own `Run:` header is the per-file source of t
 (cd tests && ../.venv/bin/python <test>.py)            # most tests
 (cd tests && ../.venv/bin/python <test>.py ../core)    # some take the core path as argv[1]
 .venv/bin/python tests/<test>.py                       # a few run from the repo root
+ruff check .                                           # lint — config in ruff.toml
 ```
 
 A wrong cwd surfaces as `ModuleNotFoundError`, which reads like a missing dependency but is not one. Live tests (real speaker, LAN scan) stay off unless `LVI_TEST_LIVE=1`. The kokoro PCM goldens in `localai_golden_test.py` compare signal statistics (sample count, RMS, peak) within a relative tolerance, not exact bytes — neural TTS float output drifts across CPUs and onnxruntime builds, so byte hashes were machine-specific (issue #49). A stat outside its tolerance is a real regression; if a healthy machine trips one, retune the tolerance constants at the top of the test.
