@@ -11,9 +11,10 @@ LVI_DRY_RUN=${LVI_DRY_RUN:-0}
 LVI_YES=${LVI_YES:-0}
 LVI_PREFIX=${LVI_PREFIX:-}
 
-# Real paths (what the unit and the config name) ...
+# Real paths (what the unit, the config and the sudoers grant name) ...
 LVI_OPT_REAL=/opt/lenoxvi
 LVI_STATE_REAL=/var/lib/lenoxvi
+LVI_RESTART_HELPER_REAL=/usr/local/lib/lenoxvi/schedule-restart
 LVI_USER=${LVI_USER:-lenoxvi}   # tests run as themselves
 # ... and where this run reads and writes them.
 LVI_OPT=$LVI_PREFIX$LVI_OPT_REAL
@@ -22,6 +23,9 @@ LVI_VENV=$LVI_OPT/venv
 LVI_BIN=$LVI_OPT/bin
 LVI_STATE=$LVI_PREFIX$LVI_STATE_REAL
 LVI_UNIT=$LVI_PREFIX/etc/systemd/system/lenoxvi.service
+LVI_LIB=$LVI_PREFIX/usr/local/lib/lenoxvi
+LVI_RESTART_HELPER=$LVI_LIB/schedule-restart
+LVI_SUDOERS=$LVI_PREFIX/etc/sudoers.d/lenoxvi-dashboard-restart
 LVI_CLI=$LVI_PREFIX/usr/local/bin/lenoxvi
 LVI_CACHE=$LVI_PREFIX/var/cache/lenoxvi
 LVI_LOG=$LVI_PREFIX/var/log/lenoxvi-install.log

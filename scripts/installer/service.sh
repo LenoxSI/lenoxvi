@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2034,SC2153
-# LenoxVI installer — the system service, the lenoxvi command, and the
-# health check.
+# LenoxVI installer — the system service, the dashboard restart grant, the
+# lenoxvi command, and the health check.
 
 # render_unit <host ip> -> the unit text on stdout
 render_unit() {
@@ -30,9 +30,59 @@ install_cli() {
   run ln -sfn "$target" "$LVI_CLI"
 }
 
+# render_restart_helper -> the helper body on stdout. The dashboard's
+# restart button runs it as root via sudo: it only schedules (the restart
+# fires 2 s later from a detached transient unit), so the dashboard's
+# HTTP response completes first.
+render_restart_helper() {
+  cat <<'EOF'
+#!/usr/bin/env bash
+# schedule-restart — written by the installer, run by the dashboard's
+# restart button via sudo. It only schedules: the restart fires 2 s later
+# from a detached transient unit, after the dashboard's response has
+# completed.
+exec systemd-run --unit="lenoxvi-dash-restart-$(date +%s%3N)" -- \
+  bash -c 'sleep 2 && systemctl restart lenoxvi.service'
+EOF
+}
+
+# install_restart_grant <ip> — the restart button's privileged path: a
+# root-owned helper plus a sudoers drop-in granting the service user
+# exactly that helper (nothing else). Idempotent: nothing is written when
+# both files already match.
+install_restart_grant() {
+  local user new_helper new_grant tmp
+  user=$(render_unit "$1" | sed -n 's/^User=//p' | head -1)
+  [[ -n $user ]] || die "the unit template has no User= — cannot grant the dashboard restart"
+  [[ -d $LVI_LIB ]] || run install -d -m 0755 "$LVI_LIB"
+  new_helper=$(render_restart_helper)
+  if [[ ! -f $LVI_RESTART_HELPER || $(cat "$LVI_RESTART_HELPER") != "$new_helper" ]]; then
+    printf '%s\n' "$new_helper" | write_file "$LVI_RESTART_HELPER" 0755 root:root
+  fi
+  new_grant=$(printf '%s ALL=(root) NOPASSWD: %s\n' "$user" "$LVI_RESTART_HELPER_REAL")
+  if [[ -f $LVI_SUDOERS && $(cat "$LVI_SUDOERS") == "$new_grant" ]]; then return 0; fi
+  # sudo parses the drop-in the moment it lands, so the exact bytes pass
+  # visudo first and a refusal aborts, leaving nothing behind. Dry-run
+  # prints the check against the drop-in's path; the real run stages the
+  # same bytes (visudo takes a file).
+  if [[ $LVI_DRY_RUN == 1 ]]; then
+    run visudo -cf "$LVI_SUDOERS"
+  else
+    tmp=$(mktemp)
+    printf '%s\n' "$new_grant" >"$tmp"
+    if ! visudo -cf "$tmp"; then
+      rm -f "$tmp"
+      die "the dashboard restart grant failed visudo's check — nothing installed"
+    fi
+    rm -f "$tmp"
+  fi
+  printf '%s\n' "$new_grant" | write_file "$LVI_SUDOERS" 0440 root:root
+}
+
 install_service() {
   step "Starting the service"
   install_unit "$HOST_IP"
+  install_restart_grant "$HOST_IP"
   install_cli
   if systemctl is-active --quiet lenoxvi 2>/dev/null; then
     if [[ $UNIT_CHANGED == yes ]]; then

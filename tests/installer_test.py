@@ -55,6 +55,7 @@ _STUB_SRC = {
     "lspci": '[ -n "${STUB_LSPCI:-}" ] && echo "$STUB_LSPCI"; exit 0',
     "ss": 'printf "%b" "${STUB_SS:-}"',
     "systemctl": 'case "$1 $2" in "is-active --quiet") [ "${STUB_ACTIVE:-no}" = yes ];; "is-active lenoxvi") [ "${STUB_ACTIVE:-no}" = yes ] && echo active || echo inactive;; *) exit 0;; esac',
+    "visudo": '[ "${STUB_VISUDO:-ok}" = fail ] && exit 1; exit 0',
     "id": 'if [ "$1" = -u ] && [ "${2:-}" = lenoxvi ]; then [ "${STUB_USER:-no}" = yes ] && echo 999 || exit 1; else /usr/bin/id "$@"; fi',
     "getent": 'case "$2" in video|render) echo "$2:x:44:";; *) exit 2;; esac',
     "ip": 'if [ "$2" = route ]; then [ -n "${STUB_SRC:-}" ] && echo "1.1.1.1 via 192.0.2.1 dev eth0 src $STUB_SRC uid 0"; else [ -n "${STUB_SRC:-}" ] && echo "2: eth0    inet $STUB_SRC/24 brd 192.0.2.255 scope global eth0"; fi; exit 0',
@@ -370,6 +371,10 @@ r = sh(f"{UT}; install_unit 192.0.2.10; echo CHANGED=$UNIT_CHANGED", pu)
 check("installer service: a new unit is written and systemd reloaded",
       "CHANGED=yes" in r.stdout and "+ systemctl daemon-reload" in r.stdout, out(r))
 (pu / "etc/systemd/system/lenoxvi.service").write_text(sh(f"{UT}; render_unit 192.0.2.10").stdout)
+# the grant is part of the service step now — an installed box has it, so
+# the dry-run install_service calls below must see it as already present
+(pu / "etc/sudoers.d").mkdir(parents=True)
+sh(f"{UT}; LVI_DRY_RUN=0; install_restart_grant 192.0.2.10", pu)
 r = sh(f"{UT}; HOST_IP=192.0.2.10; install_service", pu, STUB_ACTIVE="yes")
 check("installer service: same unit + running = no restart",
       "restart" not in r.stdout.replace("restarted", "") and "+ write" not in r.stdout and "nothing changed" in r.stdout, out(r))
@@ -384,6 +389,56 @@ r = sh("HOST_IP=192.0.2.10; DASH_TOKEN=abc123; handoff")
 check("installer handoff: dashboard address, the certificate warning, the token once, how to manage it",
       "https://192.0.2.10:7860/dashboard" in r.stdout and "certificate" in r.stdout and r.stdout.count("abc123") == 1
       and "lenoxvi status" in r.stdout, r.stdout)
+
+# ── service: the dashboard restart button's privileged path ────────────
+# The installer shape restarts through a root-owned helper plus a sudoers
+# drop-in granting the service user exactly that helper. The helper path
+# is the same literal the dashboard route runs (test_dashboard.py pins it
+# there); this suite pins the installer's side, so the two cannot drift.
+HELPER_REAL = "/usr/local/lib/lenoxvi/schedule-restart"
+r = sh(f"{UT}; render_restart_helper")
+_sched = [ln for ln in r.stdout.splitlines() if "systemd-run" in ln]
+check("installer service: the restart helper is the one detached scheduling line (2 s, then the system unit)",
+      r.stdout.startswith("#!/usr/bin/env bash") and len(_sched) == 1
+      and _sched[0].rstrip().endswith("bash -c 'sleep 2 && systemctl restart lenoxvi.service'")
+      and "--unit=" in _sched[0], r.stdout)
+rgd = make_prefix()
+r = sh(f"{UT}; install_restart_grant 192.0.2.10", rgd)
+o = r.stdout
+_drop_w = f"+ write {rgd}/etc/sudoers.d/lenoxvi-dashboard-restart (0440 root:root)"
+check("installer service: dry-run shows the helper write (0755 root:root) and visudo -cf gating the drop-in write (0440 root:root)",
+      f"+ write {rgd}/usr/local/lib/lenoxvi/schedule-restart (0755 root:root)" in o and _drop_w in o
+      and 0 <= o.find("+ visudo -cf") < o.find(_drop_w), o)
+rgf = make_prefix()
+(rgf / "etc/sudoers.d").mkdir(parents=True)
+r = sh(f"{UT}; LVI_DRY_RUN=0; install_restart_grant 192.0.2.10", rgf)
+_helper, _dropin = rgf / "usr/local/lib/lenoxvi/schedule-restart", rgf / "etc/sudoers.d/lenoxvi-dashboard-restart"
+_hm = oct(_helper.stat().st_mode & 0o777) if _helper.exists() else "missing"
+_gm = _dropin.read_text() if _dropin.exists() else "missing"
+check("installer service: the helper lands 0755 with the exact scheduling body; the drop-in is exactly one grant line at 0440",
+      _helper.is_file() and _hm == "0o755"
+      and "bash -c 'sleep 2 && systemctl restart lenoxvi.service'" in _helper.read_text()
+      and _dropin.is_file() and oct(_dropin.stat().st_mode & 0o777) == "0o440"
+      and _gm == f"lenoxvi ALL=(root) NOPASSWD: {HELPER_REAL}\n",
+      f"helper_mode={_hm} grant={_gm!r}")
+r = sh(f"{UT}; install_restart_grant 192.0.2.10", rgf)
+check("installer service: an unchanged helper and grant write nothing on a re-run",
+      r.returncode == 0 and "+ write" not in r.stdout and "+ install -d" not in r.stdout
+      and "+ visudo" not in r.stdout, out(r))
+rgv = make_prefix()
+(rgv / "etc/sudoers.d").mkdir(parents=True)
+r = sh(f"{UT}; LVI_DRY_RUN=0; install_restart_grant 192.0.2.10", rgv, STUB_VISUDO="fail")
+check("installer service: a grant visudo refuses aborts the install and leaves no drop-in behind",
+      r.returncode != 0 and "visudo" in r.stderr
+      and not (rgv / "etc/sudoers.d/lenoxvi-dashboard-restart").exists(), out(r))
+u_tpl = TMP / "unit-user.service.in"
+u_tpl.write_text("[Unit]\n[Service]\nUser=botfriend\nExecStart=/bin/true @HOST_IP@\n")
+rgu = make_prefix()
+(rgu / "etc/sudoers.d").mkdir(parents=True)
+r = sh(f"LVI_UNIT_TEMPLATE={u_tpl}; LVI_DRY_RUN=0; install_restart_grant 192.0.2.10", rgu)
+check("installer service: the grant names the unit's User= — the user the service runs as, not a hardcoded one",
+      (rgu / "etc/sudoers.d/lenoxvi-dashboard-restart").read_text()
+      == f"botfriend ALL=(root) NOPASSWD: {HELPER_REAL}\n", out(r))
 
 # ── whole install.sh, dry-run: fresh box vs an installed box ─────────────
 INST = REPO / "scripts" / "install.sh"
@@ -464,6 +519,10 @@ unit = subprocess.run(["bash", "-c", f"source {SCRIPTS}/lib.sh; source {SCRIPTS}
 (done / "etc/systemd/system/lenoxvi.service").write_text(unit)
 (done / "usr/local/bin").mkdir(parents=True)
 os.symlink("/opt/lenoxvi/app/scripts/installer/lenoxvi", done / "usr/local/bin/lenoxvi")
+# an installed box has the dashboard restart grant too — the re-run below
+# must leave it exactly as it is
+(done / "etc/sudoers.d").mkdir(parents=True)
+sh(f"{UT}; LVI_DRY_RUN=0; install_restart_grant 192.0.2.10", done)
 r = install(done, "--source", str(src), "--host", "192.0.2.10", STUB_USER="yes", STUB_ACTIVE="yes",
             STUB_SS="LISTEN 0 1 0.0.0.0:7860 x users:((\\\"python\\\"))\\n")
 o = r.stdout
