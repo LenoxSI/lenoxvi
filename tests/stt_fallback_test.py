@@ -305,10 +305,10 @@ finally:
     sl._new_model, sl.LocalWhisperSTTService._shared_model = _saved_new, _saved_shared
 check("REAL: the cloud standby is Embedded Whisper — the service the switcher landed on loads base on the CPU (int8)",
       landed and type(_embedded) is sl.LocalWhisperSTTService
-      and [l[:3] for l in _emb_loads] == [(cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)],
+      and [rec[:3] for rec in _emb_loads] == [(cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)],
       f"landed={landed} loads={_emb_loads}")
 check("REAL: every Embedded Whisper load is pinned to the catalog's revision (the HF commit, not moving main)",
-      bool(_emb_loads) and all(l[3] == cat.EMBEDDED_REVISION for l in _emb_loads),
+      bool(_emb_loads) and all(rec[3] == cat.EMBEDDED_REVISION for rec in _emb_loads),
       f"revision={cat.EMBEDDED_REVISION} loads={_emb_loads}")
 
 if _dns_ok("api.deepgram.com"):
