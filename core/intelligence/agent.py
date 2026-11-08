@@ -92,7 +92,7 @@ _LAST_FILLER = ""
 
 
 # Intelligence calls get their own threads. A superseded or hung call can't
-# be cancelled (blocking urlopen, up to the 120 s timeout); on the shared
+# be cancelled (blocking urlopen, up to the request timeout); on the shared
 # default pool (cpu+4 threads) a pile of them starved wake-word scoring in
 # every room.
 _INTEL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="lvi-intel")
@@ -364,6 +364,11 @@ class IntelligenceAgent(FrameProcessor):
         # endpoint (Hermes, Anthropic, OpenClaw — forward-compatible
         # with the intelligence.kind arc). Config-gated per house law.
         self._max_tokens = int(cfg_env("intelligence", "max_tokens", "LVI_INTELLIGENCE_MAX_TOKENS", 300) or 300)
+        # Give-up line for one request: past this many seconds the call is
+        # abandoned and the user hears the took-too-long line, never the
+        # connect-failure apology. Default 120 s — the wait the request
+        # path hardcoded; a slow-but-working agent gets more rope here.
+        self._request_timeout = float(cfg_env("intelligence", "request_timeout_secs", "LVI_REQUEST_TIMEOUT_SECS", 120.0) or 120.0)
         # Turn-shape tunables — the knobs closest to conversation UX. Same
         # precedence as every other knob: config.yaml > LVI_* env > default.
         self._lull_secs = float(cfg_env("intelligence", "lull_secs", "LVI_LULL_SECS", lull_secs))
@@ -613,7 +618,7 @@ class IntelligenceAgent(FrameProcessor):
             headers=headers,
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with urllib.request.urlopen(req, timeout=self._request_timeout) as r:
                 data = json.loads(r.read())
         except urllib.error.HTTPError as e:
             # A lane may explain a refusal from the server's body (never

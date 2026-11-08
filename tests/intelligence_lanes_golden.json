@@ -30,7 +30,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -66,7 +66,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -102,7 +102,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -138,7 +138,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -174,7 +174,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -210,7 +210,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -238,7 +238,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -270,7 +270,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -298,7 +298,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/legacy-main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -330,7 +330,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/legacy-main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -358,7 +358,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -390,7 +390,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -418,7 +418,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -446,7 +446,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -474,7 +474,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\", \"model\": \"glm-5\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -502,7 +502,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\", \"model\": \"glm-5\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -538,7 +538,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -574,7 +574,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -610,7 +610,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -642,7 +642,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/kidbot\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -670,7 +670,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-room\", \"model\": \"glm-kids\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -706,7 +706,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -742,7 +742,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-room\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -774,7 +774,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -806,7 +806,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -838,7 +838,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -874,7 +874,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 10, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": [
@@ -912,7 +912,7 @@
      ]
     ],
     "body": "{\"model\": \"hermes-agent\", \"stream\": false, \"max_tokens\": 300, \"conversation\": \"voice-golden-fresh\", \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -936,7 +936,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -960,7 +960,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -984,7 +984,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -1012,7 +1012,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 10, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": [
@@ -1042,7 +1042,7 @@
      ]
     ],
     "body": "{\"model\": \"openclaw/main\", \"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"system\", \"content\": \"You are the house voice assistant, currently talking to the user over speakers. Replies are spoken aloud by TTS, so keep them SHORT \\u2014 one to three sentences, plain conversational English. No markdown, no bullet points, no emojis, no URLs. You have all your normal tools and memory; use them when asked, but never read out raw command output \\u2014 summarize it conversationally.\"}, {\"role\": \"user\", \"content\": \"earlier\"}, {\"role\": \"assistant\", \"content\": \"before\"}, {\"role\": \"user\", \"content\": \"hi\"}]}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": [
@@ -1068,7 +1068,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -1092,7 +1092,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -1116,7 +1116,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []
@@ -1144,7 +1144,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 10, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": [
@@ -1174,7 +1174,7 @@
      ]
     ],
     "body": "{\"stream\": false, \"max_tokens\": 300, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}], \"session_id\": \"voice-golden-fresh\"}",
-    "timeout": 120
+    "timeout": 120.0
    }
   ],
   "logs": []

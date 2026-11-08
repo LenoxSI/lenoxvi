@@ -125,6 +125,10 @@ intelligence:
   max_tokens: 300       # output cap: ~220 words ≈ 90s of speech. Guards
                         # against runaway replies (the 16k-token
                         # degenerate reply incident)
+  request_timeout_secs: 120.0  # seconds the bot waits for one intelligence reply
+                        # before giving up on it (default 120 — the wait the
+                        # request path hardcoded). A slow-but-working agent
+                        # gets more rope here.
   # zone: <room-name>  # conversation tag prefix: voice-<zone>-<id> (default "zone")
   lull_secs: 0.6        # silence after speech before the turn flushes to the
                         # intelligence; lower = snappier but risks clipping slow talkers

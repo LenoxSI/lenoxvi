@@ -266,6 +266,26 @@ def main():
     put_cfg(kind="bogus", url=HM)
     scenario("turn/unknown-kind", turn(), [chat_ok])
 
+    # ── request timeout knob ───────────────────────────────────────
+    # Read once at construction; the fake urlopen pins what the one
+    # call actually got — the default first, then the env override.
+    def turn_timeout():
+        config._load.cache_clear()
+        config._BOOT = None
+        a = ia.IntelligenceAgent(room="golden-room", session_mode="fresh",
+                                 room_resolver=lambda: "golden-room")
+        a._ask_intelligence("hi")
+        return NET.calls[-1]["timeout"]
+
+    NET.rules = [chat_ok]
+    put_cfg(**turn_cfgs["hermes-default"])
+    t = turn_timeout()
+    check("request timeout: default 120", t == 120, f"timeout={t}")
+    os.environ["LVI_REQUEST_TIMEOUT_SECS"] = "45"
+    t = turn_timeout()
+    check("request timeout: LVI_REQUEST_TIMEOUT_SECS=45", t == 45, f"timeout={t}")
+    os.environ.pop("LVI_REQUEST_TIMEOUT_SECS", None)
+
     # ── intelligence_target ─────────────────────────────────────────
     kinds = ("hermes", "openclaw", "nanobot", "stub", "bogus", "")
     cfgs = [{}, {"agent": "legacy"}, {"agents": {"hermes": "default", "openclaw": "oc", "nanobot": "nb"}},
@@ -461,7 +481,7 @@ def main():
                     detail = f"{part} differs: got {json.dumps(got.get(part))[:300]} | want {json.dumps(golden[name].get(part))[:300]}"
                     break
         check(f"lanes golden: {name}", same, detail)
-    print(f"{len(FAILS)} failed of {len(golden) + 1}")
+    print(f"{len(FAILS)} failed of {len(golden) + 3}")
     return 1 if FAILS else 0
 
 

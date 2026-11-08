@@ -17,6 +17,9 @@ The two version streams are independent.
   dev-only `requirements-dev.txt` pin (`ruff==0.17.4` — never the runtime venv); the AGENTS.md Commands
   block carries the bare `ruff check .`. The first sweep's fixes ride in the same change — imports placed
   below the path/env setup by design keep targeted `# noqa` marks. (#62)
+- Intelligence: the request timeout is a knob — `intelligence.request_timeout_secs` in config.yaml (env
+  `LVI_REQUEST_TIMEOUT_SECS`, default 120 s, the wait the request path hardcoded). A slow-but-working agent
+  gets more rope before the bot gives up on its reply. (#5)
 
 ### Changed
 - The read-only node status `GET /api/dashboard/nodes/<room>/info` no longer asks for the dashboard token:
