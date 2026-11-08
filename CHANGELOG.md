@@ -8,6 +8,12 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Added
+- TTS card, LocalAI chatterbox voices: an optional `localai.voices:` block in config.yaml (label -> reference-WAV
+  path on the LocalAI host) turns the chatterbox voice picker into a dropdown of the declared voices plus `default`
+  (the card stores the path; an undeclared stored value keeps the free-text input). Chatterbox has no preset
+  voices — a per-request voice is honored only as a reference-audio path. (#63)
+
 ### Fixed
 - Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the
   switch before asserting — the switcher flips its active service one event-loop hop before the fallback note

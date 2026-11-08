@@ -1123,6 +1123,10 @@ _LOCALAI_POCKET_VOICES = (
 # most accepted voices unpickable and a configured aura-2-zeus-en
 # couldn't even display. One catalog, one owner.
 # "pocket" is not a provider: it is LocalAI's pocket-tts voice list.
+# "chatterbox" is not hardcoded: LocalAI's chatterbox backend takes
+# voices as per-request reference-WAV paths and nothing about LocalAI
+# enumerates them, so get_tts adds the labels declared under
+# localai.voices ("default" first), read fresh per request.
 TTS_CATALOG = {
     "elevenlabs": list(_ELEVENLABS_MODELS),
     "deepgram": list(_DEEPGRAM_VOICES),
@@ -1237,6 +1241,9 @@ async def get_tts():
     tts_cfg = config_store.read_section("tts") or {}
     kokoro_problem = tts_kokoro.setup_problem()
     localai_problem = _localai_problem()
+    # One read for the LocalAI fields below; config.yaml is re-read per
+    # GET, so a save or hand edit shows without a restart.
+    la = _localai_saved()
 
     def _cfg_env(key, env_var, default=None):
         # same precedence as core.config.cfg_env, on the fresh file read
@@ -1261,8 +1268,12 @@ async def get_tts():
         # None = unset in file and env = the bot's default (1.0). Kept None
         # so the card doesn't pin 1.0 into config on its next save.
         "kokoro_speed": _cfg_env("kokoro_speed", "LVI_TTS_KOKORO_SPEED"),
-        "localai_model_tts": _localai_saved()["model_tts"],
-        "localai_voice": _localai_saved()["voice"],
+        "localai_model_tts": la["model_tts"],
+        "localai_voice": la["voice"],
+        # The chatterbox picker's label -> reference-WAV map (the card
+        # offers the labels, stores the paths; "default" = the backend's
+        # own voice, "").
+        "chatterbox_voices": {"default": "", **la["voices"]},
         # First 4 characters of a set key, so a wrong key is recognisable.
         "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
         "localai_key_hint": intelligence_target.key_hint(_saved_env().get("LVI_LOCALAI_KEY")),
@@ -1273,8 +1284,10 @@ async def get_tts():
         "providers": _tts_providers(kokoro_problem, localai_problem),
         # The accepted values per provider — the UI's only source for its
         # pick-lists (elevenlabs = model ids; deepgram* and kokoro = voices;
-        # pocket = LocalAI's pocket-tts voices for the LocalAI voice picker).
-        "catalog": TTS_CATALOG,
+        # pocket = LocalAI's pocket-tts voices; chatterbox = the labels
+        # declared under localai.voices, "default" first, for the LocalAI
+        # voice picker).
+        "catalog": {**TTS_CATALOG, "chatterbox": ["default", *la["voices"]]},
     }
 
 
@@ -1624,9 +1637,10 @@ async def delete_key(var: str):
 
 
 # ── LocalAI (System — speech models on a LAN server) ──
-# The URL and model picks live in config.yaml (localai:), the key in .env
-# (LVI_LOCALAI_KEY, Keys card only). The client module is imported lazily so
-# this file stays light; nothing here installs or edits models on LocalAI.
+# The URL, model picks and the chatterbox voice registry (voices:) live in
+# config.yaml (localai:), the key in .env (LVI_LOCALAI_KEY, Keys card only).
+# The client module is imported lazily so this file stays light; nothing
+# here installs or edits models on LocalAI.
 
 _LOCALAI_URL_RE = re.compile(r"^https?://[A-Za-z0-9._-]+(:\d{1,5})?$")
 _LOCALAI_NAME = r"^[A-Za-z0-9._:/@+-]*$"
@@ -1640,11 +1654,21 @@ def _localai_saved() -> dict:
         v = sec.get(key)
         return v if v not in (None, "") else os.getenv(env, default)
 
+    # voices declares the chatterbox reference voices (label -> WAV path on
+    # the LocalAI host). Read defensively: only str->str pairs with a
+    # nonempty label survive — a config typo must not 500 the card.
+    declared = sec.get("voices")
+    voices = {}
+    if isinstance(declared, dict):
+        for label, path in declared.items():
+            if isinstance(label, str) and label and isinstance(path, str):
+                voices[label] = path
     return {"url": pick("url", "LVI_LOCALAI_URL") or None,
             "model_stt": str(pick("model_stt", "LVI_LOCALAI_MODEL_STT") or ""),
             "model_tts": str(pick("model_tts", "LVI_LOCALAI_MODEL_TTS") or ""),
             "voice": str(pick("voice", "LVI_LOCALAI_VOICE") or ""),
-            "speed": pick("speed", "LVI_LOCALAI_SPEED", None)}
+            "speed": pick("speed", "LVI_LOCALAI_SPEED", None),
+            "voices": voices}
 
 
 def _localai_problem() -> str | None:

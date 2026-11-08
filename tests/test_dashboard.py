@@ -691,6 +691,12 @@ def main():
               and len(_cat.get("pocket", [])) == 21
               and len(_cat.get("kokoro", [])) == 28,
               str({k: len(v) for k, v in _cat.items()}))
+        # The rig's config declares no localai.voices, so the chatterbox
+        # picker list is just the backend's own default.
+        check("chatterbox: no localai.voices in config -> GET /tts catalog.chatterbox is just ['default']",
+              _cat.get("chatterbox") == ["default"], str(_cat.get("chatterbox")))
+        check("chatterbox: no localai.voices in config -> GET /tts chatterbox_voices maps only default to ''",
+              t.get("chatterbox_voices") == {"default": ""}, str(t.get("chatterbox_voices")))
         from dashboard import routes as _routes_m1
         import tts_kokoro as _tk_m1
         _m1_kavail = _tk_m1.kokoro_available
@@ -703,6 +709,10 @@ def main():
                 try:
                     if _prov == "pocket":
                         # LocalAI's pocket-tts presets ride PUT /localai's voice, not a TTS provider.
+                        _routes_m1.LocalAIPayload(voice=_v)
+                        continue
+                    if _prov == "chatterbox":
+                        # Same ride-along: LocalAI's chatterbox voices are reference paths, not a TTS provider.
                         _routes_m1.LocalAIPayload(voice=_v)
                         continue
                     if _prov == "elevenlabs":
@@ -719,7 +729,7 @@ def main():
         _tk_m1.kokoro_available = _m1_kavail
         _tk_m1._files_problem = _m1_kfiles
         check("every catalog entry passes the server's own TTS validation",
-              not _m1_bad and sum(len(v) for v in _cat.values()) == 127, f"bad={_m1_bad[:3]}")
+              not _m1_bad and sum(len(v) for v in _cat.values()) == 128, f"bad={_m1_bad[:3]}")
         check("localai card: GET /tts catalog.pocket = LocalAI pocket-tts's 21 presets, alba first (its voice picker's list)",
               (_cat.get("pocket") or [None])[0] == "alba" and len(_cat.get("pocket") or []) == 21, str(_cat.get("pocket")))
     r = client.put("/api/dashboard/tts", json={
@@ -1261,6 +1271,41 @@ def main():
         check("restart pending: a LocalAI change lists 'localai' while a card uses LocalAI, never before",
               "localai" in _la_pending(_laB, _laS) and "localai" not in _la_pending(_laN, _laN2)
               and "localai" not in _la_pending(_laB, _laB), f"{_la_pending(_laB, _laS)} {_la_pending(_laN, _laN2)}")
+        # Chatterbox voices: localai.voices declares the reference WAVs
+        # (label -> path on the LocalAI host); the card offers the labels
+        # and stores the paths. Odd shapes drop silently — a config typo
+        # must not 500 the card.
+        config_store.write_section("localai", {**(config_store.read_section("localai") or {}),
+                                               "voices": {"Mom": "/refs/mom.wav", "Narrator": "/refs/narr.wav",
+                                                          "": "/refs/dropped.wav", "Odd": 7,
+                                                          "Wrong": ["/refs/x.wav"]}})
+        t = client.get("/api/dashboard/tts").json()
+        check("chatterbox: GET /tts lists 'default' plus the declared labels, in declared order (odd shapes dropped)",
+              (t.get("catalog") or {}).get("chatterbox") == ["default", "Mom", "Narrator"],
+              str((t.get("catalog") or {}).get("chatterbox")))
+        check("chatterbox: GET /tts serves the label->path map ('default' = the backend's own voice, '')",
+              t.get("chatterbox_voices") == {"default": "", "Mom": "/refs/mom.wav", "Narrator": "/refs/narr.wav"},
+              str(t.get("chatterbox_voices")))
+        _cb_bad = []
+        _cb_offered = (t.get("catalog") or {}).get("chatterbox") or []
+        _cb_offered += list((t.get("chatterbox_voices") or {}).values())
+        for _v in _cb_offered:
+            try:
+                _rLAP.LocalAIPayload(voice=_v)
+            except Exception as _e:
+                _cb_bad.append((_v, str(_e)[:40]))
+        check("chatterbox: every offered label and path passes the localai PUT's own voice validation",
+              not _cb_bad, f"bad={_cb_bad[:3]}")
+        r = client.put("/api/dashboard/localai", json={"voice": "/refs/mom.wav"})
+        t = client.get("/api/dashboard/tts").json()
+        check("chatterbox: a stored reference path round-trips through GET /tts untouched",
+              r.status_code == 200 and t.get("localai_voice") == "/refs/mom.wav",
+              f"{r.status_code} {t.get('localai_voice')}")
+        config_store.write_section("localai", {**(config_store.read_section("localai") or {}), "voices": {}})
+        t = client.get("/api/dashboard/tts").json()
+        check("chatterbox: an empty voices block lists just 'default'",
+              (t.get("catalog") or {}).get("chatterbox") == ["default"]
+              and t.get("chatterbox_voices") == {"default": ""}, str(t.get("chatterbox_voices")))
         check("localai card: GET /tts says nothing is missing for LocalAI",
               any(p.get("name") == "localai" and p.get("available") is True
                   for p in client.get("/api/dashboard/tts").json().get("providers") or []))
@@ -7032,7 +7077,7 @@ def main():
         _TTS_FIELDS = {"provider", "voice_id", "model", "deepgram_voice", "deepgram_flux_voice", "deepgram_flux_speed",
                        "deepgram_flux_expressivity", "elevenlabs_speed", "elevenlabs_stability",
                        "elevenlabs_text_normalization", "kokoro_voice", "kokoro_speed", "localai_model_tts",
-                       "localai_voice",
+                       "localai_voice", "chatterbox_voices",
                        "elevenlabs_key_hint", "localai_key_hint",
                        "deepgram_key_hint", "tiers", "providers", "catalog"}
         _gT = client.get("/api/dashboard/tts").json()
