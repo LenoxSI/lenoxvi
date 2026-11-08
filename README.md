@@ -67,7 +67,7 @@ Local voices: `bash scripts/fetch_kokoro_models.sh` fetches Kokoro's model files
 
 Reply clips, uploaded wake models and firmware, and session history are written under the repo folder. Set `LVI_STATE_DIR` to keep them somewhere else.
 
-**Hey Jarvis** works out of the box. `/client` on the same host is a browser mic for a first test.
+**Hey Jarvis** works out of the box. `/client/` on the same host is a browser mic for a first test.
 
 ## Features
 

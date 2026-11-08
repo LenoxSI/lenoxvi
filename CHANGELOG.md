@@ -22,6 +22,8 @@ The two version streams are independent.
   a relative tolerance instead of an exact sha256 — neural TTS float output drifts across CPUs and onnxruntime builds,
   so the golden false-failed on every machine but the one that recorded it; the sha256 stays in the golden as an
   informational fingerprint, and the whisper transcript goldens remain exact. (#49)
+- Docs: the first-test browser mic the README and the `bot.py` docstring point at is `/client/`, trailing slash
+  included — pipecat serves it there, and the slashless `/client` the docs had returns 404. (#48)
 - Embedded and LocalAI speech-to-text: a question the turn closes over more than one speech stretch ("What about …
   Wednesday?") is transcribed once more, as one clip, before it is asked — a short tail stretch is no longer misheard
   with no context. Single-stretch turns are untouched, and a joint transcription that fails or is too slow asks with

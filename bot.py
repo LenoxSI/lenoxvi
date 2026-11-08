@@ -9,7 +9,7 @@ room's speaker. LocalAI and cloud speech always fall back to Embedded.
 
 Run on the appliance host from the repo root:
   ~/venvs/lenoxvi/bin/python bot.py
-Then open https://<bot-host-LAN-IP>:7860/client in a LAN browser
+Then open https://<bot-host-LAN-IP>:7860/client/ in a LAN browser
 (mic access needs the HTTPS secure context; certs via scripts/make-cert.sh).
 
 Secrets live in .env (see .env.example): the intelligence key, plus the key of
