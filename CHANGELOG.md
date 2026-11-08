@@ -28,6 +28,10 @@ The two version streams are independent.
   today's boards keep working. (#53)
 
 ### Fixed
+- Embedded speech-to-text: the Whisper base model is downloaded pinned to one Hugging Face commit
+  (`stt_catalog.EMBEDDED_REVISION`): the installer's up-front fetch and the bot's lazy load both pass the
+  revision, so an install always gets the same weights instead of whatever Systran/faster-whisper-base
+  currently serves — the last unpinned download, and the commit every install already had. (#51)
 - Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the
   switch before asserting — the switcher flips its active service one event-loop hop before the fallback note
   lands in status, so an immediate snapshot could miss the fallback and flake the check. (#50)

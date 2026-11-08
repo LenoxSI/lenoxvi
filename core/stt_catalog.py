@@ -24,6 +24,10 @@ TIER_NAMES = [t["name"] for t in TIERS]
 EMBEDDED_MODEL = "base"
 EMBEDDED_DEVICE = "cpu"
 EMBEDDED_COMPUTE = "int8"
+# The Hugging Face commit the model is downloaded from, so the model
+# repo's main moving can't quietly change the weights an install hears.
+# Keeps the download pinned like the installer's other fetches.
+EMBEDDED_REVISION = "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
 
 LANGUAGES = [
     {"code": "auto", "label": "Auto-detect"},

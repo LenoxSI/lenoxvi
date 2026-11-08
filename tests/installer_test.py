@@ -271,9 +271,11 @@ check("installer app: a new-enough system Python is used as is; packages come fr
       and _pip[0].endswith(f"--python {p}/opt/lenoxvi/venv/bin/python -r {p}/opt/lenoxvi/app/requirements.txt")
       and "requirements-gpu" not in r.stdout, out(r))
 r = sh("fetch_models", p)
-check("installer app: both speech models download up front as the service user, into its home",
+check("installer app: both speech models download up front as the service user, into its home; "
+      "the Whisper fetch is pinned to the catalog's revision",
       "runuser -u lenoxvi -- env HOME=/var/lib/lenoxvi" in r.stdout and EMB is not None
-      and "fetch_kokoro_models.sh" in r.stdout and f"download_model\\(\\'{EMB}\\'\\)" in r.stdout
+      and "fetch_kokoro_models.sh" in r.stdout and "download_model\\(stt_catalog.EMBEDDED_MODEL" in r.stdout
+      and "revision=stt_catalog.EMBEDDED_REVISION\\)" in r.stdout
       and f"speech model (Whisper {EMB}): ready" in r.stdout, out(r))
 
 # ── questions + keyless state ────────────────────────────────────────────
@@ -486,7 +488,8 @@ check("installer dry-run: a machine with an NVIDIA GPU installs exactly like one
       and "requirements-gpu" not in r_gpu.stdout
       and "gpu" not in out(r_gpu).replace(str(p_gpu), "PFX").replace(str(TMP), "TMP").lower()  # random dir names
       and "speech: Embedded (Whisper base + Kokoro)" in r_gpu.stdout and EMB is not None
-      and f"download_model\\(\\'{EMB}\\'\\)" in r_gpu.stdout
+      and "download_model\\(stt_catalog.EMBEDDED_MODEL" in r_gpu.stdout
+      and "revision=stt_catalog.EMBEDDED_REVISION\\)" in r_gpu.stdout
       and "ExecStart=" in u_gpu and not any(w in u_gpu.lower() for w in ("ld_library_path", "nvidia", "cuda")),
       out(r_gpu)[-600:] + u_gpu[-300:])
 r = install(make_prefix(), "--stt", "gpu")

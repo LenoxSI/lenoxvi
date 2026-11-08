@@ -40,7 +40,7 @@ from pathlib import Path  # noqa: E402
 import stt_local as sl  # noqa: E402
 import stt_localai as sla  # noqa: E402
 
-EMBEDDED = (cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)
+EMBEDDED = (cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE, cat.EMBEDDED_REVISION)
 _ctor = inspect.signature(sl.LocalWhisperSTTService.__init__).parameters
 check("stt: LocalWhisperSTTService takes no model, device or compute_type (Embedded Whisper is fixed)",
       not ({"model", "device", "compute_type"} & set(_ctor)), str(list(_ctor)))
@@ -99,8 +99,8 @@ _real_new = sl._new_model
 LOADS = []
 
 
-def _boom(model, device, compute):
-    LOADS.append((model, device, compute))
+def _boom(model, device, compute, revision):
+    LOADS.append((model, device, compute, revision))
     raise RuntimeError("model.bin is unreadable")
 
 
@@ -121,7 +121,7 @@ class _WarmupBoom(_FakeModel):
         raise RuntimeError("warm-up transcribe failed")
 
 
-sl._new_model = lambda model, device, compute: _WarmupBoom()
+sl._new_model = lambda model, device, compute, revision: _WarmupBoom()
 raised = False
 try:
     sl.preload_shared_model()
@@ -136,8 +136,8 @@ _saved_env = {k: os.environ.get(k) for k in _STT_ENV}
 os.environ.update(dict(zip(_STT_ENV, ("medium", "cuda", "float16"))))
 
 
-def _record(model, device, compute):
-    LOADS.append((model, device, compute))
+def _record(model, device, compute, revision):
+    LOADS.append((model, device, compute, revision))
     return _FakeModel()
 
 

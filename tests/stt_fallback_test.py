@@ -297,7 +297,7 @@ class _FW:
 
 
 _saved_new, _saved_shared = sl._new_model, sl.LocalWhisperSTTService._shared_model
-sl._new_model = lambda model, device, compute: (_emb_loads.append((model, device, compute)), _FW())[1]
+sl._new_model = lambda model, device, compute, revision: (_emb_loads.append((model, device, compute, revision)), _FW())[1]
 sl.LocalWhisperSTTService._shared_model = None
 try:
     asyncio.run(_embedded.ensure_model())
@@ -305,8 +305,11 @@ finally:
     sl._new_model, sl.LocalWhisperSTTService._shared_model = _saved_new, _saved_shared
 check("REAL: the cloud standby is Embedded Whisper — the service the switcher landed on loads base on the CPU (int8)",
       landed and type(_embedded) is sl.LocalWhisperSTTService
-      and _emb_loads == [(cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)],
+      and [l[:3] for l in _emb_loads] == [(cat.EMBEDDED_MODEL, cat.EMBEDDED_DEVICE, cat.EMBEDDED_COMPUTE)],
       f"landed={landed} loads={_emb_loads}")
+check("REAL: every Embedded Whisper load is pinned to the catalog's revision (the HF commit, not moving main)",
+      bool(_emb_loads) and all(l[3] == cat.EMBEDDED_REVISION for l in _emb_loads),
+      f"revision={cat.EMBEDDED_REVISION} loads={_emb_loads}")
 
 if _dns_ok("api.deepgram.com"):
     badkey = DeepgramSTTService(api_key="definitely-not-a-key",

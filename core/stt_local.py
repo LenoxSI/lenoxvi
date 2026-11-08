@@ -113,15 +113,16 @@ def _reset_status_for_tests() -> None:
     _LAT_MS.clear()
 
 
-def _new_model(model: str, device: str, compute: str):
+def _new_model(model: str, device: str, compute: str, revision: str):
     """The one place a WhisperModel is constructed (patchable in tests)."""
     from faster_whisper import WhisperModel
-    return WhisperModel(model, device=device, compute_type=compute)
+    return WhisperModel(model, device=device, compute_type=compute, revision=revision)
 
 
-def _embedded() -> tuple[str, str, str]:
+def _embedded() -> tuple[str, str, str, str]:
     """The one Whisper this appliance runs: stt_catalog's Embedded model."""
-    return stt_catalog.EMBEDDED_MODEL, stt_catalog.EMBEDDED_DEVICE, stt_catalog.EMBEDDED_COMPUTE
+    return (stt_catalog.EMBEDDED_MODEL, stt_catalog.EMBEDDED_DEVICE,
+            stt_catalog.EMBEDDED_COMPUTE, stt_catalog.EMBEDDED_REVISION)
 
 
 def _live_language():
@@ -175,13 +176,13 @@ def preload_shared_model() -> None:
         return
     import numpy as np
 
-    model, device, compute = _embedded()
+    model, device, compute, revision = _embedded()
     t0 = time.monotonic()
     before = _rss_mb()
     logger.info(f"stt_local: preloading faster-whisper {model} on {device} ({compute}) at startup")
     _set_status("loading", model, compute)
     try:
-        m = _new_model(model, device, compute)
+        m = _new_model(model, device, compute, revision)
         # Warm-up: the first encode sets up the decoder — do it now, not
         # inside someone's first question. 1 s of silence, result discarded.
         # Inside the try: a warm-up that fails must show as an error on the
@@ -241,11 +242,12 @@ class LocalWhisperSTTService(BaseWhisperSTTService):
             if LocalWhisperSTTService._shared_model is not None:
                 self._fw_model = LocalWhisperSTTService._shared_model
                 return
-            model, device, compute = _embedded()
+            model, device, compute, revision = _embedded()
             logger.info(f"Loading faster-whisper {model} on {device} ({compute})")
             _set_status("loading", model, compute)
             try:
-                LocalWhisperSTTService._shared_model = await asyncio.to_thread(_new_model, model, device, compute)
+                LocalWhisperSTTService._shared_model = await asyncio.to_thread(
+                    _new_model, model, device, compute, revision)
             except Exception as e:
                 _set_status("error", model, compute, error=f"{type(e).__name__}: {e}"[:300])
                 raise

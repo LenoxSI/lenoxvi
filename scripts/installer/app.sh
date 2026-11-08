@@ -98,7 +98,7 @@ fetch_models() {
   _as_user bash "$LVI_APP_REAL/scripts/fetch_kokoro_models.sh" || die "couldn't download the Kokoro voice model (see above)"
   ok "voice model (Kokoro): ready"
   _as_user "$LVI_VENV_REAL/bin/python" -c \
-    "import faster_whisper as f; f.download_model('base')" \
+    "import sys; sys.path.insert(0, '$LVI_APP_REAL/core'); import stt_catalog; import faster_whisper as f; f.download_model(stt_catalog.EMBEDDED_MODEL, revision=stt_catalog.EMBEDDED_REVISION)" \
     || warn "couldn't download the Whisper base speech model now — the bot will fetch it on first start"
   ok "speech model (Whisper base): ready"
 }
