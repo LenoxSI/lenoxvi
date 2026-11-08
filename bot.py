@@ -16,7 +16,7 @@ Secrets live in .env (see .env.example): the intelligence key, plus the key of
 any cloud speech provider you pick. Embedded speech needs none.
 """
 
-import asyncio
+import asyncio  # noqa: F401 — unused; hot-path file, left for the owner
 import os
 import sys
 import threading
@@ -34,32 +34,34 @@ from dotenv import load_dotenv
 
 load_dotenv(_paths.env_file())
 
-import log_setup
+# Imports below need the path insert, .env load and log setup above — each
+# carries E402 for that order.
+import log_setup  # noqa: E402
 
 log_setup.configure()  # logging.level (default INFO) before anything else logs
 
-from intelligence.stub import StubIntelligence
-from echo_gate import EchoGate
-from intelligence.agent import IntelligenceAgent
-import intelligence as intelligence_lanes
-from sonos_output import SonosOutput
-from wiim_output import WiiMOutput
-from stt_local import LocalWhisperSTTService
-from wake_word import WakeWordFilter
-import keys_catalog
-import tts_text
-import webrtc_compat
+from intelligence.stub import StubIntelligence  # noqa: E402
+from echo_gate import EchoGate  # noqa: E402
+from intelligence.agent import IntelligenceAgent  # noqa: E402
+import intelligence as intelligence_lanes  # noqa: E402
+from sonos_output import SonosOutput  # noqa: E402
+from wiim_output import WiiMOutput  # noqa: E402
+from stt_local import LocalWhisperSTTService  # noqa: E402
+from wake_word import WakeWordFilter  # noqa: E402
+import keys_catalog  # noqa: E402
+import tts_text  # noqa: E402
+import webrtc_compat  # noqa: E402
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.processors.audio.vad_processor import VADProcessor
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.audio.vad.silero import SileroVADAnalyzer  # noqa: E402
+from pipecat.processors.audio.vad_processor import VADProcessor  # noqa: E402
+from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
+from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
 # PipelineTask/PipelineParams (pipecat.pipeline.task) are deprecated aliases,
 # removed in pipecat 2.0 — import the real names from pipeline.worker.
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.runner.utils import create_transport
-from pipecat.runner.types import RunnerArguments
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker  # noqa: E402
+from pipecat.runner.utils import create_transport  # noqa: E402
+from pipecat.runner.types import RunnerArguments  # noqa: E402
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService  # noqa: E402
 try:
     from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 except ImportError:  # older pipecat without the Text-to-Dialogue service
@@ -72,8 +74,8 @@ except ImportError:  # older pipecat without the Deepgram services
     DeepgramTTSService = None
     DeepgramFluxTTSService = None
     _DEEPGRAM_OK = False
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.transports.base_transport import TransportParams  # noqa: E402
+from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport  # noqa: E402
 
 # pipecat 1.13's MAX_BUNDLE answers carry no ICE candidates, which the ESP32
 # nodes (no trickle ICE) can't connect with — restore aiortc's default policy
