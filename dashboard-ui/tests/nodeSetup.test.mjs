@@ -11,12 +11,25 @@ test('contract: the frozen API is exported', () => {
   assert.equal(ns.PROTO, 1)
   assert.deepEqual(ns.SETTINGS_REGION, [0x9000, 0x10000])
   assert.deepEqual(ns.TRACKS, ['array', 'flex', 'waveshare'])
+  assert.deepEqual(ns.REPLY_MARKERS, ['OH<', 'LVI<'])
 })
 
 test('parseReplyLine finds OH< inside a log line and ignores everything else', () => {
   assert.deepEqual(parseReplyLine('I (12) wifi: connOH<{"cmd":"info","ok":true}'), { cmd: 'info', ok: true })
   assert.equal(parseReplyLine('I (12) wifi: connected'), null)
   assert.equal(parseReplyLine('OH<{broken'), null)
+})
+
+test('parseReplyLine takes the new LVI< marker too; with both markers, the leftmost valid one wins', () => {
+  assert.deepEqual(parseReplyLine('I (12) wifi: connLVI<{"cmd":"info","ok":true}'), { cmd: 'info', ok: true })
+  assert.equal(parseReplyLine('LVI<{broken'), null)
+  assert.equal(parseReplyLine('LVI<[1,2]'), null) // JSON, but not an object
+  // one line, both markers: the earliest hit whose tail is JSON wins, whatever its marker
+  assert.deepEqual(parseReplyLine('log LVI<{"seen":"OH<"}'), { seen: 'OH<' })
+  assert.deepEqual(parseReplyLine('log OH<{"seen":"LVI<"}'), { seen: 'LVI<' })
+  assert.deepEqual(parseReplyLine('OH<{broken LVI<{"cmd":"info","ok":true}'), { cmd: 'info', ok: true })
+  assert.deepEqual(parseReplyLine('LVI<{broken OH<{"a":1}'), { a: 1 })
+  assert.deepEqual(parseReplyLine('OH<{xOH<{"a":1}'), { a: 1 }) // every occurrence of a marker is tried
 })
 
 test('validateSettings mirrors the firmware rules', () => {
@@ -72,7 +85,7 @@ test('checkManifest refuses another line, the settings region, and incomplete se
 // ── fakes ────────────────────────────────────────────────────────────────
 
 const enc = new TextEncoder()
-const reply = (obj) => `\nOH<${JSON.stringify(obj)}\n`
+const reply = (obj, marker = 'OH<') => `\n${marker}${JSON.stringify(obj)}\n`
 const INFO = {
   cmd: 'info', ok: true, proto: 1, track: 'flex', fw: '1.2.47', mac: 'aa:bb:cc:dd:ee:ff', name: 'Kitchen',
   wifi_ssid: 'Maple', bot_url: 'https://192.0.2.10:7860/api/offer', bot_url_saved: true, link: 'bot', ip: '192.0.2.21', up_s: 5,
@@ -209,6 +222,13 @@ test('replies are routed by id; stray and foreign replies are ignored', async ()
     reply({ ...INFO, id: req.id }),
   ])
   assert.equal((await link.info({ timeoutMs: 2000 })).track, 'flex')
+  await link.close()
+})
+
+test('a node answering in the new LVI< marker sets up through the link; requests stay OH>', async () => {
+  const { port, link } = await openLink((req) => [reply({ ...INFO, id: req.id }, 'LVI<')])
+  assert.equal((await link.info({ timeoutMs: 1000 })).track, 'flex')
+  assert.ok(port.written.every((w) => w.startsWith('\nOH>')), 'this release still asks with OH>')
   await link.close()
 })
 

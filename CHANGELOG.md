@@ -22,6 +22,10 @@ The two version streams are independent.
 - The read-only node status `GET /api/dashboard/nodes/<room>/info` no longer asks for the dashboard token:
   read routes are open by law (`/status` and `/mapping` already are), so the Nodes table's mute state and
   details load without one. Every mutating route keeps its token check. (#54)
+- Node setup over USB: the page reads node replies in both markers, the old `OH<` and the new `LVI<`, and
+  keeps sending its requests as `OH>` until firmware parses the new pair. The first step of the setup
+  marker rename: firmware that starts answering `LVI<` sets up through this dashboard unchanged, and
+  today's boards keep working. (#53)
 
 ### Fixed
 - Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the

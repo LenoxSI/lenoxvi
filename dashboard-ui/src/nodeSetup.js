@@ -41,11 +41,20 @@ export function hostOfferUrl(origin) {
   return origin.replace(/\/+$/, '') + '/api/offer'
 }
 
-/** Parse a reply out of one received line ('OH<' anywhere); null when there is none. */
+/** Reply markers a node's answers may carry: the old `OH<` and the new `LVI<`. Both are parsed
+ *  while firmware moves to the new marker; a later release drops the old one. */
+export const REPLY_MARKERS = ['OH<', 'LVI<']
+
+/** Parse a reply out of one received line (a reply marker anywhere in it): the leftmost marker
+ *  whose tail parses as a JSON object wins; null when there is none. */
 export function parseReplyLine(line) {
-  for (let i = line.indexOf('OH<'); i >= 0; i = line.indexOf('OH<', i + 1)) {
+  const hits = []
+  for (const m of REPLY_MARKERS) {
+    for (let i = line.indexOf(m); i >= 0; i = line.indexOf(m, i + 1)) hits.push([i, m])
+  }
+  for (const [i, m] of hits.sort((a, b) => a[0] - b[0])) {
     try {
-      const v = JSON.parse(line.slice(i + 3))
+      const v = JSON.parse(line.slice(i + m.length))
       if (v && typeof v === 'object' && !Array.isArray(v)) return v
     } catch { /* not a reply from here; try the next marker */ }
   }
