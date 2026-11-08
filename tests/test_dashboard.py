@@ -9907,14 +9907,22 @@ def main():
           "Kokoro as its stand-in",
           "{tierOptions(tts?.tiers || LOADING_TIERS," in _ws(_laVo)
           and "If LocalAI is down: Kokoro on this appliance." in _laVo)
-    check("localai ui: the TTS card never shows a model it isn't holding ('pick a model'), and Save refuses an empty model or voice",
+    check("localai ui: the TTS card never shows a model it isn't holding ('pick a model'), and Save refuses an empty "
+          "model or preset voice — chatterbox's 'default' entry stores '' (the backend's own)",
           "{provider === 'localai' && !model && options.length > 0 && <option value=\"\" disabled>pick a model</option>}" in _laVo
           and "if (!model) { say('Pick a LocalAI voice model first.', 'err', 'TTS'); return false }" in _laVo
-          and "if (laVoices && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }" in _laVo)
-    check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, else free text)",
-          "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null" in _laVo
-          and "laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw" in _laVo
+          and "if (laVoices && laBackend !== 'chatterbox' && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }" in _laVo)
+    check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, "
+          "Chatterbox's declared reference voices, else free text)",
+          "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : laBackend === 'chatterbox' ? (catalog.chatterbox || []) : null" in _ws(_laVo)
+          and "laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw.startsWith('chatterbox') ? 'chatterbox' : laRaw" in _ws(_laVo)
           and 'id="tts-localai-voice"' in _laVo)
+    check("localai ui: the chatterbox picker shows the declared labels but stores their reference paths; an "
+          "undeclared stored value keeps the free-text input (never silently blanked)",
+          "const laVoicePaths = laBackend === 'chatterbox' ? (tts?.chatterbox_voices || null) : null" in _ws(_laVo)
+          and "Object.values(laVoicePaths).includes(laVoice)" in _ws(_laVo)
+          and "value={laBackend === 'chatterbox' ? laVoicePaths[v] : v}" in _ws(_laVo)
+          and "laBackend !== 'chatterbox' && !laVoices.includes(laVoice)" in _ws(_laVo))
     check("localai ui: the STT card's LocalAI model saves on the LocalAI route, never inside the /stt body",
           "body.la_model = laModel" in _laSt and "delete body.la_model" in _laSt
           and "api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })" in _laSt

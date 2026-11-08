@@ -2626,13 +2626,24 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const kokoroSpeed = t.val('kokoro_speed') ?? 1.0
   const laVoice = t.val('la_voice') || ''
   // LocalAI: its voice models come from the server; the voice list follows
-  // the backend that runs the picked model (Kokoro / Pocket presets, else
-  // free text).
+  // the backend that runs the picked model (Kokoro / Pocket presets,
+  // Chatterbox's declared reference voices, else free text).
   const laFound = useLocalAIModels(provider === 'localai')
-  // LocalAI names backends its own way ('pocket-tts', 'kokoro'): match the family.
+  // LocalAI names backends its own way ('pocket-tts', 'kokoro', 'chatterbox'): match the family.
   const laRaw = String((laFound?.tts || []).find(m => m.id === model)?.backend || '').toLowerCase()
-  const laBackend = laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw
-  const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || []) : null
+  const laBackend = laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket'
+    : laRaw.startsWith('chatterbox') ? 'chatterbox' : laRaw
+  const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || [])
+    : laBackend === 'pocket' ? (catalog.pocket || [])
+    : laBackend === 'chatterbox' ? (catalog.chatterbox || []) : null
+  // Chatterbox has no preset voices: each entry is a label standing for a
+  // reference-WAV path on the LocalAI host (the stored value), and
+  // 'default' = '' = the backend's own voice.
+  const laVoicePaths = laBackend === 'chatterbox' ? (tts?.chatterbox_voices || null) : null
+  // A stored value the map doesn't declare keeps the free-text input —
+  // visible and editable, never silently blanked.
+  const laVoiceDropdown = laVoices && (laBackend !== 'chatterbox'
+    || (laVoicePaths && Object.values(laVoicePaths).includes(laVoice)))
   // What Save sends for this provider, so the count matches the save.
   // Kokoro's voice and speed count on every tier.
   const ttsFields = ['provider', `model:${provider}`,
@@ -2673,9 +2684,11 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
     } else if (provider === 'kokoro') {
       body.kokoro_voice = kokoroVoice
     } else if (provider === 'localai') {
-      // An empty pick would leave every reply on the Kokoro fallback.
+      // An empty pick would leave every reply on the Kokoro fallback —
+      // except chatterbox, whose 'default' entry stores '' (the
+      // backend's own voice).
       if (!model) { say('Pick a LocalAI voice model first.', 'err', 'TTS'); return false }
-      if (laVoices && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }
+      if (laVoices && laBackend !== 'chatterbox' && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }
     }
     // Kokoro's voice and speed ride with every provider: the voice on
     // Embedded, the standby's voice on LocalAI and Cloud. Off Embedded the
@@ -2727,11 +2740,12 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
               {options.map(v => <option key={v} value={v}>{ttsLabel(v)}</option>)}
             </select>}
             {provider === 'localai' && <span className="text-[12px] font-medium text-[var(--muted)]">Voice</span>}
-            {provider === 'localai' && (laVoices
+            {provider === 'localai' && (laVoiceDropdown
               ? <select id="tts-localai-voice" className={`${INPUT_CLS} w-[200px]`} value={laVoice}
                   onChange={e => t.set({ la_voice: e.target.value })} aria-label="LocalAI voice">
-                  {!laVoices.includes(laVoice) && <option value={laVoice} disabled>{laVoice || 'pick a voice'}</option>}
-                  {laVoices.map(v => <option key={v} value={v}>{laBackend === 'kokoro' ? kokoroLabel(v) : v}</option>)}
+                  {laBackend !== 'chatterbox' && !laVoices.includes(laVoice) &&
+                    <option value={laVoice} disabled>{laVoice || 'pick a voice'}</option>}
+                  {laVoices.map(v => <option key={v} value={laBackend === 'chatterbox' ? laVoicePaths[v] : v}>{laBackend === 'kokoro' ? kokoroLabel(v) : v}</option>)}
                 </select>
               : <input id="tts-localai-voice" value={laVoice} onChange={e => t.set({ la_voice: e.target.value })}
                   placeholder="Voice name" className={`${INPUT_CLS} w-[200px] font-mono`} aria-label="LocalAI voice" />)}
