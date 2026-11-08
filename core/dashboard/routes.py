@@ -1731,7 +1731,11 @@ async def put_localai(payload: LocalAIPayload):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logger.info("dashboard: localai settings saved — applies on next restart")
-    return {"ok": True, **_localai_saved()}
+    s = _localai_saved()
+    # The write response keeps its documented shape — the voice registry is
+    # GET /tts's to serve, not a side effect of saving.
+    s.pop("voices", None)
+    return {"ok": True, **s}
 
 
 @router.post("/localai/test", dependencies=GUARD)
