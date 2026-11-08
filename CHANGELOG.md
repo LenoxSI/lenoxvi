@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Fixed
+- Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the
+  switch before asserting — the switcher flips its active service one event-loop hop before the fallback note
+  lands in status, so an immediate snapshot could miss the fallback and flake the check. (#50)
 - Tests: the kokoro PCM golden in `localai_golden_test.py` compares signal statistics (sample count, RMS, peak) with
   a relative tolerance instead of an exact sha256 — neural TTS float output drifts across CPUs and onnxruntime builds,
   so the golden false-failed on every machine but the one that recorded it; the sha256 stays in the golden as an

@@ -15,6 +15,8 @@ import time
 CORE = sys.argv[1] if len(sys.argv) > 1 else "../core"
 sys.path.insert(0, CORE)
 FAILS = []
+# The fallback note reaches status one hop behind the switch: wait it out, don't snapshot the race.
+STATUS_SETTLE_BUDGET_S = 5.0
 
 
 def check(name, cond, detail=""):
@@ -227,6 +229,12 @@ def _dns_ok(host):
         return False
 
 
+def _fallback_visible(st):
+    """Exactly the fields the two 'visible in status' checks assert on."""
+    return (st.get("active") == "whisper" and st.get("fallback_rooms") == ["proof"]
+            and bool(st.get("fallback_reason")))
+
+
 async def _failover(dg, budget, provider="deepgram", feed=False, whisper=None):
     """feed: audio every 0.1 s while waiting (a room that is awake) — a
     service that connects on demand can't fail before it hears something.
@@ -251,6 +259,12 @@ async def _failover(dg, budget, provider="deepgram", feed=False, whisper=None):
         await asyncio.sleep(0.1)
     took = time.monotonic() - t0
     landed = switcher.strategy.active_service is whisper
+    if landed:
+        # The switch has landed; its status note may be one hop behind —
+        # poll for the fields the checks assert on, then snapshot.
+        t_settle = time.monotonic()
+        while time.monotonic() - t_settle < STATUS_SETTLE_BUDGET_S and not _fallback_visible(sf.status()):
+            await asyncio.sleep(0.05)
     st = sf.status()
     sf.close_stt_fallback(switcher)
     await task.queue_frame(EndFrame())
