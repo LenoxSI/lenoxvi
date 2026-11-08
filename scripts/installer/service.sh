@@ -41,8 +41,7 @@ render_restart_helper() {
 # restart button via sudo. It only schedules: the restart fires 2 s later
 # from a detached transient unit, after the dashboard's response has
 # completed.
-exec systemd-run --unit="lenoxvi-dash-restart-$(date +%s%3N)" -- \
-  bash -c 'sleep 2 && systemctl restart lenoxvi.service'
+exec systemd-run --unit="lenoxvi-dash-restart-$(date +%s%3N)" -- bash -c 'sleep 2 && systemctl restart lenoxvi.service'
 EOF
 }
 
