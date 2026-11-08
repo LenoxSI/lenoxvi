@@ -1,0 +1,2 @@
+# Dev-only — the Python lint gate; never install into the runtime venv (issue #62).
+ruff==0.17.4
