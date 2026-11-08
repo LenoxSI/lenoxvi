@@ -1020,7 +1020,7 @@ async def set_node_mute(room: str, payload: MutePayload):
     return reply  # {"ok": true, "data": {"muted": bool}}
 
 
-@router.get("/nodes/{room}/info", dependencies=GUARD)
+@router.get("/nodes/{room}/info")
 async def node_info(room: str):
     """Live node state: the dashboard refreshes its Mute
     button from the node's OWN answer — get_info returns muted (flex

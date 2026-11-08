@@ -3252,6 +3252,38 @@ def main():
                        json={"room_zones": {"bedroom": "Kitchen"}},
                        headers={"X-Dashboard-Token": "rig-secret"})
         check("guard: token mode, matching header passes", r.status_code == 200, f"status={r.status_code}")
+
+        # Read-routes-open law: node info is read-only status, so its GET
+        # carries no GUARD — a bare read answers in token mode, with the
+        # same body as a tokened one; neighboring node mutations keep
+        # their 401.
+        from dashboard import routes as _rt_info
+        registry.note_offer("suite-info-pc", "suite-info-probe")
+        registry.mark_connected("suite-info-pc")
+        _real_info_request = _rt_info.node_command.request
+
+        async def _fake_info_request(room, cmd, args=None, timeout=12.0):
+            if cmd == "get_info":
+                return {"ok": True, "data": {"name": room, "mac": "02:00:00:00:00:01",
+                                            "fw": "1.2.37", "muted": False}}
+            return await _real_info_request(room, cmd, args, timeout)
+
+        _rt_info.node_command.request = _fake_info_request
+        try:
+            r = client.get("/api/dashboard/nodes/suite-info-probe/info")
+            _bare_info = (r.status_code, r.json())
+            check("guard: token mode, bare node-info GET answers (read routes are open)",
+                  _bare_info[0] == 200 and _bare_info[1].get("data", {}).get("name") == "suite-info-probe",
+                  f"status={_bare_info[0]} body={str(_bare_info[1])[:140]}")
+            r = client.get("/api/dashboard/nodes/suite-info-probe/info",
+                           headers={"X-Dashboard-Token": "rig-secret"})
+            check("guard: token mode, node-info GET with the header answers the same",
+                  (r.status_code, r.json()) == _bare_info, f"status={r.status_code}")
+            r = client.post("/api/dashboard/nodes/suite-info-probe/restart")
+            check("guard: token mode, bare node restart still 401", r.status_code == 401,
+                  f"status={r.status_code}")
+        finally:
+            _rt_info.node_command.request = _real_info_request
     finally:
         del os.environ["LVI_DASHBOARD_TOKEN"]
 
@@ -8299,7 +8331,7 @@ def main():
           "liveZone(" in _sm and "const liveZone = z => z === BUILTIN || zoneNames.includes(z)" in _appsrc)
 
     _apib = _jsbody(_appsrc, "async function api(path, opts = {}, _retried = false) {")
-    check("dashboard ui: the node /info read may ask for the dashboard token (its route is guarded)",
+    check("dashboard ui: the node /info read still passes promptForToken (its route is open — the flag only acts on a 401)",
           "promptForToken" in _apib
           and _reui.search(r"nodes/\$\{encodeURIComponent\(room\)\}/info`, \{ promptForToken: true \}", _appsrc) is not None)
 

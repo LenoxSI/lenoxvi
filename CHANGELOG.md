@@ -14,6 +14,11 @@ The two version streams are independent.
   (the card stores the path; an undeclared stored value keeps the free-text input). Chatterbox has no preset
   voices — a per-request voice is honored only as a reference-audio path. (#63)
 
+### Changed
+- The read-only node status `GET /api/dashboard/nodes/<room>/info` no longer asks for the dashboard token:
+  read routes are open by law (`/status` and `/mapping` already are), so the Nodes table's mute state and
+  details load without one. Every mutating route keeps its token check. (#54)
+
 ### Fixed
 - Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the
   switch before asserting — the switcher flips its active service one event-loop hop before the fallback note
