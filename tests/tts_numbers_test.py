@@ -10,7 +10,8 @@ import sys
 CORE = sys.argv[1] if len(sys.argv) > 1 else "../core"
 sys.path.insert(0, os.path.abspath(CORE))
 
-import tts_numbers
+# E402 by design: tts_numbers needs the path insert above.
+import tts_numbers  # noqa: E402
 
 fails = 0
 

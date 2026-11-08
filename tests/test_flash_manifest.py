@@ -42,7 +42,8 @@ def build_dir(files=None, sizes=None):
     return d
 
 
-import flash_manifest
+# E402 by design: flash_manifest needs the scripts/ path insert above.
+import flash_manifest  # noqa: E402
 
 out = Path(tempfile.mkdtemp())
 try:

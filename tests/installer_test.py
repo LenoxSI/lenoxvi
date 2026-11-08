@@ -25,7 +25,8 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts" / "installer"
 sys.path.append(str(REPO / "core"))  # appended, never first: no core module may shadow a stdlib one
 # Pure data (no pipecat): the Embedded defaults the installer relies on.
-import stt_catalog
+# E402 by design: stt_catalog needs the sys.path.append above.
+import stt_catalog  # noqa: E402
 
 try:
     import tts_catalog

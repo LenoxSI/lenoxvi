@@ -20,7 +20,8 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-import stt_catalog as cat
+# E402 by design: the catalog needs the path insert above.
+import stt_catalog as cat  # noqa: E402
 
 # ── catalog ──────────────────────────────────────────────────────────
 codes = [lang["code"] for lang in cat.LANGUAGES]

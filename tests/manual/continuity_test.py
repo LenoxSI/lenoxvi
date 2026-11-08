@@ -17,7 +17,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 # URL from the same config surface the bot uses (config.yaml intelligence.url >
 # LVI_HERMES_URL env), not env-only — .env is secrets-only by rule.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "core"))
-from config import cfg_env
+# E402 by design: cfg_env needs the core path insert above.
+from config import cfg_env  # noqa: E402
 
 URL = cfg_env("intelligence", "url", "LVI_HERMES_URL", "http://localhost:8642/v1") + "/chat/completions"
 KEY = os.environ["LVI_HERMES_KEY"]

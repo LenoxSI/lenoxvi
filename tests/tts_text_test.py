@@ -8,7 +8,9 @@ import sys
 CORE = sys.argv[1] if len(sys.argv) > 1 else "../core"
 sys.path.insert(0, os.path.abspath(CORE))
 
-import tts_text
+# E402 by design: tts_text needs the path insert above; tempfile sits with
+# its section.
+import tts_text  # noqa: E402
 
 fails = 0
 
@@ -27,7 +29,7 @@ for v, want in [("on", "on"), ("ON", "on"), (" off ", "off"), ("auto", "auto"),
 
 # Through the real config loader: a bare `on` in config.yaml (the documented
 # spelling) must reach ElevenLabs as "on", not vanish as a YAML boolean.
-import tempfile
+import tempfile  # noqa: E402
 
 for raw, want in [("on", "on"), ("off", "off"), ('"on"', "on"), ("auto", "auto")]:
     with tempfile.TemporaryDirectory() as d:

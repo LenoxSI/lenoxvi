@@ -25,8 +25,9 @@ for k in list(os.environ):
     if k.startswith(("LVI_HERMES", "LVI_OPENCLAW", "LVI_NANOBOT", "LVI_INTELLIGENCE")):
         del os.environ[k]
 
-import config
-import intelligence.agent as ia
+# E402 by design: config needs the path insert + env cleanup above.
+import config  # noqa: E402
+import intelligence.agent as ia  # noqa: E402
 
 HM, OC = "http://hm.test:8642/v1", "http://oc.test:18789/v1"
 

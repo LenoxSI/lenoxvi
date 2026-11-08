@@ -17,9 +17,11 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-import keys_catalog
-import stt_catalog
-import tts_catalog
+# E402 by design: imports sit under the path/env setup and with their
+# sections throughout this file.
+import keys_catalog  # noqa: E402
+import stt_catalog  # noqa: E402
+import tts_catalog  # noqa: E402
 
 # ── catalogs ─────────────────────────────────────────────────────────
 check("speech tiers: three tiers in display order — Embedded, Local, Cloud (LocalAI is a Local provider)",
@@ -84,8 +86,8 @@ check("speech tiers: importing both catalogs loads no pipecat, Whisper or Kokoro
       _light.returncode == 0 and _light.stdout.strip() == "[]", (_light.stdout + _light.stderr)[-300:])
 
 # ── bot.py: Embedded STT is fixed (code only: ast.unparse, comments stripped) ──
-import ast
-from pathlib import Path
+import ast  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 _BOT_TREE = ast.parse((Path(CORE).resolve().parent / "bot.py").read_text())
 _BOT_SRC = ast.unparse(_BOT_TREE)
@@ -145,7 +147,7 @@ check("speech tiers: the cloud STT switcher wraps that one Embedded Whisper serv
       and "stt_fallback.wrap_stt_with_fallback(_cloud, stt, room=_room" in _RB_SRC, "")
 
 # ── bot.py: TTS tiers (code only) ────────────────────────────────────
-import tts_catalog
+import tts_catalog  # noqa: E402
 
 # The tts keys that stay (spec: config after). An allow-list, so the test never
 # has to spell a deleted key.
@@ -188,14 +190,14 @@ check("speech tiers: startup preloads Kokoro for every provider (only kokoro_ava
 # the real provider dispatch, the real TTS services and switcher. Only what
 # would load a model, open a socket or start a pipeline is stubbed in bot's
 # namespace; PipelineWorker(...) is the stop: it captures run_bot's locals.
-import asyncio
-import importlib.util
-import os
-import tempfile
-import types
+import asyncio  # noqa: E402
+import importlib.util  # noqa: E402
+import os  # noqa: E402
+import tempfile  # noqa: E402
+import types  # noqa: E402
 
-import numpy as np
-import yaml
+import numpy as np  # noqa: E402
+import yaml  # noqa: E402
 
 _REPO = Path(CORE).resolve().parent
 _SCRATCH = Path(tempfile.mkdtemp(prefix="speech-tiers-"))
@@ -210,13 +212,13 @@ if importlib.util.find_spec("kokoro_onnx") is None:  # pipecat's Kokoro module i
     _kk_mod.Kokoro = object
     sys.modules["kokoro_onnx"] = _kk_mod
 sys.path.insert(0, str(_REPO))
-import config
-import tts_fallback
-import tts_kokoro
-from loguru import logger
-from pipecat.pipeline.service_switcher import ServiceSwitcher
+import config  # noqa: E402
+import tts_fallback  # noqa: E402
+import tts_kokoro  # noqa: E402
+from loguru import logger  # noqa: E402
+from pipecat.pipeline.service_switcher import ServiceSwitcher  # noqa: E402
 
-import bot
+import bot  # noqa: E402
 
 config.CONFIG_PATH = str(_CFG)
 

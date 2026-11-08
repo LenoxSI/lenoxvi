@@ -37,10 +37,12 @@ for k in list(os.environ):
         del os.environ[k]
 os.environ["LVI_HERMES_KEY"] = "hm-key"
 
-import config
-from echo_gate import EchoGate
-from intelligence.agent import IntelligenceAgent
-from pipecat.frames.frames import (
+# E402 by design: config needs the path insert + env setup above; later
+# imports sit with their sections.
+import config  # noqa: E402
+from echo_gate import EchoGate  # noqa: E402
+from intelligence.agent import IntelligenceAgent  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     InputAudioRawFrame,
@@ -49,8 +51,8 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from wake_word import TurnState, WakeWordFilter
+from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
+from wake_word import TurnState, WakeWordFilter  # noqa: E402
 
 D = FrameDirection.DOWNSTREAM
 SILENCE = b"\x00" * 2560
@@ -247,7 +249,7 @@ for case, want_closed, want_turns in (
               "for tomorrow in Boston" not in " ".join(turns_j), str(turns_j))
 
 # ── segmented STT: a new stretch soon after the close continues the turn ─
-import intelligence.agent as _ia_cont
+import intelligence.agent as _ia_cont  # noqa: E402
 
 _ia_cont.CONTINUATION_WINDOW = 0.6
 async def cont_probe(case):
@@ -375,13 +377,13 @@ sent, spoken = asyncio.run(think_probe(with_led=False))
 check("agent: no LED bound (stub/tests) -> the turn still answers", spoken and spoken[-1] == "It is noon.", str(spoken))
 
 # ── long turns: the 30 s line, and a superseded running call reports late ─
-import threading
-from concurrent.futures import ThreadPoolExecutor
+import threading  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 
-import intelligence.agent as ia
-import yaml
-from loguru import logger
-from pipecat.frames.frames import CancelFrame
+import intelligence.agent as ia  # noqa: E402
+import yaml  # noqa: E402
+from loguru import logger  # noqa: E402
+from pipecat.frames.frames import CancelFrame  # noqa: E402
 
 REPO = Path(CORE).resolve().parent
 

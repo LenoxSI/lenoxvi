@@ -28,8 +28,9 @@ cfg_file = scratch / "config.yaml"
 cfg_file.write_text("wake:\n  name: Before\n")
 os.environ["LVI_CONFIG"] = str(cfg_file)
 
-import config
-import yaml
+# E402 by design: config reads the LVI_CONFIG set above.
+import config  # noqa: E402
+import yaml  # noqa: E402
 
 config.CONFIG_PATH = str(cfg_file)
 config._load.cache_clear()

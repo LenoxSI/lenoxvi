@@ -44,10 +44,11 @@ if importlib.util.find_spec("kokoro_onnx") is None:
     _kk_mod.Kokoro = object
     sys.modules["kokoro_onnx"] = _kk_mod
 
-import tts_fallback as tf
-import tts_kokoro as tk
-from pipecat.frames.frames import ErrorFrame, ManuallySwitchServiceFrame
-from pipecat.pipeline.service_switcher import (
+# E402 by design: these import under the fake kokoro_onnx installed above.
+import tts_fallback as tf  # noqa: E402
+import tts_kokoro as tk  # noqa: E402
+from pipecat.frames.frames import ErrorFrame, ManuallySwitchServiceFrame  # noqa: E402
+from pipecat.pipeline.service_switcher import (  # noqa: E402
     ServiceSwitcherStrategyFailover,
 )
 

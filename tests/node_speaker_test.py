@@ -19,8 +19,10 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-import node_speaker as ns
-from dashboard import node_command, registry
+# E402 by design: core/dashboard imports sit under the path insert above;
+# later ones sit with their sections.
+import node_speaker as ns  # noqa: E402
+from dashboard import node_command, registry  # noqa: E402
 
 # ── pure rules ───────────────────────────────────────────────────────
 check("speaker: reserved value is 'builtin'", ns.BUILTIN == "builtin")
@@ -180,13 +182,13 @@ finally:
     ns.sync_pc = _real_sync_pc
 
 # ── output stage: echo gate for builtin replies ──────────────────────
-import node_speaker_output as nso
-from pipecat.frames.frames import (
+import node_speaker_output as nso  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 
 
 class _Gate:
@@ -243,7 +245,7 @@ gate, _ = _run_reply(None)
 check("speaker: no zone (unmapped room): stage stays out of it", gate.blocks == [])
 
 # ── R-I5 speaker-only install (Sonos disabled): LEDs + wake gate follow the reply ──
-import sonos_output as _so
+import sonos_output as _so  # noqa: E402
 
 
 class _Led:
@@ -289,9 +291,9 @@ led, wg, ends = _sonos_disabled_reply(None)
 check("speaker: Sonos disabled, no builtin: unchanged (LED ends at once, no speech window)", ends == [0.0] and wg.speech == [])
 
 # ── speakers: a room with no speaker mapping stays silent until it is mapped ──
-import inspect
+import inspect  # noqa: E402
 
-import wiim_output as _wo_un
+import wiim_output as _wo_un  # noqa: E402
 
 
 def _unmapped_reply(zone, room="probe-room"):
@@ -342,16 +344,16 @@ check("speakers: a mapped Sonos room still plays (one speak task, speech window 
       len(_tasks) == 1 and _wg.speech == [1.0], f"tasks={len(_tasks)} speech={_wg.speech}")
 
 # ── bot wiring (source pins) ─────────────────────────────────────────
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
 _bot = (Path(CORE).parent / "bot.py").read_text()
 check("speaker: bot._reply_zone resolves through node_speaker", "node_speaker.resolve_zone(" in _bot)
-import re as _re
+import re as _re  # noqa: E402
 
 check("speaker: NodeSpeakerOutput sits in the pipeline after the backends, right before the transport output",
       _re.search(r"\n\s+wiim_out,\n\s+node_spk_out,\n\s+out,\n", _bot) is not None)
-import sonos_output
-import wiim_output
+import sonos_output  # noqa: E402
+import wiim_output  # noqa: E402
 
 check("speaker Sonos/WiiM: builtin is not theirs and isn't logged as a warning",
       "BUILTIN" in inspect.getsource(sonos_output) and "BUILTIN" in inspect.getsource(wiim_output))

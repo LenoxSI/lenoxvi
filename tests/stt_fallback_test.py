@@ -25,7 +25,9 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-import stt_catalog as cat
+# E402 by design: core/pipecat imports sit under the path/env setup and
+# with their sections.
+import stt_catalog as cat  # noqa: E402
 
 # ── catalog ──────────────────────────────────────────────────────────
 check("provider catalog: Whisper base first, then LocalAI, then Deepgram Nova-3, then ElevenLabs Scribe v2",
@@ -41,8 +43,8 @@ check("validate_provider: known ok, unknown refused",
       getattr(cat, "validate_provider", lambda p: "x")("deepgram") is None
       and "provider" in (cat.validate_provider("grok") or ""))
 
-import stt_fallback as sf
-import stt_local as sl
+import stt_fallback as sf  # noqa: E402
+import stt_local as sl  # noqa: E402
 
 # ── make_deepgram ────────────────────────────────────────────────────
 _saved_key = os.environ.pop("DEEPGRAM_API_KEY", None)
@@ -57,7 +59,7 @@ check("make_deepgram with a key: a DeepgramSTTService on nova-3, language mapped
 
 bad = [lang["code"] for lang in cat.LANGUAGES if sf.make_deepgram(lang["code"])[0] is None]
 check("make_deepgram: every card language builds a service (auto -> multi)", not bad, str(bad))
-import pipecat.services.deepgram.stt as _dgmod
+import pipecat.services.deepgram.stt as _dgmod  # noqa: E402
 
 _real_cls = _dgmod.DeepgramSTTService
 
@@ -94,7 +96,7 @@ sl.set_latency_mode("compute")
 sl._reset_status_for_tests()
 
 # ── SttTimer: VAD stop -> final transcript ───────────────────────────
-from pipecat.frames.frames import (
+from pipecat.frames.frames import (  # noqa: E402
     InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStoppedSpeakingFrame,
@@ -109,7 +111,7 @@ check("timer: interim transcripts don't stop the clock",
 ms = timer.observe(TranscriptionFrame("hello", "", "0"), now=10.35)
 check("timer: VAD stop -> final = 350 ms", ms is not None and abs(ms - 350) < 1, str(ms))
 check("timer: one measurement per stop", timer.observe(TranscriptionFrame("again", "", "0"), now=11.0) is None)
-from pipecat.frames.frames import VADUserStartedSpeakingFrame
+from pipecat.frames.frames import VADUserStartedSpeakingFrame  # noqa: E402
 
 timer.observe(VADUserStoppedSpeakingFrame(), now=20.0)
 timer.observe(VADUserStartedSpeakingFrame(), now=21.0)
@@ -204,11 +206,11 @@ async def _rec_closed():
 check("recover: stops when the session closes", asyncio.run(_rec_closed()) is False)
 
 # ── REAL failover proof ──────────────────────────────────────────────
-from pipecat.frames.frames import EndFrame
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.stt_service import STTService
+from pipecat.frames.frames import EndFrame  # noqa: E402
+from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
+from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
+from pipecat.pipeline.task import PipelineParams, PipelineTask  # noqa: E402
+from pipecat.services.stt_service import STTService  # noqa: E402
 
 
 class _FakeWhisper(STTService):
@@ -274,7 +276,7 @@ async def _failover(dg, budget, provider="deepgram", feed=False, whisper=None):
         await task.cancel()
     return landed, took, st
 
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService  # noqa: E402
 
 dead = DeepgramSTTService(api_key="junk", base_url="ws://127.0.0.1:9",
                           settings=DeepgramSTTService.Settings(model="nova-3", language="en"))
@@ -316,7 +318,7 @@ else:
     print("[SKIP] bad-key failover: no DNS for api.deepgram.com")
 
 # ── REAL: a key that stays bad -> recovery keeps Whisper (no flapping) ──
-from pipecat.frames.frames import InputAudioRawFrame
+from pipecat.frames.frames import InputAudioRawFrame  # noqa: E402
 
 
 def _audio():
@@ -368,7 +370,7 @@ else:
     print("[SKIP] bad-key recovery: no DNS for api.deepgram.com")
 
 # ── REAL: down -> Whisper hears; back -> switch back, ONLY Deepgram hears ──
-import websockets
+import websockets  # noqa: E402
 
 _srv_sock = socket.socket()
 _srv_sock.bind(("127.0.0.1", 0))
@@ -422,11 +424,11 @@ print(f"    (cycle: {r})")
 # ── ElevenLabs Scribe: same switcher, same recovery, the TTS key ─────
 # Never the real ElevenLabs service: dead local ports and a local fake
 # server only, and the recovery probe is replaced (no outbound TCP).
-import json
-import re
-import types
+import json  # noqa: E402
+import re  # noqa: E402
+import types  # noqa: E402
 
-from websockets.protocol import State
+from websockets.protocol import State  # noqa: E402
 
 _saved_el = os.environ.pop("ELEVENLABS_API_KEY", None)
 _saved_probes = (getattr(sf, "_probe_elevenlabs", None), sf._probe_deepgram)

@@ -33,9 +33,11 @@ Path(STATE, "clips").mkdir()
 REPO = Path(CORE).resolve().parent
 os.environ.setdefault("LVI_TEST_CONFIG", str(REPO / "tests" / "fixtures" / "config.yaml"))
 
-import sonos_output
-import wiim_output
-from pipecat.processors.frame_processor import FrameProcessor
+# E402 by design: the speakers need the path/env setup above; the later
+# block sits with its section.
+import sonos_output  # noqa: E402
+import wiim_output  # noqa: E402
+from pipecat.processors.frame_processor import FrameProcessor  # noqa: E402
 
 PLAYS = []
 
@@ -261,13 +263,13 @@ check("speaker: WiiM put back the music volume when the bot stopped during the p
       VOLS == [45, 20] and not _left_saved, f"vols={VOLS} saved_left={_left_saved}")
 
 # ── Sonos reply failures, bad config values, duck-holder recovery ───
-import uuid
+import uuid  # noqa: E402
 
-import lameenc  # noqa: F401 — the real encoder, put back after the broken-encoder probe
-import yaml
-from config import DEFAULT_CLIP_VOLUME
-from echo_gate import EchoGate
-from loguru import logger as _logger
+import lameenc  # noqa: F401, E402 — the real encoder, put back after the broken-encoder probe
+import yaml  # noqa: E402
+from config import DEFAULT_CLIP_VOLUME  # noqa: E402
+from echo_gate import EchoGate  # noqa: E402
+from loguru import logger as _logger  # noqa: E402
 
 LOGS = []
 _logger.add(lambda m: LOGS.append((m.record["level"].name, m.record["message"])), level="DEBUG")

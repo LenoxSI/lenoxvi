@@ -33,11 +33,13 @@ Path(STATE, "clips").mkdir()
 REPO = Path(CORE).resolve().parent
 os.environ.setdefault("LVI_TEST_CONFIG", str(REPO / "tests" / "fixtures" / "config.yaml"))
 
-import sonos_output
-import wiim_output
-from echo_gate import EchoGate
-from loguru import logger
-from pipecat.processors.frame_processor import FrameProcessor
+# E402 by design: the speakers need the path/env setup above; the
+# yaml/config pair sits with its section.
+import sonos_output  # noqa: E402
+import wiim_output  # noqa: E402
+from echo_gate import EchoGate  # noqa: E402
+from loguru import logger  # noqa: E402
+from pipecat.processors.frame_processor import FrameProcessor  # noqa: E402
 
 SRV = SimpleNamespace(url_for=lambda n: f"http://192.0.2.1:9/clips/{n}")
 LOGS = []
@@ -374,8 +376,8 @@ check("wiim output: a failed music-volume restore on a bot stop logs a warning n
 
 
 # ── an explicit config_path is read, not the live config ────────────
-import yaml
-from config import cfg
+import yaml  # noqa: E402
+from config import cfg  # noqa: E402
 
 _scratch = Path(STATE, "wiim-config.yaml")
 _scratch.write_text(yaml.safe_dump({"wiim": {
