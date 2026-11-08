@@ -583,7 +583,7 @@ check("lenoxvi uninstall --purge also deletes the install log",
 _user_text = "".join((SCRIPTS / n).read_text() for n in ("lib.sh", "preflight.sh", "deps.sh", "app.sh", "state.sh", "service.sh", "lenoxvi"))
 _user_text += (SCRIPTS.parent / "install.sh").read_text()
 check("installer copy: says 'intelligence', never 'brain' (naming law)",
-      "brain" not in _user_text.lower(), [l.strip() for l in _user_text.splitlines() if "brain" in l.lower()][:3])
+      "brain" not in _user_text.lower(), [line.strip() for line in _user_text.splitlines() if "brain" in line.lower()][:3])
 r = cli(done, "upgrade", "--to", "v0.9.0", "--source", str(src))
 check("lenoxvi upgrade: going back to an older release needs --force",
       r.returncode != 0 and "older" in r.stderr and "--force" in r.stderr, out(r))

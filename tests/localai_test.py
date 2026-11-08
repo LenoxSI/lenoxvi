@@ -355,9 +355,9 @@ class FakeFW:
         class S:
             text = " local words "
 
-        class I:
+        class Info:
             language = "en"
-        return [S()], I()
+        return [S()], Info()
 
 
 fw = FakeFW()

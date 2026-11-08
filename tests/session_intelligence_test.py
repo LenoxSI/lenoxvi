@@ -73,8 +73,10 @@ def agent(room="kitchen"):
     return a
 
 
-BOOT.clear(); BOOT.update({"intelligence": {"kind": "hermes", "url": HM}})
-LIVE.clear(); LIVE.update({"intelligence": {"kind": "openclaw", "url": OC, "agent": "main"}})
+BOOT.clear()
+BOOT.update({"intelligence": {"kind": "hermes", "url": HM}})
+LIVE.clear()
+LIVE.update({"intelligence": {"kind": "openclaw", "url": OC, "agent": "main"}})
 os.environ["LVI_HERMES_KEY"] = "hm-key"
 a = agent()
 check("agent: a room reconnecting after an unloaded-key switch keeps the boot lane, URL and key",
@@ -87,9 +89,11 @@ check("agent: once LVI_OPENCLAW_KEY is loaded the saved lane applies",
 del os.environ["LVI_OPENCLAW_KEY"]
 
 # per-room override saved with a new profile key
-BOOT.clear(); BOOT.update({"intelligence": {"kind": "hermes", "url": HM}})
-LIVE.clear(); LIVE.update({"intelligence": {"kind": "hermes", "url": HM},
-                           "room_agents": {"hermes": {"kitchen": "kids-agent"}}})
+BOOT.clear()
+BOOT.update({"intelligence": {"kind": "hermes", "url": HM}})
+LIVE.clear()
+LIVE.update({"intelligence": {"kind": "hermes", "url": HM},
+            "room_agents": {"hermes": {"kitchen": "kids-agent"}}})
 a = agent()
 check("agent: a room override whose LVI_HERMES_KEY_KIDS_AGENT isn't loaded keeps the room's boot agent",
       a._agent == "" and a._key_var == "LVI_HERMES_KEY" and a._key == "hm-key", f"{a._agent!r} {a._key_var}")

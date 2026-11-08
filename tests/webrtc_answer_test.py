@@ -85,7 +85,7 @@ check("webrtc answer: connection address is a real IP, not 0.0.0.0",
       conns and all("0.0.0.0" not in c for c in conns), f"c-lines={conns}")
 check("webrtc answer: audio + data channel both answered",
       any(ln.startswith("m=audio") for ln in lines)
-      and any(ln.startswith("m=application") for ln in lines), f"m-lines={[l for l in lines if l.startswith('m=')]}")
+      and any(ln.startswith("m=application") for ln in lines), f"m-lines={[ln for ln in lines if ln.startswith('m=')]}")
 check("webrtc answer: no line reaches libpeer's 256-byte line buffer",
       max(len(ln) for ln in lines) < 256, f"longest={max(len(ln) for ln in lines)}")
 check("webrtc answer: sha-256 fingerprint present (libpeer reads only sha-256)",

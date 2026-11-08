@@ -124,7 +124,7 @@ def main():
 
     @app.exception_handler(_PRVE)
     async def _pipecat_like_validation_handler(request: _PReq, exc: _PRVE):
-        body = await request.body()  # pipecat does exactly this
+        await request.body()  # pipecat does exactly this
         PIPECAT_HANDLER_HITS.append((request.url.path, str(exc.errors())))
         return _PJR(status_code=422, content=_pje({"detail": exc.errors()}))
 
@@ -1865,7 +1865,8 @@ def main():
     node_command.on_message(
         json.dumps({"type": "cmd_result", "evt": "cmd_result", "cmd": "fw_push",
                     "ok": True, "data": {"fw": "1.2.29", "line": "waveshare"}}), "test-pc-line")
-    import firmware_image as _fwiwst, firmware_server as _fwswst
+    import firmware_image as _fwiwst
+    import firmware_server as _fwswst
     check("waveshare: the three track tables agree (firmware_image.TRACKS == registry.NODE_LINES == firmware_server.FIRMWARE_TRACKS)",
           tuple(_fwiwst.TRACKS) == tuple(_reg.NODE_LINES) and set(_fwswst.FIRMWARE_TRACKS) == set(_fwiwst.TRACKS)
           and set(_fwiwst.TRACK_LABEL) == set(_fwiwst.TRACKS),
@@ -2450,8 +2451,7 @@ def main():
     os.environ["LVI_MODELS_DIR"] = models_dir
     Path(models_dir).mkdir(parents=True, exist_ok=True)
     try:
-        r = client.get("/api/dashboard/oww/models")
-        before = r.json().get("models", [])
+        client.get("/api/dashboard/oww/models")
         # (a) upload rejects garbage bytes (422 — validation fires)
         _r_bad = client.post("/api/dashboard/oww/models",
                          files={"file": ("bad.onnx", b"\x00" * 4096, "application/octet-stream")})
@@ -4736,7 +4736,9 @@ def main():
                 def do_GET(self):
                     fn = self.routes.get(self.path)
                     if fn is None:
-                        self.send_response(404); self.end_headers(); return
+                        self.send_response(404)
+                        self.end_headers()
+                        return
                     code, body = fn(self)
                     self.send_response(code)
                     self.send_header("Content-Type", "application/json")
@@ -5494,9 +5496,11 @@ def main():
     _l4_bytes = b"l4-placeholder-onnx-bytes"
     # where the routes now look (paths, not the cwd); the stored value stays
     # the portable relative form ("models/<name>", "<name>")
-    _l4_models = paths.models_dir(); _l4_models.mkdir(parents=True, exist_ok=True)
+    _l4_models = paths.models_dir()
+    _l4_models.mkdir(parents=True, exist_ok=True)
     (_l4_models / _l4_name).write_bytes(_l4_bytes)
-    _l4_root = paths.wake_root() / _l4_name; _l4_root.write_bytes(_l4_bytes)
+    _l4_root = paths.wake_root() / _l4_name
+    _l4_root.write_bytes(_l4_bytes)
     try:
         r = client.put("/api/dashboard/oww/select",
                        json={"model": _l4_name, "source": "root"})
@@ -8689,7 +8693,7 @@ def main():
     from intelligence import stub as _stubNL
     _nlS = _stubNL.StubIntelligence.__new__(_stubNL.StubIntelligence)
     _nlSaid = [_nlS._reply(q) for q in ("what's your name", "who are you", "bye", "turn on the lights")]
-    _nlHits = [l.strip()[:80] for l in _appsrc.splitlines() if _reNL.search(r"\bbrains?\b", l, _reNL.IGNORECASE)]
+    _nlHits = [line.strip()[:80] for line in _appsrc.splitlines() if _reNL.search(r"\bbrains?\b", line, _reNL.IGNORECASE)]
     _nlHits += [s for s in _nlSaid if _reNL.search(r"\bbrains?\b", s, _reNL.IGNORECASE)]
     check("naming law: the dashboard source and the echo stub's spoken lines never say 'brain'",
           not _nlHits and all("intelligence" in s for s in _nlSaid[:1] + _nlSaid[3:]), _nlHits[:3] or _nlSaid)
@@ -9799,10 +9803,10 @@ def main():
     _req_la = (REPO_CORE.parent / "requirements.txt").read_text().splitlines()
     _readme_in = (REPO_CORE.parent / "README.md").read_text()
     check("install: requirements.txt pulls pipecat's WebRTC extra (bot.py's SmallWebRTC transport needs aiortc)",
-          any(l.startswith("pipecat-ai[webrtc]==") for l in _req_la)
-          and not any(l.startswith("pipecat-ai==") for l in _req_la)
+          any(line.startswith("pipecat-ai[webrtc]==") for line in _req_la)
+          and not any(line.startswith("pipecat-ai==") for line in _req_la)
           and "from pipecat.transports.smallwebrtc.transport import" in (REPO_CORE.parent / "bot.py").read_text(),
-          str([l for l in _req_la if l.startswith("pipecat-ai")]))
+          str([line for line in _req_la if line.startswith("pipecat-ai")]))
     _units_la = {n: (REPO_CORE.parent / "deploy" / n).read_text() for n in ("lenoxvi.service.in", "lenoxvi-bot.service.example")}
     _cuda_la = sorted(f"{n}: {w}" for n, t in _units_la.items()
                       for w in ("LD_LIBRARY_PATH", "nvidia", "cuda", "requirements-gpu") if w.lower() in t.lower())
