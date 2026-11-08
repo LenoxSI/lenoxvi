@@ -20,6 +20,15 @@ The two version streams are independent.
   details load without one. Every mutating route keeps its token check. (#54)
 
 ### Fixed
+- Dashboard: the Bot-control Restart button works on installs done by `scripts/install.sh`. The button built only
+  the dev user-unit command (`systemd-run --user … restart lenoxvi-bot`), which fails on the installer shape: there
+  the bot runs as the hardened system service `lenoxvi`, with no user session bus for the service user and no
+  `lenoxvi-bot` user unit. The route now detects the install shape on the first click — system unit, then user unit,
+  else unknown, which keeps today's dev command as the fallback — and on the installer shape schedules the restart
+  through a root-owned helper, `/usr/local/lib/lenoxvi/schedule-restart`, that the installer ships with a sudoers
+  drop-in granting the service user exactly that helper (nothing else, `visudo`-checked before the drop-in lands).
+  The system unit drops `NoNewPrivileges=yes` so that one sudo call can elevate; its other hardening, the route's
+  response and the dev shape's command are unchanged. (#47)
 - Tests: the STT fallback proof in `stt_fallback_test.py` waits briefly for the status snapshot to reflect the
   switch before asserting — the switcher flips its active service one event-loop hop before the fallback note
   lands in status, so an immediate snapshot could miss the fallback and flake the check. (#50)
