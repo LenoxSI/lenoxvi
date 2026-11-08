@@ -960,9 +960,14 @@ def main():
 
     # 9b. Bot restart route (suite MUST NEVER restart the real bot — it
     # runs on the same host as prod). The suite monkeypatches
-    # subprocess.run IN THIS PROCESS so systemd-run never executes while
-    # the route's code is fully exercised.
+    # subprocess.run IN THIS PROCESS so systemd-run (or sudo) never
+    # executes while the route's code is fully exercised, and pins the
+    # install shape per check — live systemd state must never decide a
+    # test's path.
+    from dashboard import routes as _rRB
     real_run = subprocess.run
+    saved_shape_fn = _rRB._install_shape
+    saved_shape = _rRB._INSTALL_SHAPE
     scheduled_cmds: list = []
 
     class _FakeProc:
@@ -974,8 +979,14 @@ def main():
         scheduled_cmds.append(cmd)
         return _FakeProc()
 
+    def _pin_shape(shape):
+        async def _fake_shape():
+            return shape
+        _rRB._install_shape = _fake_shape
+
     subprocess.run = _fake_run
     try:
+        _pin_shape("dev")
         r = client.post("/api/dashboard/restart")
         ok = (r.status_code == 200 and r.json().get("restarting") is True
               and len(scheduled_cmds) == 1
@@ -983,8 +994,97 @@ def main():
               and "systemctl --user restart lenoxvi-bot" in " ".join(scheduled_cmds[0]))
         check("restart route schedules the real transient unit (monkeypatched, nothing executed)",
               ok, f"status={r.status_code} scheduled={scheduled_cmds}")
+
+        # installer shape: the sudo-granted helper the installer ships —
+        # no user bus, no systemd-run --user anywhere near it
+        scheduled_cmds.clear()
+        _pin_shape("installer")
+        r = client.post("/api/dashboard/restart")
+        ok = (r.status_code == 200 and r.json() == {"ok": True, "restarting": True}
+              and scheduled_cmds == [["sudo", "-n", "/usr/local/lib/lenoxvi/schedule-restart"]])
+        check("restart route: installer shape runs the sudo-granted helper (never systemd-run --user)",
+              ok, f"status={r.status_code} scheduled={scheduled_cmds}")
+
+        # unknown shape: exactly today's dev command is the fallback
+        scheduled_cmds.clear()
+        _pin_shape("unknown")
+        r = client.post("/api/dashboard/restart")
+        ok = (r.status_code == 200
+              and "lenoxvi-dash-restart-" in " ".join(scheduled_cmds[0])
+              and "systemctl --user restart lenoxvi-bot" in " ".join(scheduled_cmds[0]))
+        check("restart route: unknown shape falls back to the dev user-unit command",
+              ok, f"status={r.status_code} scheduled={scheduled_cmds}")
+
+        # the failure path: a scheduling call that exits non-zero is the
+        # unchanged 500 — here the installer helper refusing
+        class _FailProc:
+            returncode = 1
+            stderr = "sudo: a password is required"
+            stdout = ""
+
+        def _fail_run(cmd, *a, **kw):
+            return _FailProc()
+
+        _pin_shape("installer")
+        subprocess.run = _fail_run
+        r = client.post("/api/dashboard/restart")
+        check("restart route: a scheduling call that fails is the unchanged 500 with the same detail",
+              r.status_code == 500 and r.json().get("detail") == "restart scheduling failed (see bot log)",
+              f"status={r.status_code} body={r.text[:120]}")
     finally:
+        _rRB._install_shape = saved_shape_fn
+        _rRB._INSTALL_SHAPE = saved_shape
         subprocess.run = real_run
+
+    # The detector contract: probed lazily on the FIRST restart call and
+    # cached — each probe runs once ever, system unit first; unknown logs
+    # ONE warning, not one per click. All faked: no systemctl runs here.
+    from loguru import logger as _lgRB
+    _rb_lines: list = []
+    _rb_sink = _lgRB.add(lambda m: _rb_lines.append((m.record["level"].name, m.record["message"])),
+                         level="DEBUG")
+    probe_cmds: list = []
+
+    def _probe_run(active):
+        def _run(cmd, *a, **kw):
+            probe_cmds.append(cmd)
+            proc = _FakeProc()
+            proc.returncode = 0 if cmd == active else 1
+            return proc
+        return _run
+
+    try:
+        subprocess.run = _probe_run(["systemctl", "is-active", "lenoxvi"])
+        _rRB._INSTALL_SHAPE = None
+        _s1 = asyncio.run(_rRB._install_shape())
+        _s2 = asyncio.run(_rRB._install_shape())
+        check("install shape: an active system unit = installer, probed once then cached",
+              _s1 == "installer" and _s2 == "installer"
+              and probe_cmds == [["systemctl", "is-active", "lenoxvi"]],
+              f"shapes={_s1},{_s2} probes={probe_cmds}")
+
+        subprocess.run = _probe_run(["systemctl", "--user", "is-active", "lenoxvi-bot"])
+        _rRB._INSTALL_SHAPE = None
+        probe_cmds.clear()
+        _s1 = asyncio.run(_rRB._install_shape())
+        check("install shape: no system unit but an active lenoxvi-bot user unit = dev",
+              _s1 == "dev" and probe_cmds == [["systemctl", "is-active", "lenoxvi"],
+                                              ["systemctl", "--user", "is-active", "lenoxvi-bot"]],
+              f"shape={_s1} probes={probe_cmds}")
+
+        subprocess.run = _probe_run(None)
+        _rRB._INSTALL_SHAPE = None
+        probe_cmds.clear()
+        _s1 = asyncio.run(_rRB._install_shape())
+        _s2 = asyncio.run(_rRB._install_shape())
+        _warns = [m for lv, m in _rb_lines if lv == "WARNING" and "falls back" in m]
+        check("install shape: neither unit active = unknown, ONE warning, no re-probe on later calls",
+              _s1 == "unknown" and _s2 == "unknown" and len(probe_cmds) == 2 and len(_warns) == 1,
+              f"shapes={_s1},{_s2} probes={probe_cmds} warns={_warns}")
+    finally:
+        _rRB._INSTALL_SHAPE = saved_shape
+        subprocess.run = real_run
+        _lgRB.remove(_rb_sink)
 
     # Mute error honesty (the lying-error incident):
     # a node answering {ok: false, data: "unknown cmd"} to set_mute must

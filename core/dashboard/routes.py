@@ -2074,30 +2074,73 @@ async def post_intelligence_test():
 # ── bot control (Settings) ─────────────────────────────────────────────
 
 # The dashboard lives in the bot process, so a plain restart would kill the
-# HTTP response mid-flight: hand the restart to a DETACHED systemd transient
-# user unit that fires 2s after the response completes. The test suite
-# monkeypatches subprocess.run for this route — see tests/test_dashboard.py.
+# HTTP response mid-flight: every path here only SCHEDULES a restart, in a
+# DETACHED unit that fires 2s after the response completes. Two install
+# shapes, one route: the installer's system unit (a sudo-granted helper)
+# or the dev user unit (a transient systemd-run unit). The test suite
+# monkeypatches subprocess.run and the shape detector for this route —
+# see tests/test_dashboard.py.
+
+# Written by scripts/installer/service.sh: root-owned, with a sudoers grant
+# for exactly this path. Tests on both sides pin the literal, so route and
+# installer cannot drift.
+_RESTART_HELPER = "/usr/local/lib/lenoxvi/schedule-restart"
+
+_INSTALL_SHAPE: str | None = None
+
+
+async def _install_shape() -> str:
+    """The machine's install shape: 'installer' | 'dev' | 'unknown'.
+
+    Resolved on the first restart call and cached — never at import, so
+    this module imports with no systemd context. Tests monkeypatch this
+    function: live systemd state must never decide a test's path.
+    """
+    global _INSTALL_SHAPE
+    if _INSTALL_SHAPE is not None:
+        return _INSTALL_SHAPE
+    for probe, shape in (
+        (["systemctl", "is-active", "lenoxvi"], "installer"),
+        (["systemctl", "--user", "is-active", "lenoxvi-bot"], "dev"),
+    ):
+        proc = await asyncio.to_thread(
+            subprocess.run, probe, capture_output=True, text=True, timeout=5)
+        if proc.returncode == 0:
+            _INSTALL_SHAPE = shape
+            return shape
+    _INSTALL_SHAPE = "unknown"
+    logger.warning("dashboard: neither the lenoxvi system unit nor the lenoxvi-bot "
+                   "user unit is active — the restart button falls back to the dev command")
+    return "unknown"
 
 
 @router.post("/restart", dependencies=GUARD)
 async def restart_bot():
-    """Restart lenoxvi-bot from the dashboard (Settings → Bot control).
+    """Restart the bot from the dashboard (Settings → Bot control).
 
     The response returns BEFORE the restart fires (2s window) — the
-    transient unit survives this process's death by design. Client polls
+    scheduler survives this process's death by design. Client polls
     /status until uptime resets, then reloads panels.
     """
-    unit = f"lenoxvi-dash-restart-{int(time.time() * 1000)}"
-    cmd = [
-        "systemd-run", "--user", f"--unit={unit}",
-        "bash", "-c", "sleep 2 && systemctl --user restart lenoxvi-bot",
-    ]
+    shape = await _install_shape()
+    if shape == "installer":
+        # The service user has no user bus; the installer grants it sudo on
+        # exactly this helper, which schedules the restart at system scope.
+        cmd = ["sudo", "-n", _RESTART_HELPER]
+        via = f"sudo helper {_RESTART_HELPER}"
+    else:
+        unit = f"lenoxvi-dash-restart-{int(time.time() * 1000)}"
+        cmd = [
+            "systemd-run", "--user", f"--unit={unit}",
+            "bash", "-c", "sleep 2 && systemctl --user restart lenoxvi-bot",
+        ]
+        via = f"transient unit {unit}"
     # Off the event loop: this process also runs every room's voice pipeline.
     proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=10)
     if proc.returncode != 0:
         logger.error(f"dashboard: restart scheduling failed: {proc.stderr.strip()}")
         raise HTTPException(status_code=500, detail="restart scheduling failed (see bot log)")
-    logger.info(f"dashboard: bot restart scheduled via transient unit {unit} — fires in 2s")
+    logger.info(f"dashboard: bot restart scheduled via {via} — fires in 2s")
     return {"ok": True, "restarting": True}
 
 
