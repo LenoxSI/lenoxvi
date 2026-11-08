@@ -365,6 +365,10 @@ r = sh(f"{UT}; render_unit 192.0.2.10", wheels, **GPU_BOX)
 check("installer service: the unit carries no CUDA lib dirs, even with an NVIDIA GPU and its wheels present",
       r.returncode == 0 and "ExecStart=" in r.stdout
       and not any(w in r.stdout.lower() for w in ("ld_library_path", "nvidia", "cuda", "@gpu")), r.stdout)
+r = sh(f"{UT}; render_unit 192.0.2.10")
+check("installer service: the unit lets the restart button's one sudo helper elevate (no NNP); the other hardening stands",
+      "NoNewPrivileges=no" in r.stdout and "ProtectSystem=strict" in r.stdout
+      and "ProtectHome=yes" in r.stdout and "PrivateTmp=yes" in r.stdout, r.stdout)
 pu = make_prefix()
 (pu / "etc/systemd/system").mkdir(parents=True)
 r = sh(f"{UT}; install_unit 192.0.2.10; echo CHANGED=$UNIT_CHANGED", pu)

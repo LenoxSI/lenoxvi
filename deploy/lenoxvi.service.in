@@ -19,7 +19,10 @@ Restart=on-failure
 RestartSec=5
 # A stop takes ~2 s (node sessions get a short grace); allow more before SIGKILL.
 TimeoutStopSec=20
-NoNewPrivileges=yes
+# The dashboard's restart button runs sudo on exactly one helper (the
+# installer's sudoers grant), which a no-new-privileges sandbox forbids —
+# so setuid exec is allowed and the unit's other hardening stands.
+NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
