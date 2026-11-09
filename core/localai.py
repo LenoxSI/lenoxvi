@@ -12,6 +12,8 @@ What LocalAI actually does (checked against v4.12.1):
   sample rate from its header.
 - /v1/models lists ids only; /api/models/config-json/<id> says what a model
   is for (known_usecases) and which backend runs it.
+- /api/voice-profiles lists the WebUI's cloned voices as name + opaque
+  localai://voice-profiles/<id> refs; their file paths never appear.
 """
 from __future__ import annotations
 
@@ -300,6 +302,28 @@ def discover(*, url=None, key=None) -> dict:
             out["stt"].append(mid)
         if "tts" in kinds:
             out["tts"].append({"id": mid, "backend": str(conf.get("backend") or "")})
+    return out
+
+
+def voice_profiles(*, url=None, key=None, timeout=None) -> list[dict]:
+    """LocalAI's Voice Library profiles as [{"name", "voice"}] — labels for
+    the TTS card's chatterbox picker, each mapping to the opaque
+    localai://voice-profiles/<id> the server resolves at speech time. []
+    on any failure (box down, key refused, a build without the library):
+    the voice list is a nicety, never an error."""
+    try:
+        payload = json.loads(_request("GET", "/api/voice-profiles",
+                                      total=timeout or PROBE_TIMEOUT, url=url, key=key))
+        entries = payload.get("data") if isinstance(payload, dict) else None
+    except Exception:  # noqa: BLE001 — LocalAIError or a non-JSON answer
+        return []
+    out = []
+    if isinstance(entries, list):
+        for e in entries:
+            name = e.get("name") if isinstance(e, dict) else None
+            voice = e.get("voice") if isinstance(e, dict) else None
+            if isinstance(name, str) and name and isinstance(voice, str) and voice:
+                out.append({"name": name, "voice": voice})
     return out
 
 

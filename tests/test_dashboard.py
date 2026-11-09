@@ -1270,6 +1270,11 @@ def main():
                 body, code = b'{"backend":"faster-whisper","known_usecases":["FLAG_TRANSCRIPT"]}', 200
             elif self.path == "/api/models/config-json/kokoro":
                 body, code = b'{"backend":"kokoro","known_usecases":["FLAG_TTS"]}', 200
+            elif self.path == "/api/voice-profiles":
+                body, code = json.dumps({"data": [
+                    {"name": "Mom", "voice": "localai://voice-profiles/11111111-1111-1111-1111-111111111111"},
+                    {"name": "Story", "voice": "localai://voice-profiles/22222222-2222-2222-2222-222222222222"},
+                ]}).encode(), 200
             else:
                 body, code = b'{"backend":"llama","known_usecases":null}', 200
             self.send_response(code)
@@ -1294,6 +1299,10 @@ def main():
               r.status_code == 200 and set(r.json()) == {"url", "model_stt", "key_set"}
               and r.json()["url"] is None and r.json()["key_set"] is False,
               r.text[:200])
+        r = client.get("/api/dashboard/localai/voices")
+        check("voices: before the URL is saved, GET /localai/voices degrades to default-only and says why",
+              r.status_code == 200 and r.json().get("voices") == {"default": ""}
+              and r.json().get("profiles_unavailable") == "Set the LocalAI URL first", r.text[:200])
         r = client.put("/api/dashboard/tts", json={"provider": "localai"})
         check("localai card: TTS can't pick LocalAI before its URL is saved (422 says so)",
               r.status_code == 422 and "URL" in r.text, r.text[:160])
@@ -1301,6 +1310,10 @@ def main():
         check("localai card: PUT normalises and saves the URL and model",
               r.status_code == 200 and config_store.read_section("localai").get("url") == "http://192.0.2.50:8080"
               and config_store.read_section("localai").get("model_stt") == "fw-small", r.text[:200])
+        r = client.get("/api/dashboard/localai/voices")
+        check("voices: URL saved but no key -> the profiles are skipped, the reason names System · Keys",
+              r.status_code == 200 and r.json().get("voices") == {"default": ""}
+              and "System · Keys" in (r.json().get("profiles_unavailable") or ""), r.text[:200])
         check("dead fields: the localai PUT carries no 'restart'", "restart" not in r.json(), r.text[:160])
         for _bad in ("http://x\nLVI_RESTART_COMMAND=boom", "ftp://x:21", "http://x:99999", "http://x/v2/thing"):
             r = client.put("/api/dashboard/localai", json={"url": _bad})
@@ -1400,6 +1413,42 @@ def main():
         t = client.get("/api/dashboard/tts").json()
         check("chatterbox: a stored reference path round-trips through GET /tts untouched",
               r.status_code == 200 and t.get("localai_voice") == "/refs/mom.wav",
+              f"{r.status_code} {t.get('localai_voice')}")
+        # Voice Library: voices cloned in LocalAI's WebUI (Add-ons → Voice)
+        # join the picker live via GET /localai/voices — the card fetches it
+        # for the chatterbox backend. A profile sharing a declared label's
+        # name loses to the config entry.
+        r = client.get("/api/dashboard/localai/voices")
+        _lv = r.json()
+        check("voices: GET /localai/voices merges the declared registry with LocalAI's Voice Library profiles (default first)",
+              r.status_code == 200 and _lv.get("voices") == {
+                  "default": "", "Mom": "/refs/mom.wav", "Narrator": "/refs/narr.wav",
+                  "Story": "localai://voice-profiles/22222222-2222-2222-2222-222222222222"}
+              and _lv.get("profiles_unavailable") is None and "SECRET" not in r.text,
+              r.text[:240])
+        check("voices: the profiles request carries the saved key as a Bearer token",
+              ("/api/voice-profiles", "Bearer la-good-SECRET-7777") in _la_seen)
+        _lvv_bad = []
+        for _v in list(_lv.get("voices") or {}).values():
+            try:
+                _rLAP.LocalAIPayload(voice=_v)
+            except Exception as _e:
+                _lvv_bad.append((_v, str(_e)[:40]))
+        check("voices: every offered value (paths and profile URIs) passes the localai PUT's own voice validation",
+              not _lvv_bad, f"bad={_lvv_bad[:3]}")
+        client.put("/api/dashboard/localai", json={"url": "127.0.0.1:1"})
+        r = client.get("/api/dashboard/localai/voices")
+        check("voices: LocalAI unreachable -> the declared registry still lists, never a 500",
+              r.status_code == 200 and r.json().get("voices") == {"default": "", "Mom": "/refs/mom.wav",
+                                                                  "Narrator": "/refs/narr.wav"}
+              and r.json().get("profiles_unavailable") is None, r.text[:200])
+        client.put("/api/dashboard/localai", json={"url": f"127.0.0.1:{_la_srv.server_port}"})
+        r = client.put("/api/dashboard/localai",
+                       json={"voice": "localai://voice-profiles/22222222-2222-2222-2222-222222222222"})
+        t = client.get("/api/dashboard/tts").json()
+        check("voices: a profile URI rides the localai voice field (validation unchanged) and round-trips",
+              r.status_code == 200
+              and t.get("localai_voice") == "localai://voice-profiles/22222222-2222-2222-2222-222222222222",
               f"{r.status_code} {t.get('localai_voice')}")
         config_store.write_section("localai", {**(config_store.read_section("localai") or {}), "voices": {}})
         t = client.get("/api/dashboard/tts").json()

@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- TTS card, LocalAI chatterbox voices: voices cloned in LocalAI's WebUI Voice Library (Add-ons → Voice) join the
+  chatterbox picker by themselves — `GET /api/dashboard/localai/voices` merges the `localai.voices:` registry with
+  the server's voice profiles (name → `localai://voice-profiles/<id>`, fetched with the saved key; the card stores
+  the URI and LocalAI resolves it at speech time). No URL/key, an unreachable box or an older build without the
+  Voice Library degrade to the declared registry and the free-text input. (#64)
 - TTS card, LocalAI chatterbox voices: an optional `localai.voices:` block in config.yaml (label -> reference-WAV
   path on the LocalAI host) turns the chatterbox voice picker into a dropdown of the declared voices plus `default`
   (the card stores the path; an undeclared stored value keeps the free-text input). Chatterbox has no preset

@@ -1761,6 +1761,35 @@ async def post_localai_test():
             "stt": found["stt"], "tts": found["tts"]}
 
 
+@router.get("/localai/voices")
+async def get_localai_voices():
+    """The chatterbox voice catalog merged live: the labels declared under
+    localai.voices (reference-WAV paths on the LocalAI host) plus LocalAI's
+    Voice Library profiles (name -> localai://voice-profiles/<id>, what
+    its WebUI clones), "default" first. A result, never a 500 — no URL or
+    key, an unreachable box or an older build without the Voice Library
+    all degrade to the declared registry, and the card keeps its
+    free-text fallback."""
+    import localai
+    s = _localai_saved()
+    key = _key_saved_value("LVI_LOCALAI_KEY")
+    voices = {"default": "", **s["voices"]}
+    unavailable = None
+    if not s["url"]:
+        unavailable = "Set the LocalAI URL first"
+    elif not key:
+        unavailable = localai.NO_KEY
+    else:
+        try:
+            profiles = await asyncio.to_thread(localai.voice_profiles, url=s["url"], key=key)
+        except Exception:  # noqa: BLE001 — the contract is a result, never a 500
+            profiles = []
+        for p in profiles:
+            # A declared label wins its name; "default" stays the backend's own voice.
+            voices.setdefault(p["name"], p["voice"])
+    return {"voices": voices, "profiles_unavailable": unavailable}
+
+
 # ── Intelligence (Settings — provider picker) ──
 
 

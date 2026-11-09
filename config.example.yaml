@@ -93,7 +93,10 @@ tts:
 #   speed: 1.0
 #   voices:                              # chatterbox reference voices: label -> WAV path
 #                                        # on the LOCALAI HOST (its TTS clones the voice
-#                                        # from the file; 'default' needs no entry)
+#                                        # from the file; 'default' needs no entry).
+#                                        # Voices cloned in LocalAI's WebUI (Add-ons ->
+#                                        # Voice) join the picker by themselves — this
+#                                        # block is only for files the WebUI doesn't hold
 #     Mom: <path-on-the-localai-host>/mom.wav
 #     Narrator: <path-on-the-localai-host>/narrator.wav
 #     Storyteller: <path-on-the-localai-host>/storyteller.wav

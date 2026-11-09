@@ -404,6 +404,25 @@ function useLocalAIModels(on) {
   return found
 }
 
+// LocalAI's Voice Library, asked of the server the same way: GET /localai/voices
+// merges the config-declared labels with the profiles cloned in LocalAI's WebUI
+// (Add-ons → Voice) — keys never reach the browser. `on` = only while a card has
+// the chatterbox backend picked. Refreshes after any save.
+function useLocalAIVoices(on) {
+  const [voices, setVoices] = useState(null)
+  useEffect(() => {
+    if (!on) return
+    let alive = true
+    const get = () => api('/api/dashboard/localai/voices')
+      .then(r => { if (alive) setVoices(r.voices || null) })
+      .catch(() => { if (alive) setVoices(null) })
+    get()
+    window.addEventListener('lenoxvi:reload-all', get)
+    return () => { alive = false; window.removeEventListener('lenoxvi:reload-all', get) }
+  }, [on])
+  return voices
+}
+
 // The save route for a row: the existing kind-aware routes (one write path).
 // A catalog key with no route here can't be saved from the card (null) —
 // never sent through another kind's route.
@@ -2627,19 +2646,23 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const laVoice = t.val('la_voice') || ''
   // LocalAI: its voice models come from the server; the voice list follows
   // the backend that runs the picked model (Kokoro / Pocket presets,
-  // Chatterbox's declared reference voices, else free text).
+  // Chatterbox's reference voices — declared ones plus the WebUI's cloned
+  // profiles — else free text).
   const laFound = useLocalAIModels(provider === 'localai')
   // LocalAI names backends its own way ('pocket-tts', 'kokoro', 'chatterbox'): match the family.
   const laRaw = String((laFound?.tts || []).find(m => m.id === model)?.backend || '').toLowerCase()
   const laBackend = laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket'
     : laRaw.startsWith('chatterbox') ? 'chatterbox' : laRaw
+  // Chatterbox has no preset voices: each entry is a label standing for a
+  // stored value — a reference-WAV path declared under localai.voices or a
+  // localai://voice-profiles/<id> cloned in LocalAI's WebUI ('default' = '' =
+  // the backend's own voice). The live merge wins while it answers; GET
+  // /tts's config-only map is the fallback for an unreachable or older server.
+  const laLibVoices = useLocalAIVoices(provider === 'localai' && laBackend === 'chatterbox')
+  const laVoicePaths = laBackend === 'chatterbox' ? (laLibVoices || tts?.chatterbox_voices || null) : null
   const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || [])
     : laBackend === 'pocket' ? (catalog.pocket || [])
-    : laBackend === 'chatterbox' ? (catalog.chatterbox || []) : null
-  // Chatterbox has no preset voices: each entry is a label standing for a
-  // reference-WAV path on the LocalAI host (the stored value), and
-  // 'default' = '' = the backend's own voice.
-  const laVoicePaths = laBackend === 'chatterbox' ? (tts?.chatterbox_voices || null) : null
+    : laBackend === 'chatterbox' ? (laVoicePaths ? Object.keys(laVoicePaths) : (catalog.chatterbox || [])) : null
   // A stored value the map doesn't declare keeps the free-text input —
   // visible and editable, never silently blanked.
   const laVoiceDropdown = laVoices && (laBackend !== 'chatterbox'
