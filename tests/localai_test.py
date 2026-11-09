@@ -127,10 +127,10 @@ os.environ.pop(la.KEY_VAR, None)
 BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", wav_bytes(22050), 0)
 pcm, rate = la.speech("Hello there.", "kokoro", "af_heart", 1.0, url=URL, key=KEY)
 _, path, hdr, body = SEEN[-1]
-check("localai: speech asks for wav and sends model, input, voice and speed",
+check("localai: speech asks for wav and sends model, input, voice — never speed (no backend takes it)",
       path == "/v1/audio/speech" and hdr.get("content-type") == "application/json"
       and json.loads(body) == {"model": "kokoro", "input": "Hello there.", "voice": "af_heart",
-                               "speed": 1.0, "response_format": "wav"})
+                               "response_format": "wav"})
 check("localai: speech sample rate comes from the WAV header", rate == 22050 and len(pcm) == 2400 * 2,
       f"{rate} {len(pcm)}")
 for label, payload in [("an html page", b"<html>oops</html>"), ("a stereo wav", wav_bytes(ch=2)),

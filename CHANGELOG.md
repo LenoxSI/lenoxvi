@@ -36,6 +36,9 @@ The two version streams are independent.
   today's boards keep working. (#53)
 
 ### Fixed
+- LocalAI speech: the /v1/audio/speech request no longer carries `speed` — no LocalAI backend takes it as
+  a request knob (pocket-tts ignores it; chatterbox's vendored generate() rejects it with a 500, so every
+  chatterbox reply fell back to Kokoro). The service plumbing keeps the parameter. (#66)
 - TTS card, LocalAI chatterbox picker: it no longer collapses to a free-text box when the stored voice
   isn't one it offers (a stale preset from another backend, e.g. pocket-tts's `eve`, hid the picker
   entirely) — the dropdown renders whenever the backend offers a voice list, and an unoffered stored

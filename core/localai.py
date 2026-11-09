@@ -14,6 +14,9 @@ What LocalAI actually does (checked against v4.12.1):
   is for (known_usecases) and which backend runs it.
 - /api/voice-profiles lists the WebUI's cloned voices as name + opaque
   localai://voice-profiles/<id> refs; their file paths never appear.
+- /v1/audio/speech: request "speed" is not a LocalAI knob — pocket-tts
+  ignores it and chatterbox answers 500 (its generate() takes no such
+  kwarg) — so it is never sent.
 """
 from __future__ import annotations
 
@@ -224,8 +227,10 @@ def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=Non
            timeout=None) -> tuple[bytes, int]:
     """Text -> (16-bit mono PCM, sample rate). Mono 16-bit PCM passes through;
     mono 32-bit float (what LocalAI's Pocket backend sends) is converted.
-    Anything else is an error, never noise."""
-    body = json.dumps({"model": model, "input": text, "voice": voice, "speed": speed,
+    Anything else is an error, never noise. `speed` stays in the signature
+    for the service plumbing but never rides the body: no LocalAI backend
+    takes it as a request knob, and chatterbox 500s on it."""
+    body = json.dumps({"model": model, "input": text, "voice": voice,
                        "response_format": "wav"}).encode()
     data = _request("POST", "/v1/audio/speech", body=body, ctype="application/json",
                     total=timeout or TTS_TIMEOUT, url=url, key=key)
