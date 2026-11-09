@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
+- make-cert.sh issues the serving certificate from the bot's own long-lived CA (`secrets/tls-ca-key.pem`,
+  created once alongside the firmware signing key — back it up; nodes can pin the CA in a later
+  release) instead of a fresh self-signed key per run: the CA pair is reused, a half-missing pair is
+  refused (never regenerated), only the per-host leaf is re-issued each run, and the script prints
+  the CA's fingerprint (`CA-OK …`) after `CERT-OK`. (#1)
 - TTS card, LocalAI chatterbox voices: voices cloned in LocalAI's WebUI Voice Library (Add-ons → Voice) join the
   chatterbox picker by themselves — `GET /api/dashboard/localai/voices` merges the `localai.voices:` registry with
   the server's voice profiles (name → `localai://voice-profiles/<id>`, fetched with the saved key; the card stores
