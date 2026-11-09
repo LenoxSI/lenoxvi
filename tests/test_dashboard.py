@@ -1429,7 +1429,7 @@ def main():
         check("voices: the profiles request carries the saved key as a Bearer token",
               ("/api/voice-profiles", "Bearer la-good-SECRET-7777") in _la_seen)
         _lvv_bad = []
-        for _v in list(_lv.get("voices") or {}).values():
+        for _v in list((_lv.get("voices") or {}).values()):
             try:
                 _rLAP.LocalAIPayload(voice=_v)
             except Exception as _e:
