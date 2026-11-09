@@ -2174,12 +2174,12 @@ async def restart_bot():
 
 # ── Voice Tuning (Voice tab — wake/VAD/turn knobs, all slider-set) ──────
 
-# Six ear-tuning knobs, each config-gated and read at pipeline
+# Eight ear-tuning knobs, each config-gated and read at pipeline
 # construction. Ranges are honest per knob's real behavior history:
 # wake threshold 0.30-0.60 (TV exploits fired 0.40-0.51; real wakes
-# 0.84-1.00), awake timeout, VAD confidence/min_volume, turn lull, echo
-# dedup. Writes are read-merge-write PER SECTION — never a blind section
-# replace (the filler-clobber lesson).
+# 0.84-1.00), awake timeout, VAD confidence/min_volume/start/stop timing,
+# turn lull, echo dedup. Writes are read-merge-write PER SECTION — never a
+# blind section replace (the filler-clobber lesson).
 
 
 class VoiceTuningPayload(BaseModel):
@@ -2188,6 +2188,8 @@ class VoiceTuningPayload(BaseModel):
     wake_awake_timeout: float | None = Field(default=None, ge=5.0, le=60.0)
     vad_confidence: float | None = Field(default=None, ge=0.30, le=0.90)
     vad_min_volume: float | None = Field(default=None, ge=0.10, le=0.90)
+    vad_start_secs: float | None = Field(default=None, ge=0.05, le=0.50)
+    vad_stop_secs: float | None = Field(default=None, ge=0.10, le=1.50)
     lull_secs: float | None = Field(default=None, ge=0.2, le=2.0)
     dedup_window: float | None = Field(default=None, ge=2.0, le=30.0)
 
@@ -2197,6 +2199,8 @@ _TUNING_TARGETS = {  # payload field -> (config section, key)
     "wake_awake_timeout": ("wake", "awake_timeout"),
     "vad_confidence": ("vad", "confidence"),
     "vad_min_volume": ("vad", "min_volume"),
+    "vad_start_secs": ("vad", "start_secs"),
+    "vad_stop_secs": ("vad", "stop_secs"),
     "lull_secs": ("intelligence", "lull_secs"),
     "dedup_window": ("intelligence", "dedup_window"),
 }
@@ -2357,6 +2361,8 @@ async def get_voice_tuning():
         "wake_awake_timeout": wake.get("awake_timeout"),
         "vad_confidence": vad.get("confidence"),
         "vad_min_volume": vad.get("min_volume"),
+        "vad_start_secs": vad.get("start_secs"),
+        "vad_stop_secs": vad.get("stop_secs"),
         "lull_secs": intelligence_cfg.get("lull_secs"),
         "dedup_window": intelligence_cfg.get("dedup_window"),
     }

@@ -3046,6 +3046,10 @@ const TUNING_FIELDS = [
     'How sure Silero must be you are speaking.'],
   ['vad_min_volume', 'VAD min volume', 0.10, 0.90, 0.05,
     'Quiet-speech floor — the ignores-the-TV knob.'],
+  ['vad_start_secs', 'VAD start (s)', 0.05, 0.50, 0.05,
+    'Speech needed before a turn starts.'],
+  ['vad_stop_secs', 'VAD stop (s)', 0.10, 1.50, 0.05,
+    'Silence before VAD calls your speech over, ahead of the lull. Lower is snappier but clips the next word.'],
   ['lull_secs', 'Turn-end lull (s)', 0.2, 2.0, 0.1,
     'Silence before your sentence flushes to the intelligence.'],
   ['dedup_window', 'Echo dedup window (s)', 2, 30, 1,
@@ -3053,8 +3057,8 @@ const TUNING_FIELDS = [
 ]
 
 function Tuning({ tuning, reloadAll }) {
-  // Save sends only the knobs that differ from the saved value. Sending all
-  // six from a sync-once draft rewrote the other five with whatever this tab
+  // Save sends only the knobs that differ from the saved value. Sending every
+  // knob from a sync-once draft rewrote the rest with whatever this tab
   // loaded, clobbering edits made elsewhere (another tab, another device).
   // Untouched sliders keep following the server on every poll (useDraft),
   // and a slider moved back to its saved value is no change.

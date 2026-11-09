@@ -2699,33 +2699,44 @@ def main():
 
     # 9c. Voice Tuning (Voice tab — each knob round-trip + range + merge)
     r = client.get("/api/dashboard/voice-tuning")
-    check("tuning GET shape — six knobs",
+    check("tuning GET shape — eight knobs",
           r.status_code == 200 and all(k in r.json() for k in
               ("wake_threshold", "wake_awake_timeout", "vad_confidence",
-               "vad_min_volume", "lull_secs", "dedup_window")),
+               "vad_min_volume", "vad_start_secs", "vad_stop_secs",
+               "lull_secs", "dedup_window")),
           f"status={r.status_code} keys={list(r.json())}")
     # Round-trip EVERY knob with a distinctive value
     r = client.put("/api/dashboard/voice-tuning", json={
         "wake_threshold": 0.42, "wake_awake_timeout": 12.0,
         "vad_confidence": 0.65, "vad_min_volume": 0.55,
+        "vad_start_secs": 0.15, "vad_stop_secs": 0.45,
         "lull_secs": 0.8, "dedup_window": 8.0})
-    check("tuning PUT (all six) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
+    check("tuning PUT (all eight) ok", r.status_code == 200, f"status={r.status_code} body={r.text[:160]}")
     check("dead fields: the voice-tuning PUT answers just {ok}", r.json() == {"ok": True}, r.text[:160])
     t = client.get("/api/dashboard/voice-tuning").json()
-    check("tuning round-trip: all six persisted",
+    check("tuning round-trip: all eight persisted",
           t["wake_threshold"] == 0.42 and t["wake_awake_timeout"] == 12.0 and
           t["vad_confidence"] == 0.65 and t["vad_min_volume"] == 0.55 and
+          t["vad_start_secs"] == 0.15 and t["vad_stop_secs"] == 0.45 and
           t["lull_secs"] == 0.8 and t["dedup_window"] == 8.0, f"t={t}")
     # Partial update: one knob only — others must not move
     r = client.put("/api/dashboard/voice-tuning", json={"wake_threshold": 0.5})
     check("tuning PUT (single knob) ok", r.status_code == 200, f"status={r.status_code}")
     t = client.get("/api/dashboard/voice-tuning").json()
-    check("tuning partial update leaves the other five untouched",
+    check("tuning partial update leaves the other knobs untouched",
           t["wake_threshold"] == 0.5 and t["lull_secs"] == 0.8 and
           t["dedup_window"] == 8.0 and t["vad_confidence"] == 0.65, f"t={t}")
+    # Partial update inside the vad section: its sibling keys must survive
+    r = client.put("/api/dashboard/voice-tuning", json={"vad_stop_secs": 0.7})
+    check("tuning PUT (vad_stop_secs alone) ok", r.status_code == 200, f"status={r.status_code}")
+    vad_after = config_store.read_section("vad") or {}
+    check("tuning vad_stop_secs write merges into vad (confidence/min_volume/start_secs untouched)",
+          vad_after.get("stop_secs") == 0.7 and vad_after.get("confidence") == 0.65 and
+          vad_after.get("min_volume") == 0.55 and vad_after.get("start_secs") == 0.15, f"vad={vad_after}")
     # Range rejection, one per knob
     for knob, bad in [("wake_threshold", 0.9), ("wake_awake_timeout", 3.0),
                       ("vad_confidence", 0.95), ("vad_min_volume", 1.5),
+                      ("vad_start_secs", 0.9), ("vad_stop_secs", 3.0),
                       ("lull_secs", 5.0), ("dedup_window", 60.0)]:
         r = client.put("/api/dashboard/voice-tuning", json={knob: bad})
         check(f"tuning PUT rejects {knob}={bad} (out of range)",
