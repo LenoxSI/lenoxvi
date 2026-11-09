@@ -36,6 +36,10 @@ The two version streams are independent.
   today's boards keep working. (#53)
 
 ### Fixed
+- TTS card, LocalAI chatterbox picker: it no longer collapses to a free-text box when the stored voice
+  isn't one it offers (a stale preset from another backend, e.g. pocket-tts's `eve`, hid the picker
+  entirely) — the dropdown renders whenever the backend offers a voice list, and an unoffered stored
+  value rides as a disabled option, the same pattern as the preset backends. (#65)
 - Embedded speech-to-text: the Whisper base model is downloaded pinned to one Hugging Face commit
   (`stt_catalog.EMBEDDED_REVISION`): the installer's up-front fetch and the bot's lazy load both pass the
   revision, so an install always gets the same weights instead of whatever Systran/faster-whisper-base

@@ -10099,21 +10099,22 @@ def main():
           and "if (!model) { say('Pick a LocalAI voice model first.', 'err', 'TTS'); return false }" in _laVo
           and "if (laVoices && laBackend !== 'chatterbox' && !laVoice.trim()) { say('Pick a voice first.', 'err', 'TTS'); return false }" in _laVo)
     check("localai ui: the TTS voice list follows the backend LocalAI reports (Kokoro / Pocket presets, "
-          "Chatterbox's reference voices — the live merge's labels, else the config-only catalog — else free text)",
+          "Chatterbox's reference voices — the live merge's labels — else free text)",
           "laBackend === 'kokoro' ? (catalog.kokoro || []) : laBackend === 'pocket' ? (catalog.pocket || [])"
-          " : laBackend === 'chatterbox' ? (laVoicePaths ? Object.keys(laVoicePaths)"
-          " : (catalog.chatterbox || [])) : null" in _ws(_laVo)
+          " : laBackend === 'chatterbox' ? (laVoicePaths ? Object.keys(laVoicePaths) : null) : null" in _ws(_laVo)
           and "laRaw.startsWith('kokoro') ? 'kokoro' : laRaw.startsWith('pocket') ? 'pocket' : laRaw.startsWith('chatterbox') ? 'chatterbox' : laRaw" in _ws(_laVo)
           and 'id="tts-localai-voice"' in _laVo)
     check("localai ui: the chatterbox picker merges the WebUI's cloned voices into the config registry "
-          "(the live map first, GET /tts's as fallback) but stores their reference values; an undeclared "
-          "stored value keeps the free-text input (never silently blanked)",
+          "(the live map first, GET /tts's as fallback), renders whenever it has a list, and a stored "
+          "value the list doesn't offer rides as a disabled option (never blanked)",
           "const laVoicePaths = laBackend === 'chatterbox' ? (laLibVoices || tts?.chatterbox_voices || null) : null" in _ws(_laVo)
           and "const laLibVoices = useLocalAIVoices(provider === 'localai' && laBackend === 'chatterbox')" in _ws(_laVo)
           and "api('/api/dashboard/localai/voices')" in _laVoHook and "lenoxvi:reload-all" in _laVoHook
-          and "Object.values(laVoicePaths).includes(laVoice)" in _ws(_laVo)
+          and "const laVoiceKnown = laBackend === 'chatterbox'" in _ws(_laVo)
+          and "Object.values(laVoicePaths || {}).includes(laVoice)" in _ws(_laVo)
+          and "const laVoiceDropdown = !!laVoices" in _ws(_laVo)
           and "value={laBackend === 'chatterbox' ? laVoicePaths[v] : v}" in _ws(_laVo)
-          and "laBackend !== 'chatterbox' && !laVoices.includes(laVoice)" in _ws(_laVo))
+          and "{!laVoiceKnown &&" in _ws(_laVo))
     check("localai ui: the STT card's LocalAI model saves on the LocalAI route, never inside the /stt body",
           "body.la_model = laModel" in _laSt and "delete body.la_model" in _laSt
           and "api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })" in _laSt

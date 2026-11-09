@@ -2662,11 +2662,13 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   const laVoicePaths = laBackend === 'chatterbox' ? (laLibVoices || tts?.chatterbox_voices || null) : null
   const laVoices = laBackend === 'kokoro' ? (catalog.kokoro || [])
     : laBackend === 'pocket' ? (catalog.pocket || [])
-    : laBackend === 'chatterbox' ? (laVoicePaths ? Object.keys(laVoicePaths) : (catalog.chatterbox || [])) : null
-  // A stored value the map doesn't declare keeps the free-text input —
-  // visible and editable, never silently blanked.
-  const laVoiceDropdown = laVoices && (laBackend !== 'chatterbox'
-    || (laVoicePaths && Object.values(laVoicePaths).includes(laVoice)))
+    : laBackend === 'chatterbox' ? (laVoicePaths ? Object.keys(laVoicePaths) : null) : null
+  // A backend that offers a list renders the dropdown; a stored value the
+  // list doesn't offer rides as a disabled option, never blanked.
+  const laVoiceKnown = laBackend === 'chatterbox'
+    ? Object.values(laVoicePaths || {}).includes(laVoice)
+    : (laVoices || []).includes(laVoice)
+  const laVoiceDropdown = !!laVoices
   // What Save sends for this provider, so the count matches the save.
   // Kokoro's voice and speed count on every tier.
   const ttsFields = ['provider', `model:${provider}`,
@@ -2766,7 +2768,7 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
             {provider === 'localai' && (laVoiceDropdown
               ? <select id="tts-localai-voice" className={`${INPUT_CLS} w-[200px]`} value={laVoice}
                   onChange={e => t.set({ la_voice: e.target.value })} aria-label="LocalAI voice">
-                  {laBackend !== 'chatterbox' && !laVoices.includes(laVoice) &&
+                  {!laVoiceKnown &&
                     <option value={laVoice} disabled>{laVoice || 'pick a voice'}</option>}
                   {laVoices.map(v => <option key={v} value={laBackend === 'chatterbox' ? laVoicePaths[v] : v}>{laBackend === 'kokoro' ? kokoroLabel(v) : v}</option>)}
                 </select>
