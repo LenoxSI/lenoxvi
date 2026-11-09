@@ -877,6 +877,57 @@ check("bot pin: wake.enabled / LVI_WAKE_WORD accept 1/true/yes/on in any case",
 check("bot pin: each session registers its echo gate under its pc_id",
       "dash_registry.set_gate(gate, pc_id=pc_id)" in bot)
 
+# ── fresh rooms rotate their conversation after FRESH_IDLE_RESET of quiet ─
+
+
+async def idle_probe(mode="fresh", pinned=False):
+    LIVE.clear()
+    LIVE.update({"intelligence": {"kind": "hermes", "url": "http://hm.test:8642/v1"}})
+    config._BOOT = LIVE
+    if pinned:
+        os.environ["LVI_CONVERSATION"] = "voice-pinned"
+    try:
+        a = IntelligenceAgent(echo_gate=EchoGate(), room="suite-idle", session_mode=mode)
+    finally:
+        os.environ.pop("LVI_CONVERSATION", None)
+    a._save_history = lambda h: None
+    seen = []
+
+    def ask(text):
+        seen.append((a._conversation, len(a._history)))
+        return "Done."
+    a._ask_intelligence = ask
+
+    async def push(frame, direction=None):
+        pass
+    a.push_frame = push
+
+    async def turn(gap):
+        if a._last_turn_at is not None:
+            a._last_turn_at -= gap
+        await a._run_turn(f"turn after {gap}s", a._turn_epoch)
+
+    await turn(0)
+    await turn(ia.FRESH_IDLE_RESET - 5)
+    await turn(ia.FRESH_IDLE_RESET + 1)
+    return seen
+
+
+seen = asyncio.run(idle_probe())
+check("idle: FRESH_IDLE_RESET is 10 minutes", ia.FRESH_IDLE_RESET == 600.0)
+check("idle: fresh turns under the reset apart share the conversation and its history",
+      seen[0][0] == seen[1][0] and seen[1][1] == 2, str(seen))
+check("idle: a fresh turn after the reset gets a new voice-<zone>-<id> and empty history",
+      seen[2][0] != seen[1][0] and seen[2][0].startswith("voice-") and seen[2][1] == 0, str(seen))
+seen = asyncio.run(idle_probe(mode="sticky"))
+check("idle: a sticky room never rotates", {c for c, _ in seen} == {"voice-suite-idle"} and seen[2][1] == 4, str(seen))
+seen = asyncio.run(idle_probe(pinned=True))
+check("idle: a pinned LVI_CONVERSATION never rotates", {c for c, _ in seen} == {"voice-pinned"}, str(seen))
+src_agent = Path(CORE, "intelligence", "agent.py").read_text()
+check("idle pin: idle counts from the turn's end (stamped in _run_turn's finally)",
+      "        finally:\n            # Idle is counted from the turn's end, so a long turn isn't idle time.\n"
+      "            self._last_turn_at = time.monotonic()\n" in src_agent)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAIL(S): {FAILS}")
     sys.exit(1)

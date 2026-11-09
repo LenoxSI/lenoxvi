@@ -116,6 +116,10 @@ CONTINUATION_WINDOW = 2.5
 # short tail stretch is not misheard for lack of context. Past this bound
 # the turn asks with the joined per-stretch text instead.
 RETRANSCRIBE_TIMEOUT = 2.0
+# A fresh room quiet this long (seconds since its last turn) starts a new
+# conversation: nodes stay connected for hours, so the per-connection id
+# alone would chain every turn of the day.
+FRESH_IDLE_RESET = 600.0
 
 
 def _filler_tiers() -> list[tuple[float, list[str]]]:
@@ -474,6 +478,7 @@ class IntelligenceAgent(FrameProcessor):
         # live session (see _stash_room).
         self._stash_name = room
         self._sticky = session_mode == "sticky"
+        self._conv_pinned = False
         if self._sticky and room:
             self._conversation = f"voice-{room}"
             self._history = _session_stash.load(room)[: self._max_history]
@@ -488,10 +493,12 @@ class IntelligenceAgent(FrameProcessor):
                 # room's stash to load.
                 logger.warning("intelligence_agent: sticky mode without a room — falling back to fresh")
             # Server-side conversation chain (per-connection): "voice-<zone>-<id>"
-            self._conversation = os.getenv(
-                "LVI_CONVERSATION",
-                f"voice-{cfg_env('intelligence', 'zone', 'LVI_ZONE', 'zone')}-{uuid.uuid4().hex[:8]}"
-            )
+            self._conv_prefix = f"voice-{cfg_env('intelligence', 'zone', 'LVI_ZONE', 'zone')}"
+            self._conv_pinned = bool(os.getenv("LVI_CONVERSATION"))
+            self._conversation = os.getenv("LVI_CONVERSATION", f"{self._conv_prefix}-{uuid.uuid4().hex[:8]}")
+        # Fresh rooms rotate after FRESH_IDLE_RESET; a pinned id never does.
+        self._rotates = not (self._sticky and room) and not self._conv_pinned
+        self._last_turn_at: float | None = None
         logger.info(f"intelligence_agent: conversation '{self._conversation}'"
                     f"{' (sticky)' if self._sticky and room else ''}")
 
@@ -875,6 +882,19 @@ class IntelligenceAgent(FrameProcessor):
         """Bind this pipeline's LED sender (bot.py, once per session)."""
         self._led = led
 
+    def _rotate_if_idle(self) -> None:
+        """Start a fresh room's new conversation (new id, empty history)
+        when its last turn is FRESH_IDLE_RESET or more ago."""
+        last = self._last_turn_at
+        self._last_turn_at = time.monotonic()
+        if not self._rotates or last is None or self._last_turn_at - last < FRESH_IDLE_RESET:
+            return
+        old = self._conversation
+        self._conversation = f"{self._conv_prefix}-{uuid.uuid4().hex[:8]}"
+        self._history = []
+        logger.info(f"intelligence_agent: idle {self._last_turn_at - last:.0f}s — "
+                    f"conversation '{old}' -> '{self._conversation}'")
+
     async def _run_turn(self, text: str, epoch: int, joint_parts: list[str] | None = None) -> None:
         """One turn as a background task. Every await
         checks the epoch — a superseded turn speaks nothing in its place,
@@ -892,6 +912,7 @@ class IntelligenceAgent(FrameProcessor):
         filler_spoken = False
         ask = call = None
         settled = False  # the call answered or failed while the turn still waited on it
+        self._rotate_if_idle()
         # The turn is now with the intelligence: show "thinking" on the ring
         # until speech (filler or reply) takes over. Cosmetic and
         # fire-and-forget: LedSender.send never raises.
@@ -1009,6 +1030,8 @@ class IntelligenceAgent(FrameProcessor):
             self._answered_epoch = epoch
             self._kick_late()
         finally:
+            # Idle is counted from the turn's end, so a long turn isn't idle time.
+            self._last_turn_at = time.monotonic()
             # Superseded, ended or failed: the shield kept the call alive
             # through the filler waits, so drop it here. One still queued
             # for a pool thread is never sent (a stale question must not

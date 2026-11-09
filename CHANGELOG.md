@@ -41,6 +41,9 @@ The two version streams are independent.
   today's boards keep working. (#53)
 
 ### Fixed
+- Fresh session mode: a room quiet for 10 minutes starts a new agent conversation (new id, empty history).
+  Nodes stay connected for hours, so the per-connection id alone chained every turn of the day and stale
+  history leaked into later turns. Sticky rooms and a pinned `LVI_CONVERSATION` are unchanged. (#68)
 - LocalAI speech: the /v1/audio/speech request no longer carries `speed` — no LocalAI backend takes it as
   a request knob (pocket-tts ignores it; chatterbox's vendored generate() rejects it with a 500, so every
   chatterbox reply fell back to Kokoro). The service plumbing keeps the parameter. (#66)
