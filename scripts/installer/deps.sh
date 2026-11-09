@@ -2,7 +2,7 @@
 # LenoxVI installer — dependencies. apt installs only what's missing (asked
 # once); gum and uv are pinned downloads checked against their sha256.
 
-APT_PACKAGES=(ca-certificates curl git openssl qrencode iproute2 whiptail)
+APT_PACKAGES=(ca-certificates curl git openssl iproute2 whiptail)
 
 GUM_VERSION=2.0.2
 GUM_SHA256_x86_64=d842e06d93dbed90af48cb8dd10698db6f22e331fc40346bb37bbc753109edc2

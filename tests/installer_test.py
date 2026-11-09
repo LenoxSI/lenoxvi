@@ -12,6 +12,7 @@ import hashlib
 import re
 import http.server
 import os
+import pty
 import shutil
 import socketserver
 import stat
@@ -72,7 +73,7 @@ for name, body in _STUB_SRC.items():
     f.write_text("#!/usr/bin/env bash\n" + body + "\n")
     f.chmod(0o755)
 
-ALL_PKGS = "ca-certificates curl git openssl qrencode iproute2 whiptail"
+ALL_PKGS = "ca-certificates curl git openssl iproute2 whiptail"
 
 
 def make_prefix(os_id="ubuntu", version="24.04", pretty=None):
@@ -187,12 +188,12 @@ r = sh("preflight", make_prefix(), STUB_DISK="2000")
 check("installer preflight: under 4 GB of free disk stops", r.returncode != 0 and "disk" in r.stderr, out(r))
 
 # ── deps ─────────────────────────────────────────────────────────────────
-r = sh("apt_missing git curl qrencode", STUB_DPKG="git ca-certificates")
-check("installer deps: apt_missing lists only what isn't installed", r.stdout.split() == ["curl", "qrencode"], out(r))
-r = sh("install_apt", STUB_DPKG="ca-certificates curl openssl iproute2 whiptail")
+r = sh("apt_missing git curl whiptail", STUB_DPKG="git ca-certificates")
+check("installer deps: apt_missing lists only what isn't installed", r.stdout.split() == ["curl", "whiptail"], out(r))
+r = sh("install_apt", STUB_DPKG="ca-certificates curl openssl iproute2")
 installs = [ln for ln in r.stdout.splitlines() if "apt-get install" in ln]
-check("installer deps: one apt install with only the missing packages (git qrencode), never an upgrade",
-      len(installs) == 1 and installs[0].endswith("--no-install-recommends git qrencode")
+check("installer deps: one apt install with only the missing packages (git whiptail), never an upgrade",
+      len(installs) == 1 and installs[0].endswith("--no-install-recommends git whiptail")
       and "upgrade" not in r.stdout, out(r))
 r = sh("install_apt")
 check("installer deps: everything present = no apt at all", "apt-get" not in r.stdout and "all present" in r.stdout, out(r))
@@ -396,6 +397,32 @@ r = sh("HOST_IP=192.0.2.10; DASH_TOKEN=abc123; handoff")
 check("installer handoff: dashboard address, the certificate warning, the token once, how to manage it",
       "https://192.0.2.10:7860/dashboard" in r.stdout and "certificate" in r.stdout and r.stdout.count("abc123") == 1
       and "lenoxvi status" in r.stdout, r.stdout)
+# The finish screen prints no QR code, even on a terminal with qrencode installed.
+qr_dir = TMP / "qrstub"
+qr_dir.mkdir()
+(qr_dir / "qrencode").write_text("#!/usr/bin/env bash\necho QR_STUB_RAN\n")
+(qr_dir / "qrencode").chmod(0o755)
+_src = "; ".join(f"source {SCRIPTS / n}.sh" for n in LIBS)
+_master, _slave = pty.openpty()
+r = subprocess.run(["setsid", "bash", "-c", f"set -euo pipefail; LVI_SCRIPT_DIR={REPO / 'scripts'}; {_src}; "
+                    "[[ -t 1 ]] && echo STDOUT_IS_TTY; HOST_IP=192.0.2.10; handoff"],
+                   stdout=_slave, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL, timeout=60, check=False,
+                   env={**env_for(), "PATH": f"{qr_dir}:{STUBS}:{os.environ['PATH']}"})
+os.close(_slave)
+_tty_out = b""
+while True:
+    try:
+        _chunk = os.read(_master, 4096)
+    except OSError:  # EIO once the terminal's last writer is gone
+        break
+    if not _chunk:
+        break
+    _tty_out += _chunk
+os.close(_master)
+_tty_out = _tty_out.decode(errors="replace")
+check("installer handoff: no QR code on a terminal, even with qrencode on PATH",
+      r.returncode == 0 and "STDOUT_IS_TTY" in _tty_out and "QR_STUB_RAN" not in _tty_out
+      and "https://192.0.2.10:7860/dashboard" in _tty_out, _tty_out + r.stderr)
 
 # ── service: the dashboard restart button's privileged path ────────────
 # The installer shape restarts through a root-owned helper plus a sudoers

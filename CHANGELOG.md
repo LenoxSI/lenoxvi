@@ -32,6 +32,9 @@ The two version streams are independent.
   gets more rope before the bot gives up on its reply. (#5)
 
 ### Changed
+- Installer: the finish screen no longer prints a terminal QR code of the dashboard address, and `qrencode`
+  is no longer installed (an existing copy is left in place). The address, certificate note, token and
+  manage line are unchanged. (#69)
 - The read-only node status `GET /api/dashboard/nodes/<room>/info` no longer asks for the dashboard token:
   read routes are open by law (`/status` and `/mapping` already are), so the Nodes table's mute state and
   details load without one. Every mutating route keeps its token check. (#54)

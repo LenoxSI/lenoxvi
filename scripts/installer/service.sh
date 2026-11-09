@@ -123,9 +123,6 @@ handoff() {
   local url="https://$HOST_IP:7860/dashboard"
   step "LenoxVI is running"
   printf '\n  %sOpen the dashboard:%s %s%s%s\n' "$MIST" "$RESET" "$LIME" "$url" "$RESET"
-  if command -v qrencode >/dev/null 2>&1 && [[ -t 1 ]]; then
-    qrencode -t ANSIUTF8 -m 2 "$url" | sed 's/^/  /'
-  fi
   printf '  Your browser warns about the certificate once (this machine made it): choose Advanced, then continue.\n'
   if [[ -n ${DASH_TOKEN:-} ]]; then
     printf '\n  Dashboard token (shown once, also in %s/.env):\n  %s\n' "$LVI_STATE_REAL" "$DASH_TOKEN"
