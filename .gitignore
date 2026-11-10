@@ -43,6 +43,10 @@ firmware/xvf3800/
 # first-run setup marker (the state dir is the repo on a dev clone)
 setup.pending
 
+# browser harness output (dashboard-ui: npm run e2e)
+dashboard-ui/test-results/
+dashboard-ui/playwright-report/
+
 # sticky-session history stash (dashboard checkbox; holds conversation text)
 data/
 config.yaml.bak-*

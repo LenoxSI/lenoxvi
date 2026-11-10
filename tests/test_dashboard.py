@@ -9366,7 +9366,9 @@ def main():
     check("tabs: section ids named like tabs (#voice, #system, #rooms) and card ids resolve to the tab that holds them",
           _gotTB == _wantTB and all(_appsrc.count(f'id="{t}"') == 1 for t, _ in _tabsTB)
           and "data-tab" not in _appsrc.replace('<div data-tab="', "").replace("[data-tab]", ""), str(_gotTB))
-    _linksTB = set(_reui.findall(r"href: '#([\w-]+)'", _appsrc)) | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))
+    # #setup opens the setup wizard, not a tab (setup_wizard_test.py pins that link).
+    _linksTB = (set(_reui.findall(r"href: '#([\w-]+)'", _appsrc))
+                | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))) - {"setup"}
     check("tabs: the warning chips' links and the missing-key link land on the tab with their card",
           _linksTB == {"intelligence", "keys", "localai", "rooms"}
           and all(_tabTB(i) in ("rooms", "voice", "system") for i in _linksTB)
