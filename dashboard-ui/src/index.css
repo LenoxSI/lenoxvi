@@ -64,6 +64,16 @@ select {
   background-size: 0.75rem;
 }
 
+/* Setup wizard: the cards it hosts keep their own classes, but on a narrow
+   phone their fixed-width fields shrink to the line instead of widening the
+   page. Tables keep theirs: they scroll inside their own box. */
+.wizard-cards :is(input, select):not(table *) {
+  max-width: 100%;
+}
+.wizard-cards .min-w-\[280px\]:not(table *) {
+  min-width: min(280px, 100%);
+}
+
 @theme {
   --font-display: "Chakra Petch", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

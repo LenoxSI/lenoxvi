@@ -9339,7 +9339,8 @@ def main():
     check("tabs: every tab renders its component with the same props as before",
           "<Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB
           and "<Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB
-          and "<System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _appTB)
+          and "<System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} unsaved={unsaved} />"
+          in _appTB)
     check("tabs: the tab comes from location.hash on load and on hashchange, default rooms",
           "useState({ tab: 'rooms', id: '' })" in _htTB and "window.location.hash.slice(1)" in _goTB
           and "go() window.addEventListener('hashchange', go) "
@@ -9428,6 +9429,8 @@ def main():
     _drUS = _fnUI("function useDraft(saved, { scope = '', blank = {} } = {}) {")
     _barUS = _fnUI("function UnsavedBar({ cards, units, setMsg }) {")
     _allUS = _jsbody(_barUS, "const saveAll = async () => {")
+    # The loop itself is saveCards(), shared with the setup wizard's Save and continue.
+    _scUS = _jsbody(_appsrc, "async function saveCards(cards, units, keys) {")
     _voUS = _fnUI("function TtsCard({ tts, reloadAll }) {")
     _stUS = _fnUI("function SttCard({ status, setMsg }) {")
     _tuUS = _fnUI("function Tuning({ tuning, reloadAll }) {")
@@ -9528,17 +9531,19 @@ def main():
           "if (!window.confirm(`Discard ${total} unsaved change${total === 1 ? '' : 's'}?`)) return" in _disUS
           and "for (const k of keys) cards.current[k]?.discard()" in _disUS and _barUS.count("window.confirm(") == 1, _disUS)
     check("unsaved: Save runs each listed card's save in order, one after another, buttons off throughout",
-          0 <= _allUS.find("setSaving(true)") < _allUS.find("for (const k of keys) {")
-          < _allUS.find("await cards.current[k]?.save(") < _allUS.find("setSaving(false)"), _allUS[:300])
+          0 <= _allUS.find("setSaving(true)") < _allUS.find("await saveCards(cards, units, keys)")
+          < _allUS.find("setSaving(false)")
+          and 0 <= _scUS.find("for (const k of keys) {") < _scUS.find("await cards.current[k]?.save("), _allUS[:300])
     check("unsaved: one summary at the end: 'Saved.' (+ ' Restart to apply.') or 'Saved X of N.' plus each failure",
           _barUS.count("setMsg(") == 1 and _allUS.find("setMsg(") > _allUS.find("setSaving(false)")
-          and ": `Saved.${restart ? ' Restart to apply.' : ''}`" in _allUS
-          and "`Saved ${done} of ${keys.length}. ${failed.join(' ')}`" in _allUS
-          and "failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))" in _allUS
-          and "if (!ok) {" in _allUS and "continue" in _allUS, _allUS[-500:])
+          and "setMsg(r.text, r.ok ? 'ok' : 'err')" in _allUS
+          and ": `Saved.${restart ? ' Restart to apply.' : ''}`" in _scUS
+          and "`Saved ${done} of ${keys.length}. ${failed.join(' ')}`" in _scUS
+          and "failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))" in _scUS
+          and "if (!ok) {" in _scUS and "continue" in _scUS, _scUS[-500:])
     check("unsaved: 'Saved — …' messages fold into the summary and flag a restart; any other message is kept as a note",
-          "if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))" in _allUS
-          and "else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true" in _allUS)
+          "if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))" in _scUS
+          and "else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true" in _scUS)
     check("unsaved: one lime per view: the header Restart is default style while the bar shows",
           "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT}" in _rbtTB
           and "unsaved={unsaved > 0}" in _hdrTB
@@ -10144,7 +10149,7 @@ def main():
 
     # ── node setup ui (App.jsx): the System tab's USB setup panel ──
     _nsUI = _fnUI("function NodeSetupPanel({ setMsg }) {")
-    _sysNS = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
+    _sysNS = _fnUI("function System({ intelligence, status, setMsg, reloadAll, unsaved = 0 }) {")
     check("node setup ui: the panel renders right after the Firmware panel on the System tab",
           bool(_reui.search(r"<FirmwarePanel [^>]*/>\s*<NodeSetupPanel setMsg=\{setMsg\} />", _sysNS)),
           _sysNS[-300:] or "no System()")
