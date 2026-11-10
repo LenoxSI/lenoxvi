@@ -8135,7 +8135,7 @@ def main():
 
         # ── dashboard ui (App.jsx) ──
         _appNB = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
-        _sysNB = _appNB[_appNB.find("function System({"):]
+        _sysNB = _appNB[_appNB.find("function IntelligenceCard({"):]
         check("nanobot: dashboard ui: the provider dropdown offers Nanobot and the Keys card can save its key",
               "{LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}" in _sysNB
               and "const lane = laneOf(row.kind)" in _appNB and "if (!lane) return null" in _appNB
@@ -8461,7 +8461,7 @@ def main():
     check("dashboard ui: a refused restart request is reported at once, not after the 90 s wait",
           0 <= _pe < _wl and "return" in _rb[_pe:_wl], f"postErr@{_pe} loop@{_wl}")
 
-    _kc = _jsbody(_appsrc, "function KeysCard({ setMsg }) {")
+    _kc = _jsbody(_appsrc, "function KeysCard({ setMsg, only }) {")
     _kadd = _reui.search(r'<select id="key-add".*?</select>', _kc, _reui.DOTALL)
     check("dashboard ui: Add key saves only under an explicitly picked service (no implicit first pick)",
           bool(_kc) and "firstPick" not in _kc and "addPick ||" not in _kc
@@ -8705,7 +8705,7 @@ def main():
         j = _reui.search(r"\n(export default )?function ", _appsrc[i + 1:]) if i >= 0 else None
         return "" if i < 0 else _appsrc[i:i + 1 + j.start()] if j else _appsrc[i:]
 
-    _sysUI = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
+    _sysUI = _fnUI("function IntelligenceCard({ intelligence, setMsg, reloadAll }) {")
     _selUI = _reui.search(r"const agentSel = (.*?)\n\s*const agentEntry", _sysUI, _reui.DOTALL)
     _selUI = _ws(_selUI.group(1)) if _selUI else ""
     _oldFallback = "intAgent || found[intKind]?.selected || agentList[0]?.id || ''"
@@ -8777,7 +8777,7 @@ def main():
           _selUI.startswith(_NB_FREE) and _nbFree
           and "[`agent:${k}`, intelligence?.agents?.[k] || null]" in _sysUI
           and "const intAgent = d.val(`agent:${intKind}`) || ''" in _sysUI, _selUI[:200])
-    _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _rmUI = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {")
     check("zones ui: 'nanobot's own model' lives only on the Intelligence card, never in the per-room agent picker",
           "laneOf(intKind).no_agent_label" in _sysUI and bool(_rmUI) and "no_agent_label" not in _rmUI
           and "nanobot's own model" not in _rmUI and "room_agents" in _rmUI)
@@ -9044,13 +9044,13 @@ def main():
           "if (_botRestarting) return false" in _rb and "_botRestarting = true" in _rb
           and _rb.count("_botRestarting = false") == 2 and "i < 45" in _rb, _rb[:200])
     for _whatRP, _fnRP, _pinRP in (
-            ("tts", "function Voice(", ("await api('/api/dashboard/tts', { method: 'PUT', json: body }) "
+            ("tts", "function TtsCard(", ("await api('/api/dashboard/tts', { method: 'PUT', json: body }) "
                                        "if (provider === 'localai') await api('/api/dashboard/localai', { method: 'PUT', "
                                        "json: { model_tts: model || '', voice: laVoice.trim() } }) "
                                        "say('Saved — restart to apply.', 'ok', 'TTS') await reloadAll()")),
             ("voice tuning", "function Tuning(", ("say('Saved — restart to apply.', 'ok', 'Voice tuning') "
                                                  "await reloadAll() // pull the saved truth back")),
-            ("intelligence", "function System(", "say('Saved — restart to apply.', 'ok', 'Intelligence') await reloadAll()"),
+            ("intelligence", "function IntelligenceCard(", "say('Saved — restart to apply.', 'ok', 'Intelligence') await reloadAll()"),
             ("wake model", "function OwwPanel(", ("say('Saved — restart to apply.', 'ok', 'Wake word model') "
                                                  "await load() reloadAll()")),
             ("stt", "function SttCard(", (": 'Saved — restart to apply.', 'ok', 'STT') "
@@ -9185,7 +9185,7 @@ def main():
     # far-right Actions cell — muting a room needed that scroll. The
     # button now renders right after the status chip; NodeActions keeps
     # owning the one mute state and hands both cells' parts to the row.
-    _rmMut = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _rmMut = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {")
     _chipThenMute = _reui.search(
         r'\{/\* Brand Chip rule.*?className="flex items-center gap-2 flex-wrap">.*?'
         r'data-role="node-state".*?\{mute\}', _rmMut, _reui.DOTALL)
@@ -9229,7 +9229,7 @@ def main():
     # fw_push (1.2.41+) reports a refused OTA version and a Wi-Fi rollback
     # (/status rooms[].fw_rejected / wifi_rollback); get_info reports boot,
     # Wi-Fi, update and audio health. Chips reuse the table's warning chip.
-    _rmNH = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _rmNH = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {")
     _fcNH = _reui.search(r"\{esc\(r\.fw\) \|\| '—'\}.*?</td>", _rmNH, _reui.DOTALL)
     _fcNH = _fcNH.group(0) if _fcNH else ""
     _warnNH = "className={`ml-2 inline-block rounded-full px-2.5 py-0.5 text-[12px] font-sans font-medium ${STAT_TONE.warning}`}"
@@ -9423,13 +9423,13 @@ def main():
     _drUS = _fnUI("function useDraft(saved, { scope = '', blank = {} } = {}) {")
     _barUS = _fnUI("function UnsavedBar({ cards, units, setMsg }) {")
     _allUS = _jsbody(_barUS, "const saveAll = async () => {")
-    _voUS = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
+    _voUS = _fnUI("function TtsCard({ tts, reloadAll }) {")
     _stUS = _fnUI("function SttCard({ status, setMsg }) {")
     _tuUS = _fnUI("function Tuning({ tuning, reloadAll }) {")
     _wkUS = _fnUI("function WakeNameField({ setMsg }) {")
     _owUS = _fnUI("function OwwPanel({ setMsg, reloadAll }) {")
-    _syUS = _fnUI("function System({ intelligence, status, setMsg, reloadAll }) {")
-    _roUS = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll }) {")
+    _syUS = _fnUI("function IntelligenceCard({ intelligence, setMsg, reloadAll }) {")
+    _roUS = _fnUI("function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {")
     _saveUS = {
         "tts": _jsbody(_voUS, "const saveTTS = async say => {"),
         "stt": _jsbody(_stUS, "const save = async say => {"),
@@ -9484,7 +9484,7 @@ def main():
     check("unsaved: voice tuning marks a knob changed by value, not by touch (the dot stays the marker)",
           "{label}{vals.changed(f) ? ' •' : ''}" in _tuUS and "markDirty" not in _tuUS and "dirtyRef" not in _tuUS
           and "onChange={e => vals.set({ [f]: e.target.value })}" in _tuUS, _tuUS[:200])
-    _btnUS = {"tts": _voUS[:_voUS.find("<SttCard ")], "stt": _stUS, "voice tuning": _tuUS, "wake name": _wkUS,
+    _btnUS = {"tts": _voUS, "stt": _stUS, "voice tuning": _tuUS, "wake name": _wkUS,
               "wake model": _owUS, "intelligence": _syUS, "room mapping": _roUS}
     check("unsaved: the seven cards have no Save button of their own, and the wake model no Set active",
           all(">Save</button>" not in s and "onClick={save}" not in s and "onClick={saveTTS}" not in s
@@ -9983,9 +9983,10 @@ def main():
           and "others would just reboot for nothing" not in _appsrc)
     _vtUX = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
     _poUX = [_vtUX.find(s) for s in ("<OwwPanel setMsg={setMsg} reloadAll={reloadAll} />", "<SttCard status={status} setMsg={setMsg} />",
-                                     '<Section id="voice" title="TTS"', "<Tuning tuning={tuning} reloadAll={reloadAll} />")]
+                                     "<TtsCard tts={tts} reloadAll={reloadAll} />", "<Tuning tuning={tuning} reloadAll={reloadAll} />")]
     check("voice tab: cards in pipeline order — wake word, STT, TTS, voice tuning",
-          all(p >= 0 for p in _poUX) and _poUX == sorted(_poUX), str(_poUX))
+          all(p >= 0 for p in _poUX) and _poUX == sorted(_poUX)
+          and '<Section id="voice" title="TTS"' in _fnUI("function TtsCard({ tts, reloadAll }) {"), str(_poUX))
     check("voice tab: the wake name hints it must match the model and applies live",
           'placeholder="Jarvis (for hey_jarvis)" title="Must match the wake model. Applies live."' in _ws(_appsrc))
     _fdUX = _fnUI("function Field({ label, children, between }) {")
@@ -10019,7 +10020,7 @@ def main():
     # ── localai ui (App.jsx) ──
     _laCard = _fnUI("function LocalAICard({ setMsg }) {")
     _laHook = _fnUI("function useLocalAIModels(on) {")
-    _laVo = _fnUI("function Voice({ tts, tuning, status, setMsg, reloadAll }) {")
+    _laVo = _fnUI("function TtsCard({ tts, reloadAll }) {")
     _laSt = _fnUI("function SttCard({ status, setMsg }) {")
     _laVoHook = _fnUI("function useLocalAIVoices(on) {")
     check("localai ui: the LocalAI card sits on the System tab after Keys, saves through the unsaved bar, never edits models",

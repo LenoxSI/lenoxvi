@@ -356,9 +356,20 @@ const perAgentLane = () => LANES.find(l => l.per_agent_keys)
 // just /v1) shows as host:port; the bot fills those parts back in on Save.
 const shortUrl = u => (u || '').match(/^http:\/\/([^/]+)(\/v1)?\/?$/)?.[1] || u || ''
 
+// Set by the setup wizard around its steps; null on the tabs.
+const WizardCtx = createContext(null)
+
 // A picked provider/agent with no key: point at the Keys card (keys are
-// entered there only).
+// entered there only). Inside the wizard a #keys link would leave it, so the
+// wizard shows the step's own key box instead.
 function MissingKey({ label }) {
+  const wizard = useContext(WizardCtx)
+  if (wizard) return (
+    <button type="button" onClick={() => wizard.showKeys()}
+      className="text-left text-[13px] text-[var(--warning-soft-foreground)] hover:underline cursor-pointer">
+      No {label} key → add it below
+    </button>
+  )
   return (
     <a href="#keys" className="text-[13px] text-[var(--warning-soft-foreground)] hover:underline">
       No {label} key → System · Keys
@@ -450,7 +461,9 @@ function keyState(row) {
   return { text: `set · ${row.hint || ''}`, cls: CHIP_CLS }
 }
 
-function KeysCard({ setMsg }) {
+// only: the setup wizard's filter. Just these vars get a row (set or not), and
+// the Add box is hidden; unset, the card is the System tab's as ever.
+function KeysCard({ setMsg, only }) {
   const [keys, setKeys] = useState(null)
   const [open, setOpen] = useState(null)        // var being replaced
   const [epoch, setEpoch] = useState(0)         // remounts key boxes after a save
@@ -585,7 +598,7 @@ function KeysCard({ setMsg }) {
       await test({ var: v })  // the saved key, checked BEFORE any restart
     } finally { setBusy(false) }
   }
-  const shownRows = (keys || []).filter(shown)
+  const shownRows = (keys || []).filter(only ? r => only.includes(r.var) : shown)
   const openVar = shownRows.some(r => r.var === open) ? open : null  // a row that left takes its box with it
 
   return (
@@ -670,7 +683,7 @@ function KeysCard({ setMsg }) {
           </div>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          {!keys ? null : (services.length === 0 && agents.length === 0) ? (
+          {!keys || only ? null : (services.length === 0 && agents.length === 0) ? (
             <span className="text-[13px] text-[var(--muted)]">Every key is set.{agentNote ? ` ${agentNote}` : ''}</span>
           ) : (
             <>
@@ -1442,7 +1455,9 @@ function NodeDetails({ room }) {
   )
 }
 
-function Rooms({ status, mapping, setMsg, reloadAll }) {
+// showZones: false in the setup wizard's nodes step, whose speakers step
+// already mounts the zone list.
+function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {
   // Per-room agent override. The Intelligence card's agent is the house
   // default; a room only differs when picked here ('' = back to Default).
   const [found, setFound] = useState(null)
@@ -1749,7 +1764,7 @@ function Rooms({ status, mapping, setMsg, reloadAll }) {
         </div>
       </Section>
 
-      <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+      {showZones && <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />}
     </>
   )
 }
@@ -2610,7 +2625,9 @@ const savedFor = (t, p) =>
   : p === 'kokoro' ? t?.kokoro_voice
   : p === 'localai' ? t?.localai_model_tts : t?.deepgram_flux_voice
 
-function Voice({ tts, tuning, status, setMsg, reloadAll }) {
+// The TTS card: provider, model or voice, its knobs and the Kokoro voice.
+// Saved from the unsaved-changes bar like every settings card.
+function TtsCard({ tts, reloadAll }) {
   const catalog = tts?.catalog || {}
   const num = (v, parse) => (v != null ? parse(v) : null)
   // Drafts against the saved TTS config (useDraft): the 5 s poll never
@@ -2736,11 +2753,8 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
   }
   useUnsaved('voice', { label: 'TTS', count: ttsFields.filter(t.changed).length, save: saveTTS, discard: t.discard })
 
-  // Pipeline order: wake word, STT, TTS, then tuning.
   return (
     <>
-      <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
-      <SttCard status={status} setMsg={setMsg} />
       <Section id="voice" title="TTS"
         note="">
         <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
@@ -2849,7 +2863,17 @@ function Voice({ tts, tuning, status, setMsg, reloadAll }) {
           )}
         </div>
       </Section>
+    </>
+  )
+}
 
+function Voice({ tts, tuning, status, setMsg, reloadAll }) {
+  // Pipeline order: wake word, STT, TTS, then tuning.
+  return (
+    <>
+      <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />
+      <SttCard status={status} setMsg={setMsg} />
+      <TtsCard tts={tts} reloadAll={reloadAll} />
       <Tuning tuning={tuning} reloadAll={reloadAll} />
     </>
   )
@@ -3172,7 +3196,9 @@ function LocalAICard({ setMsg }) {
   )
 }
 
-function System({ intelligence, status, setMsg, reloadAll }) {
+// The Intelligence card: the lane, its agent and URL, and the agent discovery
+// behind them. Saved from the unsaved-changes bar like every settings card.
+function IntelligenceCard({ intelligence, setMsg, reloadAll }) {
   // Agents: per-kind selection (like URLs) + the provider's discovered
   // list. Discovery runs server-side (keys never reach the browser) on
   // first load, on provider switch, on URL change, and on the refresh
@@ -3287,9 +3313,6 @@ function System({ intelligence, status, setMsg, reloadAll }) {
   }
   useUnsaved('intelligence', { label: 'Intelligence', count: intFields.filter(d.changed).length, save, discard: d.discard })
   return (
-    <>
-    <KeysCard setMsg={setMsg} />
-    <LocalAICard setMsg={setMsg} />
     <Section id="intelligence" title="Intelligence"
       note="">
       <div className="rounded-2xl bg-[var(--surface)] p-4 grid grid-cols-1 gap-4">
@@ -3362,6 +3385,15 @@ function System({ intelligence, status, setMsg, reloadAll }) {
         </div>}
       </div>
     </Section>
+  )
+}
+
+function System({ intelligence, status, setMsg, reloadAll }) {
+  return (
+    <>
+    <KeysCard setMsg={setMsg} />
+    <LocalAICard setMsg={setMsg} />
+    <IntelligenceCard intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
 
     <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
     <NodeSetupPanel setMsg={setMsg} />
