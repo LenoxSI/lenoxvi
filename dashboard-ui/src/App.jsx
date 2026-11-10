@@ -8,7 +8,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { TABS } from './tabs.js'
-import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView } from './setupWizard.js'
+import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView, wakePhrase, heardSince } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
@@ -146,11 +146,11 @@ function TokenDialog() {
 }
 
 /* ── restart lane ──────────────────────────────────────────── */
-// restartBot's one caller is the header's Restart button (saves never restart; they
-// add to /status restart_pending), and the React `rebooting` state can lag
-// a second click — two concurrent restarts meant two transient restart
-// units and two 90s wait loops fighting over one message chip. A
-// module-level latch is the only airtight double-fire guard.
+// restartBot's callers are the header's Restart button and the setup wizard's
+// Restart step; saves never restart (they add to /status restart_pending).
+// React's `rebooting` state can lag a second click, and two concurrent
+// restarts mean two restart units and two 90 s wait loops on one message
+// chip, so a module-level latch guards against a double fire.
 let _botRestarting = false
 async function restartBot(setMsg, setRebooting) {
   if (_botRestarting) return false
@@ -3595,6 +3595,57 @@ function NodesStep({ probe, onProbe, status, mapping, setMsg, reloadAll }) {
   )
 }
 
+// Restart and test: one restart applies what the steps saved (a bot that
+// can't restart itself gets a note to do it by hand). Then the wake word,
+// heard after that boot, shows the new setup works.
+function FinishStep({ probe, onProbe, setMsg }) {
+  useProbePoll(onProbe)
+  const [models, setModels] = useState(null)
+  const [rebooting, setRebooting] = useState(false)
+  useEffect(() => {
+    let alive = true
+    api('/api/dashboard/oww/models').then(d => { if (alive) setModels(d) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  const pending = probe?.restart_pending || []
+  const manual = probe?.restart === 'manual'
+  const heard = heardSince(probe)
+  const restart = async () => {
+    if (await restartBot(setMsg, setRebooting)) api('/api/dashboard/setup/probe').then(onProbe).catch(() => {})
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3 rounded-2xl bg-[var(--surface)] p-4" style={{ minWidth: 0 }}>
+      {!probe ? (
+        <p className="text-[14px] leading-5 text-[var(--muted)] m-0">…</p>
+      ) : pending.length ? (
+        manual ? (
+          <p className="text-[14px] leading-5 m-0">Restart the bot yourself so it loads the new settings
+            ({pending.join(', ')}), then come back here. This page notices the restart by itself.</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={`${BTN_PRIMARY} ${TOUCH}`} disabled={rebooting} onClick={restart}>
+              {rebooting ? 'Restarting…' : `Restart to apply (${pending.length})`}</button>
+            <span className="text-[13px] leading-5 text-[var(--muted)]">
+              Waiting: {pending.join(', ')}. Every node reboots and reconnects.</span>
+          </div>
+        )
+      ) : (
+        <>
+          <p className="text-[16px] leading-6 font-medium m-0">
+            {models ? `Say “${wakePhrase(models)}” in a room with a node.` : 'Say the wake word in a room with a node.'}</p>
+          <p aria-live="polite" className="text-[14px] leading-5 m-0">
+            {heard
+              ? `Heard you${heard.room ? ` in ${heard.room}` : ''} at ${new Date(heard.time * 1000).toLocaleTimeString()}.`
+              : 'Listening for the wake word…'}</p>
+        </>
+      )}
+      <a href="/client/" target="_blank" rel="noreferrer"
+        className="inline-flex items-center min-h-[44px] text-[14px] underline hover:text-[var(--accent)]">
+        No node yet? Talk from this browser.</a>
+    </div>
+  )
+}
+
 // Finish's summary: each step done or skipped, as the probe sees it, with a
 // way back to it.
 function StepSummary({ probe, onGo }) {
@@ -3619,13 +3670,15 @@ function StepSummary({ probe, onGo }) {
   )
 }
 
-function StepNav({ onBack, onSkip, skipLabel = 'Skip', nextLabel = 'Continue', onNext, busy }) {
+// quiet: the next button steps back from the lead (another button on the
+// step leads, and a view has one lime element).
+function StepNav({ onBack, onSkip, skipLabel = 'Skip', nextLabel = 'Continue', onNext, busy, quiet = false }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       {onBack ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onBack}>Back</button> : <span />}
       <div className="flex flex-wrap gap-3">
         {onSkip ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onSkip}>{skipLabel}</button> : null}
-        <button type={onNext ? 'button' : 'submit'} className={`${BTN_PRIMARY} ${TOUCH}`} disabled={busy}
+        <button type={onNext ? 'button' : 'submit'} className={`${quiet ? BTN_DEFAULT : BTN_PRIMARY} ${TOUCH}`} disabled={busy}
           onClick={onNext}>{nextLabel}</button>
       </div>
     </div>
@@ -3714,7 +3767,7 @@ function WelcomeStep({ probe, version, onNext }) {
   )
 }
 
-function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll }) {
+function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll, onUnsaved }) {
   const [probe, setProbe] = useState(null)
   const [step, setStep] = useState(STEPS[0].id)
   const [leaving, setLeaving] = useState(false)
@@ -3729,6 +3782,10 @@ function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll }) 
     const label = card?.label || '', count = card?.count || 0
     setUnits(u => (u[key]?.label === label && u[key]?.count === count ? u : { ...u, [key]: { label, count } }))
   }, [])
+  // The step's unsaved edits count toward the page's leave-page warning.
+  const count = UNSAVED_ORDER.reduce((n, k) => n + (units[k]?.count || 0), 0)
+  useEffect(() => { onUnsaved(count) }, [count, onUnsaved])
+  useEffect(() => () => onUnsaved(0), [onUnsaved])
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
   // Read again on every step: the steps' done flags follow what was saved.
@@ -3783,7 +3840,10 @@ function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll }) 
     </>,
     [STEP_ID.Nodes]: <NodesStep probe={probe} onProbe={setProbe} status={status} mapping={mapping}
       setMsg={setMsg} reloadAll={reloadAll} />,
+    [STEP_ID['Restart and test']]: <FinishStep probe={probe} onProbe={setProbe} setMsg={setMsg} />,
   }[s.id]
+  // While a restart waits, the step's Restart button leads, not Finish.
+  const restartLeads = !next && probe?.restart !== 'manual' && (probe?.restart_pending || []).length > 0
   // Zone actions apply at once, so the Speakers step has nothing to save.
   const saves = body && s.id !== STEP_ID.Speakers
   return (
@@ -3802,7 +3862,7 @@ function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll }) 
       {s.id === STEPS[0].id ? (
         <WelcomeStep probe={probe} version={status?.version} onNext={() => go(next)} />
       ) : (
-        <StepNav onBack={back ? () => go(back) : null} busy={leaving || saving}
+        <StepNav onBack={back ? () => go(back) : null} busy={leaving || saving} quiet={restartLeads}
           onSkip={s.skippable && next ? () => go(next) : null}
           skipLabel={s.id === STEP_ID.Intelligence ? 'Not yet' : 'Skip'}
           nextLabel={!next ? 'Finish' : saves ? (saving ? 'Saving…' : 'Save and continue') : 'Continue'}
@@ -3848,12 +3908,16 @@ export default function App() {
     setUnits(u => (u[key]?.label === label && u[key]?.count === count ? u : { ...u, [key]: { label, count } }))
   }, [])
   const unsaved = UNSAVED_ORDER.reduce((n, k) => n + (units[k]?.count || 0), 0)
+  // The setup wizard keeps its own registry; its count joins the tabs' here,
+  // so leaving the page asks first over either.
+  const [wizardUnsaved, setWizardUnsaved] = useState(0)
+  const leaving = unsaved + wizardUnsaved
   useEffect(() => {
-    if (!unsaved) return
+    if (!leaving) return
     const warn = e => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [unsaved])
+  }, [leaving])
 
   // Poll hygiene. One refresh cycle at a time —
   // a call that lands mid-cycle doesn't stack a second wave of 5 GETs
@@ -3938,7 +4002,8 @@ export default function App() {
         {/* The wizard replaces the tabs, never sits beside them: the cards it
             reuses assume one mount per page (ids, hash targets, unsaved keys). */}
         {setup ? (
-          <SetupWizard status={status} mapping={mapping} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
+          <SetupWizard status={status} mapping={mapping} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll}
+            onUnsaved={setWizardUnsaved} />
         ) : waiting ? null : (
           <>
             <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
