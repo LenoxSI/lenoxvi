@@ -302,6 +302,72 @@ check("install contract: state.sh writes exactly the marker paths.setup_marker()
 _setup_src = (CORE / "dashboard" / "setup.py").read_text()
 check("setup.py stays framework-free (no FastAPI import)", "fastapi" not in _setup_src.lower())
 
+# ── dashboard ui: the cards the wizard reuses stand alone ────────────
+# Source pins (the host has no JS runtime for the React app): the TTS and
+# Intelligence cards are their own components, and the shared cards take
+# wizard props whose defaults change nothing on the tabs.
+APP = (REPO / "dashboard-ui" / "src" / "App.jsx").read_text()
+
+
+def fn(head):
+    """A top-level component's source, up to the next top-level function."""
+    i = APP.find(head)
+    if i < 0:
+        return ""
+    j = re.search(r"\n(export default )?function ", APP[i + 1:])
+    return APP[i:i + 1 + j.start()] if j else APP[i:]
+
+
+def rendered(src):
+    """The component tags a function's return renders, in order."""
+    ret = src[src.find("\n  return ("):]
+    return re.findall(r"<([A-Z]\w*)[\s/>]", ret)
+
+
+TTS_HEAD = "function TtsCard({ tts, reloadAll }) {"
+INT_HEAD = "function IntelligenceCard({ intelligence, setMsg, reloadAll }) {"
+KEYS_HEAD = "function KeysCard({ setMsg, only }) {"
+ROOMS_HEAD = "function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {"
+VOICE_HEAD = "function Voice({ tts, tuning, status, setMsg, reloadAll }) {"
+SYSTEM_HEAD = "function System({ intelligence, status, setMsg, reloadAll }) {"
+_tts, _int, _keys, _rooms = fn(TTS_HEAD), fn(INT_HEAD), fn(KEYS_HEAD), fn(ROOMS_HEAD)
+_voice, _system, _missing = fn(VOICE_HEAD), fn(SYSTEM_HEAD), fn("function MissingKey({ label }) {")
+check("cards: TtsCard, IntelligenceCard, KeysCard(only) and Rooms(showZones) have their wizard signatures",
+      all(APP.count(h) == 1 for h in (TTS_HEAD, INT_HEAD, KEYS_HEAD, ROOMS_HEAD)),
+      str([h for h in (TTS_HEAD, INT_HEAD, KEYS_HEAD, ROOMS_HEAD) if APP.count(h) != 1]))
+check("cards: Voice renders wake word, STT, TTS, tuning — in that order, nothing else",
+      rendered(_voice) == ["OwwPanel", "SttCard", "TtsCard", "Tuning"]
+      and "<TtsCard tts={tts} reloadAll={reloadAll} />" in _voice, str(rendered(_voice)))
+check("cards: System renders Keys, LocalAI, Intelligence, Firmware, Node setup — in that order, nothing else",
+      rendered(_system) == ["KeysCard", "LocalAICard", "IntelligenceCard", "FirmwarePanel", "NodeSetupPanel"]
+      and "<IntelligenceCard intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />" in _system,
+      str(rendered(_system)))
+check("cards: Voice and System keep no settings state of their own (it moved with the cards)",
+      bool(_voice) and bool(_system) and not any(s in _voice + _system for s in ("useDraft(", "useUnsaved(", "useState(")),
+      "")
+_reg_voice, _reg_int = "useUnsaved('voice'", "useUnsaved('intelligence'"
+check("cards: the TTS and Intelligence unsaved keys register once each, inside their own card",
+      APP.count(_reg_voice) == 1 and _reg_voice in _tts and APP.count(_reg_int) == 1 and _reg_int in _int,
+      f"voice x{APP.count(_reg_voice)} intelligence x{APP.count(_reg_int)}")
+check("cards: the TTS card keeps its section id and the Intelligence card its own, plus its discovery state",
+      '<Section id="voice" title="TTS"' in _tts and '<Section id="intelligence" title="Intelligence"' in _int
+      and "const [found, setFound] = useState({})" in _int and "const discover = async (kind, url) => {" in _int)
+_order = re.search(r"const UNSAVED_ORDER = \[(.*?)\]", APP)
+check("cards: UNSAVED_ORDER is unchanged",
+      bool(_order) and re.findall(r"'([\w-]+)'", _order.group(1))
+      == ["rooms", "wake-name-card", "wake-model", "stt", "voice", "tuning", "localai", "intelligence"],
+      _order.group(0) if _order else "missing")
+check("cards: KeysCard without `only` shows today's rows and Add box; with it, only those vars and no Add box",
+      "const shownRows = (keys || []).filter(only ? r => only.includes(r.var) : shown)" in _keys
+      and "{!keys || only ? null : (services.length === 0 && agents.length === 0) ? (" in _keys, "")
+check("cards: Rooms mounts ZoneList unless showZones is false",
+      "{showZones && <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />}" in _rooms
+      and APP.count("<ZoneList ") == 1, "")
+check("cards: MissingKey keeps its #keys link outside the wizard; inside it, a button asks the wizard to show the keys",
+      "const WizardCtx = createContext(null)" in APP and "const wizard = useContext(WizardCtx)" in _missing
+      and 'href="#keys"' in _missing and "onClick={() => wizard.showKeys()}" in _missing
+      and _missing.find("if (wizard)") < _missing.find('href="#keys"'), _missing[:300])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} failed: {FAILS}")
