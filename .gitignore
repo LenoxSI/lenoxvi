@@ -40,6 +40,9 @@ firmware/waveshare/
 firmware/xvf3800/
 *.bundle
 
+# first-run setup marker (the state dir is the repo on a dev clone)
+setup.pending
+
 # sticky-session history stash (dashboard checkbox; holds conversation text)
 data/
 config.yaml.bak-*

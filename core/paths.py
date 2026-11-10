@@ -59,6 +59,12 @@ def certs_dir() -> Path:
     return state_root() / "certs"
 
 
+def setup_marker() -> Path:
+    """The first-run marker: present means the dashboard opens the setup
+    wizard by itself. Only the installer creates it, on a fresh config."""
+    return state_root() / "setup.pending"
+
+
 def sessions_file() -> Path:
     """Sticky-session history (LVI_SESSIONS wins)."""
     env = os.getenv("LVI_SESSIONS")
