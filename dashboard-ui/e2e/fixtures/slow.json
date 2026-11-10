@@ -1,0 +1,615 @@
+{
+  "generated_by": "tests/setup_wizard_test.py --dump-fixtures",
+  "responses": {
+    "/api/dashboard/intelligence": {
+      "agents": {
+        "hermes": "default",
+        "nanobot": null,
+        "openclaw": null
+      },
+      "key_set": false,
+      "keys_set": {
+        "hermes": false,
+        "nanobot": false,
+        "openclaw": false
+      },
+      "kind": "stub",
+      "url": null,
+      "urls": {}
+    },
+    "/api/dashboard/intelligence/lanes": {
+      "lanes": [
+        {
+          "agent_help": "Agents (profiles) on this Hermes gateway. Each one needs its own API key.",
+          "agent_required": true,
+          "brand": {
+            "backgroundColor": "rgba(255, 255, 255, 0.92)",
+            "color": "#2563eb"
+          },
+          "default_agent": "default",
+          "kind": "hermes",
+          "label": "Hermes",
+          "no_agent_label": null,
+          "per_agent_keys": true,
+          "url_placeholder": "<host>:8642"
+        },
+        {
+          "agent_help": "Agents on this OpenClaw Gateway (its /v1/models).",
+          "agent_required": true,
+          "brand": {
+            "backgroundColor": "rgba(23, 23, 23, 0.9)",
+            "color": "#ef4444"
+          },
+          "default_agent": null,
+          "kind": "openclaw",
+          "label": "OpenClaw",
+          "no_agent_label": null,
+          "per_agent_keys": false,
+          "url_placeholder": "<host>:18789"
+        },
+        {
+          "agent_help": "The model this nanobot server runs (its /v1/models). Optional: with none picked, nanobot uses its own.",
+          "agent_required": false,
+          "brand": null,
+          "default_agent": null,
+          "kind": "nanobot",
+          "label": "Nanobot",
+          "no_agent_label": "nanobot's own model",
+          "per_agent_keys": false,
+          "url_placeholder": "<host>:8900"
+        }
+      ]
+    },
+    "/api/dashboard/keys": {
+      "keys": [
+        {
+          "hint": null,
+          "in_use": false,
+          "kind": "elevenlabs",
+          "label": "ElevenLabs",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "TTS"
+          ],
+          "var": "ELEVENLABS_API_KEY"
+        },
+        {
+          "hint": null,
+          "in_use": false,
+          "kind": "deepgram",
+          "label": "Deepgram",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "TTS",
+            "STT"
+          ],
+          "var": "DEEPGRAM_API_KEY"
+        },
+        {
+          "hint": null,
+          "in_use": false,
+          "kind": "localai",
+          "label": "LocalAI",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "STT",
+            "TTS"
+          ],
+          "var": "LVI_LOCALAI_KEY"
+        },
+        {
+          "agent": "default",
+          "hint": null,
+          "in_use": false,
+          "kind": "hermes",
+          "label": "Hermes",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "Intelligence"
+          ],
+          "var": "LVI_HERMES_KEY"
+        },
+        {
+          "hint": null,
+          "in_use": false,
+          "kind": "openclaw",
+          "label": "OpenClaw",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "Intelligence"
+          ],
+          "var": "LVI_OPENCLAW_KEY"
+        },
+        {
+          "hint": null,
+          "in_use": false,
+          "kind": "nanobot",
+          "label": "Nanobot",
+          "pending_restart": false,
+          "set": false,
+          "used_by": [
+            "Intelligence"
+          ],
+          "var": "LVI_NANOBOT_KEY"
+        }
+      ]
+    },
+    "/api/dashboard/localai": {
+      "key_set": false,
+      "model_stt": "",
+      "url": null
+    },
+    "/api/dashboard/mapping": {
+      "agent_kind": "stub",
+      "default_agent": "",
+      "effective_volumes": {},
+      "room_agents": {},
+      "room_zones": {},
+      "speakers": {},
+      "zones": {}
+    },
+    "/api/dashboard/oww/models": {
+      "models": [
+        {
+          "license": "CC BY-NC-SA 4.0 (non-commercial)",
+          "name": "hey_test_word_1",
+          "path": "models/hey_test_word_1",
+          "selected": true,
+          "size": 1000000,
+          "source": "stock"
+        },
+        {
+          "license": "CC BY-NC-SA 4.0 (non-commercial)",
+          "name": "hey_test_word_2",
+          "path": "models/hey_test_word_2",
+          "selected": false,
+          "size": 1000000,
+          "source": "stock"
+        },
+        {
+          "license": "CC BY-NC-SA 4.0 (non-commercial)",
+          "name": "hey_test_word_3",
+          "path": "models/hey_test_word_3",
+          "selected": false,
+          "size": 1000000,
+          "source": "stock"
+        }
+      ]
+    },
+    "/api/dashboard/setup/probe": {
+      "boot_time": 1762700000.0,
+      "host": {
+        "arch": "aarch64",
+        "cpus": 4,
+        "disk_free_gb": 200,
+        "python": "3.12.3",
+        "ram_mb": 16000,
+        "slow": true
+      },
+      "last_wake": null,
+      "pending": true,
+      "restart": "auto",
+      "restart_pending": [],
+      "steps": [
+        {
+          "detail": "",
+          "done": true,
+          "id": "welcome"
+        },
+        {
+          "detail": "Whisper base",
+          "done": true,
+          "id": "listening",
+          "tier": "embedded"
+        },
+        {
+          "detail": "Kokoro",
+          "done": true,
+          "id": "voice",
+          "tier": "embedded"
+        },
+        {
+          "detail": "echo",
+          "done": false,
+          "id": "brain"
+        },
+        {
+          "detail": "stock model",
+          "done": true,
+          "id": "wake"
+        },
+        {
+          "detail": "no zones",
+          "done": false,
+          "id": "speakers"
+        },
+        {
+          "detail": "0 online",
+          "done": false,
+          "id": "nodes"
+        },
+        {
+          "detail": "ready",
+          "done": false,
+          "id": "finish"
+        }
+      ],
+      "token_required": false
+    },
+    "/api/dashboard/status": {
+      "intelligence": "echo",
+      "last_wake": null,
+      "restart_pending": [],
+      "rooms": [],
+      "session_modes": {},
+      "stt": {
+        "provider": "whisper",
+        "samples": 0,
+        "state": "not_loaded"
+      },
+      "tts_provider": "kokoro",
+      "uptime_secs": 120,
+      "version": "v0.0.0-e2e"
+    },
+    "/api/dashboard/stt": {
+      "current": {
+        "custom_language": false,
+        "language": "auto",
+        "provider": "whisper"
+      },
+      "deepgram_key_set": false,
+      "elevenlabs_key_set": false,
+      "languages": [
+        {
+          "code": "auto",
+          "label": "Auto-detect"
+        },
+        {
+          "code": "en",
+          "label": "English"
+        },
+        {
+          "code": "es",
+          "label": "Spanish"
+        },
+        {
+          "code": "fr",
+          "label": "French"
+        },
+        {
+          "code": "de",
+          "label": "German"
+        },
+        {
+          "code": "it",
+          "label": "Italian"
+        },
+        {
+          "code": "pt",
+          "label": "Portuguese"
+        },
+        {
+          "code": "nl",
+          "label": "Dutch"
+        },
+        {
+          "code": "pl",
+          "label": "Polish"
+        },
+        {
+          "code": "ru",
+          "label": "Russian"
+        },
+        {
+          "code": "uk",
+          "label": "Ukrainian"
+        },
+        {
+          "code": "tr",
+          "label": "Turkish"
+        },
+        {
+          "code": "ar",
+          "label": "Arabic"
+        },
+        {
+          "code": "hi",
+          "label": "Hindi"
+        },
+        {
+          "code": "ja",
+          "label": "Japanese"
+        },
+        {
+          "code": "ko",
+          "label": "Korean"
+        },
+        {
+          "code": "zh",
+          "label": "Chinese"
+        }
+      ],
+      "providers": [
+        {
+          "available": true,
+          "label": "Whisper base",
+          "name": "whisper",
+          "tier": "embedded"
+        },
+        {
+          "available": false,
+          "label": "LocalAI",
+          "name": "localai",
+          "reason": "set it up on System",
+          "tier": "local"
+        },
+        {
+          "available": false,
+          "label": "Deepgram Nova-3",
+          "name": "deepgram",
+          "reason": "add the key on System · Keys",
+          "tier": "cloud"
+        },
+        {
+          "available": false,
+          "label": "ElevenLabs Scribe v2",
+          "name": "elevenlabs",
+          "reason": "add the key on System · Keys",
+          "tier": "cloud"
+        }
+      ],
+      "status": {
+        "provider": "whisper",
+        "samples": 0,
+        "state": "not_loaded"
+      },
+      "tiers": [
+        {
+          "label": "Embedded",
+          "name": "embedded"
+        },
+        {
+          "label": "Local",
+          "name": "local"
+        },
+        {
+          "label": "Cloud",
+          "name": "cloud"
+        }
+      ]
+    },
+    "/api/dashboard/tts": {
+      "catalog": {
+        "chatterbox": [
+          "default"
+        ],
+        "deepgram": [
+          "aura-2-thalia-en",
+          "aura-2-andromeda-en",
+          "aura-2-helena-en",
+          "aura-2-apollo-en",
+          "aura-2-arcas-en",
+          "aura-2-aries-en",
+          "aura-2-asteria-en",
+          "aura-2-athena-en",
+          "aura-2-atlas-en",
+          "aura-2-aurora-en",
+          "aura-2-callista-en",
+          "aura-2-cora-en",
+          "aura-2-cordelia-en",
+          "aura-2-delia-en",
+          "aura-2-draco-en",
+          "aura-2-electra-en",
+          "aura-2-harmonia-en",
+          "aura-2-hera-en",
+          "aura-2-hermes-en",
+          "aura-2-hyperion-en",
+          "aura-2-iris-en",
+          "aura-2-janus-en",
+          "aura-2-juno-en",
+          "aura-2-jupiter-en",
+          "aura-2-luna-en",
+          "aura-2-mars-en",
+          "aura-2-minerva-en",
+          "aura-2-neptune-en",
+          "aura-2-odysseus-en",
+          "aura-2-ophelia-en",
+          "aura-2-orion-en",
+          "aura-2-orpheus-en",
+          "aura-2-pandora-en",
+          "aura-2-phoebe-en",
+          "aura-2-pluto-en",
+          "aura-2-saturn-en",
+          "aura-2-selene-en",
+          "aura-2-theia-en",
+          "aura-2-vesta-en",
+          "aura-2-zeus-en"
+        ],
+        "deepgram-flux": [
+          "flux-hannah-en",
+          "flux-kit-en",
+          "flux-alexis-en",
+          "flux-cliff-en",
+          "flux-sienna-en",
+          "flux-cole-en",
+          "flux-brooke-en",
+          "flux-colin-en",
+          "flux-gemma-en",
+          "flux-haley-en",
+          "flux-heather-en",
+          "flux-miles-en",
+          "flux-sean-en",
+          "flux-bree-en",
+          "flux-brittany-en",
+          "flux-bruce-en",
+          "flux-conor-en",
+          "flux-donovan-en",
+          "flux-drew-en",
+          "flux-elise-en",
+          "flux-jack-en",
+          "flux-kai-en",
+          "flux-kelsey-en",
+          "flux-maeve-en",
+          "flux-marcelo-en",
+          "flux-marcus-en",
+          "flux-meena-en",
+          "flux-meghan-en",
+          "flux-naveen-en",
+          "flux-paige-en",
+          "flux-priya-en",
+          "flux-rufus-en",
+          "flux-sharon-en",
+          "flux-tanner-en",
+          "flux-wade-en",
+          "flux-wes-en"
+        ],
+        "elevenlabs": [
+          "eleven_flash_v2_5",
+          "eleven_v4_turbo"
+        ],
+        "kokoro": [
+          "af_alloy",
+          "af_aoede",
+          "af_bella",
+          "af_heart",
+          "af_jessica",
+          "af_kore",
+          "af_nicole",
+          "af_nova",
+          "af_river",
+          "af_sarah",
+          "af_sky",
+          "am_adam",
+          "am_echo",
+          "am_eric",
+          "am_fenrir",
+          "am_liam",
+          "am_michael",
+          "am_onyx",
+          "am_puck",
+          "am_santa",
+          "bf_alice",
+          "bf_emma",
+          "bf_isabella",
+          "bf_lily",
+          "bm_daniel",
+          "bm_fable",
+          "bm_george",
+          "bm_lewis"
+        ],
+        "pocket": [
+          "alba",
+          "anna",
+          "azelma",
+          "bill_boerst",
+          "caro_davy",
+          "charles",
+          "cosette",
+          "eponine",
+          "eve",
+          "fantine",
+          "george",
+          "jane",
+          "jean",
+          "javert",
+          "marius",
+          "mary",
+          "michael",
+          "paul",
+          "peter_yearsley",
+          "stuart_bell",
+          "vera"
+        ]
+      },
+      "chatterbox_voices": {
+        "default": ""
+      },
+      "deepgram_flux_expressivity": null,
+      "deepgram_flux_speed": null,
+      "deepgram_flux_voice": "flux-hannah-en",
+      "deepgram_key_hint": null,
+      "deepgram_voice": "aura-2-thalia-en",
+      "elevenlabs_key_hint": null,
+      "elevenlabs_speed": null,
+      "elevenlabs_stability": null,
+      "elevenlabs_text_normalization": null,
+      "kokoro_speed": null,
+      "kokoro_voice": "af_heart",
+      "localai_key_hint": null,
+      "localai_model_tts": "",
+      "localai_voice": "",
+      "model": "eleven_flash_v2_5",
+      "provider": "kokoro",
+      "providers": [
+        {
+          "available": true,
+          "label": "Kokoro",
+          "name": "kokoro",
+          "tier": "embedded"
+        },
+        {
+          "available": false,
+          "label": "LocalAI",
+          "name": "localai",
+          "reason": "set it up on System",
+          "tier": "local"
+        },
+        {
+          "available": false,
+          "label": "ElevenLabs",
+          "name": "elevenlabs",
+          "reason": "add the key on System · Keys",
+          "tier": "cloud"
+        },
+        {
+          "available": false,
+          "label": "Deepgram Flux",
+          "name": "deepgram-flux",
+          "reason": "add the key on System · Keys",
+          "tier": "cloud"
+        },
+        {
+          "available": false,
+          "label": "Deepgram Aura-2",
+          "name": "deepgram",
+          "reason": "add the key on System · Keys",
+          "tier": "cloud"
+        }
+      ],
+      "tiers": [
+        {
+          "label": "Embedded",
+          "name": "embedded"
+        },
+        {
+          "label": "Local",
+          "name": "local"
+        },
+        {
+          "label": "Cloud",
+          "name": "cloud"
+        }
+      ],
+      "voice_id": null
+    },
+    "/api/dashboard/voice-tuning": {
+      "dedup_window": 10.0,
+      "lull_secs": 0.6,
+      "vad_confidence": 0.7,
+      "vad_min_volume": 0.6,
+      "vad_start_secs": 0.2,
+      "vad_stop_secs": 0.2,
+      "wake_awake_timeout": 15.0,
+      "wake_threshold": 0.4
+    },
+    "/api/dashboard/wake": {
+      "name": "Test Box"
+    }
+  },
+  "scenario": "slow"
+}

@@ -8,7 +8,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { TABS } from './tabs.js'
-import { STEPS, shouldOpen, nextStep, prevStep, tokenStep } from './setupWizard.js'
+import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
@@ -376,13 +376,13 @@ const WizardCtx = createContext(null)
 
 // A picked provider/agent with no key: point at the Keys card (keys are
 // entered there only). Inside the wizard a #keys link would leave it, so the
-// wizard shows the step's own key box instead.
+// wizard shows the step's own key box instead (above or below this line).
 function MissingKey({ label }) {
   const wizard = useContext(WizardCtx)
   if (wizard) return (
     <button type="button" onClick={() => wizard.showKeys()}
       className="text-left text-[13px] text-[var(--warning-soft-foreground)] hover:underline cursor-pointer">
-      No {label} key → add it below
+      No {label} key → add it in the key box
     </button>
   )
   return (
@@ -796,41 +796,47 @@ function useUnsaved(key, card) {
   useEffect(() => () => put(key, null), [key, put])
 }
 
+// Saves the listed cards one after another with their own save(), for the
+// unsaved bar and the setup wizard. One summary at the end instead of each
+// card's message flashing over the last; a failed card keeps its draft.
+async function saveCards(cards, units, keys) {
+  const end = s => (/[.!?]$/.test(s) ? s : s + '.')
+  let done = 0, restart = false
+  const failed = [], notes = []
+  for (const k of keys) {
+    const said = []
+    let ok = false
+    try { ok = !!(await cards.current[k]?.save(text => { said.push(text) })) }
+    catch (e) { said.push(e.message) }
+    const label = units[k].label
+    if (!ok) {
+      const why = (said[said.length - 1] || '').replace(/^[^:]*failed: /, '')
+      failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))
+      continue
+    }
+    done++
+    for (const text of said) {
+      // "Saved — …" folds into the summary; anything else is a next step
+      // the card asked for, kept in full.
+      if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))
+      else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true
+    }
+  }
+  const head = failed.length ? `Saved ${done} of ${keys.length}. ${failed.join(' ')}`
+    : `Saved.${restart ? ' Restart to apply.' : ''}`
+  return { ok: !failed.length, notes, text: [head, ...notes].join(' ') }
+}
+
 function UnsavedBar({ cards, units, setMsg }) {
   const [saving, setSaving] = useState(false)
   const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)
   const total = keys.reduce((n, k) => n + units[k].count, 0)
   if (!total) return null
-  const end = s => (/[.!?]$/.test(s) ? s : s + '.')
-  // One card after another; one summary at the end instead of each card's
-  // message flashing over the last. A failed card keeps its draft.
   const saveAll = async () => {
     setSaving(true)
-    let done = 0, restart = false
-    const failed = [], notes = []
-    for (const k of keys) {
-      const said = []
-      let ok = false
-      try { ok = !!(await cards.current[k]?.save(text => { said.push(text) })) }
-      catch (e) { said.push(e.message) }
-      const label = units[k].label
-      if (!ok) {
-        const why = (said[said.length - 1] || '').replace(/^[^:]*failed: /, '')
-        failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))
-        continue
-      }
-      done++
-      for (const text of said) {
-        // "Saved — …" folds into the summary; anything else is a next step
-        // the card asked for, kept in full.
-        if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))
-        else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true
-      }
-    }
+    const r = await saveCards(cards, units, keys)
     setSaving(false)
-    const head = failed.length ? `Saved ${done} of ${keys.length}. ${failed.join(' ')}`
-      : `Saved.${restart ? ' Restart to apply.' : ''}`
-    setMsg([head, ...notes].join(' '), failed.length ? 'err' : 'ok')
+    setMsg(r.text, r.ok ? 'ok' : 'err')
   }
   const discard = () => {
     if (!window.confirm(`Discard ${total} unsaved change${total === 1 ? '' : 's'}?`)) return
@@ -3399,7 +3405,7 @@ function IntelligenceCard({ intelligence, setMsg, reloadAll }) {
   )
 }
 
-function System({ intelligence, status, setMsg, reloadAll }) {
+function System({ intelligence, status, setMsg, reloadAll, unsaved = 0 }) {
   return (
     <>
     <KeysCard setMsg={setMsg} />
@@ -3409,7 +3415,11 @@ function System({ intelligence, status, setMsg, reloadAll }) {
     <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
     <NodeSetupPanel setMsg={setMsg} />
     <p className="text-[13px] text-[var(--muted)] m-0 text-center">
-      <a href="#setup" className="inline-block py-3 underline hover:text-[var(--foreground)]">Run setup again</a>
+      {/* Setup replaces the tabs, and their unsaved edits go with them: ask first. */}
+      <a href="#setup" className="inline-block py-3 underline hover:text-[var(--foreground)]"
+        onClick={e => {
+          if (unsaved && !window.confirm(`Discard ${unsaved} unsaved change${unsaved === 1 ? '' : 's'} and open setup?`)) e.preventDefault()
+        }}>Run setup again</a>
     </p>
     </>
   )
@@ -3430,6 +3440,63 @@ const STEP_NOTE = {
   'Restart and test': 'Restart the bot so it uses the new settings, then say the wake word.',
 }
 const TOUCH = 'min-h-[44px] min-w-[88px]'
+// Step ids by title: the ids are the server's, the titles are what users read.
+const STEP_ID = Object.fromEntries(STEPS.map(s => [s.title, s.id]))
+
+// Where a speech step's provider runs. The pick writes nothing: it decides
+// which helper cards (LocalAI, the step's own keys) show above the step's card.
+const SPEECH_TIERS = [
+  { name: 'embedded', label: 'Embedded', words: 'On this machine.' },
+  { name: 'local', label: 'Local', words: 'On a computer on your network, through LocalAI.' },
+  { name: 'cloud', label: 'Cloud', words: 'An online service, with an API key.' },
+]
+const CLOUD_KEYS = ['DEEPGRAM_API_KEY', 'ELEVENLABS_API_KEY']
+const LOCAL_KEYS = ['LVI_LOCALAI_KEY']
+const TIER_HINT = {
+  local: 'Set the LocalAI address and add its key below, then pick LocalAI.',
+  cloud: 'Add the key below, then pick the provider.',
+}
+// Cards that set up another card's choice: saving only these keeps the step
+// open, so the provider they unlock can be picked next.
+const HELPER_CARDS = ['localai']
+
+function SpeechStep({ step, probe, setMsg, card }) {
+  const [picked, setPicked] = useState(null)
+  const tier = picked || stepView(probe, step).tier || 'embedded'
+  // A "No key" button shows this step's key box (Cloud's when none is showing).
+  const keysCtx = {
+    showKeys: () => {
+      if (tier === 'embedded') setPicked('cloud')
+      setTimeout(() => scrollToCard('keys'), 0)
+    },
+  }
+  return (
+    <WizardCtx.Provider value={keysCtx}>
+      <fieldset className="grid grid-cols-1 gap-2 m-0 p-0 border-0" style={{ minWidth: 0 }}>
+        <legend className="text-[12px] font-medium text-[var(--muted)] mb-2">Where it runs</legend>
+        {SPEECH_TIERS.map(t => (
+          <label key={t.name} className={`flex items-start gap-3 rounded-2xl bg-[var(--surface)] px-4 py-3 min-h-[44px] cursor-pointer border ${
+            tier === t.name ? 'border-[var(--accent)]' : 'border-transparent'}`}>
+            <input type="radio" name={`tier-${step}`} value={t.name} checked={tier === t.name}
+              aria-label={t.label} aria-describedby={`tier-${step}-${t.name}`}
+              onChange={() => setPicked(t.name)} className="mt-1 accent-[var(--accent)]" />
+            <span className="grid gap-0.5">
+              <span className="text-[14px] font-medium">{t.label}</span>
+              <span id={`tier-${step}-${t.name}`} className="text-[13px] leading-5 text-[var(--muted)]">{t.words}</span>
+            </span>
+          </label>
+        ))}
+        {probe?.host?.slow ? (
+          <p className="text-[13px] leading-5 m-0">Local or Cloud answer faster on this machine.</p>
+        ) : null}
+        {TIER_HINT[tier] ? <p className="text-[13px] leading-5 text-[var(--muted)] m-0">{TIER_HINT[tier]}</p> : null}
+      </fieldset>
+      {tier === 'local' && <LocalAICard setMsg={setMsg} />}
+      {tier !== 'embedded' && <KeysCard setMsg={setMsg} only={tier === 'cloud' ? CLOUD_KEYS : LOCAL_KEYS} />}
+      {card}
+    </WizardCtx.Provider>
+  )
+}
 
 // 'setup' | 'tabs' | 'wait'. Until the first probe answers, a hash the wizard
 // may take over renders no tabs: their cards would mount, fire their loads
@@ -3560,10 +3627,21 @@ function WelcomeStep({ probe, version, onNext }) {
   )
 }
 
-function SetupWizard({ status, setMsg, reloadAll }) {
+function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
   const [probe, setProbe] = useState(null)
   const [step, setStep] = useState(STEPS[0].id)
   const [leaving, setLeaving] = useState(false)
+  const [saving, setSaving] = useState(false)
+  // The step's cards register here, not with the page's unsaved bar: "Save
+  // and continue" saves them, and leaving the step drops their drafts.
+  const cards = useRef({})
+  const [units, setUnits] = useState({})
+  const putCard = useCallback((key, card) => {
+    if (card) cards.current[key] = card
+    else delete cards.current[key]
+    const label = card?.label || '', count = card?.count || 0
+    setUnits(u => (u[key]?.label === label && u[key]?.count === count ? u : { ...u, [key]: { label, count } }))
+  }, [])
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
   useEffect(() => {
@@ -3589,19 +3667,45 @@ function SetupWizard({ status, setMsg, reloadAll }) {
       setLeaving(false)
     }
   }
+  // The step's changed cards, saved by their own save(). A failed card, or
+  // one that asks for a next step, keeps the step open with its message; so
+  // does a save of helper cards alone (their provider is picked next).
+  const saveStep = async () => {
+    const keys = UNSAVED_ORDER.filter(k => units[k]?.count > 0)
+    if (!keys.length) { setMsg('Nothing changed.', 'muted'); go(next); return }
+    setSaving(true)
+    const r = await saveCards(cards, units, keys)
+    setSaving(false)
+    const helpersOnly = keys.every(k => HELPER_CARDS.includes(k))
+    setMsg(r.ok && helpersOnly ? `${r.text} Now pick it as the provider, then Save and continue.` : r.text,
+      r.ok ? 'ok' : 'err')
+    if (r.ok && !r.notes.length && !helpersOnly) go(next)
+  }
+  const body = {
+    [STEP_ID.Listening]: <SpeechStep step={s.id} probe={probe} setMsg={setMsg}
+      card={<SttCard status={status} setMsg={setMsg} />} />,
+    [STEP_ID.Voice]: <SpeechStep step={s.id} probe={probe} setMsg={setMsg}
+      card={<TtsCard tts={tts} reloadAll={reloadAll} />} />,
+  }[s.id]
   return (
-    <main data-wizard={step} className="grid grid-cols-1 gap-6 w-full max-w-[680px] mx-auto">
+    <main data-wizard={step} className="grid grid-cols-1 gap-6 w-full max-w-[680px] mx-auto" style={{ minWidth: 0 }}>
       <div className="grid gap-2">
         <p className="text-[12px] leading-4 font-medium text-[var(--muted)] m-0">Step {i + 1} of {STEPS.length}</p>
         <h1 className="font-display text-[24px] leading-[32px] font-semibold m-0">{s.title}</h1>
         <p className="text-[14px] leading-5 text-[var(--muted)] m-0">{STEP_NOTE[s.title]}</p>
       </div>
-      {s.id === 'welcome' ? (
+      {body ? (
+        <UnsavedCtx.Provider value={putCard}>
+          <div key={s.id} className="wizard-cards grid grid-cols-1 gap-10" style={{ minWidth: 0 }}>{body}</div>
+        </UnsavedCtx.Provider>
+      ) : null}
+      {s.id === STEPS[0].id ? (
         <WelcomeStep probe={probe} version={status?.version} onNext={() => go(next)} />
       ) : (
-        <StepNav onBack={back ? () => go(back) : null} busy={leaving}
+        <StepNav onBack={back ? () => go(back) : null} busy={leaving || saving}
           onSkip={s.skippable && next ? () => go(next) : null}
-          nextLabel={next ? 'Continue' : 'Finish'} onNext={next ? () => go(next) : () => leave(false)} />
+          nextLabel={!next ? 'Finish' : body ? (saving ? 'Saving…' : 'Save and continue') : 'Continue'}
+          onNext={!next ? () => leave(false) : body ? saveStep : () => go(next)} />
       )}
       <div className="flex justify-center">
         <button type="button" disabled={leaving} onClick={() => leave(true)}
@@ -3733,7 +3837,7 @@ export default function App() {
         {/* The wizard replaces the tabs, never sits beside them: the cards it
             reuses assume one mount per page (ids, hash targets, unsaved keys). */}
         {setup ? (
-          <SetupWizard status={status} setMsg={setMsg} reloadAll={reloadAll} />
+          <SetupWizard status={status} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
         ) : waiting ? null : (
           <>
             <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
@@ -3746,7 +3850,7 @@ export default function App() {
               <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
             </div>
             <div data-tab="system" hidden={tab !== 'system'} className="grid grid-cols-1 gap-10">
-              <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+              <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} unsaved={unsaved} />
             </div>
           </>
         )}

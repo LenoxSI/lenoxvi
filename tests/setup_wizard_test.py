@@ -310,7 +310,11 @@ SCENARIOS = {  # name: (config source, marker, token)
     "fresh": ("installer", True, None),
     "upgraded": ("fixture", False, None),
     "token": ("installer", True, SENTINEL),
+    "slow": ("installer", True, None),
 }
+# Made-up machine facts per scenario, over FAKE_HOST: a slow box by the probe's
+# own rule (aarch64), so the wizard's "Local or Cloud is faster" hints show.
+SCENARIO_HOST = {"slow": {"arch": "aarch64", "cpus": 4, "slow": True}}
 
 
 def _boot_scenario(source, marker, token):
@@ -373,6 +377,9 @@ def scenario_responses(name):
         for p in E2E_GETS:
             r = client.get(f"/api/dashboard/{p}")
             out[f"/api/dashboard/{p}"] = _scrub(p, r.json()) if r.status_code == 200 else {"_status": r.status_code}
+        _probe_body = out.get("/api/dashboard/setup/probe") or {}
+        if name in SCENARIO_HOST and isinstance(_probe_body.get("host"), dict):
+            _probe_body["host"].update({k: v for k, v in SCENARIO_HOST[name].items() if k in _probe_body["host"]})
         return out
     finally:
         os.environ.pop("LVI_DASHBOARD_TOKEN", None)
@@ -437,6 +444,10 @@ check("e2e fixtures: fresh and token are marked, upgraded is not; only token nee
       and [_probe[n].get("token_required") for n in ("fresh", "upgraded", "token")] == [False, False, True],
       str({n: (p.get("pending"), p.get("token_required")) for n, p in _probe.items()}))
 check("e2e fixtures: the token value never reaches a fixture", not any(SENTINEL in t for t, _ in _fx.values()))
+_slow_host = _probe.get("slow", {}).get("host") or {}
+check("e2e fixture slow: a marked box the probe's own rule calls slow (aarch64), the rest of fresh's shape",
+      _slow_host.get("slow") is True and _slow_host.get("arch") == "aarch64" and _probe.get("slow", {}).get("pending") is True
+      and all(_probe[n].get("host", {}).get("slow") is False for n in ("fresh", "upgraded", "token")), str(_slow_host))
 routes._install_shape = _real_shape
 
 # ── repo hygiene ─────────────────────────────────────────────────────
@@ -479,7 +490,7 @@ INT_HEAD = "function IntelligenceCard({ intelligence, setMsg, reloadAll }) {"
 KEYS_HEAD = "function KeysCard({ setMsg, only }) {"
 ROOMS_HEAD = "function Rooms({ status, mapping, setMsg, reloadAll, showZones = true }) {"
 VOICE_HEAD = "function Voice({ tts, tuning, status, setMsg, reloadAll }) {"
-SYSTEM_HEAD = "function System({ intelligence, status, setMsg, reloadAll }) {"
+SYSTEM_HEAD = "function System({ intelligence, status, setMsg, reloadAll, unsaved = 0 }) {"
 _tts, _int, _keys, _rooms = fn(TTS_HEAD), fn(INT_HEAD), fn(KEYS_HEAD), fn(ROOMS_HEAD)
 _voice, _system, _missing = fn(VOICE_HEAD), fn(SYSTEM_HEAD), fn("function MissingKey({ label }) {")
 check("cards: TtsCard, IntelligenceCard, KeysCard(only) and Rooms(showZones) have their wizard signatures",
@@ -528,7 +539,8 @@ _wiz_branch = _ret[_body_at:_else_at] if 0 <= _body_at < _else_at else ""
 _tab_branch = _ret[_else_at:] if _wiz_branch else ""
 check("shell: wizard mode renders SetupWizard; the tab bodies sit only in the branch that renders once the probe "
       "has answered and the wizard is not showing",
-      "<SetupWizard status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _wiz_branch
+      "<SetupWizard status={status} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />"
+      in _wiz_branch
       and not any(s in _wiz_branch for s in ("data-tab=", "<Overview", "<Rooms", "<Voice", "<System"))
       and all(f'data-tab="{t}"' in _tab_branch for t in ("rooms", "voice", "system")) and "<Overview" in _tab_branch,
       _ret[:200])
@@ -541,6 +553,40 @@ check("shell: the token never rides a URL or a log (no searchParams, no ?token=,
       and not re.search(r"console\.\w+\([^)]*token", APP + WIZ_JS, re.I), "")
 check("shell: System ends with the quiet 'Run setup again' link to #setup",
       '<a href="#setup"' in _system and "Run setup again" in _system, _system[-400:])
+_again = _system[_system.find('<a href="#setup"'):]
+check("shell: 'Run setup again' over unsaved edits asks first (Discard N … and open setup?); Cancel stays put",
+      "unsaved={unsaved}" in _tab_branch and "if (unsaved && !window.confirm(" in _again
+      and "`Discard ${unsaved} unsaved change${unsaved === 1 ? '' : 's'} and open setup?`" in _again
+      and "e.preventDefault()" in _again, _again[:400])
+
+# ── the speech steps: the cards as they are, saved by their own save() ──
+_wiz = fn("function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {")
+_speech = fn("function SpeechStep({")
+_save_cards = fn("async function saveCards(cards, units, keys) {")
+_bar = fn("function UnsavedBar({ cards, units, setMsg }) {")
+check("speech steps: one saveCards() loop, shared by the unsaved bar and the wizard's Save and continue",
+      bool(_save_cards) and "await cards.current[k]?.save(" in _save_cards
+      and "await saveCards(cards, units, keys)" in _bar and "await cards.current[k]?.save(" not in _bar
+      and "await saveCards(cards, units, keys)" in _wiz, _save_cards[:200])
+check("speech steps: the wizard keeps its own unsaved-changes registry, so the page bar never lists its cards",
+      "<UnsavedCtx.Provider value={putCard}>" in _wiz and "const cards = useRef({})" in _wiz
+      and APP.count("<UnsavedCtx.Provider ") == 2, "")
+check("speech steps: Listening hosts SttCard and Voice hosts TtsCard, each once, under the tier pick",
+      "card={<SttCard status={status} setMsg={setMsg} />}" in _wiz
+      and "card={<TtsCard tts={tts} reloadAll={reloadAll} />}" in _wiz
+      and APP.count("<SttCard ") == 2 and APP.count("<TtsCard ") == 2, "")
+check("speech steps: the tier pick writes nothing; it shows LocalAI + its key (Local) or the cloud keys (Cloud)",
+      "const CLOUD_KEYS = ['DEEPGRAM_API_KEY', 'ELEVENLABS_API_KEY']" in APP and "const LOCAL_KEYS = ['LVI_LOCALAI_KEY']" in APP
+      and "<KeysCard setMsg={setMsg} only={tier === 'cloud' ? CLOUD_KEYS : LOCAL_KEYS} />" in _speech
+      and "{tier === 'local' && <LocalAICard setMsg={setMsg} />}" in _speech
+      and "api(" not in _speech, _speech[:300])
+check("speech steps: a 'No key' button inside a step scrolls to the step's key box, never to #keys on a tab",
+      "<WizardCtx.Provider value={keysCtx}>" in _speech and "scrollToCard('keys')" in _speech, "")
+check("speech steps: a slow machine gets the Local or Cloud hint", "Local or Cloud answer faster on this machine." in _speech)
+check("speech steps: the narrow-screen wrapper is the wizard's own (cards keep their classes)",
+      'className="wizard-cards' in _wiz
+      and ".wizard-cards" in (REPO / "dashboard-ui" / "src" / "index.css").read_text(), "")
+
 _titles = re.findall(r"\{ id: '\w+', title: '([^']+)'", WIZ_JS)
 _dist = [p.read_text(errors="ignore") for p in (REPO / "dashboard-ui" / "dist" / "assets").glob("*.js")]
 check("dist: a bundle carries 'Run setup again' and every setup step title (rebuild dist/)",

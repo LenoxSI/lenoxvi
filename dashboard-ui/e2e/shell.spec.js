@@ -40,6 +40,34 @@ test('upgraded install (no marker): the dashboard, never the wizard; System offe
   expect(fake.writes().filter(w => w.path.startsWith('/api/dashboard/setup/'))).toEqual([])
 })
 
+test('Run setup again with unsaved edits asks first: Cancel keeps them on the tab, OK opens setup', async ({ page, fake }) => {
+  await fake.load('upgraded')
+  await page.goto('/dashboard#system')
+  const address = page.getByLabel('LocalAI address')
+  await expect(address).toBeEnabled()
+  await address.fill('192.0.2.51:8080')
+  const bar = page.getByRole('region', { name: 'Unsaved changes' })
+  await expect(bar).toContainText('1 unsaved')
+
+  const asked = []
+  page.once('dialog', d => { asked.push(d.message()); d.dismiss() })
+  await page.getByRole('link', { name: 'Run setup again' }).click()
+  await expect.poll(() => asked.length).toBe(1)
+  expect(asked[0]).toBe('Discard 1 unsaved change and open setup?')
+  await expect(page).toHaveURL(/#system$/)
+  await expect(wizard(page)).toHaveCount(0)
+  await expect(address).toHaveValue('192.0.2.51:8080')
+  await expect(bar).toContainText('1 unsaved')
+
+  page.once('dialog', d => { asked.push(d.message()); d.accept() })
+  await page.getByRole('link', { name: 'Run setup again' }).click()
+  await expect(wizard(page)).toBeVisible()
+  await expect(page).toHaveURL(/#setup$/)
+  expect(asked).toHaveLength(2)
+  await expect(bar).toHaveCount(0)
+  expect(fake.saves()).toEqual([])  // the System tab's agent discovery only looks
+})
+
 test('fresh install: lands on #setup, Welcome shows the host, the tabs are not in the DOM', async ({ page, fake }) => {
   await fake.load('fresh')
   await page.goto('/dashboard')
@@ -70,7 +98,8 @@ test('the frame walks all eight steps; Back, Skip and Continue write nothing', a
     await expect(page.getByRole('button', { name: 'Back', exact: true })).toHaveCount(i ? 1 : 0)
     expect(await duplicateIds(page)).toEqual([])
     expect(await sideScroll(page)).toBeLessThanOrEqual(0)
-    if (i < STEPS.length - 1) await page.getByRole('button', { name: 'Continue', exact: true }).click()
+    // Steps that host cards save them on the way ("Save and continue").
+    if (i < STEPS.length - 1) await page.getByRole('button', { name: /^(Save and continue|Continue)$/ }).click()
   }
   await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(title(page, STEPS.at(-2).title)).toBeVisible()
