@@ -587,6 +587,25 @@ check("speech steps: the narrow-screen wrapper is the wizard's own (cards keep t
       'className="wizard-cards' in _wiz
       and ".wizard-cards" in (REPO / "dashboard-ui" / "src" / "index.css").read_text(), "")
 
+# ── the intelligence and wake steps ───────────────────────────────────
+_intel_step = fn("function IntelligenceStep({")
+_summary = fn("function StepSummary({")
+check("intelligence step: IntelligenceCard as it is, once, plus only the key row of the lane on screen",
+      "<IntelligenceCard intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />" in _intel_step
+      and APP.count("<IntelligenceCard ") == 2 and "<KeysCard setMsg={setMsg} only={vars} />" in _intel_step
+      and "e.target.id === 'int-kind'" in _intel_step and "<WizardCtx.Provider value={keysCtx}>" in _intel_step,
+      _intel_step[:300])
+check("intelligence step: its Skip reads 'Not yet' and writes nothing",
+      "skipLabel={s.id === STEP_ID.Intelligence ? 'Not yet' : 'Skip'}" in _wiz, "")
+check("wake step: OwwPanel as it is (wake name, model, stock licence line), once",
+      "[STEP_ID['Wake word']]: <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />" in _wiz
+      and APP.count("<OwwPanel ") == 2, "")
+check("finish summary: each step done or skipped by the probe, with a way back to it",
+      "stepView(probe, s.id)" in _summary and "'skipped'" in _summary and "onGo(s.id)" in _summary
+      and "<StepSummary probe={probe} onGo={go} />" in _wiz, _summary[:300])
+check("the wizard re-reads the probe on every step, so the summary follows what was saved",
+      "}, [step])" in _wiz and "api('/api/dashboard/setup/probe')" in _wiz, "")
+
 _titles = re.findall(r"\{ id: '\w+', title: '([^']+)'", WIZ_JS)
 _dist = [p.read_text(errors="ignore") for p in (REPO / "dashboard-ui" / "dist" / "assets").glob("*.js")]
 check("dist: a bundle carries 'Run setup again' and every setup step title (rebuild dist/)",

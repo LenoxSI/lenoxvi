@@ -94,7 +94,8 @@ test('the frame walks all eight steps; Back, Skip and Continue write nothing', a
     await expect(title(page, s.title)).toBeVisible()
     await expect(wizard(page).locator('h1 + p')).toHaveText(/\w{3,}/)  // the step's plain-words line
     await expect(page.getByText(`Step ${i + 1} of ${STEPS.length}`, { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Skip', exact: true })).toHaveCount(s.skippable && i < STEPS.length - 1 ? 1 : 0)
+    // Intelligence says "Not yet" for its Skip.
+    await expect(page.getByRole('button', { name: /^(Skip|Not yet)$/ })).toHaveCount(s.skippable && i < STEPS.length - 1 ? 1 : 0)
     await expect(page.getByRole('button', { name: 'Back', exact: true })).toHaveCount(i ? 1 : 0)
     expect(await duplicateIds(page)).toEqual([])
     expect(await sideScroll(page)).toBeLessThanOrEqual(0)
