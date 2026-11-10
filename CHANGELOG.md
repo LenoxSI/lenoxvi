@@ -17,6 +17,9 @@ The two version streams are independent.
   restart happens, this machine's CPU/RAM/disk, the restart-pending list, the last wake and each step's done
   state; `POST /setup/check` is a token check with no side effects; `POST /setup/done` removes the marker. No
   existing route changes. (#59)
+- Installer, for the first-run setup wizard: a fresh install (the run that creates config.yaml) writes the
+  `setup.pending` marker into the state dir as the service user; a re-run, `reconfigure` or `upgrade` keeps the
+  config and never writes it. The finish screen's next-step line now points at the dashboard's setup. (#59)
 - Voice Tuning card: VAD start and stop timing join the sliders — `vad.start_secs` (0.05–0.50 s, speech needed
   before a turn starts) and `vad.stop_secs` (0.10–1.50 s, silence before VAD calls the speech over, ahead of the
   turn-end lull). `GET/PUT /api/dashboard/voice-tuning` carry them as `vad_start_secs` / `vad_stop_secs`, written

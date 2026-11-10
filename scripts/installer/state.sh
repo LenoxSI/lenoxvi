@@ -61,6 +61,9 @@ write_config_file() {
   else
     run_quiet runuser -u "$LVI_USER" -- "$LVI_VENV_REAL/bin/python" "$LVI_APP_REAL/scripts/installer/write_config.py" \
       "$LVI_APP_REAL/config.example.yaml" "$LVI_STATE_REAL/config.yaml" --host "$HOST_IP"
+    # Only a fresh config marks the box: the dashboard opens setup by itself
+    # until the wizard finishes or is skipped. Re-runs and upgrades never get it.
+    printf '' | write_file "$LVI_STATE/setup.pending" 0644 "$LVI_USER:$LVI_USER"
     ok "config: written (no keys needed — the voice is local, the intelligence answers with an echo until you pick one)"
   fi
 }

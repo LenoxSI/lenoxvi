@@ -351,6 +351,20 @@ check("installer state: fresh box = config written as the service user, empty ke
       and "--stt" not in r.stdout
       and "/var/lib/lenoxvi/.env (0600 lenoxvi:lenoxvi)" in r.stdout
       and "LVI_STATE_DIR=/var/lib/lenoxvi bash /opt/lenoxvi/app/scripts/make-cert.sh 192.0.2.10" in r.stdout, out(r))
+_cfg_at = r.stdout.find("write_config.py")
+_mark_at = r.stdout.find("/var/lib/lenoxvi/setup.pending (0644 lenoxvi:lenoxvi)")
+_env_at = r.stdout.find("/var/lib/lenoxvi/.env (0600")
+check("installer state: a fresh config marks the box for the setup wizard (setup.pending, 0644, the service user), "
+      "right after the config write",
+      -1 not in (_cfg_at, _mark_at, _env_at) and _cfg_at < _mark_at < _env_at
+      and r.stdout.count("setup.pending") == 1, out(r))
+pk = make_prefix()
+(pk / "var/lib/lenoxvi").mkdir(parents=True)
+(pk / "var/lib/lenoxvi/config.yaml").write_text("clip_server:\n  host: 192.0.2.10\n")
+r = sh("HOST_IP=192.0.2.10; MAKE_TOKEN=no; write_config_file", pk)
+check("installer state: an existing config is kept and gets no setup marker (upgrade and re-run)",
+      r.returncode == 0 and "kept your" in r.stdout and "setup.pending" not in out(r)
+      and not (pk / "var/lib/lenoxvi/setup.pending").exists(), out(r))
 
 # ── service ──────────────────────────────────────────────────────────────
 UT = f"LVI_UNIT_TEMPLATE={REPO}/deploy/lenoxvi.service.in"
@@ -397,6 +411,9 @@ r = sh("HOST_IP=192.0.2.10; DASH_TOKEN=abc123; handoff")
 check("installer handoff: dashboard address, the certificate warning, the token once, how to manage it",
       "https://192.0.2.10:7860/dashboard" in r.stdout and "certificate" in r.stdout and r.stdout.count("abc123") == 1
       and "lenoxvi status" in r.stdout, r.stdout)
+check("installer handoff: the next step is the dashboard's setup wizard",
+      "Next: open the dashboard — it walks you through setup." in r.stdout
+      and "pick a voice and an intelligence" not in r.stdout and r.stdout.count("abc123") == 1, r.stdout)
 # The finish screen prints no QR code, even on a terminal with qrencode installed.
 qr_dir = TMP / "qrstub"
 qr_dir.mkdir()
@@ -489,7 +506,8 @@ r = install(fresh, "--source", str(src), "--host", "192.0.2.10", STUB_DPKG="ca-c
 o = r.stdout
 order = ["apt-get install", "fetch https://github.com/charmbracelet/gum", "fetch https://github.com/astral-sh/uv",
          "useradd --system", "clone --quiet --depth 1 --branch v0.10.0", "pip install", "fetch_kokoro_models.sh",
-         "write_config.py", "/var/lib/lenoxvi/.env (0600", "make-cert.sh 192.0.2.10", "lenoxvi.service",
+         "write_config.py", "/var/lib/lenoxvi/setup.pending (0644", "/var/lib/lenoxvi/.env (0600",
+         "make-cert.sh 192.0.2.10", "lenoxvi.service",
          "systemctl enable --now"]
 pos = [o.find(x) for x in order]
 check("installer dry-run: a fresh box runs every step in order (apt, gum, uv, user, code, packages, models, config, keys, cert, unit, start)",
@@ -565,6 +583,8 @@ bad = [x for x in ("useradd", "apt-get", "clone", "write_config.py", "+ write", 
                    "systemctl enable", "daemon-reload", "ln -sfn", "fetch https") if x in o]
 check("installer dry-run: re-running on an installed box changes nothing it doesn't own (no apt, user, code, config, keys, cert, unit or restart)",
       r.returncode == 0 and not bad and "kept your" in o and "nothing changed" in o, f"rc={r.returncode} bad={bad}\n{out(r)[-800:]}")
+check("installer dry-run: the re-run writes no setup marker (only a fresh config opens the setup wizard)",
+      r.returncode == 0 and "setup.pending" not in out(r), out(r)[-400:])
 check("installer dry-run: the re-run only re-checks the Python packages (a no-op when they're met)",
       "pip install" in o, o[-400:])
 
