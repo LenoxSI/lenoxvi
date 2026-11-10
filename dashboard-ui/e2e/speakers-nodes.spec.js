@@ -106,7 +106,8 @@ test('Nodes: the probe is read every 5 s while the step is open, a new node show
   await page.waitForTimeout(1000)  // the Speakers step's own read on arrival
   const settled = fake.gets(PROBE).length
   await page.waitForTimeout(6500)
-  expect(fake.gets(PROBE).length, 'probe reads after leaving the Nodes step').toBe(settled)  expect(fake.saves()).toEqual([])
+  expect(fake.gets(PROBE).length, 'probe reads after leaving the Nodes step').toBe(settled)
+  expect(fake.saves()).toEqual([])
 })
 
 test('Nodes: picking a zone for a room saves PUT /mapping with room_zones wrapped', async ({ page, fake }) => {
