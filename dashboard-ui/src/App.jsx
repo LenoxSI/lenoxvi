@@ -7,6 +7,7 @@
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
+import { TABS } from './tabs.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
@@ -857,11 +858,7 @@ function scrollToCard(id) {
 }
 
 /* ── tabs ──────────────────────────────────────────────────── */
-const TABS = [
-  { id: 'rooms', label: 'Rooms' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'system', label: 'System' },
-]
+// TABS lives in tabs.js, shared with the setup wizard's logic.
 
 // The tab comes from the hash, so tabs are plain links (keyboard, middle-click,
 // back/forward). Any other id (#keys, #stt) opens the tab that holds it, then
