@@ -3,8 +3,10 @@
 The marker file, the host facts, the pure step rules, the /setup/* routes
 and the installer contract. Everything runs against a scratch config and
 LVI_STATE_DIR (the tracked fixture config, copied); nothing touches the
-repo's own state.
-Run: cd tests && ../.venv/bin/python setup_wizard_test.py ../core
+repo's own state. The browser harness's fixtures come from these routes:
+--dump-fixtures rewrites dashboard-ui/e2e/fixtures/*.json, and a contract
+check fails when a committed fixture's keys drift from the live responses.
+Run: cd tests && ../.venv/bin/python setup_wizard_test.py ../core [--dump-fixtures]
 """
 import os
 import shutil
@@ -12,7 +14,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-CORE = Path(sys.argv[1] if len(sys.argv) > 1 else "../core").resolve()
+DUMP = "--dump-fixtures" in sys.argv
+_ARGS = [a for a in sys.argv[1:] if a != "--dump-fixtures"]
+CORE = Path(_ARGS[0] if _ARGS else "../core").resolve()
 REPO = CORE.parent
 sys.path.insert(0, str(CORE))
 SCRATCH = Path(tempfile.mkdtemp(prefix="lvi-setup-test-"))
@@ -285,6 +289,154 @@ voice = next((s for s in p.get("steps", []) if s.get("id") == "voice"), {})
 check("probe: after PUT /tts to ElevenLabs with no key, voice is not done and tts waits for a restart",
       r.status_code == 200 and voice.get("done") is False and voice.get("tier") == "cloud"
       and "tts" in p.get("restart_pending", []), f"put={r.status_code} voice={voice} pending={p.get('restart_pending')}")
+
+# ── e2e fixtures: the fake API answers what these routes answer ──────
+# Each scenario is a box state; its fixture holds the real responses to the
+# GETs the page makes there, with machine facts swapped for fixed made-up
+# values (key sets kept), so the fake API in dashboard-ui/e2e can't drift.
+import ipaddress  # noqa: E402
+import json  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+
+import config as _config  # noqa: E402
+
+E2E_FIXTURES = REPO / "dashboard-ui" / "e2e" / "fixtures"
+E2E_GETS = ("setup/probe", "status", "mapping", "tts", "voice-tuning", "intelligence", "intelligence/lanes",
+            "keys", "localai", "stt", "oww/models", "wake")
+FAKE_HOST = {"arch": "x86_64", "cpus": 8, "ram_mb": 16000, "disk_free_gb": 200, "python": "3.12.3", "slow": False}
+FAKE_BOOT = 1762700000.0
+SCENARIOS = {  # name: (config source, marker, token)
+    "fresh": ("installer", True, None),
+    "upgraded": ("fixture", False, None),
+    "token": ("installer", True, SENTINEL),
+}
+
+
+def _boot_scenario(source, marker, token):
+    """A box as a fresh bot process sees it: the config, keys file, marker
+    and token, with the boot snapshot taken from this config."""
+    CONFIG.unlink(missing_ok=True)
+    if source == "installer":  # exactly what the installer writes on a new box
+        subprocess.run([sys.executable, str(REPO / "scripts" / "installer" / "write_config.py"),
+                        str(REPO / "config.example.yaml"), str(CONFIG), "--host", "192.0.2.10"],
+                       check=True, capture_output=True)
+    else:
+        shutil.copy2(REPO / "tests" / "fixtures" / "config.yaml", CONFIG)
+    ENV_FILE.write_text("# suite keys file\n")
+    _config._BOOT = None
+    _config._load.cache_clear()
+    if marker:
+        paths.setup_marker().touch()
+    else:
+        paths.setup_marker().unlink(missing_ok=True)
+    if token:
+        os.environ["LVI_DASHBOARD_TOKEN"] = token
+    else:
+        os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+
+
+def _scrub(path, body):
+    """Fixed made-up values for the facts of the machine running the suite:
+    host, boot time, uptime, model paths and the stock wake keys (real
+    phrases never reach the repo). Keys and types stay as the route sent them."""
+    body = json.loads(json.dumps(body))
+    if path == "setup/probe":
+        body["host"] = {k: FAKE_HOST.get(k) for k in body.get("host") or {}}
+        body["boot_time"] = FAKE_BOOT
+    if path == "status":
+        for k in ("uptime_secs", "boot_time"):
+            if isinstance(body.get(k), (int, float)) and not isinstance(body.get(k), bool):
+                body[k] = FAKE_BOOT if k == "boot_time" else 120
+        if isinstance(body.get("version"), str):
+            body["version"] = "v0.0.0-e2e"
+    if path == "wake" and isinstance(body.get("name"), str):
+        body["name"] = "Test Box"
+    if path == "oww/models":
+        n = 0
+        for m in body.get("models") or []:
+            if m.get("source") == "stock":
+                n += 1
+                m["name"] = f"hey_test_word_{n}"
+            if "size" in m:
+                m["size"] = 1000000
+            if "path" in m:
+                m["path"] = f"models/{m['name']}"
+    return body
+
+
+def scenario_responses(name):
+    source, marker, token = SCENARIOS[name]
+    _boot_scenario(source, marker, token)
+    try:
+        out = {}
+        for p in E2E_GETS:
+            r = client.get(f"/api/dashboard/{p}")
+            out[f"/api/dashboard/{p}"] = _scrub(p, r.json()) if r.status_code == 200 else {"_status": r.status_code}
+        return out
+    finally:
+        os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+
+
+def _shape(v):
+    """Keys and JSON types, not values: a list is the set of its items' shapes."""
+    if isinstance(v, dict):
+        return {k: _shape(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return sorted({json.dumps(_shape(x), sort_keys=True) for x in v})
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "bool"
+    return "number" if isinstance(v, (int, float)) else type(v).__name__
+
+
+def _public_leaks(text):
+    """Machine paths, real wake phrases or non-documentation IPs in a fixture."""
+    out = [s for s in (str(SCRATCH), str(REPO), str(Path.home()), sys.prefix) if s and s in text]
+    out += sorted(p for p in _phrases if re.search(rf"\b{re.escape(p)}\b", text, re.I))
+    for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if a not in ipaddress.ip_network("192.0.2.0/24") and not a.is_loopback:
+            out.append(ip)
+    return out
+
+
+pin_shape("installer")
+_live = {name: scenario_responses(name) for name in SCENARIOS}
+if DUMP:
+    E2E_FIXTURES.mkdir(parents=True, exist_ok=True)
+    for name, resp in _live.items():
+        doc = {"scenario": name, "generated_by": "tests/setup_wizard_test.py --dump-fixtures", "responses": resp}
+        (E2E_FIXTURES / f"{name}.json").write_text(json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+                                                   encoding="utf-8")
+        print(f"wrote dashboard-ui/e2e/fixtures/{name}.json")
+_fx = {}
+for name, resp in _live.items():
+    check(f"e2e fixture {name}: every GET answers 200 on the live rig",
+          not [p for p, b in resp.items() if "_status" in b], str([p for p, b in resp.items() if "_status" in b]))
+    try:
+        text = (E2E_FIXTURES / f"{name}.json").read_text(encoding="utf-8")
+        got = json.loads(text).get("responses") or {}
+    except (OSError, ValueError) as e:
+        check(f"e2e fixture {name}: committed and readable", False, repr(e))
+        continue
+    _fx[name] = (text, got)
+    check(f"e2e fixture {name}: the same GETs as the live rig", set(got) == set(resp), str(sorted(set(got) ^ set(resp))))
+    drift = [p for p in resp if p in got and _shape(got[p]) != _shape(resp[p])]
+    check(f"e2e fixture {name}: each response has the live keys and types (rerun with --dump-fixtures)",
+          not drift, str(drift))
+    check(f"e2e fixture {name}: no machine path, real wake phrase or private IP",
+          not _public_leaks(text), str(_public_leaks(text)))
+_probe = {n: (_fx[n][1].get("/api/dashboard/setup/probe") or {}) if n in _fx else {} for n in SCENARIOS}
+check("e2e fixtures: fresh and token are marked, upgraded is not; only token needs a token",
+      [_probe[n].get("pending") for n in ("fresh", "upgraded", "token")] == [True, False, True]
+      and [_probe[n].get("token_required") for n in ("fresh", "upgraded", "token")] == [False, False, True],
+      str({n: (p.get("pending"), p.get("token_required")) for n, p in _probe.items()}))
+check("e2e fixtures: the token value never reaches a fixture", not any(SENTINEL in t for t, _ in _fx.values()))
 routes._install_shape = _real_shape
 
 # ── repo hygiene ─────────────────────────────────────────────────────
@@ -293,8 +445,6 @@ check(".gitignore lists setup.pending (a dev clone's state dir is the repo)",
       "setup.pending" in [ln.strip() for ln in _ignored], "")
 # The installer writes the marker the server reads: a rename on either side
 # must break this check, not a user's first visit.
-import re  # noqa: E402
-
 _state_sh = (REPO / "scripts" / "installer" / "state.sh").read_text()
 _marker_writes = re.findall(r'write_file "\$LVI_STATE/([\w.-]+)" 0644 "\$LVI_USER:\$LVI_USER"', _state_sh)
 check("install contract: state.sh writes exactly the marker paths.setup_marker() names",
@@ -367,6 +517,52 @@ check("cards: MissingKey keeps its #keys link outside the wizard; inside it, a b
       "const WizardCtx = createContext(null)" in APP and "const wizard = useContext(WizardCtx)" in _missing
       and 'href="#keys"' in _missing and "onClick={() => wizard.showKeys()}" in _missing
       and _missing.find("if (wizard)") < _missing.find('href="#keys"'), _missing[:300])
+
+# ── the wizard shell: it replaces the tabs, never sits beside them ───
+WIZ_JS = (REPO / "dashboard-ui" / "src" / "setupWizard.js").read_text()
+_app = fn("export default function App() {")
+_ret = _app[_app.find("\n  return ("):] if "\n  return (" in _app else ""
+_head_at, _body_at = _ret.find("{setup || waiting ? null : ("), _ret.find("{setup ? (")
+_else_at = _ret.find(") : waiting ? null : (", _body_at) if _body_at >= 0 else -1
+_wiz_branch = _ret[_body_at:_else_at] if 0 <= _body_at < _else_at else ""
+_tab_branch = _ret[_else_at:] if _wiz_branch else ""
+check("shell: wizard mode renders SetupWizard; the tab bodies sit only in the branch that renders once the probe "
+      "has answered and the wizard is not showing",
+      "<SetupWizard status={status} setMsg={setMsg} reloadAll={reloadAll} />" in _wiz_branch
+      and not any(s in _wiz_branch for s in ("data-tab=", "<Overview", "<Rooms", "<Voice", "<System"))
+      and all(f'data-tab="{t}"' in _tab_branch for t in ("rooms", "voice", "system")) and "<Overview" in _tab_branch,
+      _ret[:200])
+check("shell: the header's tab nav and Restart button render only outside the wizard",
+      _head_at >= 0 and APP.count("<nav ") == 1 and APP.count("<RestartButton ") == 1
+      and _ret.find("<nav ") > _head_at and _ret.find("<RestartButton ") > _head_at
+      and _ret.find("<AppMsg") > _ret.find("<RestartButton "), "")
+check("shell: the token never rides a URL or a log (no searchParams, no ?token=, no console call naming it)",
+      not re.search(r"searchParams|URLSearchParams|[?&]token=", APP + WIZ_JS)
+      and not re.search(r"console\.\w+\([^)]*token", APP + WIZ_JS, re.I), "")
+check("shell: System ends with the quiet 'Run setup again' link to #setup",
+      '<a href="#setup"' in _system and "Run setup again" in _system, _system[-400:])
+_titles = re.findall(r"\{ id: '\w+', title: '([^']+)'", WIZ_JS)
+_dist = [p.read_text(errors="ignore") for p in (REPO / "dashboard-ui" / "dist" / "assets").glob("*.js")]
+check("dist: a bundle carries 'Run setup again' and every setup step title (rebuild dist/)",
+      len(_titles) == 8 and any("Run setup again" in s and all(t in s for t in _titles) for s in _dist), str(_titles))
+
+# ── the browser harness: dev-side only, on its own port ──────────────
+_pkg = json.loads((REPO / "dashboard-ui" / "package.json").read_text())
+check("harness: @playwright/test is a devDependency pinned to exactly 1.65.0, run by `npm run e2e`",
+      (_pkg.get("devDependencies") or {}).get("@playwright/test") == "1.65.0"
+      and "@playwright/test" not in (_pkg.get("dependencies") or {})
+      and (_pkg.get("scripts") or {}).get("e2e") == "playwright test", str(_pkg.get("devDependencies")))
+_pw_cfg = REPO / "dashboard-ui" / "playwright.config.js"
+_pw = _pw_cfg.read_text() if _pw_cfg.exists() else ""
+check("harness: the preview server binds 127.0.0.1:4173 (strict, never reused), never a bot port",
+      all(s in _pw for s in ("--host 127.0.0.1", "--port 4173", "--strictPort", "reuseExistingServer: false"))
+      and not re.search(r"\b(7860|8642|9119)\b", _pw), "")
+check("harness: projects desktop-chromium, phone-android and phone-ios (WebKit)",
+      all(f"name: '{n}'" in _pw for n in ("desktop-chromium", "phone-android", "phone-ios"))
+      and "devices['iPhone 13']" in _pw, "")
+_npx = [str(p.relative_to(REPO)) for p in sorted((REPO / "scripts").rglob("*"))
+        if p.is_file() and re.search(r"playwright|npx", p.read_text(errors="ignore"), re.I)]
+check("users never get the harness: nothing under scripts/ mentions playwright or npx", not _npx, str(_npx))
 
 print()
 if FAILS:

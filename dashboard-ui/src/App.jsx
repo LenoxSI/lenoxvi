@@ -8,6 +8,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { TABS } from './tabs.js'
+import { STEPS, shouldOpen, nextStep, prevStep, tokenStep } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
 
@@ -75,6 +76,19 @@ async function api(path, opts = {}, _retried = false) {
     throw e
   }
   return body
+}
+
+// Checks a token against the guarded no-op POST /setup/check without api()'s
+// 401 ask and without storing it: the caller stores it only on 'ok'. The
+// token rides the header only, never the URL.
+async function checkToken(token) {
+  let r
+  try {
+    r = await fetch('/api/dashboard/setup/check', { method: 'POST', headers: { 'X-Dashboard-Token': token } })
+  } catch {
+    return 'network'
+  }
+  return r.ok ? 'ok' : r.status === 401 ? 'wrong' : 'error'
 }
 
 /* ── common message strip ──────────────────────────────────── */
@@ -3394,7 +3408,208 @@ function System({ intelligence, status, setMsg, reloadAll }) {
 
     <FirmwarePanel status={status} setMsg={setMsg} reloadAll={reloadAll} />
     <NodeSetupPanel setMsg={setMsg} />
+    <p className="text-[13px] text-[var(--muted)] m-0 text-center">
+      <a href="#setup" className="inline-block py-3 underline hover:text-[var(--foreground)]">Run setup again</a>
+    </p>
     </>
+  )
+}
+
+/* ── setup wizard ──────────────────────────────────────────── */
+// The wizard renders instead of the tabs (cards assume one mount per page).
+// The #setup hash shows it; the setup.pending marker only opens it by itself.
+// One plain line under each step's title, keyed by that title.
+const STEP_NOTE = {
+  Welcome: 'A few short steps get this machine listening, talking and answering. Every step after this one can be skipped.',
+  Listening: 'How the bot turns what you say into text.',
+  Voice: 'The voice the bot answers with.',
+  Intelligence: 'What answers when you ask the bot something.',
+  'Wake word': 'The word that wakes the bot up.',
+  Speakers: 'Where the answers play.',
+  Nodes: 'The microphones in each room.',
+  'Restart and test': 'Restart the bot so it uses the new settings, then say the wake word.',
+}
+const TOUCH = 'min-h-[44px] min-w-[88px]'
+
+// 'setup' | 'tabs' | 'wait'. Until the first probe answers, a hash the wizard
+// may take over renders no tabs: their cards would mount, fire their loads
+// (a guarded one opens the token prompt) and unmount again.
+function useSetupMode() {
+  const [mode, setMode] = useState(() => window.location.hash === '#setup' ? 'setup'
+    : shouldOpen({ pending: true }, window.location.hash) ? 'wait' : 'tabs')
+  useEffect(() => {
+    const go = () => setMode(window.location.hash === '#setup' ? 'setup' : 'tabs')
+    window.addEventListener('hashchange', go)
+    return () => window.removeEventListener('hashchange', go)
+  }, [])
+  // First load only. replaceState fires no hashchange, so set the mode too. A
+  // probe slower than 3 s, or none (an older bot), leaves the dashboard as before.
+  useEffect(() => {
+    let settled = false
+    const settle = open => {
+      if (settled) return
+      settled = true
+      if (open) {
+        history.replaceState(null, '', '#setup')
+        setMode('setup')
+      } else {
+        setMode(m => (m === 'wait' ? 'tabs' : m))
+      }
+    }
+    api('/api/dashboard/setup/probe')
+      .then(p => settle(shouldOpen(p, window.location.hash)))
+      .catch(() => settle(false))
+    const t = setTimeout(() => settle(false), 3000)
+    return () => clearTimeout(t)
+  }, [])
+  return mode
+}
+
+function StepNav({ onBack, onSkip, nextLabel = 'Continue', onNext, busy }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      {onBack ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onBack}>Back</button> : <span />}
+      <div className="flex flex-wrap gap-3">
+        {onSkip ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onSkip}>Skip</button> : null}
+        <button type={onNext ? 'button' : 'submit'} className={`${BTN_PRIMARY} ${TOUCH}`} disabled={busy}
+          onClick={onNext}>{nextLabel}</button>
+      </div>
+    </div>
+  )
+}
+
+// Welcome: what this machine is, and the dashboard token when the bot has
+// one. A stored token is checked quietly; a typed one is stored only once
+// the bot accepts it.
+function WelcomeStep({ probe, version, onNext }) {
+  const need = tokenStep(probe, localStorage.getItem(TOKEN_KEY))
+  const [verified, setVerified] = useState(false)
+  const [ask, setAsk] = useState(false)
+  const [val, setVal] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (need !== 'check') return
+    let alive = true
+    checkToken(localStorage.getItem(TOKEN_KEY) || '').then(r => {
+      if (!alive) return
+      if (r === 'ok') setVerified(true)
+      else setAsk(true)
+    })
+    return () => { alive = false }
+  }, [need])
+  const field = need !== 'none' && !verified && (need === 'ask' || ask)
+  const checking = need === 'check' && !verified && !ask
+  const submit = async e => {
+    e.preventDefault()
+    if (!field) { onNext(); return }
+    const t = val.trim()
+    if (!t) { setErr('Enter the dashboard token to continue.'); return }
+    setBusy(true)
+    setErr('')
+    const r = await checkToken(t)
+    setBusy(false)
+    if (r === 'ok') {
+      localStorage.setItem(TOKEN_KEY, t)
+      setVal('')
+      setVerified(true)
+      onNext()
+    } else {
+      setErr(r === 'wrong' ? 'wrong' : "Couldn't reach the bot to check the token. Try again.")
+    }
+  }
+  const h = probe?.host
+  return (
+    <form className="grid grid-cols-1 gap-6" onSubmit={submit}>
+      <div className="flex flex-wrap gap-8 rounded-2xl bg-[var(--surface)] p-4" style={{ rowGap: '12px' }}>
+        <Stat label="Processor">
+          <StatChip stat="cpu" muted={!h}>{h ? `${h.cpus ?? '?'} cores · ${esc(h.arch)}` : '…'}</StatChip>
+        </Stat>
+        <Stat label="Memory">
+          <StatChip stat="ram" muted={!h?.ram_mb}>{h?.ram_mb ? `${(h.ram_mb / 1024).toFixed(1)} GB` : '—'}</StatChip>
+        </Stat>
+        <Stat label="Free disk">
+          <StatChip stat="disk" muted={h?.disk_free_gb == null}>{h?.disk_free_gb != null ? `${h.disk_free_gb} GB` : '—'}</StatChip>
+        </Stat>
+        <Stat label="Version">
+          <StatChip stat="version" muted={!version} className="font-mono">{esc(version) || '…'}</StatChip>
+        </Stat>
+      </div>
+      {h?.slow ? (
+        <p className="text-[14px] leading-5 m-0">This machine is on the slow side. In the next steps, Local or Cloud
+          speech answers faster than Embedded.</p>
+      ) : null}
+      {field ? (
+        <div className="grid grid-cols-1 gap-1" style={{ minWidth: 0 }}>
+          <label htmlFor="setup-token" className="text-[12px] font-medium text-[var(--muted)]">Dashboard token</label>
+          <input id="setup-token" type="password" autoComplete="off" spellCheck={false} aria-label="Dashboard token" value={val}
+            onChange={e => setVal(e.target.value)} className={`${INPUT_CLS} min-h-[44px]`} />
+          <p className="text-[13px] leading-5 text-[var(--muted)] m-0">This bot protects its settings with a token.
+            The installer printed it once, at the end of the install.</p>
+          {err ? (
+            <p role="alert" className="text-[13.5px] leading-5 text-[var(--danger)] m-0">
+              {err === 'wrong'
+                ? <>That token didn't work. The installer printed it once; <code>sudo lenoxvi reconfigure</code> makes a new one.</>
+                : err}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <StepNav busy={busy || checking} nextLabel={busy || checking ? 'Checking…' : 'Continue'} />
+    </form>
+  )
+}
+
+function SetupWizard({ status, setMsg, reloadAll }) {
+  const [probe, setProbe] = useState(null)
+  const [step, setStep] = useState(STEPS[0].id)
+  const [leaving, setLeaving] = useState(false)
+  const msgRef = useRef(setMsg)
+  useEffect(() => { msgRef.current = setMsg })
+  useEffect(() => {
+    let alive = true
+    api('/api/dashboard/setup/probe')
+      .then(p => { if (alive) setProbe(p) })
+      .catch(e => { if (alive && !e.network) msgRef.current('setup check failed: ' + e.message, 'err', 'Setup') })
+    return () => { alive = false }
+  }, [])
+  const i = Math.max(0, STEPS.findIndex(s => s.id === step))
+  const s = STEPS[i]
+  const go = id => { setStep(id); window.scrollTo(0, 0) }
+  const back = prevStep(step), next = nextStep(step)
+  // Finish and Skip setup both clear the marker, then land on the dashboard.
+  const leave = async skipped => {
+    setLeaving(true)
+    try {
+      await api('/api/dashboard/setup/done', { method: 'POST', json: { skipped } })
+      window.location.hash = 'rooms'
+      reloadAll()
+    } catch (e) {
+      setMsg(`could not leave setup (${e.message})`, 'err', 'Setup')
+      setLeaving(false)
+    }
+  }
+  return (
+    <main data-wizard={step} className="grid grid-cols-1 gap-6 w-full max-w-[680px] mx-auto">
+      <div className="grid gap-2">
+        <p className="text-[12px] leading-4 font-medium text-[var(--muted)] m-0">Step {i + 1} of {STEPS.length}</p>
+        <h1 className="font-display text-[24px] leading-[32px] font-semibold m-0">{s.title}</h1>
+        <p className="text-[14px] leading-5 text-[var(--muted)] m-0">{STEP_NOTE[s.title]}</p>
+      </div>
+      {s.id === 'welcome' ? (
+        <WelcomeStep probe={probe} version={status?.version} onNext={() => go(next)} />
+      ) : (
+        <StepNav onBack={back ? () => go(back) : null} busy={leaving}
+          onSkip={s.skippable && next ? () => go(next) : null}
+          nextLabel={next ? 'Continue' : 'Finish'} onNext={next ? () => go(next) : () => leave(false)} />
+      )}
+      <div className="flex justify-center">
+        <button type="button" disabled={leaving} onClick={() => leave(true)}
+          className="min-h-[44px] px-3 bg-transparent text-[13px] text-[var(--muted)] underline cursor-pointer hover:text-[var(--foreground)]">
+          Skip setup
+        </button>
+      </div>
+    </main>
   )
 }
 
@@ -3414,6 +3629,8 @@ export default function App() {
       .catch(() => {})
   }, [])
   const tab = useHashTab()
+  const mode = useSetupMode()
+  const setup = mode === 'setup', waiting = mode === 'wait'
 
   // Unsaved changes (useUnsaved): each card's save and discard, current
   // every render, and its label and count for the bar.
@@ -3492,6 +3709,7 @@ export default function App() {
         <header className="sticky top-0 z-10 -mx-6 px-6 pt-2 pb-3 bg-[var(--background)]">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <Wordmark />
+            {setup || waiting ? null : (
             <div className="flex items-center gap-4 flex-wrap">
               <nav className="flex gap-2" aria-label="Tabs">
                 {TABS.map(t => (
@@ -3507,22 +3725,31 @@ export default function App() {
               </nav>
               <RestartButton status={status} setMsg={setMsg} setRebooting={setRebooting} rebooting={rebooting} unsaved={unsaved > 0} />
             </div>
+            )}
           </div>
           <AppMsg msg={msg} />
         </header>
 
-        <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
-        {/* Every tab stays mounted, only the active one is shown: a card's
-            unsaved edits and its own loading survive a tab switch. */}
-        <div data-tab="rooms" hidden={tab !== 'rooms'} className="grid grid-cols-1 gap-10">
-          <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
-        </div>
-        <div data-tab="voice" hidden={tab !== 'voice'} className="grid grid-cols-1 gap-10">
-          <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
-        </div>
-        <div data-tab="system" hidden={tab !== 'system'} className="grid grid-cols-1 gap-10">
-          <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
-        </div>
+        {/* The wizard replaces the tabs, never sits beside them: the cards it
+            reuses assume one mount per page (ids, hash targets, unsaved keys). */}
+        {setup ? (
+          <SetupWizard status={status} setMsg={setMsg} reloadAll={reloadAll} />
+        ) : waiting ? null : (
+          <>
+            <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
+            {/* Every tab stays mounted, only the active one is shown: a card's
+                unsaved edits and its own loading survive a tab switch. */}
+            <div data-tab="rooms" hidden={tab !== 'rooms'} className="grid grid-cols-1 gap-10">
+              <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+            </div>
+            <div data-tab="voice" hidden={tab !== 'voice'} className="grid grid-cols-1 gap-10">
+              <Voice tts={tts} tuning={tuning} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+            </div>
+            <div data-tab="system" hidden={tab !== 'system'} className="grid grid-cols-1 gap-10">
+              <System intelligence={intelligence} status={status} setMsg={setMsg} reloadAll={reloadAll} />
+            </div>
+          </>
+        )}
       </div>
       <UnsavedBar cards={cards} units={units} setMsg={setMsg} />
       <TokenDialog />
