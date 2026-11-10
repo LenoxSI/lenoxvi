@@ -31,9 +31,11 @@ async function sha256Hex(bytes) {
   return Array.from(d, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** Web Serial available in a secure context. */
+/** Web Serial available in a secure context, on a desktop: a phone or tablet
+ *  browser may expose Web Serial, but node setup is a desktop job. */
 export function isSupported(nav = globalThis.navigator, win = globalThis.window) {
-  return Boolean(win?.isSecureContext && nav?.serial)
+  const mobile = nav?.userAgentData?.mobile === true || /Android|iPhone|iPad|Mobile/i.test(nav?.userAgent || '')
+  return Boolean(win?.isSecureContext && nav?.serial && !mobile)
 }
 
 /** The offer URL nodes should use for the host serving this page. */

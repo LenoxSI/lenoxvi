@@ -3558,6 +3558,43 @@ function IntelligenceStep({ intelligence, setMsg, reloadAll }) {
   )
 }
 
+// Reads the probe every 5 s while the calling step is mounted; unmounting the
+// step stops it. A hidden page skips its reads, as the dashboard's poll does.
+function useProbePoll(onProbe) {
+  const cb = useRef(onProbe)
+  useEffect(() => { cb.current = onProbe })
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.hidden) return
+      api('/api/dashboard/setup/probe').then(p => cb.current(p)).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
+}
+
+// Nodes: USB setup and the room → zone map as on the tabs (the zone list
+// stays on the Speakers step). A node that connects shows up by itself: a
+// new count from the probe reloads the rooms too.
+function NodesStep({ probe, onProbe, status, mapping, setMsg, reloadAll }) {
+  const seen = useRef(null)
+  useProbePoll(p => {
+    onProbe(p)
+    const detail = stepView(p, STEP_ID.Nodes).detail
+    if (seen.current !== null && seen.current !== detail) reloadAll()
+    seen.current = detail
+  })
+  const n = parseInt(stepView(probe, STEP_ID.Nodes).detail, 10) || 0
+  return (
+    <>
+      <NodeSetupPanel setMsg={setMsg} />
+      <p aria-live="polite" className="text-[14px] leading-5 m-0">
+        {n ? `${n} node${n === 1 ? '' : 's'} online.` : 'No node has connected yet. A node shows up here a few seconds after it connects.'}
+      </p>
+      <Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} showZones={false} />
+    </>
+  )
+}
+
 // Finish's summary: each step done or skipped, as the probe sees it, with a
 // way back to it.
 function StepSummary({ probe, onGo }) {
@@ -3677,7 +3714,7 @@ function WelcomeStep({ probe, version, onNext }) {
   )
 }
 
-function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
+function SetupWizard({ status, mapping, tts, intelligence, setMsg, reloadAll }) {
   const [probe, setProbe] = useState(null)
   const [step, setStep] = useState(STEPS[0].id)
   const [leaving, setLeaving] = useState(false)
@@ -3739,7 +3776,16 @@ function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
       card={<TtsCard tts={tts} reloadAll={reloadAll} />} />,
     [STEP_ID.Intelligence]: <IntelligenceStep intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />,
     [STEP_ID['Wake word']]: <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />,
+    [STEP_ID.Speakers]: <>
+      <p className="text-[14px] leading-5 m-0">Find Sonos players on your network, or add a WiiM by its IP address.
+        No speaker yet? Skip this step: a node's own speaker or this browser can answer meanwhile.</p>
+      <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />
+    </>,
+    [STEP_ID.Nodes]: <NodesStep probe={probe} onProbe={setProbe} status={status} mapping={mapping}
+      setMsg={setMsg} reloadAll={reloadAll} />,
   }[s.id]
+  // Zone actions apply at once, so the Speakers step has nothing to save.
+  const saves = body && s.id !== STEP_ID.Speakers
   return (
     <main data-wizard={step} className="grid grid-cols-1 gap-6 w-full max-w-[680px] mx-auto" style={{ minWidth: 0 }}>
       <div className="grid gap-2">
@@ -3759,8 +3805,8 @@ function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
         <StepNav onBack={back ? () => go(back) : null} busy={leaving || saving}
           onSkip={s.skippable && next ? () => go(next) : null}
           skipLabel={s.id === STEP_ID.Intelligence ? 'Not yet' : 'Skip'}
-          nextLabel={!next ? 'Finish' : body ? (saving ? 'Saving…' : 'Save and continue') : 'Continue'}
-          onNext={!next ? () => leave(false) : body ? saveStep : () => go(next)} />
+          nextLabel={!next ? 'Finish' : saves ? (saving ? 'Saving…' : 'Save and continue') : 'Continue'}
+          onNext={!next ? () => leave(false) : saves ? saveStep : () => go(next)} />
       )}
       <div className="flex justify-center">
         <button type="button" disabled={leaving} onClick={() => leave(true)}
@@ -3892,7 +3938,7 @@ export default function App() {
         {/* The wizard replaces the tabs, never sits beside them: the cards it
             reuses assume one mount per page (ids, hash targets, unsaved keys). */}
         {setup ? (
-          <SetupWizard status={status} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
+          <SetupWizard status={status} mapping={mapping} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
         ) : waiting ? null : (
           <>
             <Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping} />
