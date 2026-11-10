@@ -9,17 +9,23 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Added
-- Server side of the first-run setup wizard, part 1: a `setup.pending` marker in the state dir (present = the
-  dashboard should open setup by itself; gitignored for a dev clone) and the rules that say which of the eight
-  setup steps is already done, computed from what the existing cards show. Nothing reads them yet. (#59)
-- Server side of the first-run setup wizard, part 2: three new dashboard routes. `GET /api/dashboard/setup/probe`
-  (open read) reports whether the marker is there, whether a dashboard token is required (never the token), how a
-  restart happens, this machine's CPU/RAM/disk, the restart-pending list, the last wake and each step's done
-  state; `POST /setup/check` is a token check with no side effects; `POST /setup/done` removes the marker. No
-  existing route changes. (#59)
-- Installer, for the first-run setup wizard: a fresh install (the run that creates config.yaml) writes the
-  `setup.pending` marker into the state dir as the service user; a re-run, `reconfigure` or `upgrade` keeps the
-  config and never writes it. The finish screen's next-step line now points at the dashboard's setup. (#59)
+- First-run setup wizard in the dashboard. A fresh install opens it on the first dashboard visit; it walks through
+  eight steps — Welcome (this machine's processor, memory, free disk and version, and the dashboard token when the
+  bot has one), Listening, Voice, Intelligence, Wake word, Speakers, Nodes, and Restart and test — each showing the
+  dashboard's own cards for that job. Every step after Welcome can be skipped, Skip setup leaves at any point, and
+  the last step lists each step as done or skipped with a way back to it. Speakers finds Sonos players and adds a
+  WiiM by its IP address (finding WiiM players by themselves is #71). Nodes sets a node up over USB from desktop
+  Chrome or Edge (phones skip it) and maps rooms to zones. Restart and test restarts the bot when a saved setting
+  needs it (or says to restart by hand where the dashboard can't), then says when and where it heard the wake word
+  (a live transcript is #70). A lost dashboard token: `sudo lenoxvi reconfigure` makes a new one (a command that
+  prints it is #72). Upgraded and hand-made installs never open it by themselves; System · Run setup again opens it
+  any time. Behind it: the installer writes a `setup.pending` marker into the state dir only on the run that creates
+  config.yaml (a re-run, `reconfigure` or `upgrade` never does; gitignored for a dev clone), and Finish or Skip
+  setup removes it; three new routes — `GET /api/dashboard/setup/probe` (open read: whether the marker is there,
+  whether a dashboard token is required (never the token), how a restart happens, this machine's CPU/RAM/disk, the
+  restart-pending list, the last wake and each step's done state), `POST /setup/check` (a token check with no side
+  effects) and `POST /setup/done` (removes the marker). No existing route changes. The installer's finish screen
+  now points at the dashboard's setup. (#59)
 - Voice Tuning card: VAD start and stop timing join the sliders — `vad.start_secs` (0.05–0.50 s, speech needed
   before a turn starts) and `vad.stop_secs` (0.10–1.50 s, silence before VAD calls the speech over, ahead of the
   turn-end lull). `GET/PUT /api/dashboard/voice-tuning` carry them as `vad_start_secs` / `vad_stop_secs`, written

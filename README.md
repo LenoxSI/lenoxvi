@@ -33,6 +33,13 @@ two questions: this machine's LAN address and whether to protect the dashboard w
 newest release, downloads the speech models (Whisper base and Kokoro), starts the `lenoxvi` service and prints the
 dashboard address. A few minutes on a fresh box.
 
+Open that address: the first visit walks you through setup in eight steps (Welcome, Listening, Voice, Intelligence,
+Wake word, Speakers, Nodes, Restart and test), and every step after Welcome can be skipped. Speakers finds Sonos
+players by itself; add a WiiM by its IP address. Setting up a node over USB needs Chrome or Edge on a desktop
+computer, so on a phone skip Nodes and come back to it. The last step restarts the bot when a setting needs it, then
+tells you when it hears the wake word. Lost the dashboard token? `sudo lenoxvi reconfigure` makes a new one. An upgraded or hand-made
+install doesn't open setup by itself: System · Run setup again opens it any time.
+
 It needs no keys and no GPU: speech runs on the machine itself ([Embedded](#speech)), and the intelligence answers
 with an echo until you pick one on the dashboard. Keys, voices, rooms and speakers are all set there.
 
@@ -81,6 +88,8 @@ Reply clips, uploaded wake models and firmware, and session history are written 
 | Dashboard | LAN-only. Keys, zones, voices and models in one place. |
 
 ## Dashboard
+
+A fresh install opens setup on the first visit ([Install](#install)); System · Run setup again reopens it.
 
 ![Voice view of the dashboard, demo data](docs/readme/voice.png)
 
