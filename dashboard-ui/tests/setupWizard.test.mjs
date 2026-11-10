@@ -103,26 +103,33 @@ test('stepView: a step an older bot does not report, or no probe at all, is not 
   assert.equal(stepView(probe({ steps: [{ id: 'voice', done: 'yes' }] }), 'voice').done, false)
 })
 
-// Made-up model keys: a phrase is always computed from the API's rows.
+// Made-up model keys and file names: a phrase is always computed from the API's rows.
 const stock = (name, selected) => ({ name, source: 'stock', selected, size: 1 })
-const custom = (name, selected) => ({ name, source: 'models', selected, size: 1 })
+const custom = (name, selected, source = 'models') => ({ name, source, selected, size: 1 })
 
-test('wakePhrase: a wake name set on the box wins', () => {
-  assert.equal(wakePhrase([stock('hey_suite_bot', true)], 'Suite Name'), 'Suite Name')
-  assert.equal(wakePhrase([stock('hey_suite_bot', true)], '  Suite   Name '), 'Suite Name')
+test("wakePhrase: the selected stock row's key, humanised", () => {
+  assert.equal(wakePhrase([stock('hey_suite_bot', false), stock('ok_other_one', true)]), 'Ok Other One')
+  assert.equal(wakePhrase([stock('hey_suite_bot', true)]), 'Hey Suite Bot')
+  assert.equal(wakePhrase({ models: [stock('hey_suite_bot', true)] }), 'Hey Suite Bot')
 })
 
-test("wakePhrase: no name — the selected stock row's key, humanised", () => {
-  assert.equal(wakePhrase([stock('hey_suite_bot', false), stock('ok_other_one', true)], ''), 'Ok Other One')
-  assert.equal(wakePhrase([stock('hey_suite_bot', true)], null), 'Hey Suite Bot')
-  assert.equal(wakePhrase({ models: [stock('hey_suite_bot', true)] }, undefined), 'Hey Suite Bot')
+test("wakePhrase: a selected custom model's file name, without extension or version suffix", () => {
+  assert.equal(wakePhrase([custom('ok_made_up_v0.1.onnx', true), stock('hey_suite_bot', false)]), 'Ok Made Up')
+  assert.equal(wakePhrase([custom('hello_test_box.onnx', true, 'root')]), 'Hello Test Box')
+  assert.equal(wakePhrase([custom('yo_fake_word_v2.tflite', true)]), 'Yo Fake Word')
+  assert.equal(wakePhrase([custom('hi_there_v1.0.3.onnx', true)]), 'Hi There')
 })
 
-test('wakePhrase: nothing selected, a custom model selected, or no list — "the wake word"', () => {
-  assert.equal(wakePhrase([stock('hey_suite_bot', false)], ''), 'the wake word')
-  assert.equal(wakePhrase([custom('my_wake.onnx', true), stock('hey_suite_bot', false)], ''), 'the wake word')
-  assert.equal(wakePhrase([], ''), 'the wake word')
-  assert.equal(wakePhrase(null, ''), 'the wake word')
+test("wakePhrase: the bot's wake name is not the phrase (it alone does not trigger the model)", () => {
+  assert.equal(wakePhrase([stock('hey_suite_bot', true)], 'Suite Name'), 'Hey Suite Bot')
+  assert.equal(wakePhrase([stock('hey_suite_bot', false)], 'Suite Name'), 'the wake word')
+})
+
+test('wakePhrase: nothing selected or no list — "the wake word"', () => {
+  assert.equal(wakePhrase([stock('hey_suite_bot', false), custom('ok_made_up.onnx', false)]), 'the wake word')
+  assert.equal(wakePhrase([]), 'the wake word')
+  assert.equal(wakePhrase(null), 'the wake word')
+  assert.equal(wakePhrase({}), 'the wake word')
 })
 
 test('heardSince: a wake after this boot gives its room and time', () => {

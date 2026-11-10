@@ -42,14 +42,14 @@ export function stepView(probe, id) {
   return { done: s?.done === true, detail: typeof s?.detail === 'string' ? s.detail : '', tier: s?.tier ?? null }
 }
 
-// What to tell the user to say: the box's wake name, else the selected stock
-// model's key as words. Always computed from the API, never a literal.
-export function wakePhrase(models, wakeName) {
-  const name = String(wakeName ?? '').split(/\s+/).filter(Boolean).join(' ')
-  if (name) return name
+// What to tell the user to say: the selected model's phrase, from its stock key
+// or custom file name as words. The bot's wake name alone does not trigger the
+// model, so it is not the phrase. Always computed from the API, never a literal.
+export function wakePhrase(models) {
   const rows = Array.isArray(models) ? models : Array.isArray(models?.models) ? models.models : []
-  const row = rows.find(m => m?.selected && m.source === 'stock')
-  const words = String(row?.name ?? '').replace(/\.(onnx|tflite)$/, '').split(/[_\s-]+/).filter(Boolean)
+  const row = rows.find(m => m?.selected === true)
+  const base = String(row?.name ?? '').replace(/\.(onnx|tflite)$/i, '').replace(/[_\s-]v\d+(\.\d+)*$/i, '')
+  const words = base.split(/[_\s-]+/).filter(Boolean)
   return words.length ? words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : 'the wake word'
 }
 
