@@ -9294,8 +9294,11 @@ def main():
     _appTB = _fnUI("export default function App() {")
     _hdrTB = _reui.search(r"<header .*?</header>", _appTB, _reui.DOTALL)
     _hdrTB = _hdrTB.group(0) if _hdrTB else ""
-    _tabsTB = _reui.search(r"const TABS = \[(.*?)\]", _appsrc, _reui.DOTALL)
-    _tabsTB = _reui.findall(r"\{ id: '(\w+)', label: '(\w+)' \}", _tabsTB.group(1)) if _tabsTB else []
+    # The tab list lives in tabs.js (shared with the setup wizard); App.jsx imports it.
+    _tabsSrcTB = (REPO_CORE.parent / "dashboard-ui" / "src" / "tabs.js").read_text()
+    _tabsTB = _reui.search(r"export const TABS = \[(.*?)\]", _tabsSrcTB, _reui.DOTALL)
+    _tabsTB = (_reui.findall(r"\{ id: '(\w+)', label: '(\w+)' \}", _tabsTB.group(1))
+               if _tabsTB and "import { TABS } from './tabs.js'" in _appsrc and "const TABS" not in _appsrc else [])
     _wrapTB = _reui.findall(r'<div data-tab="(\w+)" hidden=\{tab !== \'(\w+)\'\} className="grid grid-cols-1 gap-10">'
                             r'\s*<(\w+) ', _appTB)
     _tabOfTB = {comp: t for t, t2, comp in _wrapTB if t == t2}
