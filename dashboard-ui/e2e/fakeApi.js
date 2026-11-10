@@ -86,6 +86,7 @@ export class FakeApi {
     const reply = (status, json) => { rec.status = status; return route.fulfill({ status, json }) }
 
     if (method === 'GET' || method === 'HEAD') {
+      this.tick()
       if (path in this.state) return reply(200, this.state[path])
       this.unknownGets.push(path)
       return reply(404, { detail: 'not in the e2e fixture' })
@@ -175,6 +176,7 @@ export class FakeApi {
         const tts = this.get('/tts')
         if (b.provider === 'elevenlabs' && !b.voice_id) return [422, { detail: 'voice_id required for elevenlabs' }]
         for (const [k, v] of Object.entries(b)) if (k in tts || k === 'provider') tts[k] = v
+        this.pendingRestart('tts')
         return [200, { ok: true }]
       },
       'PUT /intelligence/key': b => {
@@ -269,7 +271,53 @@ export class FakeApi {
         m.room_zones = { ...rz }
         return [200, { ok: true }]
       },
+      // The real route schedules the restart and answers first; the new
+      // process boots 2 s later.
+      'POST /restart': () => {
+        this.reboot(Date.now() / 1000 + 2)
+        return [200, { ok: true, restarting: true }]
+      },
     }
+  }
+
+  // A saved setting the running bot hasn't loaded yet, as /status and the
+  // probe list it until the next boot.
+  pendingRestart(label) {
+    for (const body of [this.get('/status'), this.probe]) {
+      if (body && !body.restart_pending.includes(label)) body.restart_pending.push(label)
+    }
+    const finish = this.probe?.steps.find(s => s.id === 'finish')
+    if (finish) finish.detail = 'restart needed'
+  }
+
+  // The bot boots again at `at` (epoch seconds; now by default, as when
+  // someone restarts it by hand). Until then the old process answers.
+  reboot(at = Date.now() / 1000) {
+    this.bootAt = at
+    this.tick()
+  }
+
+  // The new process, once it has booted: its own boot time and uptime, and
+  // nothing left waiting for a restart.
+  tick() {
+    if (this.bootAt == null || Date.now() / 1000 < this.bootAt) return
+    const status = this.get('/status')
+    if (this.booted !== this.bootAt) {
+      this.booted = this.bootAt
+      status.restart_pending = []
+      this.probe.restart_pending = []
+      this.probe.boot_time = this.bootAt
+      const finish = this.probe.steps.find(s => s.id === 'finish')
+      if (finish) finish.detail = 'ready'
+    }
+    status.uptime_secs = Math.round((Date.now() / 1000 - this.bootAt) * 10) / 10
+  }
+
+  // Someone says the wake word in `room` now, as the registry records it.
+  wake(room) {
+    const w = { time: Date.now() / 1000, room }
+    this.get('/status').last_wake = w
+    this.probe.last_wake = { ...w }
   }
 
   // A node connects: /status lists it online and the probe counts it, as the

@@ -311,10 +311,14 @@ SCENARIOS = {  # name: (config source, marker, token)
     "upgraded": ("fixture", False, None),
     "token": ("installer", True, SENTINEL),
     "slow": ("installer", True, None),
+    "manual": ("installer", True, None),
 }
 # Made-up machine facts per scenario, over FAKE_HOST: a slow box by the probe's
 # own rule (aarch64), so the wizard's "Local or Cloud is faster" hints show.
 SCENARIO_HOST = {"slow": {"arch": "aarch64", "cpus": 4, "slow": True}}
+# The install shape per scenario (installer otherwise): one the bot can't
+# restart itself, so the Restart step asks for a restart by hand.
+SCENARIO_SHAPE = {"manual": "unknown"}
 
 
 def _boot_scenario(source, marker, token):
@@ -372,6 +376,7 @@ def _scrub(path, body):
 def scenario_responses(name):
     source, marker, token = SCENARIOS[name]
     _boot_scenario(source, marker, token)
+    pin_shape(SCENARIO_SHAPE.get(name, "installer"))
     try:
         out = {}
         for p in E2E_GETS:
@@ -383,6 +388,7 @@ def scenario_responses(name):
         return out
     finally:
         os.environ.pop("LVI_DASHBOARD_TOKEN", None)
+        pin_shape("installer")
 
 
 def _shape(v):
@@ -448,6 +454,10 @@ _slow_host = _probe.get("slow", {}).get("host") or {}
 check("e2e fixture slow: a marked box the probe's own rule calls slow (aarch64), the rest of fresh's shape",
       _slow_host.get("slow") is True and _slow_host.get("arch") == "aarch64" and _probe.get("slow", {}).get("pending") is True
       and all(_probe[n].get("host", {}).get("slow") is False for n in ("fresh", "upgraded", "token")), str(_slow_host))
+check("e2e fixture manual: a marked box whose install shape can't restart itself (restart manual); the rest auto",
+      _probe.get("manual", {}).get("restart") == "manual" and _probe.get("manual", {}).get("pending") is True
+      and all(_probe[n].get("restart") == "auto" for n in ("fresh", "upgraded", "token", "slow")),
+      str({n: p.get("restart") for n, p in _probe.items()}))
 routes._install_shape = _real_shape
 
 # ── repo hygiene ─────────────────────────────────────────────────────
@@ -620,6 +630,24 @@ check("nodes step: NodeSetupPanel as it is (its desktop-only message unchanged),
 check("nodes step: the probe is read every 5 s only while the step is mounted (cleared on unmount)",
       "useProbePoll(p => {" in _nodes_step and "onProbe(p)" in _nodes_step and "setInterval(" in _poll and "}, 5000)" in _poll
       and "return () => clearInterval(t)" in _poll and "setInterval(" not in _wiz, _poll[:300])
+
+# ── the restart-and-test step, Finish, and the leave-page warning ─────
+_finish = fn("function FinishStep({")
+check("restart step: 'Say …' is wakePhrase() of the selected model from GET /oww/models, never the wake name",
+      "wakePhrase(models)" in _finish and "api('/api/dashboard/oww/models')" in _finish
+      and "/api/dashboard/wake" not in _finish and ".name" not in _finish, _finish[:300])
+check("restart step: 'Heard you in …' only for a wake after the current boot (heardSince over the polled probe)",
+      "heardSince(probe)" in _finish and "useProbePoll(" in _finish, "")
+check("restart step: restarts through restartBot(); a bot that can't restart itself gets a note and no POST",
+      "restartBot(setMsg, setRebooting)" in _finish and "probe?.restart === 'manual'" in _finish
+      and "Restart the bot yourself" in _finish and "/api/dashboard/restart" not in _finish, "")
+check("restart step: the browser mic link keeps its trailing slash", 'href="/client/"' in _finish, "")
+check("restart step: hosted by the wizard; Finish posts /setup/done {skipped: false} and lands on #rooms",
+      "<FinishStep " in _wiz and "() => leave(false)" in _wiz and "json: { skipped }" in _wiz
+      and "window.location.hash = 'rooms'" in _wiz, "")
+check("leave-page warning: the one beforeunload listener also counts the wizard's unsaved edits",
+      APP.count("addEventListener('beforeunload'") == 1 and "onUnsaved={setWizardUnsaved}" in _app
+      and "const leaving = unsaved + wizardUnsaved" in _app and "onUnsaved(count)" in _wiz, "")
 
 _titles = re.findall(r"\{ id: '\w+', title: '([^']+)'", WIZ_JS)
 _dist = [p.read_text(errors="ignore") for p in (REPO / "dashboard-ui" / "dist" / "assets").glob("*.js")]

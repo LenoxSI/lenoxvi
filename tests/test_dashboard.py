@@ -9398,7 +9398,9 @@ def main():
               "restartBot(setMsg, setRebooting) }" in _rbtTB
           and "{pending.length ? `Restart to apply (${pending.length})` : 'Restart bot'}" in _rbtTB
           and _rbtTB.count("window.confirm(") == 1
-          and _appsrc.count("restartBot(setMsg, setRebooting)") == 2, _rbtTB[:300])
+          # The other caller is the setup wizard's Restart step (the tabs aren't mounted there).
+          and _appsrc.count("restartBot(setMsg, setRebooting)") == 3
+          and "restartBot(setMsg, setRebooting)" in _fnUI("function FinishStep({"), _rbtTB[:300])
 
     # Overview: the chip row, under the header, above the tab; no title.
     _ovTB = _fnUI("function Overview({ status, tts, intelligence, mapping }) {")
@@ -9548,10 +9550,11 @@ def main():
           "className={pending.length && !unsaved ? BTN_PRIMARY : BTN_DEFAULT}" in _rbtTB
           and "unsaved={unsaved > 0}" in _hdrTB
           and "const unsaved = UNSAVED_ORDER.reduce((n, k) => n + (units[k]?.count || 0), 0)" in _appTB)
-    check("unsaved: leaving the page warns while anything is unsaved",
-          "if (!unsaved) return" in _appTB and "const warn = e => { e.preventDefault(); e.returnValue = '' }" in _appTB
+    check("unsaved: leaving the page warns while anything is unsaved (the tabs' cards or a setup step's)",
+          "const leaving = unsaved + wizardUnsaved" in _appTB
+          and "if (!leaving) return" in _appTB and "const warn = e => { e.preventDefault(); e.returnValue = '' }" in _appTB
           and "window.addEventListener('beforeunload', warn)" in _appTB
-          and "return () => window.removeEventListener('beforeunload', warn)" in _appTB and "}, [unsaved])" in _appTB)
+          and "return () => window.removeEventListener('beforeunload', warn)" in _appTB and "}, [leaving])" in _appTB)
     check("unsaved: TTS fields follow the server until edited; the voice id is a draft, not a DOM read",
           "fluxTouched" not in _voUS and "document.getElementById('tts-voice')" not in _appsrc
           and '<input aria-label="ElevenLabs voice ID" id="tts-voice" value={voiceId} onChange={e => t.set({ voice_id: e.target.value })}' in _voUS
