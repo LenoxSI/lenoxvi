@@ -291,6 +291,14 @@ routes._install_shape = _real_shape
 _ignored = (REPO / ".gitignore").read_text().splitlines()
 check(".gitignore lists setup.pending (a dev clone's state dir is the repo)",
       "setup.pending" in [ln.strip() for ln in _ignored], "")
+# The installer writes the marker the server reads: a rename on either side
+# must break this check, not a user's first visit.
+import re  # noqa: E402
+
+_state_sh = (REPO / "scripts" / "installer" / "state.sh").read_text()
+_marker_writes = re.findall(r'write_file "\$LVI_STATE/([\w.-]+)" 0644 "\$LVI_USER:\$LVI_USER"', _state_sh)
+check("install contract: state.sh writes exactly the marker paths.setup_marker() names",
+      _marker_writes == [paths.setup_marker().name], str(_marker_writes))
 _setup_src = (CORE / "dashboard" / "setup.py").read_text()
 check("setup.py stays framework-free (no FastAPI import)", "fastapi" not in _setup_src.lower())
 
