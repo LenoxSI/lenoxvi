@@ -43,7 +43,7 @@ import tts_catalog
 import tts_kokoro
 import wake_name
 
-from . import config_store, node_command, registry
+from . import config_store, node_command, registry, setup
 from .guard import mutation_guard
 from .upload_limit import FIRMWARE_IMAGE_MAX, WAKE_MODEL_MAX
 
@@ -1878,6 +1878,11 @@ class IntelligenceKeyPayload(BaseModel):
 @router.get("/intelligence")
 async def get_intelligence():
     """Current Intelligence config + key status. Never returns the key."""
+    return _intelligence_view()
+
+
+def _intelligence_view() -> dict:
+    """GET /intelligence's body; sync, so the setup probe can build it off the loop."""
     _env = _saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
@@ -2170,6 +2175,83 @@ async def restart_bot():
         raise HTTPException(status_code=500, detail="restart scheduling failed (see bot log)")
     logger.info(f"dashboard: bot restart scheduled via {via} — fires in 2s")
     return {"ok": True, "restarting": True}
+
+
+# ── first-run setup wizard ───────────────────────────────────────────
+# The probe reports what each wizard step's card already shows; the marker
+# (setup.pending) only decides whether the page opens the wizard by itself.
+# The wizard saves through the existing card routes; the only write here is
+# removing the marker.
+
+
+class SetupDonePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # misspelled keys 422, never no-op
+    skipped: bool = False
+
+
+def _wake_custom_name(active: Path) -> str:
+    """The active wake model's file name when it is a custom model, "" for a
+    stock one (the detail never names a stock model's phrase)."""
+    for key in wake_name.STOCK_MODELS:
+        try:
+            if Path(wake_name.resolve_model(key)).resolve() == active:
+                return ""
+        except Exception:  # openwakeword missing/broken: the file name stands
+            continue
+    return active.name
+
+
+def _setup_probe(shape: str) -> dict:
+    """The probe body. Sync: it reads config.yaml and .env, so the route
+    runs it off the event loop. Presence of the token only, never its value."""
+    tts_cfg = config_store.read_section("tts") or {}
+    tts_saved = tts_cfg.get("provider")
+    tts_provider = tts_catalog.resolve_provider(tts_saved if tts_saved is not None else os.getenv("LVI_TTS_PROVIDER"))
+    intel = _intelligence_view()
+    active = _oww_active_path()
+    restart_pending = _restart_pending()
+    pending = setup.pending()
+    return {
+        "pending": pending,
+        "token_required": bool(os.environ.get("LVI_DASHBOARD_TOKEN")),
+        "restart": "manual" if shape == "unknown" else "auto",
+        "host": setup.host_facts(),
+        "restart_pending": restart_pending,
+        "boot_time": registry.boot_time(),
+        "last_wake": registry.last_wake(),
+        "steps": setup.step_states(
+            stt_current=_stt_current(), stt_providers=_stt_providers(),
+            tts_provider=tts_provider,
+            tts_providers=_tts_providers(tts_kokoro.setup_problem(), _localai_problem()),
+            intelligence={"kind": intel["kind"], "url": intel["url"], "label": _intelligence_label()},
+            keys_set=intel["keys_set"],
+            wake_file_ok=active.is_file(), wake_custom=_wake_custom_name(active),
+            zones=_all_zones(), capable_rooms=registry.capable_rooms(), rooms=registry.known_rooms(),
+            pending=pending, restart_pending=restart_pending),
+    }
+
+
+@router.get("/setup/probe")
+async def setup_probe():
+    """The setup wizard's view of this box: marker, host facts, restart
+    shape and each step's done state. Open, like every dashboard read."""
+    shape = await _install_shape()
+    return await asyncio.to_thread(_setup_probe, shape)
+
+
+@router.post("/setup/check", dependencies=GUARD)
+async def setup_check():
+    """The wizard's token check: the guard is the whole answer. No side effects."""
+    return {"ok": True}
+
+
+@router.post("/setup/done", dependencies=GUARD)
+async def setup_done(payload: SetupDonePayload):
+    """Finish or Skip: remove the marker so the wizard stops opening by
+    itself. Idempotent: no marker is still ok."""
+    await asyncio.to_thread(setup.clear)
+    logger.info("setup: skipped" if payload.skipped else "setup: finished")
+    return {"ok": True, "pending": False}
 
 
 # ── Voice Tuning (Voice tab — wake/VAD/turn knobs, all slider-set) ──────
