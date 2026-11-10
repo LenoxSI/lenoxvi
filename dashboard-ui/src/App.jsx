@@ -3532,12 +3532,62 @@ function useSetupMode() {
   return mode
 }
 
-function StepNav({ onBack, onSkip, nextLabel = 'Continue', onNext, busy }) {
+// Intelligence: the card as it is, and the key row of the lane on screen. The
+// lane follows the card's own provider select (its change event bubbles here);
+// which variable a lane reads comes from GET /keys.
+function IntelligenceStep({ intelligence, setMsg, reloadAll }) {
+  const [kind, setKind] = useState(null)
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    let alive = true
+    api('/api/dashboard/keys').then(d => { if (alive) setRows(d.keys || []) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  const lane = laneOf(kind ?? intelligence?.kind)
+  const vars = lane ? rows.filter(r => r.kind === lane.kind && (!lane.per_agent_keys || r.agent === lane.default_agent))
+    .map(r => r.var) : []
+  const keysCtx = { showKeys: () => setTimeout(() => scrollToCard('keys'), 0) }
+  return (
+    <WizardCtx.Provider value={keysCtx}>
+      <div className="grid grid-cols-1" style={{ minWidth: 0 }}
+        onChange={e => { if (e.target.id === 'int-kind') setKind(e.target.value) }}>
+        <IntelligenceCard intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />
+      </div>
+      {vars.length > 0 && <KeysCard setMsg={setMsg} only={vars} />}
+    </WizardCtx.Provider>
+  )
+}
+
+// Finish's summary: each step done or skipped, as the probe sees it, with a
+// way back to it.
+function StepSummary({ probe, onGo }) {
+  return (
+    <ul aria-label="Setup summary" className="grid grid-cols-1 gap-2 m-0 p-0 list-none">
+      {STEPS.slice(1, -1).map(s => {
+        const v = stepView(probe, s.id)
+        return (
+          <li key={s.id} data-step={s.id}
+            className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--surface)] px-4 py-2">
+            <span className="grid gap-0.5" style={{ minWidth: 0 }}>
+              <span className="text-[14px] font-medium">{s.title}</span>
+              <span className="text-[13px] text-[var(--muted)]">
+                {!probe ? '…' : v.done ? `done${v.detail ? ` · ${v.detail}` : ''}` : 'skipped'}</span>
+            </span>
+            <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={() => onGo(s.id)}
+              aria-label={`${v.done ? 'Change' : 'Set up'} ${s.title}`}>{v.done ? 'Change' : 'Set up'}</button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function StepNav({ onBack, onSkip, skipLabel = 'Skip', nextLabel = 'Continue', onNext, busy }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       {onBack ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onBack}>Back</button> : <span />}
       <div className="flex flex-wrap gap-3">
-        {onSkip ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onSkip}>Skip</button> : null}
+        {onSkip ? <button type="button" className={`${BTN_DEFAULT} ${TOUCH}`} onClick={onSkip}>{skipLabel}</button> : null}
         <button type={onNext ? 'button' : 'submit'} className={`${BTN_PRIMARY} ${TOUCH}`} disabled={busy}
           onClick={onNext}>{nextLabel}</button>
       </div>
@@ -3644,13 +3694,14 @@ function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
   }, [])
   const msgRef = useRef(setMsg)
   useEffect(() => { msgRef.current = setMsg })
+  // Read again on every step: the steps' done flags follow what was saved.
   useEffect(() => {
     let alive = true
     api('/api/dashboard/setup/probe')
       .then(p => { if (alive) setProbe(p) })
       .catch(e => { if (alive && !e.network) msgRef.current('setup check failed: ' + e.message, 'err', 'Setup') })
     return () => { alive = false }
-  }, [])
+  }, [step])
   const i = Math.max(0, STEPS.findIndex(s => s.id === step))
   const s = STEPS[i]
   const go = id => { setStep(id); window.scrollTo(0, 0) }
@@ -3686,6 +3737,8 @@ function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
       card={<SttCard status={status} setMsg={setMsg} />} />,
     [STEP_ID.Voice]: <SpeechStep step={s.id} probe={probe} setMsg={setMsg}
       card={<TtsCard tts={tts} reloadAll={reloadAll} />} />,
+    [STEP_ID.Intelligence]: <IntelligenceStep intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />,
+    [STEP_ID['Wake word']]: <OwwPanel setMsg={setMsg} reloadAll={reloadAll} />,
   }[s.id]
   return (
     <main data-wizard={step} className="grid grid-cols-1 gap-6 w-full max-w-[680px] mx-auto" style={{ minWidth: 0 }}>
@@ -3699,11 +3752,13 @@ function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {
           <div key={s.id} className="wizard-cards grid grid-cols-1 gap-10" style={{ minWidth: 0 }}>{body}</div>
         </UnsavedCtx.Provider>
       ) : null}
+      {!next ? <StepSummary probe={probe} onGo={go} /> : null}
       {s.id === STEPS[0].id ? (
         <WelcomeStep probe={probe} version={status?.version} onNext={() => go(next)} />
       ) : (
         <StepNav onBack={back ? () => go(back) : null} busy={leaving || saving}
           onSkip={s.skippable && next ? () => go(next) : null}
+          skipLabel={s.id === STEP_ID.Intelligence ? 'Not yet' : 'Skip'}
           nextLabel={!next ? 'Finish' : body ? (saving ? 'Saving…' : 'Save and continue') : 'Continue'}
           onNext={!next ? () => leave(false) : body ? saveStep : () => go(next)} />
       )}
