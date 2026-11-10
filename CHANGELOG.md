@@ -12,6 +12,11 @@ The two version streams are independent.
 - Server side of the first-run setup wizard, part 1: a `setup.pending` marker in the state dir (present = the
   dashboard should open setup by itself; gitignored for a dev clone) and the rules that say which of the eight
   setup steps is already done, computed from what the existing cards show. Nothing reads them yet. (#59)
+- Server side of the first-run setup wizard, part 2: three new dashboard routes. `GET /api/dashboard/setup/probe`
+  (open read) reports whether the marker is there, whether a dashboard token is required (never the token), how a
+  restart happens, this machine's CPU/RAM/disk, the restart-pending list, the last wake and each step's done
+  state; `POST /setup/check` is a token check with no side effects; `POST /setup/done` removes the marker. No
+  existing route changes. (#59)
 - Voice Tuning card: VAD start and stop timing join the sliders — `vad.start_secs` (0.05–0.50 s, speech needed
   before a turn starts) and `vad.stop_secs` (0.10–1.50 s, silence before VAD calls the speech over, ahead of the
   turn-end lull). `GET/PUT /api/dashboard/voice-tuning` carry them as `vad_start_secs` / `vad_stop_secs`, written
