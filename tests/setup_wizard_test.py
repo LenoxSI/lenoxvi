@@ -521,9 +521,9 @@ check("cards: UNSAVED_ORDER is unchanged",
 check("cards: KeysCard without `only` shows today's rows and Add box; with it, only those vars and no Add box",
       "const shownRows = (keys || []).filter(only ? r => only.includes(r.var) : shown)" in _keys
       and "{!keys || only ? null : (services.length === 0 && agents.length === 0) ? (" in _keys, "")
-check("cards: Rooms mounts ZoneList unless showZones is false",
+check("cards: Rooms mounts ZoneList unless showZones is false (the wizard's Speakers step is the one other mount)",
       "{showZones && <ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />}" in _rooms
-      and APP.count("<ZoneList ") == 1, "")
+      and APP.count("<ZoneList ") == 2, "")
 check("cards: MissingKey keeps its #keys link outside the wizard; inside it, a button asks the wizard to show the keys",
       "const WizardCtx = createContext(null)" in APP and "const wizard = useContext(WizardCtx)" in _missing
       and 'href="#keys"' in _missing and "onClick={() => wizard.showKeys()}" in _missing
@@ -539,8 +539,8 @@ _wiz_branch = _ret[_body_at:_else_at] if 0 <= _body_at < _else_at else ""
 _tab_branch = _ret[_else_at:] if _wiz_branch else ""
 check("shell: wizard mode renders SetupWizard; the tab bodies sit only in the branch that renders once the probe "
       "has answered and the wizard is not showing",
-      "<SetupWizard status={status} tts={tts} intelligence={intelligence} setMsg={setMsg} reloadAll={reloadAll} />"
-      in _wiz_branch
+      "<SetupWizard status={status} mapping={mapping} tts={tts} intelligence={intelligence} setMsg={setMsg} "
+      "reloadAll={reloadAll}" in _wiz_branch
       and not any(s in _wiz_branch for s in ("data-tab=", "<Overview", "<Rooms", "<Voice", "<System"))
       and all(f'data-tab="{t}"' in _tab_branch for t in ("rooms", "voice", "system")) and "<Overview" in _tab_branch,
       _ret[:200])
@@ -560,7 +560,7 @@ check("shell: 'Run setup again' over unsaved edits asks first (Discard N … and
       and "e.preventDefault()" in _again, _again[:400])
 
 # ── the speech steps: the cards as they are, saved by their own save() ──
-_wiz = fn("function SetupWizard({ status, tts, intelligence, setMsg, reloadAll }) {")
+_wiz = fn("function SetupWizard({")
 _speech = fn("function SpeechStep({")
 _save_cards = fn("async function saveCards(cards, units, keys) {")
 _bar = fn("function UnsavedBar({ cards, units, setMsg }) {")
@@ -605,6 +605,21 @@ check("finish summary: each step done or skipped by the probe, with a way back t
       and "<StepSummary probe={probe} onGo={go} />" in _wiz, _summary[:300])
 check("the wizard re-reads the probe on every step, so the summary follows what was saved",
       "}, [step])" in _wiz and "api('/api/dashboard/setup/probe')" in _wiz, "")
+
+# ── the speakers and nodes steps ──────────────────────────────────────
+_nodes_step, _poll = fn("function NodesStep({"), fn("function useProbePoll(")
+check("speakers step: ZoneList as it is, mounted by the wizard; the nodes step's Rooms leaves it out",
+      "<ZoneList mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} />" in _wiz
+      and "<Rooms status={status} mapping={mapping} setMsg={setMsg} reloadAll={reloadAll} showZones={false} />"
+      in _nodes_step and APP.count("<Rooms ") == 2, _nodes_step[:300])
+check("speakers step: Sonos is discovered, a WiiM is added by its address (no WiiM discovery here)",
+      "add a WiiM by its IP address" in _wiz, "")
+check("nodes step: NodeSetupPanel as it is (its desktop-only message unchanged), once in the wizard",
+      "<NodeSetupPanel setMsg={setMsg} />" in _nodes_step and APP.count("<NodeSetupPanel ") == 2
+      and "Node setup needs Chrome or Edge on a desktop computer." in APP, "")
+check("nodes step: the probe is read every 5 s only while the step is mounted (cleared on unmount)",
+      "useProbePoll(p => {" in _nodes_step and "onProbe(p)" in _nodes_step and "setInterval(" in _poll and "}, 5000)" in _poll
+      and "return () => clearInterval(t)" in _poll and "setInterval(" not in _wiz, _poll[:300])
 
 _titles = re.findall(r"\{ id: '\w+', title: '([^']+)'", WIZ_JS)
 _dist = [p.read_text(errors="ignore") for p in (REPO / "dashboard-ui" / "dist" / "assets").glob("*.js")]

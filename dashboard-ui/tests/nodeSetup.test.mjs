@@ -68,6 +68,18 @@ test('isSupported needs Web Serial and a secure context', () => {
   assert.equal(isSupported(undefined, undefined), false)
 })
 
+test('isSupported is desktop-only: a phone or tablet browser that has Web Serial still gets the desktop message', () => {
+  const win = { isSecureContext: true }
+  const desktop = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36'
+  const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Mobile Safari/537.36'
+  const tablet = 'Mozilla/5.0 (Linux; Android 14; Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36'
+  assert.equal(isSupported({ serial: {}, userAgent: desktop }, win), true)
+  assert.equal(isSupported({ serial: {}, userAgent: desktop, userAgentData: { mobile: false } }, win), true)
+  assert.equal(isSupported({ serial: {}, userAgent: android }, win), false)
+  assert.equal(isSupported({ serial: {}, userAgent: tablet }, win), false)
+  assert.equal(isSupported({ serial: {}, userAgent: desktop, userAgentData: { mobile: true } }, win), false)
+})
+
 test('checkManifest refuses another line, the settings region, and incomplete sets', () => {
   const ok = { track: 'flex', parts: [0, 0x8000, 0x10000, 0x20000].map((offset, i) =>
     ({ name: ['bootloader', 'partition-table', 'ota-data', 'app'][i], file: `f${i}`, offset, size: 100, sha256: 'a'.repeat(64) })) }

@@ -30,6 +30,12 @@ const LOOKS = ['POST /intelligence/agents', 'POST /intelligence/test', 'POST /lo
 export const FAKE_LOCALAI = { stt: 'e2e-stt-model', tts: { id: 'e2e-voice-model', backend: 'kokoro' } }
 export const FAKE_AGENT = 'e2e-agent'
 export const FAKE_REPLY = 'e2e reply text'
+// Made-up Sonos players the fake bot's LAN scan finds.
+export const FAKE_PLAYERS = [
+  { ip: '192.0.2.31', name: 'Room 1', uid: 'RINCON_E2E000000000031' },
+  { ip: '192.0.2.32', name: 'Room 2', uid: 'RINCON_E2E000000000032' },
+]
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 // The Intelligence step's id is the server's; specs and the fake reach it by title.
 const STEPS_INTEL_ID = STEPS.find(s => s.title === 'Intelligence').id
 
@@ -75,7 +81,7 @@ export class FakeApi {
     } else {
       try { body = req.postDataJSON() } catch { body = req.postData() }
     }
-    const rec = { method, path, url: req.url(), body, status: 0 }
+    const rec = { method, path, url: req.url(), body, status: 0, at: Date.now() }
     this.requests.push(rec)
     const reply = (status, json) => { rec.status = status; return route.fulfill({ status, json }) }
 
@@ -106,9 +112,10 @@ export class FakeApi {
       if (finish) finish.done = true
       return reply(200, { ok: true, pending: false })
     }
-    const handler = this.routes()[`${method} ${path.replace(/^\/oww\/models\/[^/]+$/, '/oww/models/*')}`]
+    const route = path.replace(/^\/oww\/models\/[^/]+$/, '/oww/models/*').replace(/^\/zones\/[^/]+\/(test|volume)$/, '/zones/*/$1')
+    const handler = this.routes()[`${method} ${route}`]
     if (!handler) return reply(200, { ok: true })
-    const [status, json] = handler(body || {})
+    const [status, json] = handler(body || {}, path)
     this.sync()
     return reply(status, json)
   }
@@ -229,7 +236,49 @@ export class FakeApi {
         if (typeof b.name === 'string') this.get('/wake').name = b.name.trim().split(/\s+/).filter(Boolean).join(' ')
         return [200, { ok: true, name: this.get('/wake').name }]
       },
+      'POST /zones/discover': () => [200, { found: structuredClone(FAKE_PLAYERS) }],
+      'POST /zones': b => {
+        const extra = Object.keys(b).filter(k => !['name', 'ip', 'player_uid', 'backend'].includes(k))
+        if (extra.length) return [422, { detail: extra.map(k => ({ loc: ['body', k], msg: 'Extra inputs are not permitted' })) }]
+        const name = String(b.name ?? '').trim(), backend = b.backend ?? 'sonos'
+        if (String(b.ip ?? '').length < 7) return [422, { detail: [{ loc: ['body', 'ip'], msg: 'String should have at least 7 characters' }] }]
+        if (backend === 'sonos' && String(b.player_uid ?? '').trim().length < 8) {
+          return [422, { detail: 'sonos zones need a player_uid (RINCON_…, 8+ chars)' }]
+        }
+        if (!name || /[.:/]/.test(name)) return [400, { detail: "bad zone name: '.', ':' and '/' aren't allowed" }]
+        const m = this.get('/mapping')
+        if (name in m.zones) return [400, { detail: `zone '${name}' already exists` }]
+        m.zones[name] = { backend, ip: b.ip.trim() }
+        m.effective_volumes[name] = 35
+        return [200, { ok: true, backend }]
+      },
+      'POST /zones/*/test': (b, path) => {
+        const name = decodeURIComponent(path.split('/')[2])
+        return name in this.get('/mapping').zones ? [200, { ok: true }] : [404, { detail: `unknown zone '${name}'` }]
+      },
+      // The real route takes room_zones (and room_agents) wrapped, never a
+      // bare room → zone dict: anything else is an extra field, a 422.
+      'PUT /mapping': b => {
+        const extra = Object.keys(b).filter(k => k !== 'room_zones' && k !== 'room_agents')
+        if (extra.length) return [422, { detail: extra.map(k => ({ loc: ['body', k], msg: 'Extra inputs are not permitted' })) }]
+        const rz = b.room_zones || {}
+        if (!Object.keys(rz).length) return [400, { detail: 'refusing to wipe all room mappings — send the full room_zones dict' }]
+        const m = this.get('/mapping')
+        const bad = Object.entries(rz).filter(([, z]) => !(z in m.zones) && z !== 'builtin')
+        if (bad.length) return [400, { detail: `unknown zone(s) ${bad.map(([, z]) => z)}` }]
+        m.room_zones = { ...rz }
+        return [200, { ok: true }]
+      },
     }
+  }
+
+  // A node connects: /status lists it online and the probe counts it, as the
+  // registry does when a node's session starts.
+  nodeOnline(room) {
+    const rooms = this.get('/status').rooms
+    rooms.push({ room, online: true, last_seen: Date.now() / 1000, fw: 'v0.0.0-e2e', fw_rejected: null,
+      wifi_rollback: false, line: 'flex', tts_provider: null, tts_usable: null, muted: false })
+    this.sync()
   }
 
   // The GETs' derived fields after a write, by the routes' own rules: a
@@ -279,6 +328,10 @@ export class FakeApi {
     }
     const wake = step('wake'), sel = (this.get('/oww/models')?.models || []).find(m => m.selected)
     if (wake && sel) Object.assign(wake, { done: true, detail: sel.source === 'stock' ? 'stock model' : sel.name })
+    const zones = Object.keys(this.get('/mapping')?.zones || {})
+    const online = (this.get('/status')?.rooms || []).filter(r => r.online)
+    if (step('speakers') && zones.length) Object.assign(step('speakers'), { done: true, detail: plural(zones.length, 'zone') })
+    if (step('nodes')) Object.assign(step('nodes'), { done: online.length > 0, detail: `${online.length} online` })
   }
 
   expectOnlyAllowedWrites() {
