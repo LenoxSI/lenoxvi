@@ -10121,7 +10121,7 @@ def main():
     check("speech tiers: the STT fallback chip reads 'embedded fallback' on the STT card and in the status bar",
           ">embedded fallback</span>" in _laSt
           and _jsbody(_chipsrc, "export function sttChip(st) {").count("text: 'embedded fallback'") == 2
-          and "whisper fallback" not in _appsrc)
+          and "whisper fallback" not in _appsrc and "whisper fallback" not in _chipsrc)
     check("speech tiers: no Whisper model menu, download, delete or GPU chip on the STT card; no retired TTS engine "
           "or fallback picker on the TTS card",
           not any(s in _laSt for s in ('id="stt-model"', 'id="stt-models"', 'id="stt-progress"', "/api/dashboard/stt/model/",
