@@ -445,7 +445,7 @@ def main():
     check("probe mapping actually gone from config",
           _probe is None, f"room_zones m14_probe_room={_probe}")
 
-    # ── deleting the default zone never leaves default_zone dangling ──
+    # ── deleting a zone leaves default_zone exactly as written ──
     _sonos_saved = dict(config_store.read_section("sonos") or {})
     _wiim_saved = dict(config_store.read_section("wiim") or {})
     try:
@@ -456,20 +456,36 @@ def main():
                                             "zones": {"zwA": {"ip": "127.0.0.7"}}})
         _d1 = client.delete("/api/dashboard/zones/zdA")
         _dz1 = (config_store.read_section("sonos") or {}).get("default_zone")
-        check("zones: deleting the default hands default to a remaining zone (the response doesn't echo it)",
-              _d1.status_code == 200 and _dz1 == "zdB" and "default_zone" not in _d1.json(),
+        check("zones: deleting the zone default_zone names leaves the key exactly as written (the response doesn't echo it)",
+              _d1.status_code == 200 and _dz1 == "zdA" and "default_zone" not in _d1.json(),
               f"{_d1.status_code} default={_dz1} body={_d1.text[:120]}")
         _d2 = client.delete("/api/dashboard/zones/zdB")
         _dz2 = (config_store.read_section("sonos") or {}).get("default_zone")
-        check("zones: deleting the last zone clears default_zone",
-              _d2.status_code == 200 and _dz2 is None, f"{_d2.status_code} default={_dz2}")
+        check("zones: deleting the last zone does not remove default_zone",
+              _d2.status_code == 200 and _dz2 == "zdA", f"{_d2.status_code} default={_dz2}")
         _d3 = client.delete("/api/dashboard/zones/zwA")
         _dz3 = (config_store.read_section("wiim") or {}).get("default_zone")
-        check("zones: a WiiM default is cleared the same way",
-              _d3.status_code == 200 and _dz3 is None, f"{_d3.status_code} default={_dz3}")
+        check("zones: a WiiM default_zone is left as written the same way",
+              _d3.status_code == 200 and _dz3 == "zwA", f"{_d3.status_code} default={_dz3}")
     finally:
         config_store.write_section("sonos", _sonos_saved)
         config_store.write_section("wiim", _wiim_saved)
+
+    # ── adding a WiiM zone writes no default_zone — nothing routes by it ──
+    _wiim_add_saved = dict(config_store.read_section("wiim") or {})
+    try:
+        _wiim_no_default = dict(_wiim_add_saved)
+        _wiim_no_default.pop("default_zone", None)
+        config_store.write_section("wiim", _wiim_no_default)
+        _r_add = client.post("/api/dashboard/zones", json={
+            "name": "zwB", "backend": "wiim", "ip": "127.0.0.6"})
+        _w_add = config_store.read_section("wiim") or {}
+        check("zones: adding a WiiM zone to a section with no default_zone writes none",
+              _r_add.status_code == 200 and "default_zone" not in _w_add
+              and "zwB" in (_w_add.get("zones") or {}),
+              f"{_r_add.status_code} default_zone={'default_zone' in _w_add} body={_r_add.text[:120]}")
+    finally:
+        config_store.write_section("wiim", _wiim_add_saved)
 
     # ── slow dashboard work never stalls the voice event loop ──
     import asyncio as _aio_rl
@@ -8344,8 +8360,8 @@ def main():
               f"note={_sd.get('hand_note')} zones={sorted(_sd.get('zones') or {})}")
         _he_stale_then_edit(lambda raw: raw["sonos"].update({"default_zone": "heB"}))
         _rdl2 = client.delete("/api/dashboard/zones/heB")
-        check("zones: deleting the hand-set default still hands default to a remaining zone",
-              _rdl2.status_code == 200 and (_he_raw().get("sonos") or {}).get("default_zone") == "heC"
+        check("zones: deleting the hand-set default leaves it as the user wrote it",
+              _rdl2.status_code == 200 and (_he_raw().get("sonos") or {}).get("default_zone") == "heB"
               and "default_zone" not in _rdl2.json(),
               f"{_rdl2.status_code} {_rdl2.text[:120]}")
     finally:

@@ -9,6 +9,9 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Changed
+- The dashboard no longer writes `default_zone`: adding a zone sets none, and deleting a zone no longer hands the
+  key to a remaining zone or clears it. A `default_zone` already in someone's config.yaml is left alone and
+  ignored — the key routes nothing. (#81)
 - Scripts: `scripts/sync_host.sh`, `scripts/serial_watch.py` and `scripts/fetch_xmos_fw.sh` are removed — nothing in
   the repo calls or documents them: the installer replaced the host-sync deploy flow, the dashboard's XMOS updater
   fetches the image, and pyserial is no longer pinned (esptool still installs it). (#76)

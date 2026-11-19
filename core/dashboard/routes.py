@@ -600,8 +600,6 @@ async def add_zone(payload: ZonePayload):
             zones = dict(wiim.get("zones") or {})
             zones[name] = {"ip": payload.ip.strip()}
             merged = {**wiim, "enabled": True, "zones": zones}
-            if not merged.get("default_zone"):
-                merged["default_zone"] = name
             config_store.write_section("wiim", merged)
         else:
             zones = dict(sonos.get("zones") or {})
@@ -617,8 +615,7 @@ async def add_zone(payload: ZonePayload):
 @router.delete("/zones/{name}", dependencies=GUARD)
 async def delete_zone(name: str):
     # Fresh read under the store's lock, same reason as the volume route:
-    # the cached cfg() would write back stale values over hand edits, and
-    # the default-zone handoff below must see the default as it is now.
+    # the cached cfg() would write back stale values over hand edits.
     def _write():
         fresh = config_store.read_sections(["sonos", "wiim", "room_zones"])
         backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
@@ -633,16 +630,6 @@ async def delete_zone(name: str):
         # deleted zone with dangling room mappings) and churned two
         # backups. Sections dict preserves every OTHER key untouched.
         sections = {backend: sec}
-        # The backend's default zone must not point at the deleted zone: every
-        # unmapped room's reply would go nowhere. Hand it to a remaining zone
-        # (add-zone sets the first one as default), or clear it.
-        new_default = sec.get("default_zone")
-        if new_default == name:
-            new_default = next(iter(zones), None)
-            if new_default:
-                sec["default_zone"] = new_default
-            else:
-                sec.pop("default_zone", None)
         # rooms mapped to a deleted zone become dangling — drop them in the
         # SAME write (they're a separate section, same atomic pass)
         mapping = dict(fresh["room_zones"] or {})
