@@ -55,7 +55,7 @@ test('Restart to apply, then the wake word heard after the new boot; Finish clea
   test.setTimeout(60_000)
   await fake.load('fresh')
   await saveVoiceThenFinish(page, fake)
-  const phrase = wakePhrase(fake.state[`${API}/oww/models`])
+  const phrase = wakePhrase(fake.state[`${API}/oww/models`], fake.state[`${API}/wake`]?.name)
   const restart = page.getByRole('button', { name: 'Restart to apply (1)', exact: true })
   await expect(restart).toBeVisible()
   await expect(wizard(page).getByText(`Say “${phrase}”`, { exact: false })).toHaveCount(0)
@@ -103,7 +103,7 @@ test('a bot that cannot restart itself: the step asks for a restart by hand and 
   expect(await sideScroll(page)).toBeLessThanOrEqual(0)
 
   fake.reboot()  // restarted by hand: the step's next read sees the new boot
-  const phrase = wakePhrase(fake.state[`${API}/oww/models`])
+  const phrase = wakePhrase(fake.state[`${API}/oww/models`], fake.state[`${API}/wake`]?.name)
   await expect(wizard(page).getByText(`Say “${phrase}”`, { exact: false })).toBeVisible({ timeout: 8000 })
   await expect(wizard(page).getByText('Restart the bot yourself', { exact: false })).toHaveCount(0)
   await page.getByRole('button', { name: 'Finish', exact: true }).click()

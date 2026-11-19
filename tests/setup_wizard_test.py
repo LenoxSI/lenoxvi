@@ -633,9 +633,9 @@ check("nodes step: the probe is read every 5 s only while the step is mounted (c
 
 # ── the restart-and-test step, Finish, and the leave-page warning ─────
 _finish = fn("function FinishStep({")
-check("restart step: 'Say …' is wakePhrase() of the selected model from GET /oww/models, never the wake name",
-      "wakePhrase(models)" in _finish and "api('/api/dashboard/oww/models')" in _finish
-      and "/api/dashboard/wake" not in _finish and ".name" not in _finish, _finish[:300])
+check("restart step: 'Say …' is wakePhrase() of the selected model (GET /oww/models) and the typed wake name (GET /wake)",
+      "wakePhrase(models, wakeName)" in _finish and "api('/api/dashboard/oww/models')" in _finish
+      and "api('/api/dashboard/wake')" in _finish, _finish[:300])
 check("restart step: 'Heard you in …' only for a wake after the current boot (heardSince over the polled probe)",
       "heardSince(probe)" in _finish and "useProbePoll(" in _finish, "")
 check("restart step: restarts through restartBot(); a bot that can't restart itself gets a note and no POST",

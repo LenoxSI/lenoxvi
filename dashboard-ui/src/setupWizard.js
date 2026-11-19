@@ -42,15 +42,24 @@ export function stepView(probe, id) {
   return { done: s?.done === true, detail: typeof s?.detail === 'string' ? s.detail : '', tier: s?.tier ?? null }
 }
 
-// What to tell the user to say: the selected model's phrase, from its stock key
-// or custom file name as words. The bot's wake name alone does not trigger the
-// model, so it is not the phrase. Always computed from the API, never a literal.
-export function wakePhrase(models) {
+// What to tell the user to say: the typed wake name, with the selected model's
+// words before it ("hey"). No name: the model's stock key or custom file name as
+// words, minus version and date tails. Always computed from the API, never a literal.
+export function wakePhrase(models, name = '') {
   const rows = Array.isArray(models) ? models : Array.isArray(models?.models) ? models.models : []
   const row = rows.find(m => m?.selected === true)
   const base = String(row?.name ?? '').replace(/\.(onnx|tflite)$/i, '').replace(/[_\s-]v\d+(\.\d+)*$/i, '')
   const words = base.split(/[_\s-]+/).filter(Boolean)
-  return words.length ? words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : 'the wake word'
+  while (words.length && /^\d+$/.test(words[words.length - 1])) words.pop()  // version or date tail
+  const cap = w => w[0].toUpperCase() + w.slice(1)
+  const typed = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (typed.length) {
+    // The typed name wins; keep the model's words before it ("hey").
+    const low = words.map(w => w.toLowerCase())
+    const at = low.findIndex((_, i) => typed.every((t, j) => low[i + j] === t.toLowerCase()))
+    return [...(at > 0 ? words.slice(0, at).map(cap) : []), ...typed].join(' ')
+  }
+  return words.length ? words.map(cap).join(' ') : 'the wake word'
 }
 
 // The last wake, only if it came after this boot (a wake from before the

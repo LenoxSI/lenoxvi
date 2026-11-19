@@ -3601,10 +3601,12 @@ function NodesStep({ probe, onProbe, status, mapping, setMsg, reloadAll }) {
 function FinishStep({ probe, onProbe, setMsg }) {
   useProbePoll(onProbe)
   const [models, setModels] = useState(null)
+  const [wakeName, setWakeName] = useState('')
   const [rebooting, setRebooting] = useState(false)
   useEffect(() => {
     let alive = true
     api('/api/dashboard/oww/models').then(d => { if (alive) setModels(d) }).catch(() => {})
+    api('/api/dashboard/wake').then(d => { if (alive) setWakeName(d?.name || '') }).catch(() => {})
     return () => { alive = false }
   }, [])
   const pending = probe?.restart_pending || []
@@ -3632,7 +3634,7 @@ function FinishStep({ probe, onProbe, setMsg }) {
       ) : (
         <>
           <p className="text-[16px] leading-6 font-medium m-0">
-            {models ? `Say “${wakePhrase(models)}” in a room with a node.` : 'Say the wake word in a room with a node.'}</p>
+            {models ? `Say “${wakePhrase(models, wakeName)}” in a room with a node.` : 'Say the wake word in a room with a node.'}</p>
           <p aria-live="polite" className="text-[14px] leading-5 m-0">
             {heard
               ? `Heard you${heard.room ? ` in ${heard.room}` : ''} at ${new Date(heard.time * 1000).toLocaleTimeString()}.`

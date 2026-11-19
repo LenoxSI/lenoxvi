@@ -113,16 +113,22 @@ test("wakePhrase: the selected stock row's key, humanised", () => {
   assert.equal(wakePhrase({ models: [stock('hey_suite_bot', true)] }), 'Hey Suite Bot')
 })
 
-test("wakePhrase: a selected custom model's file name, without extension or version suffix", () => {
+test("wakePhrase: a selected custom model's file name, without extension, version or date tail", () => {
   assert.equal(wakePhrase([custom('ok_made_up_v0.1.onnx', true), stock('hey_suite_bot', false)]), 'Ok Made Up')
   assert.equal(wakePhrase([custom('hello_test_box.onnx', true, 'root')]), 'Hello Test Box')
   assert.equal(wakePhrase([custom('yo_fake_word_v2.tflite', true)]), 'Yo Fake Word')
   assert.equal(wakePhrase([custom('hi_there_v1.0.3.onnx', true)]), 'Hi There')
+  assert.equal(wakePhrase([custom('Hi_Test_Box_1-0.onnx', true)]), 'Hi Test Box')
+  assert.equal(wakePhrase([custom('Hi_Test_Box_20250101_120000.onnx', true)]), 'Hi Test Box')
 })
 
-test("wakePhrase: the bot's wake name is not the phrase (it alone does not trigger the model)", () => {
-  assert.equal(wakePhrase([stock('hey_suite_bot', true)], 'Suite Name'), 'Hey Suite Bot')
-  assert.equal(wakePhrase([stock('hey_suite_bot', false)], 'Suite Name'), 'the wake word')
+test('wakePhrase: the typed wake name wins, keeping the model words before it', () => {
+  assert.equal(wakePhrase([custom('Hi_Test_Box_1-0.onnx', true)], 'Test Box'), 'Hi Test Box')
+  assert.equal(wakePhrase([custom('hi_testbox_1-0.onnx', true)], 'Testbox'), 'Hi Testbox')
+  assert.equal(wakePhrase([stock('hey_suite_bot', true)], 'suite bot'), 'Hey suite bot')
+  assert.equal(wakePhrase([stock('hey_suite_bot', true)], 'Other Name'), 'Other Name')
+  assert.equal(wakePhrase([stock('hey_suite_bot', false)], 'Suite Name'), 'Suite Name')
+  assert.equal(wakePhrase([stock('hey_suite_bot', true)], '  '), 'Hey Suite Bot')
 })
 
 test('wakePhrase: nothing selected or no list — "the wake word"', () => {
