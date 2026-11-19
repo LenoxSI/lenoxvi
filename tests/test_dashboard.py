@@ -9388,7 +9388,7 @@ def main():
           _gotTB == _wantTB and all(_appsrc.count(f'id="{t}"') == 1 for t, _ in _tabsTB)
           and "data-tab" not in _appsrc.replace('<div data-tab="', "").replace("[data-tab]", ""), str(_gotTB))
     # #setup opens the setup wizard, not a tab (setup_wizard_test.py pins that link).
-    _linksTB = (set(_reui.findall(r"href: '#([\w-]+)'", _appsrc))
+    _linksTB = (set(_reui.findall(r"href: '#([\w-]+)'", _appsrc + _chipsrc))
                 | set(_reui.findall(r'href="#([\w-]+)"', _appsrc))) - {"setup"}
     check("tabs: the warning chips' links and the missing-key link land on the tab with their card",
           _linksTB == {"intelligence", "keys", "localai", "rooms"}
