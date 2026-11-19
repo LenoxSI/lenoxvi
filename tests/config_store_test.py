@@ -32,7 +32,7 @@ cfg_file.write_text("counter:\n  n: 0\n")
 os.environ["LVI_CONFIG"] = str(cfg_file)
 
 # E402 by design: config_store reads the LVI_CONFIG set above.
-import config_store  # noqa: E402
+from dashboard import config_store  # noqa: E402
 
 
 # update() is a plain wrapper: fn's return value comes back to the caller.
@@ -93,7 +93,7 @@ check("update: fn's exception reaches the caller unchanged",
 check("update: a fn that raises leaves config.yaml untouched",
       cfg_file.read_bytes() == before)
 
-# The race this lane exists for: each bump's read and write share one lock,
+# The race update() closes: each bump's read and write share one lock,
 # so no bump can read a value another bump is about to overwrite.
 cfg_file.write_text("counter:\n  n: 0\n")
 

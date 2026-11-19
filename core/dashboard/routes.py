@@ -349,13 +349,13 @@ def _agent_default() -> dict:
     return {"agent_kind": kind, "default_agent": agent}
 
 
-def _merge_room_agents(sent: dict, room_zones: dict) -> dict:
+def _merge_room_agents(sent: dict, room_zones: dict, connected: set) -> dict:
     """room_agents after a PUT: each sent system's map replaces the stored
     one ("" drops a room = back to the default). Only a NEW or CHANGED pick
     must name a mapped or connected room — a leftover override (its zone
     deleted, its node retired) passes unchanged or cleared, so it can never
     wedge every later save."""
-    known = set(room_zones) | {k["room"] for k in registry.known_rooms()}
+    known = set(room_zones) | connected
     known.discard(registry.PROVISIONAL)
     agents = dict(config_store.read_section("room_agents") or {})
     for kind, rooms in sent.items():
@@ -387,15 +387,17 @@ async def put_mapping(payload: MappingPayload):
     zones = _all_zones()
     # Validate BEFORE writing: every mapped zone must exist (either backend).
     rz = {r.strip(): z for r, z in payload.room_zones.items()}
+    # The registry is event-loop state: read it here, not in the worker thread.
+    unproven = {r for r, z in rz.items()
+                if z == node_speaker.BUILTIN and not registry.has_speaker(r)}
+    connected = {k["room"] for k in registry.known_rooms()}
 
     def _save():
         # `builtin` is a node's own speaker — only for a node that has PROVEN
         # one. An entry config already holds is left alone: after a restart the
         # node may be offline, and the UI always PUTs the full dict.
         current = dict(config_store.read_section("room_zones") or {})
-        no_spk = sorted(r for r, z in rz.items()
-                        if z == node_speaker.BUILTIN and not registry.has_speaker(r)
-                        and current.get(r) != node_speaker.BUILTIN)
+        no_spk = sorted(r for r in unproven if current.get(r) != node_speaker.BUILTIN)
         if no_spk:
             raise HTTPException(
                 status_code=400,
@@ -417,7 +419,7 @@ async def put_mapping(payload: MappingPayload):
         sections = {"room_zones": clean}
         # room_agents merges in the same locked step as the mapping write.
         if payload.room_agents is not None:
-            sections["room_agents"] = _merge_room_agents(payload.room_agents, clean)
+            sections["room_agents"] = _merge_room_agents(payload.room_agents, clean, connected)
         config_store.write_sections(sections)  # one atomic pass
 
     await _config_update(_save)
