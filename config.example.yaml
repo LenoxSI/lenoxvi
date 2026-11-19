@@ -217,8 +217,8 @@ clip_server:
 # — or by hand here. The mic node's firmware sends its room name in the
 # WebRTC offer; when a wake fires in a mapped room, the reply clip plays
 # in that room's zone. An unmapped room's reply plays on no speaker until
-# the room is mapped; the browser client
-# still hears its replies in the browser.
+# the room is mapped; the browser client still hears its replies in the
+# browser.
 room_zones: {}
   # <room>: <zone-name>   # the Rooms tab sets these
 
