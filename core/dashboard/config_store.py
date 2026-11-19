@@ -13,6 +13,7 @@ restarts the bot on its own (that is systemd's job, deliberately kept
 out of the web path for now).
 """
 
+import asyncio
 import copy
 import io
 import os
@@ -151,6 +152,19 @@ def write_sections(sections: dict) -> dict:
             logger.info(f"config_store: rewrote '{section}' via dashboard "
                         f"({len(sections[section])} entries, multi-section write)")
         return {"before": before, "after": {k: dict(v) for k, v in sections.items()}}
+
+
+async def update(fn):
+    """Run fn() as one locked read-modify-write off the event loop; return its value."""
+    # The one entry point for dashboard saves: LOCK spans fn's reads AND
+    # writes (two saves close together can't overwrite each other), and the
+    # file work runs in a worker thread, never on the bot's event loop.
+    # Exceptions from fn propagate unchanged.
+    def run_locked():
+        with LOCK:
+            return fn()
+
+    return await asyncio.to_thread(run_locked)
 
 
 def _render(data) -> str:
