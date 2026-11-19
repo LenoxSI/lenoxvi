@@ -13,6 +13,12 @@ The two version streams are independent.
   the repo calls or documents them: the installer replaced the host-sync deploy flow, the dashboard's XMOS updater
   fetches the image, and pyserial is no longer pinned (esptool still installs it). (#76)
 
+### Fixed
+- Dashboard config saves made close together can no longer overwrite each other: every route that writes
+  config.yaml now runs its read-modify-write as one locked step off the bot's event loop, where only five
+  of the thirteen held the store's lock and nine wrote from inside an async handler. No response, error
+  code or config key changed. (#77)
+
 ## [0.9.2] — 2026-11-18 — First-run setup wizard
 
 A fresh install now opens a setup wizard in the dashboard that walks through listening, voice, intelligence,

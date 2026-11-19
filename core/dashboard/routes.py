@@ -86,6 +86,19 @@ router = APIRouter(prefix="/api/dashboard", route_class=_DashboardRoute)
 GUARD = [Depends(mutation_guard)]
 
 
+async def _config_update(fn):
+    """Every config save goes through here: config_store.update runs fn as
+    one locked read-modify-write off the event loop, and the two errors a
+    config write can raise map HERE, once, instead of in every handler.
+    An HTTPException raised inside fn passes through untouched."""
+    try:
+        return await config_store.update(fn)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ── models ───────────────────────────────────────────────────────────
 
 # Every intelligence kind, from the lane registry (a tuple subscript is the
@@ -374,41 +387,40 @@ async def put_mapping(payload: MappingPayload):
     zones = _all_zones()
     # Validate BEFORE writing: every mapped zone must exist (either backend).
     rz = {r.strip(): z for r, z in payload.room_zones.items()}
-    # `builtin` is a node's own speaker — only for a node that has PROVEN
-    # one. An entry config already holds is left alone: after a restart the
-    # node may be offline, and the UI always PUTs the full dict.
-    current = dict(config_store.read_section("room_zones") or {})
-    no_spk = sorted(r for r, z in rz.items()
-                    if z == node_speaker.BUILTIN and not registry.has_speaker(r)
-                    and current.get(r) != node_speaker.BUILTIN)
-    if no_spk:
-        raise HTTPException(
-            status_code=400,
-            detail=f"room(s) {no_spk} have no built-in speaker",
-        )
-    bad = {r: z for r, z in rz.items()
-           if z not in zones and z != node_speaker.BUILTIN}
-    if bad:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unknown zone(s) {sorted(bad.values())} for room(s) {sorted(bad)}",
-        )
-    clean = {}
-    for room, zone in payload.room_zones.items():
-        room = room.strip()
-        if not room:
-            raise HTTPException(status_code=400, detail="empty room name")
-        clean[room] = zone
-    sections = {"room_zones": clean}
-    try:
-        with config_store.LOCK:  # read-merge-write of room_agents as one step
-            if payload.room_agents is not None:
-                sections["room_agents"] = _merge_room_agents(payload.room_agents, clean)
-            config_store.write_sections(sections)  # one atomic pass
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    def _save():
+        # `builtin` is a node's own speaker — only for a node that has PROVEN
+        # one. An entry config already holds is left alone: after a restart the
+        # node may be offline, and the UI always PUTs the full dict.
+        current = dict(config_store.read_section("room_zones") or {})
+        no_spk = sorted(r for r, z in rz.items()
+                        if z == node_speaker.BUILTIN and not registry.has_speaker(r)
+                        and current.get(r) != node_speaker.BUILTIN)
+        if no_spk:
+            raise HTTPException(
+                status_code=400,
+                detail=f"room(s) {no_spk} have no built-in speaker",
+            )
+        bad = {r: z for r, z in rz.items()
+               if z not in zones and z != node_speaker.BUILTIN}
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown zone(s) {sorted(bad.values())} for room(s) {sorted(bad)}",
+            )
+        clean = {}
+        for room, zone in payload.room_zones.items():
+            room = room.strip()
+            if not room:
+                raise HTTPException(status_code=400, detail="empty room name")
+            clean[room] = zone
+        sections = {"room_zones": clean}
+        # room_agents merges in the same locked step as the mapping write.
+        if payload.room_agents is not None:
+            sections["room_agents"] = _merge_room_agents(payload.room_agents, clean)
+        config_store.write_sections(sections)  # one atomic pass
+
+    await _config_update(_save)
     # exactly one output sounds a reply — tell every speaker node
     # whether it's now the one (a full-dict PUT can map OR unmap it).
     node_speaker.sync_all(registry.capable_rooms())
@@ -442,14 +454,13 @@ def _speaker_room_or_404(room: str) -> str:
 @router.put("/node-speaker/volume", dependencies=GUARD)
 async def put_node_speaker_volume(payload: NodeSpeakerVolumePayload):
     room = _speaker_room_or_404(payload.room)
-    section = dict(config_store.read_section("node_speaker") or {})
-    volumes = {**(section.get("volumes") or {}), room: payload.volume}
-    try:
+
+    def _save():
+        section = dict(config_store.read_section("node_speaker") or {})
+        volumes = {**(section.get("volumes") or {}), room: payload.volume}
         config_store.write_section("node_speaker", {**section, "volumes": volumes})
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    await _config_update(_save)
     node_speaker.sync(room)
     return {"ok": True, "room": room, "volume": payload.volume}
 
@@ -533,28 +544,22 @@ async def set_zone_volume(name: str, payload: ZoneVolumePayload):
     # only refreshes on dashboard writes, so rebuilding the section from it
     # would silently undo any hand edit made since the last one.
     def _write():
-        with config_store.LOCK:
-            fresh = config_store.read_sections(["sonos", "wiim"])
-            backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
-            section = dict(fresh[backend] or {})
-            if name not in (section.get("zones") or {}):
-                raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-            vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
-            if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
-                # Setting a zone back to the global value = no override needed;
-                # keep the config minimal (same pattern as session modes).
-                vols.pop(name, None)
-            else:
-                vols[name] = payload.volume
-            config_store.write_section(backend, {**section, "zone_volumes": vols})
-            return backend, vols
+        fresh = config_store.read_sections(["sonos", "wiim"])
+        backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
+        section = dict(fresh[backend] or {})
+        if name not in (section.get("zones") or {}):
+            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+        vols = {k: int(v) for k, v in (section.get("zone_volumes") or {}).items()}
+        if payload.volume == int(section.get("clip_volume", DEFAULT_CLIP_VOLUME)):
+            # Setting a zone back to the global value = no override needed;
+            # keep the config minimal (same pattern as session modes).
+            vols.pop(name, None)
+        else:
+            vols[name] = payload.volume
+        config_store.write_section(backend, {**section, "zone_volumes": vols})
+        return backend, vols
 
-    try:
-        backend, vols = await asyncio.to_thread(_write)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    backend, vols = await _config_update(_write)
     # Live layer: next clip in this zone plays at the new volume.
     if backend == "wiim":
         wiim_volume_overrides(vols)
@@ -577,39 +582,33 @@ async def add_zone(payload: ZonePayload):
     # Fresh read under the store's lock, same reason as the volume route:
     # the cached cfg() would write back stale values over hand edits.
     def _write():
-        with config_store.LOCK:
-            fresh = config_store.read_sections(["sonos", "wiim"])
-            sonos, wiim = dict(fresh["sonos"] or {}), dict(fresh["wiim"] or {})
-            # Collision check across BOTH backends: one merged namespace (the
-            # mapping routes and the room_zones config key see one zone list).
-            if name in (sonos.get("zones") or {}) or name in (wiim.get("zones") or {}):
-                raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
-            if payload.backend == "wiim":
-                # WiiM zones need no player_uid (HTTP API is UID-less); the
-                # payload validator already dropped any sent value. Adding a zone to a
-                # backend IMPLIES enabling it: a first WiiM zone once went
-                # silent because the wiim section was written without
-                # enabled: true and WiiMOutput constructed disabled (replies
-                # dropped before ever reaching the network).
-                zones = dict(wiim.get("zones") or {})
-                zones[name] = {"ip": payload.ip.strip()}
-                merged = {**wiim, "enabled": True, "zones": zones}
-                if not merged.get("default_zone"):
-                    merged["default_zone"] = name
-                config_store.write_section("wiim", merged)
-            else:
-                zones = dict(sonos.get("zones") or {})
-                zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
-                # Adding a zone turns its backend on (same as WiiM above).
-                config_store.write_section("sonos", {**sonos, "enabled": True, "zones": zones})
-            return zones
+        fresh = config_store.read_sections(["sonos", "wiim"])
+        sonos, wiim = dict(fresh["sonos"] or {}), dict(fresh["wiim"] or {})
+        # Collision check across BOTH backends: one merged namespace (the
+        # mapping routes and the room_zones config key see one zone list).
+        if name in (sonos.get("zones") or {}) or name in (wiim.get("zones") or {}):
+            raise HTTPException(status_code=400, detail=f"zone '{name}' already exists")
+        if payload.backend == "wiim":
+            # WiiM zones need no player_uid (HTTP API is UID-less); the
+            # payload validator already dropped any sent value. Adding a zone to a
+            # backend IMPLIES enabling it: a first WiiM zone once went
+            # silent because the wiim section was written without
+            # enabled: true and WiiMOutput constructed disabled (replies
+            # dropped before ever reaching the network).
+            zones = dict(wiim.get("zones") or {})
+            zones[name] = {"ip": payload.ip.strip()}
+            merged = {**wiim, "enabled": True, "zones": zones}
+            if not merged.get("default_zone"):
+                merged["default_zone"] = name
+            config_store.write_section("wiim", merged)
+        else:
+            zones = dict(sonos.get("zones") or {})
+            zones[name] = {"ip": payload.ip.strip(), "player_uid": payload.player_uid.strip()}
+            # Adding a zone turns its backend on (same as WiiM above).
+            config_store.write_section("sonos", {**sonos, "enabled": True, "zones": zones})
+        return zones
 
-    try:
-        zones = await asyncio.to_thread(_write)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    zones = await _config_update(_write)
     return {"ok": True, "zones": zones, "backend": payload.backend}
 
 
@@ -619,47 +618,41 @@ async def delete_zone(name: str):
     # the cached cfg() would write back stale values over hand edits, and
     # the default-zone handoff below must see the default as it is now.
     def _write():
-        with config_store.LOCK:
-            fresh = config_store.read_sections(["sonos", "wiim", "room_zones"])
-            backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
-            sec = dict(fresh[backend] or {})
-            zones = dict(sec.get("zones") or {})
-            if name not in zones:
-                raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
-            del zones[name]
-            sec["zones"] = zones
-            # ONE atomic multi-section write — the old back-to-back
-            # write_section pair was non-atomic (crash between them left a
-            # deleted zone with dangling room mappings) and churned two
-            # backups. Sections dict preserves every OTHER key untouched.
-            sections = {backend: sec}
-            # The backend's default zone must not point at the deleted zone: every
-            # unmapped room's reply would go nowhere. Hand it to a remaining zone
-            # (add-zone sets the first one as default), or clear it.
-            new_default = sec.get("default_zone")
-            if new_default == name:
-                new_default = next(iter(zones), None)
-                if new_default:
-                    sec["default_zone"] = new_default
-                else:
-                    sec.pop("default_zone", None)
-            # rooms mapped to a deleted zone become dangling — drop them in the
-            # SAME write (they're a separate section, same atomic pass)
-            mapping = dict(fresh["room_zones"] or {})
-            dangling = [r for r, z in mapping.items() if z == name]
-            if dangling:
-                for r in dangling:
-                    del mapping[r]
-                sections["room_zones"] = mapping
-            config_store.write_sections(sections)
-            return backend, dangling
+        fresh = config_store.read_sections(["sonos", "wiim", "room_zones"])
+        backend = "wiim" if name in ((fresh["wiim"] or {}).get("zones") or {}) else "sonos"
+        sec = dict(fresh[backend] or {})
+        zones = dict(sec.get("zones") or {})
+        if name not in zones:
+            raise HTTPException(status_code=404, detail=f"unknown zone '{name}'")
+        del zones[name]
+        sec["zones"] = zones
+        # ONE atomic multi-section write — the old back-to-back
+        # write_section pair was non-atomic (crash between them left a
+        # deleted zone with dangling room mappings) and churned two
+        # backups. Sections dict preserves every OTHER key untouched.
+        sections = {backend: sec}
+        # The backend's default zone must not point at the deleted zone: every
+        # unmapped room's reply would go nowhere. Hand it to a remaining zone
+        # (add-zone sets the first one as default), or clear it.
+        new_default = sec.get("default_zone")
+        if new_default == name:
+            new_default = next(iter(zones), None)
+            if new_default:
+                sec["default_zone"] = new_default
+            else:
+                sec.pop("default_zone", None)
+        # rooms mapped to a deleted zone become dangling — drop them in the
+        # SAME write (they're a separate section, same atomic pass)
+        mapping = dict(fresh["room_zones"] or {})
+        dangling = [r for r, z in mapping.items() if z == name]
+        if dangling:
+            for r in dangling:
+                del mapping[r]
+            sections["room_zones"] = mapping
+        config_store.write_sections(sections)
+        return backend, dangling
 
-    try:
-        backend, dangling = await asyncio.to_thread(_write)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    backend, dangling = await _config_update(_write)
     # A speaker room mapped to the deleted zone is back on its own speaker
     # (the default) — tell its node, or it stays silent.
     node_speaker.sync_all(registry.capable_rooms())
@@ -1050,17 +1043,16 @@ async def set_session_mode(room: str, payload: SessionModePayload):
     """
     if payload.mode not in ("fresh", "sticky"):
         raise HTTPException(status_code=400, detail="mode must be 'fresh' or 'sticky'")
-    modes = dict(config_store.read_section("session_modes") or {})
-    if payload.mode == "fresh":
-        modes.pop(room, None)  # fresh is the default — config stays minimal
-    else:
-        modes[room] = "sticky"
-    try:
+
+    def _save():
+        modes = dict(config_store.read_section("session_modes") or {})
+        if payload.mode == "fresh":
+            modes.pop(room, None)  # fresh is the default — config stays minimal
+        else:
+            modes[room] = "sticky"
         config_store.write_section("session_modes", modes)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    await _config_update(_save)
     logger.info(f"dashboard: session-mode '{room}' -> {payload.mode}")
     return {"ok": True, "room": room, "mode": payload.mode}
 
@@ -1295,44 +1287,43 @@ async def get_tts():
 async def put_tts(payload: TTSPayload):
     """Write provider + knobs to config.yaml (tts section). Applies on the
     next bot restart — same contract as every config edit."""
-    current = dict(config_store.read_section("tts") or {})
-    _validate_tts_payload(payload)
-    current["provider"] = payload.provider
-    if payload.provider == "elevenlabs":
-        current["voice_id"] = payload.voice_id
-        current["model"] = payload.model
-        # Flash-v2.5 knobs ride along with None = "leave as-is" — same
-        # partial-update law as the Flux pair.
-        if payload.elevenlabs_speed is not None:
-            current["elevenlabs_speed"] = payload.elevenlabs_speed
-        if payload.elevenlabs_stability is not None:
-            current["elevenlabs_stability"] = payload.elevenlabs_stability
-        if payload.elevenlabs_text_normalization is not None:
-            current["elevenlabs_text_normalization"] = payload.elevenlabs_text_normalization
-    elif payload.provider == "deepgram":
-        current["deepgram_voice"] = payload.deepgram_voice
-    elif payload.provider == "deepgram-flux":
-        current["deepgram_flux_voice"] = payload.deepgram_flux_voice
-        # Flux knobs ride along — None means "leave as-is" (partial update
-        # semantics: the panel always sends current values, but a bare
-        # API PUT of just provider+voice must not wipe tuned knobs).
-        if payload.deepgram_flux_speed is not None:
-            current["deepgram_flux_speed"] = payload.deepgram_flux_speed
-        if payload.deepgram_flux_expressivity is not None:
-            current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
-    # Kokoro's voice and speed serve every tier: the Embedded voice, and the
-    # standby behind LocalAI and Cloud (the card's "Fallback voice"). Saved
-    # with any provider (Kokoro itself requires the voice); None = leave as-is.
-    if payload.kokoro_voice is not None:
-        current["kokoro_voice"] = payload.kokoro_voice
-    if payload.kokoro_speed is not None:
-        current["kokoro_speed"] = payload.kokoro_speed
-    try:
+
+    def _save():
+        current = dict(config_store.read_section("tts") or {})
+        _validate_tts_payload(payload)
+        current["provider"] = payload.provider
+        if payload.provider == "elevenlabs":
+            current["voice_id"] = payload.voice_id
+            current["model"] = payload.model
+            # Flash-v2.5 knobs ride along with None = "leave as-is" — same
+            # partial-update law as the Flux pair.
+            if payload.elevenlabs_speed is not None:
+                current["elevenlabs_speed"] = payload.elevenlabs_speed
+            if payload.elevenlabs_stability is not None:
+                current["elevenlabs_stability"] = payload.elevenlabs_stability
+            if payload.elevenlabs_text_normalization is not None:
+                current["elevenlabs_text_normalization"] = payload.elevenlabs_text_normalization
+        elif payload.provider == "deepgram":
+            current["deepgram_voice"] = payload.deepgram_voice
+        elif payload.provider == "deepgram-flux":
+            current["deepgram_flux_voice"] = payload.deepgram_flux_voice
+            # Flux knobs ride along — None means "leave as-is" (partial update
+            # semantics: the panel always sends current values, but a bare
+            # API PUT of just provider+voice must not wipe tuned knobs).
+            if payload.deepgram_flux_speed is not None:
+                current["deepgram_flux_speed"] = payload.deepgram_flux_speed
+            if payload.deepgram_flux_expressivity is not None:
+                current["deepgram_flux_expressivity"] = payload.deepgram_flux_expressivity
+        # Kokoro's voice and speed serve every tier: the Embedded voice, and the
+        # standby behind LocalAI and Cloud (the card's "Fallback voice"). Saved
+        # with any provider (Kokoro itself requires the voice); None = leave as-is.
+        if payload.kokoro_voice is not None:
+            current["kokoro_voice"] = payload.kokoro_voice
+        if payload.kokoro_speed is not None:
+            current["kokoro_speed"] = payload.kokoro_speed
         config_store.write_section("tts", current)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    await _config_update(_save)
     logger.info(f"dashboard: tts config saved (provider={payload.provider}) — applies on next restart")
     return {"ok": True, "provider": payload.provider}
 
@@ -1715,21 +1706,20 @@ async def get_localai():
 async def put_localai(payload: LocalAIPayload):
     """Save the URL / model picks (None = leave as-is, "" = clear).
     Applies on the next bot restart, like every provider setting."""
-    current = dict(config_store.read_section("localai") or {})
-    for field in ("url", "model_stt", "model_tts", "voice", "speed"):
-        value = getattr(payload, field)
-        if value is None:
-            continue
-        if value == "":
-            current.pop(field, None)
-        else:
-            current[field] = value
-    try:
+
+    def _save():
+        current = dict(config_store.read_section("localai") or {})
+        for field in ("url", "model_stt", "model_tts", "voice", "speed"):
+            value = getattr(payload, field)
+            if value is None:
+                continue
+            if value == "":
+                current.pop(field, None)
+            else:
+                current[field] = value
         config_store.write_section("localai", current)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    await _config_update(_save)
     logger.info("dashboard: localai settings saved — applies on next restart")
     s = _localai_saved()
     # The write response keeps its documented shape — the voice registry is
@@ -1921,59 +1911,59 @@ async def put_intelligence(payload: IntelligencePayload):
         optional = " / ".join(k for k, ln in intelligence.LANES.items() if not ln.agent_required)
         raise HTTPException(status_code=422,
                             detail=f"{payload.kind} needs an agent; only {optional} can run without one")
-    current = dict(config_store.read_section("intelligence") or {})
-    saved_kind = current.get("kind") or intelligence.DEFAULT_KIND
-    urls = dict(current.get("urls") or {})
-    if (lane.url_first_setup and payload.agent is None and payload.url is not None
-            and not lane.agent_for(current)):
-        # New setup of a URL-first lane (OpenClaw): its agents can't be
-        # listed until the URL is saved (discovery only sends the key to a
-        # saved URL), and the lane
-        # can't run without an agent. Save just the URL and leave the live
-        # lane as it is; the next Save, with an agent picked, switches it.
-        urls[payload.kind] = payload.url
-        current["urls"] = urls
-        if saved_kind == payload.kind:
-            current["url"] = payload.url
-        try:
+
+    def _save():
+        # Returns None after a full save, or the SAVED kind when a URL-only
+        # first setup wrote JUST the URL — that response echoes the saved
+        # kind with url_only: True and leaves the live lane alone.
+        current = dict(config_store.read_section("intelligence") or {})
+        saved_kind = current.get("kind") or intelligence.DEFAULT_KIND
+        urls = dict(current.get("urls") or {})
+        if (lane.url_first_setup and payload.agent is None and payload.url is not None
+                and not lane.agent_for(current)):
+            # New setup of a URL-first lane (OpenClaw): its agents can't be
+            # listed until the URL is saved (discovery only sends the key to a
+            # saved URL), and the lane
+            # can't run without an agent. Save just the URL and leave the live
+            # lane as it is; the next Save, with an agent picked, switches it.
+            urls[payload.kind] = payload.url
+            current["urls"] = urls
+            if saved_kind == payload.kind:
+                current["url"] = payload.url
             config_store.write_section("intelligence", current)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            return saved_kind
+        current["kind"] = payload.kind
+        if payload.url is not None:
+            current["url"] = payload.url
+            # File the URL under the kind being saved (per-kind recall map).
+            urls[payload.kind] = payload.url
+            current["urls"] = urls
+        elif urls.get(payload.kind):
+            # Bare kind flip: restore THAT kind's remembered URL.
+            current["url"] = urls[payload.kind]
+        elif payload.kind != saved_kind:
+            # No URL for the new kind. Keeping the old kind's URL would point
+            # the new lane (and its key) at the wrong intelligence, and clearing
+            # it would fall back to LVI_HERMES_URL — refuse instead.
+            raise HTTPException(status_code=422, detail=f"set a URL for {payload.kind} first")
+        if payload.agent is not None:
+            agents = dict(current.get("agents") or {})
+            if payload.agent:
+                agents[payload.kind] = payload.agent
+            else:
+                agents.pop(payload.kind, None)  # nanobot: back to its own model
+            current["agents"] = agents
+            if lane.legacy_agent_key:
+                current["agent"] = payload.agent  # legacy key, read by older builds
+        if lane.agent_required and lane.default_agent is None and not lane.agent_for(current):
+            raise HTTPException(status_code=422, detail=f"{payload.kind} needs an agent id (intelligence.agent)")
+        config_store.write_section("intelligence", current)
+        return None
+
+    saved_kind = await _config_update(_save)
+    if saved_kind is not None:
         logger.info(f"dashboard: intelligence {payload.kind} URL saved (no agent yet; live lane unchanged)")
         return {"ok": True, "kind": saved_kind, "url_only": True}
-    current["kind"] = payload.kind
-    if payload.url is not None:
-        current["url"] = payload.url
-        # File the URL under the kind being saved (per-kind recall map).
-        urls[payload.kind] = payload.url
-        current["urls"] = urls
-    elif urls.get(payload.kind):
-        # Bare kind flip: restore THAT kind's remembered URL.
-        current["url"] = urls[payload.kind]
-    elif payload.kind != saved_kind:
-        # No URL for the new kind. Keeping the old kind's URL would point
-        # the new lane (and its key) at the wrong intelligence, and clearing
-        # it would fall back to LVI_HERMES_URL — refuse instead.
-        raise HTTPException(status_code=422, detail=f"set a URL for {payload.kind} first")
-    if payload.agent is not None:
-        agents = dict(current.get("agents") or {})
-        if payload.agent:
-            agents[payload.kind] = payload.agent
-        else:
-            agents.pop(payload.kind, None)  # nanobot: back to its own model
-        current["agents"] = agents
-        if lane.legacy_agent_key:
-            current["agent"] = payload.agent  # legacy key, read by older builds
-    if lane.agent_required and lane.default_agent is None and not lane.agent_for(current):
-        raise HTTPException(status_code=422, detail=f"{payload.kind} needs an agent id (intelligence.agent)")
-    try:
-        config_store.write_section("intelligence", current)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"dashboard: intelligence config saved (kind={payload.kind}) — applies on next restart")
     return {"ok": True, "kind": payload.kind}
 
@@ -2421,12 +2411,8 @@ async def put_stt(payload: SttPayload):
         # A restart only if the bot isn't already running what was picked.
         restart_needed = restart_needed or payload.provider != running_provider
     if payload.language is not None or provider is not None:
-        try:
-            _stt_write(language=payload.language, provider=provider)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        await _config_update(
+            lambda: _stt_write(language=payload.language, provider=provider))
     cur = _stt_current()
     key_needed = stt_catalog.is_cloud(cur["provider"]) and not _stt_key_set(cur["provider"])
     return {"ok": True, "restart_needed": restart_needed, "key_needed": key_needed, "current": cur}
@@ -2462,17 +2448,17 @@ async def put_voice_tuning(payload: VoiceTuningPayload):
             by_section.setdefault(section, {})[key] = val
     if not by_section:
         raise HTTPException(status_code=422, detail="no knobs provided")
-    written: dict[str, float] = {}
-    for section, updates in by_section.items():
-        current = dict(config_store.read_section(section) or {})
-        current.update(updates)
-        try:
+
+    def _save():
+        written: dict[str, float] = {}
+        for section, updates in by_section.items():
+            current = dict(config_store.read_section(section) or {})
+            current.update(updates)
             config_store.write_section(section, current)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        written.update({f"{section}.{k}": v for k, v in updates.items()})
+            written.update({f"{section}.{k}": v for k, v in updates.items()})
+        return written
+
+    written = await _config_update(_save)
     logger.info(f"dashboard: voice-tuning saved {written} — applies on next restart")
     return {"ok": True}
 
@@ -2678,14 +2664,13 @@ async def oww_select_model(payload: OWWModelPayload):
             path = path.relative_to(state_root())
         except ValueError:
             pass
-    current = dict(config_store.read_section("wake") or {})
-    current["model"] = str(path)
-    try:
+
+    def _save():
+        current = dict(config_store.read_section("wake") or {})
+        current["model"] = str(path)
         config_store.write_section("wake", current)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    await _config_update(_save)
     logger.info(f"dashboard: wake model set to '{path}' — applies on next restart")
     return {"ok": True, "model": str(path), "note": "applies on next bot restart"}
 
@@ -2712,21 +2697,22 @@ async def put_wake(payload: WakePayload):
     """Save the name. Applies LIVE — the drop-filter and log name
     read config per call (the write refreshes the cache). Edits the wake
     section in place (comments survive)."""
-    wake = config_store.read_section("wake") or {}
-    touched = {}
-    if payload.name is not None:
-        if payload.name.strip():
-            wake["name"] = " ".join(payload.name.split())
-        else:
-            wake.pop("name", None)
-        touched["wake"] = wake
-    if touched:
-        try:
+
+    def _save():
+        wake = config_store.read_section("wake") or {}
+        touched = {}
+        if payload.name is not None:
+            if payload.name.strip():
+                wake["name"] = " ".join(payload.name.split())
+            else:
+                wake.pop("name", None)
+            touched["wake"] = wake
+        if touched:
             config_store.write_sections(touched)
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        return touched
+
+    touched = await _config_update(_save)
+    if touched:
         logger.info(f"dashboard: wake {'/'.join(sorted(touched))} saved — live, no restart")
     return {"ok": True, "name": wake_name.name()}
 
