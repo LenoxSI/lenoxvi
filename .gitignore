@@ -30,8 +30,8 @@ config.backup.yaml
 # are serve-on-only garbage, firmware/<track>/ (array, flex, waveshare) are the
 # OTA tracks (dashboard upload / deploy_firmware.sh --track <track>) — built
 # images, never committed
-# firmware/xvf3800 is fetched at bring-up (fetch_xmos_fw.sh) — the upstream
-# image ships no license, so it must not be committed
+# firmware/xvf3800 is fetched at bring-up — the upstream XMOS image ships
+# no license, so it must not be committed
 certs/
 clips/
 firmware/array/

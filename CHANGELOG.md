@@ -8,6 +8,9 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+### Changed
+- Scripts: `scripts/sync_host.sh`, `scripts/serial_watch.py` and `scripts/fetch_xmos_fw.sh` are removed — nothing in the repo calls or documents them: the installer replaced the host-sync deploy flow, the dashboard's XMOS updater fetches the image, and pyserial is no longer pinned (esptool still installs it). (#76)
+
 ## [0.9.2] — 2026-11-18 — First-run setup wizard
 
 A fresh install now opens a setup wizard in the dashboard that walks through listening, voice, intelligence,

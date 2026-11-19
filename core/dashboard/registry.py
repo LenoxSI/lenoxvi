@@ -83,11 +83,9 @@ def mark_boot():
     global _boot_time
     _boot_time = time.time()
     # Resolve the running install's version ONCE at boot: `git describe`
-    # from the repo the bot runs from (the host checkout is the install
-    # — sync_host.sh rsyncs the repo to ~/projects/lenoxvi on the
-    # appliance). Falls back to "unknown" if git is missing or this is
-    # not a checkout (stranger clones still get a dashboard, per the
-    # public-flip rule). Not a static string on purpose: the statusbar shows the ACTUAL installed version,
+    # from the repo the bot runs from. Falls back to "unknown" if git is
+    # missing or this is not a checkout (stranger clones still get a
+    # dashboard, per the public-flip rule). Not a static string on purpose: the statusbar shows the ACTUAL installed version,
     # including -N-g<hash> drift past a tag.
     global _version
     try:
