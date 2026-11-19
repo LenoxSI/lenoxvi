@@ -2,7 +2,7 @@
 
 Pure module + registry + output-stage + node_command wiring. Route pins
 live in test_dashboard.py (built-in speaker block).
-Run: cd tests && ~/venvs/lenoxvi/bin/python node_speaker_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python node_speaker_test.py <path-to-core>
 """
 import asyncio
 import json

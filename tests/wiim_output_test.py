@@ -6,7 +6,7 @@
 - the happy path arms the gate for the clip before the play command
 - a failed music-volume restore is logged with the zone, on a bot stop too
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python wiim_output_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python wiim_output_test.py <path-to-core>
 """
 import asyncio
 import os

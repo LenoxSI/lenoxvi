@@ -5,7 +5,7 @@ session at once. A lane/agent switch saved with its NEW key must keep the
 boot settings until the restart (keys_catalog.session_tts_provider's rule),
 while a key that is simply missing still fails loudly.
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python session_intelligence_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python session_intelligence_test.py <path-to-core>
 """
 import os
 import sys

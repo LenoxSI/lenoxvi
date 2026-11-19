@@ -4,7 +4,7 @@
   must not leave the reader's PRE-write copy cached (review B #1)
 - WiiMOutput collects reply audio in a bytearray, not a list of ints (A #6)
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python config_cache_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python config_cache_test.py <path-to-core>
 """
 import os
 import sys

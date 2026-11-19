@@ -2,7 +2,7 @@
 """Sign firmware images with this bot's key (core/firmware_signing.py).
 
 Run on the bot host, from the repo root, with the bot's Python:
-    ~/venvs/lenoxvi/bin/python scripts/sign_firmware.py firmware/array/array_esp32.bin
+    .venv/bin/python scripts/sign_firmware.py firmware/array/array_esp32.bin
 deploy_firmware.sh runs it after copying a build in. Creates the key on first
 use (secrets/firmware-signing-key.pem, or $LVI_STATE_DIR/secrets/). Prints the
 key fingerprint; never the key.

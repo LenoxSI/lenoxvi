@@ -12,7 +12,7 @@
   superseded by a new question while its call was running speaks that
   call's reply late, after the current one
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python turn_fixes_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python turn_fixes_test.py <path-to-core>
 """
 import asyncio
 import os

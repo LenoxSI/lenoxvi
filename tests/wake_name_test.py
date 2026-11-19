@@ -1,7 +1,7 @@
 """wake_name module pins (host venv).
 
 Patches wake_name._wake instead of touching config files.
-Run: cd tests && ~/venvs/lenoxvi/bin/python wake_name_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python wake_name_test.py <path-to-core>
 """
 import os
 import sys

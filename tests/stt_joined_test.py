@@ -5,7 +5,7 @@ The transcribe backend is faked through stt_local's hooks (the shared
 model and a model_override stand-in): no model loads, nothing downloads,
 no network.
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python stt_joined_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python stt_joined_test.py <path-to-core>
 """
 import asyncio
 import io

@@ -1,7 +1,7 @@
 """speech tiers — the catalog contract: three tiers, each provider's tier, resolve rules (host venv).
 
 Pure data: no model loads, no network.
-Run: cd tests && ~/venvs/lenoxvi/bin/python speech_tiers_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python speech_tiers_test.py <path-to-core>
 """
 import subprocess
 import sys

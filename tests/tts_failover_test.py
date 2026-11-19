@@ -7,7 +7,7 @@ audio is pinned by localai_golden_test). The WAN-dead boot checks drive a
 REAL ElevenLabs service pointed at a refused port, inside a real switcher,
 inside a real pipeline.
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python tts_failover_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python tts_failover_test.py <path-to-core>
 """
 import asyncio
 import importlib.util

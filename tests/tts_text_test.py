@@ -1,6 +1,6 @@
 """ElevenLabs text-normalization setting: config value -> API value.
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python tts_text_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python tts_text_test.py <path-to-core>
 """
 import os
 import sys

@@ -1,7 +1,7 @@
 """Golden of the LOCAL speech path — the LocalAI work must not move it.
 
 Run on the host (pipecat + faster-whisper + kokoro-onnx installed):
-  cd tests && ~/venvs/lenoxvi/bin/python localai_golden_test.py <path-to-core> [record]
+  cd tests && ../.venv/bin/python localai_golden_test.py <path-to-core> [record]
 
 `record` writes fixtures/golden/golden_local.json from the CURRENT tree (do
 it from main); without it the test compares. What it pins:
@@ -144,7 +144,7 @@ async def main():
         if not isinstance(want, dict) or "samples" not in want:
             check(f"golden: kokoro stats within tolerance [{s[:28]}]", False,
                   "the golden entry predates the stats pin (sha256-only) — re-record: "
-                  "cd tests && ~/venvs/lenoxvi/bin/python localai_golden_test.py ../core record")
+                  "cd tests && ../.venv/bin/python localai_golden_test.py ../core record")
             continue
         bad = kokoro_stat_failures(got, want)
         check(f"golden: kokoro stats within tolerance [{s[:28]}]", not bad, "; ".join(bad))

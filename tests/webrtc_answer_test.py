@@ -8,7 +8,7 @@ also copies each SDP line into a 256-byte buffer, so no line may reach 256.
 
 No network peer needed: aiortc answers a libpeer-shaped offer in-process,
 then the runner's --esp32 munging runs on it, same as /api/offer.
-Run: cd tests && ~/venvs/lenoxvi/bin/python webrtc_answer_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python webrtc_answer_test.py <path-to-core>
 """
 import asyncio
 import os

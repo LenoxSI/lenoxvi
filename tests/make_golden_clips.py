@@ -1,7 +1,7 @@
 """One-off: make the three golden speech clips with Kokoro (CPU).
 
 Run on the host from the repo root:
-  ~/venvs/lenoxvi/bin/python tests/make_golden_clips.py core
+  .venv/bin/python tests/make_golden_clips.py core
 Writes tests/fixtures/golden/clip{1,2,3}.wav — 16 kHz, mono, 16-bit.
 Kept in the repo so the clips can be remade the same way; the WAVs
 themselves are the fixture (re-running is not required).

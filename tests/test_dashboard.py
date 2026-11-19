@@ -15,7 +15,7 @@ Exercises:
   7. mapping PUT validation (unknown zone rejected)
   8. REAL Sonos test clip on the REAL configured zone (if reachable)
 
-Usage (host): ~/venvs/lenoxvi/bin/python test_dashboard.py <repo-core-path>
+Usage: cd tests && ../.venv/bin/python test_dashboard.py <repo-core-path>
 """
 
 import asyncio

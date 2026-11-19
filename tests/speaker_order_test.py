@@ -5,7 +5,7 @@
 - Sonos setup never fails a session over the clip server (Sonos off, or a
   bad host_ip)
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python speaker_order_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python speaker_order_test.py <path-to-core>
 """
 import asyncio
 import os

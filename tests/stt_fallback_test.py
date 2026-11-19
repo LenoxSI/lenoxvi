@@ -1,6 +1,6 @@
 """Cloud STT provider + Whisper fallback pins (host venv; pipecat + deepgram-sdk).
 
-Run: cd tests && ~/venvs/lenoxvi/bin/python stt_fallback_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python stt_fallback_test.py <path-to-core>
 The failover proof uses a REAL DeepgramSTTService inside a REAL PipelineTask
 (pointed at a dead local port, and at Deepgram with a junk key) — the TTS
 fallback taught that reading the code isn't proof. ElevenLabs Scribe gets the

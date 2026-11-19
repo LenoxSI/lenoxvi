@@ -1,7 +1,7 @@
 """stt — STT card pins: catalog + stt_local status / latency / live language (host venv).
 
 Whisper is faked through stt_local's hooks: no model loads, nothing downloads.
-Run: cd tests && ~/venvs/lenoxvi/bin/python stt_card_test.py <path-to-core>
+Run: cd tests && ../.venv/bin/python stt_card_test.py <path-to-core>
 """
 import asyncio
 import io
