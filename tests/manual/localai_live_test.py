@@ -49,7 +49,7 @@ for c in ("clip1", "clip2", "clip3"):
     check(f"live: {c} transcribed", bool(text))
 tts_model = d["tts"][0]["id"] if d["tts"] else ""
 t0 = time.monotonic()
-pcm, rate = la.speech("The kitchen lights are now off.", tts_model, "af_heart", 1.0, url=URL)
+pcm, rate = la.speech("The kitchen lights are now off.", tts_model, "af_heart", url=URL)
 print(f"  speech: {(time.monotonic() - t0) * 1000:.0f} ms, {len(pcm) // 2 / rate:.2f} s of audio at {rate} Hz")
 check("live: speech returns mono 16-bit audio with a real rate", len(pcm) > 1000 and 8000 <= rate <= 48000, str(rate))
 try:

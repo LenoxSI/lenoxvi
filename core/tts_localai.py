@@ -67,7 +67,7 @@ def _service_class(mixin: type) -> type:
 
         async def _localai_frame(self, part: str, context_id: str):
             pcm, rate = await asyncio.to_thread(localai.speech, part, self._la_model,
-                                                self._la_voice, self._la_speed, url=self._la_url,
+                                                self._la_voice, url=self._la_url,
                                                 timeout=self._la_timeout)
             audio = await self._la_resampler.resample(pcm, rate, self.sample_rate)
             return TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1,

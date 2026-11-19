@@ -125,7 +125,7 @@ os.environ.pop(la.KEY_VAR, None)
 
 # ── speech ───────────────────────────────────────────────────────────
 BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", wav_bytes(22050), 0)
-pcm, rate = la.speech("Hello there.", "kokoro", "af_heart", 1.0, url=URL, key=KEY)
+pcm, rate = la.speech("Hello there.", "kokoro", "af_heart", url=URL, key=KEY)
 _, path, hdr, body = SEEN[-1]
 check("localai: speech asks for wav and sends model, input, voice — never speed (no backend takes it)",
       path == "/v1/audio/speech" and hdr.get("content-type") == "application/json"
@@ -138,7 +138,7 @@ for label, payload in [("an html page", b"<html>oops</html>"), ("a stereo wav", 
                        ("an empty wav", wav_bytes(frames=0))]:
     BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", payload, 0)
     check(f"localai: speech refuses {label} (error, never noise)",
-          err(lambda: la.speech("x", "kokoro", "af_heart", 1.0, url=URL, key=KEY)) is not None)
+          err(lambda: la.speech("x", "kokoro", "af_heart", url=URL, key=KEY)) is not None)
 
 # ── errors ───────────────────────────────────────────────────────────
 BEHAVIOUR["/v1/audio/transcriptions"] = (401, "application/json",
@@ -161,7 +161,7 @@ dt = time.monotonic() - t0
 check("localai: hung server -> gives up near the 6 s STT budget", e is not None and 5.5 <= dt <= 7.0, f"{dt:.2f}s")
 BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", wav_bytes(), 6.5)
 t0 = time.monotonic()
-e = err(lambda: la.speech("x", "kokoro", "af_heart", 1.0, url=URL, key=KEY))
+e = err(lambda: la.speech("x", "kokoro", "af_heart", url=URL, key=KEY))
 dt = time.monotonic() - t0
 check("localai: hung server -> speech gives up near its 5 s budget", e is not None and 4.5 <= dt <= 6.0, f"{dt:.2f}s")
 
@@ -234,7 +234,7 @@ for _st, _ct, _body in ((500, "application/json", _VOICE_ERR), (500, "text/plain
                         (502, "application/json", _VOICE_ERR), (503, "application/json", _VOICE_ERR),
                         (504, "application/json", _VOICE_ERR)):
     BEHAVIOUR["/v1/audio/speech"] = (_st, _ct, _body, 0)
-    _e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", 1.0, url=URL, key=KEY))
+    _e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", url=URL, key=KEY))
     _cls[(_st, _body[:12])] = None if _e is None else _e.box_down
 check("localai: a 500 that names what failed (bad voice) is about this request; the box stays up",
       _cls[(500, _VOICE_ERR[:12])] is False, str(_cls))
@@ -243,7 +243,7 @@ check("localai: a bare 500 (no JSON, blank or missing message) and 502/503/504 a
       and _cls[(502, _VOICE_ERR[:12])] is True and _cls[(503, _VOICE_ERR[:12])] is True
       and _cls[(504, _VOICE_ERR[:12])] is True, str(_cls))
 BEHAVIOUR["/v1/audio/speech"] = (500, "application/json", _VOICE_ERR, 0)
-_e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", 1.0, url=URL, key=KEY))
+_e = err(lambda: la.speech("x", "pocket-tts", "nosuchvoice", url=URL, key=KEY))
 check("localai: the bad-voice reason carries the server's words for the log",
       _e is not None and "Voice not found" in _e.reason and _e.status == 500, str(_e and _e.reason))
 BEHAVIOUR["/v1/audio/transcriptions"] = (200, "application/json", b'{"segments":[]}', 0)
@@ -271,7 +271,7 @@ for label, payload in [("plain", float_wav([0.0, 0.5, -0.5, 1.5, -1.5, float("na
                        ("extensible", float_wav([0.0, 0.5, -0.5, 1.5, -1.5, float("nan")], extensible=True))]:
     BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", payload, 0)
     try:
-        pcm, rate = la.speech("x", "pocket-tts", "alba", 1.0, url=URL, key=KEY)
+        pcm, rate = la.speech("x", "pocket-tts", "alba", url=URL, key=KEY)
         vals = list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
     except la.LocalAIError as e:
         vals, rate = str(e), None
@@ -279,10 +279,10 @@ for label, payload in [("plain", float_wav([0.0, 0.5, -0.5, 1.5, -1.5, float("na
           vals == [0, 16383, -16383, 32767, -32767, 0] and rate == 24000, str(vals))
 BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", float_wav([0.1, 0.2, 0.3, 0.4], ch=2), 0)
 check("localai: a stereo float WAV is still refused",
-      err(lambda: la.speech("x", "pocket-tts", "alba", 1.0, url=URL, key=KEY)) is not None)
+      err(lambda: la.speech("x", "pocket-tts", "alba", url=URL, key=KEY)) is not None)
 
 check("localai: speech refuses a WAV with an odd sample rate",
-      err(lambda: la.speech("x", "kokoro", "af_heart", 1.0, url=URL, key=KEY)) is not None)
+      err(lambda: la.speech("x", "kokoro", "af_heart", url=URL, key=KEY)) is not None)
 
 # ── discovery ────────────────────────────────────────────────────────
 BEHAVIOUR["/v1/models"] = (200, "application/json", json.dumps({"object": "list", "data": [
@@ -662,7 +662,7 @@ if HAVE_PIPECAT:
     check("tts localai: any other exception -> Kokoro speaks, never silence",
           any(isinstance(f, TTSAudioRawFrame) for f in frames) and not any(isinstance(f, ErrorFrame) for f in frames))
     _urls = []
-    la.speech = lambda text, model, voice, speed, url=None, key=None, timeout=None: (
+    la.speech = lambda text, model, voice, url=None, key=None, timeout=None: (
         _urls.append((url, timeout)), (LA_WAV[44:], 24000))[1]
     s1 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0, standby_voice="af_heart",
                                   url="http://192.0.2.9:8080", timeout=12.0)

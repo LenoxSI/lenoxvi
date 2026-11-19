@@ -223,13 +223,11 @@ def transcribe(wav: bytes, model: str, language: str | None, *, url=None, key=No
     return str(text or "").strip()
 
 
-def speech(text: str, model: str, voice: str, speed: float, *, url=None, key=None,
+def speech(text: str, model: str, voice: str, *, url=None, key=None,
            timeout=None) -> tuple[bytes, int]:
     """Text -> (16-bit mono PCM, sample rate). Mono 16-bit PCM passes through;
     mono 32-bit float (what LocalAI's Pocket backend sends) is converted.
-    Anything else is an error, never noise. `speed` stays in the signature
-    for the service plumbing but never rides the body: no LocalAI backend
-    takes it as a request knob, and chatterbox 500s on it."""
+    Anything else is an error, never noise."""
     body = json.dumps({"model": model, "input": text, "voice": voice,
                        "response_format": "wav"}).encode()
     data = _request("POST", "/v1/audio/speech", body=body, ctype="application/json",
