@@ -6188,7 +6188,8 @@ def main():
     import inspect as _inspwn
     _rootwn = REPO_CORE.parent
     _sweptwn = [_rootwn / "bot.py", _rootwn / "README.md", _rootwn / "config.example.yaml"]
-    _sweptwn += list(REPO_CORE.rglob("*.py")) + list((_rootwn / "dashboard-ui" / "src").rglob("*.jsx"))
+    _sweptwn += (list(REPO_CORE.rglob("*.py")) + list((_rootwn / "dashboard-ui" / "src").rglob("*.jsx"))
+                 + list((_rootwn / "dashboard-ui" / "src").rglob("*.js")))
     # The words come from LVI_PRIVATE_WORDS (comma-separated, kept out of the
     # repo): a public test must not name the private word it guards.
     _privwn = [w.strip().lower() for w in os.environ.get("LVI_PRIVATE_WORDS", "").split(",") if w.strip()]
@@ -8458,6 +8459,7 @@ def main():
     # pin the shape of the exact function that carried each defect.
     import re as _reui
     _appsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
+    _chipsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "chips.js").read_text()
 
     def _jsbody(src, head):
         """Text of the block opened by `head` (which ends in '{'), brace-matched."""
@@ -8759,9 +8761,9 @@ def main():
     check("echo: kind stub reads 'echo' on the status line (an unknown kind still shows the default lane)",
           _lbl_EC == "echo" and _lbl_bogus_EC == _lanesUI.LANES[_lanesUI.DEFAULT_KIND].label
           and _def_EC.get("agent_kind") == "stub", f"{_lbl_EC!r} {_lbl_bogus_EC!r} {_def_EC}")
-    _chipEC = _fnUI("function intelligenceChip(status, intel) {")
+    _chipEC = _jsbody(_chipsrc, "export function intelligenceChip(status, intel, lanes) {")
     check("echo ui: the Intelligence chip says 'echo' (neutral, not a link: not a fault) before any url/key warning",
-          "const ECHO_KIND = 'stub'" in _appsrc
+          "export const ECHO_KIND = 'stub'" in _chipsrc
           and 0 <= _chipEC.find("=== ECHO_KIND") < _chipEC.find("'no url'")
           and "return { tone: 'neutral', text: 'echo', title: 'No intelligence picked yet" in _chipEC, _chipEC[:300])
     # Naming law: users never see or hear "brain" (it's "intelligence").
@@ -9088,16 +9090,16 @@ def main():
             i = body.find("return {", i + 1)
         return out
 
-    _ttsHO = _jsbody(_appsrc, "function ttsChip(status, tts) {")
-    _intHO = _jsbody(_appsrc, "function intelligenceChip(status, intel) {")
-    _nodHO = _jsbody(_appsrc, "function nodesChip(rooms, mapping) {")
+    _ttsHO = _jsbody(_chipsrc, "export function ttsChip(status, tts) {")
+    _intHO = _jsbody(_chipsrc, "export function intelligenceChip(status, intel, lanes) {")
+    _nodHO = _jsbody(_chipsrc, "export function nodesChip(rooms, mapping) {")
     _chipHO = _jsbody(_appsrc, "function StatChip({ stat, tone = 'neutral', text, title, muted, href, className, style, children }) {")
     _ovHO = _fnUI("function Overview({ status, tts, intelligence, mapping }) {")
     check("overview: the chips get the TTS, intelligence and mapping data App already loads",
           "<Overview status={status} tts={tts} intelligence={intelligence} mapping={mapping}" in _appsrc
-          and "{...ttsChip(status, tts)}" in _ovHO and "{...intelligenceChip(status, intelligence)}" in _ovHO
+          and "{...ttsChip(status, tts)}" in _ovHO and "{...intelligenceChip(status, intelligence, LANES)}" in _ovHO
           and "{...nodesChip(status?.rooms, mapping)}" in _ovHO, _ovHO[:200])
-    _hintHO = _reui.search(r"const TTS_KEY_HINT = \{(.*?)\}", _appsrc)
+    _hintHO = _reui.search(r"export const TTS_KEY_HINT = \{(.*?)\}", _chipsrc)
     _hintHO = dict(_reui.findall(r"'?([\w-]+)'?: '(\w+)'", _hintHO.group(1))) if _hintHO else {}
     _ttsGet = client.get("/api/dashboard/tts").json()
     check("overview: the TTS chip warns 'no key' (a link to Keys) when the configured cloud voice has no saved key",
@@ -9639,8 +9641,8 @@ def main():
           _ttsUS[-400:])
     check("tts ui: Kokoro needs no key (no Missing key notice); the chip says 'kokoro'",
           "{TTS_KEY_HINT[provider] && tts && !tts[TTS_KEY_HINT[provider]] && (" in _voWS
-          and "kokoro: 'Kokoro'" in _appsrc and "return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }"
-          in _appsrc)
+          and "kokoro: 'Kokoro'" in _chipsrc and "return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }"
+          in _chipsrc)
     check("unsaved: the intelligence save body and 'Test saved config' stay as they were (still holds)",
           "const body = { kind, url }" in _saveUS["intelligence"]
           and "if (agentSel || laneOf(kind)?.agent_required === false) body.agent = agentSel" in _saveUS["intelligence"]
@@ -9854,9 +9856,9 @@ def main():
           "wrap_stt_with_fallback(" in _main_src and _main_src.count("close_stt_fallback(") >= 2 and "SttTimer(" in _main_src)
 
     # UI: one table of cloud providers drives the chips, the key line and the save message
-    _clEL = _reui.search(r"const STT_CLOUD = \{(.*?)\n\}", _appsrc, _reui.DOTALL)
+    _clEL = _reui.search(r"export const STT_CLOUD = \{(.*?)\n\}", _chipsrc, _reui.DOTALL)
     _clEL = _ws(_clEL.group(1)) if _clEL else ""
-    _chEL = _jsbody(_appsrc, "function sttChip(st) {")
+    _chEL = _jsbody(_chipsrc, "export function sttChip(st) {")
     _scEL = _fnUI("function SttCard({ status, setMsg }) {")
     _svEL = _ws(_jsbody(_scEL, "const save = async say => {"))
     check("elevenlabs ui: the cloud table names Deepgram and ElevenLabs with their GET /stt key flags",
@@ -10118,7 +10120,7 @@ def main():
           and "...(provider === 'kokoro' ? [] : ['model:kokoro']), 'kokoro_speed']" in _ws(_laVo), _laVo[-600:])
     check("speech tiers: the STT fallback chip reads 'embedded fallback' on the STT card and in the status bar",
           ">embedded fallback</span>" in _laSt
-          and _fnUI("function sttChip(st) {").count("text: 'embedded fallback'") == 2
+          and _jsbody(_chipsrc, "export function sttChip(st) {").count("text: 'embedded fallback'") == 2
           and "whisper fallback" not in _appsrc)
     check("speech tiers: no Whisper model menu, download, delete or GPU chip on the STT card; no retired TTS engine "
           "or fallback picker on the TTS card",
@@ -10162,11 +10164,11 @@ def main():
           "body.la_model = laModel" in _laSt and "delete body.la_model" in _laSt
           and "api('/api/dashboard/localai', { method: 'PUT', json: { model_stt: laPick } })" in _laSt
           and "If LocalAI is down: Whisper base on this appliance." in _laSt)
-    _laChip = _fnUI("function sttChip(st) {")
+    _laChip = _jsbody(_chipsrc, "export function sttChip(st) {")
     check("localai ui: the STT chip says 'localai <model>', and 'embedded fallback' linking to the LocalAI card when it's down",
           "return { text: `localai ${st.localai_model || ''}`.trim() }" in _laChip and "href: '#localai'" in _laChip
           and "text: 'embedded fallback', href: '#localai'" in _laChip
-          and "localai: 'LocalAI'" in _appsrc)
+          and "localai: 'LocalAI'" in _chipsrc)
 
     # ── node setup ui (App.jsx): the System tab's USB setup panel ──
     _nsUI = _fnUI("function NodeSetupPanel({ setMsg }) {")
