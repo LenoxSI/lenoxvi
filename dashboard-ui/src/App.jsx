@@ -8,6 +8,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { TABS } from './tabs.js'
+import { BUILTIN, ECHO_KIND, TTS_NAMES, ttsName, TTS_KEY_HINT, STT_CLOUD, intelligenceChip, nodesChip, ttsChip, sttChip } from './chips.js'
 import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView, wakePhrase, heardSince } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
@@ -237,8 +238,6 @@ const defaultAgentLabel = a => (!a || a === 'default' ? 'Default agent' : `Defau
 
 const INPUT_CLS = 'rounded-xl bg-[var(--field-background)] text-[14px] px-3 py-2'
 // Line badge per node: the hardware behind each firmware line (fw_push `line`).
-// A node's own speaker as a reply zone (server: node_speaker.BUILTIN).
-const BUILTIN = 'builtin'
 const LINE_TITLE = {
   array: 'reSpeaker XVF3800 mic array (LED ring, physical mute button)',
   flex: 'reSpeaker Flex (XVF3800, no LED ring or button)',
@@ -938,7 +937,7 @@ function Overview({ status, tts, intelligence, mapping }) {
       <Stat label="Uptime">
         <StatChip stat="uptime" muted={status?.uptime_secs == null}>{sec(status?.uptime_secs)}</StatChip>
       </Stat>
-      <Stat label="Intelligence"><StatChip stat="intelligence" {...intelligenceChip(status, intelligence)} /></Stat>
+      <Stat label="Intelligence"><StatChip stat="intelligence" {...intelligenceChip(status, intelligence, LANES)} /></Stat>
       <Stat label="Nodes online"><StatChip stat="nodes" {...nodesChip(status?.rooms, mapping)} /></Stat>
       <Stat label="Last wake">
         <StatChip stat="last-wake" muted={!status?.last_wake}>
@@ -970,10 +969,6 @@ function Stat({ label, children }) {
 // are lowercase, even brand names — "sonos"); hover text is a sentence.
 // A setup gap (no key, no URL, an unmapped room) is a warning chip that links
 // to the card that fixes it; healthy chips are not links.
-// intelligence.kind for "no intelligence picked yet": the bot answers from its echo
-// stub. Not a lane (no URL, key or agents); a fresh install starts here.
-const ECHO_KIND = 'stub'
-
 const STAT_TONE = {
   success: 'bg-[var(--success-soft)] text-[var(--success-soft-foreground)]',
   warning: 'bg-[var(--warning-soft)] text-[var(--warning-soft-foreground)]',
@@ -990,123 +985,6 @@ function StatChip({ stat, tone = 'neutral', text, title, muted, href, className,
       {children ?? text}
     </Tag>
   )
-}
-
-// Intelligence: the brand the bot runs, unless the configured kind has no
-// URL or no key saved (the next restart can't reach it).
-function intelligenceChip(status, intel) {
-  // No intelligence picked yet (a fresh install): the bot echoes. Not a fault, so a
-  // plain chip (only setup warnings are links); the hover says what to do.
-  if ((intel?.kind || '') === ECHO_KIND || (!intel && status?.intelligence === 'echo'))
-    return { tone: 'neutral', text: 'echo', title: 'No intelligence picked yet: the bot repeats what it hears. Pick one on the Intelligence card.' }
-  if (intel) {
-    const label = laneLabel(intel.kind)
-    if (!intel.url)
-      return { tone: 'warning', text: 'no url', href: '#intelligence', title: `No ${label} URL saved. Set it on the Intelligence card.` }
-    // A per-agent-key lane's profile reads its own key (e.g.
-    // LVI_HERMES_KEY_<AGENT>), which /intelligence doesn't report: only the
-    // kind's base key is judged here.
-    const profile = laneOf(intel.kind)?.per_agent_keys && intel.agents?.[intel.kind] && intel.agents[intel.kind] !== laneOf(intel.kind).default_agent
-    if (!profile && !intel.key_set)
-      return { tone: 'warning', text: 'no key', href: '#keys', title: `No ${label} key saved. Add it on the Keys card.` }
-  }
-  // Brand chips: the colours come from the lane list. Inline
-  // styles — these are foreign brands, they don't earn design tokens.
-  // Chip shows the brand only — the agent id lives in the Intelligence
-  // section: strip " · <agent>" from the label.
-  const brand = (esc(status?.intelligence) || '—').split(' · ')[0]
-  const lane = LANES.find(l => l.label === brand)
-  // Only a real brand wears brand colors — the loading
-  // placeholder ('—') must not wear brand colors.
-  const s = lane?.brand || null
-  // A lane with no brand of its own: a plain chip, not the muted placeholder.
-  return { tone: s ? 'brand' : 'neutral', muted: !s && !lane, style: s, text: brand.toLowerCase() }
-}
-
-// Nodes online: green = every node up, yellow = some down, red = all down.
-// An online room with no zone is a warning too: unmapped rooms are silent
-// by design (a speaker node's unmapped room plays on its own speaker).
-// Judged only once /mapping has loaded.
-function nodesChip(rooms, mapping) {
-  if (!rooms) return { text: '—', muted: true }
-  if (!rooms.length) return { text: 'no nodes', muted: true }
-  const down = rooms.filter(r => !r.online).map(r => esc(r.room))
-  const text = `${rooms.length - down.length}/${rooms.length}`
-  const heard = room => mapping.room_zones[room] || mapping.speakers?.[room]?.zone === BUILTIN
-  const silent = mapping?.room_zones ? rooms.filter(r => r.online && !heard(r.room)).map(r => esc(r.room)) : []
-  if (silent.length)
-    return { tone: 'warning', text: `${silent.length} unmapped`, href: '#rooms',
-      title: `No speaker zone for ${silent.join(', ')}: replies there play nowhere. ${down.length ? `${down.join(', ')} offline.` : 'All nodes online.'}` }
-  if (!down.length) return { tone: 'success', text, title: 'All nodes online' }
-  if (down.length === rooms.length) return { tone: 'danger', text, title: 'All nodes offline' }
-  return { tone: 'warning', text, title: `${down.join(', ')} offline` }
-}
-
-const TTS_NAMES = { elevenlabs: 'ElevenLabs', deepgram: 'Deepgram', 'deepgram-flux': 'Deepgram Flux', kokoro: 'Kokoro', localai: 'LocalAI' }
-const ttsName = p => TTS_NAMES[p] || p
-
-// TTS: the voice service the rooms are actually using (each online room
-// reports its live provider); the configured one only until a room has
-// reported — config edits apply on the next restart. Offline rooms don't
-// count: their last report is stale. A configured cloud voice with no saved
-// key (GET /tts) is a warning: it can't speak after the next restart.
-const TTS_KEY_HINT = { elevenlabs: 'elevenlabs_key_hint', deepgram: 'deepgram_key_hint', 'deepgram-flux': 'deepgram_key_hint', localai: 'localai_key_hint' }
-function ttsChip(status, tts) {
-  if (!status) return { text: '—', muted: true }
-  const live = (status.rooms || []).filter(r => r.online)
-  const down = live.filter(r => r.tts_usable === false).map(r => esc(r.room))
-  if (down.length)
-    return { tone: 'danger', text: 'tts down',
-      title: `${down.join(', ')} can't speak. Reboot the node (or the bot) to rebuild its session.` }
-  const hint = TTS_KEY_HINT[tts?.provider]
-  if (hint && !tts[hint])
-    return { tone: 'warning', text: 'no key', href: '#keys',
-      title: `No ${ttsName(tts.provider)} key saved. Add it on the Keys card.` }
-  const isFb = r => String(r.tts_provider || '').endsWith('(fallback)')
-  // Rooms report Deepgram Flux as plain "deepgram": when the room's service
-  // is the configured one's family, the configured name is the more
-  // specific (a switch between the two Deepgram voices shows early).
-  const roomP = live.find(r => r.tts_provider && !isFb(r))?.tts_provider
-  const cfgP = status.tts_provider
-  const primary = roomP && !String(cfgP || '').startsWith(roomP) ? roomP : (cfgP || roomP)
-  const fb = live.filter(isFb)
-  if (fb.length) {
-    const name = ttsName(String(fb[0].tts_provider).replace(/\s*\(fallback\)$/, ''))
-    return { tone: 'warning', text: `${name.toLowerCase()} fallback`,
-      title: `${fb.map(r => esc(r.room)).join(', ')} on the local ${name} voice: ${ttsName(primary)} is unreachable` }
-  }
-  return { text: ttsName(primary)?.toLowerCase() || '—', muted: !primary }
-}
-
-// Cloud STT providers (Whisper is the local one): the name in messages, the
-// GET /stt flag saying its key is saved, and its chip words.
-const STT_CLOUD = {
-  deepgram: { name: 'Deepgram', key: 'deepgram_key_set', chip: st => `deepgram ${st.cloud_model || ''}`.trim() },
-  elevenlabs: { name: 'ElevenLabs', key: 'elevenlabs_key_set', chip: () => 'elevenlabs scribe' },
-}
-
-// STT: Whisper <model> on Embedded, or a LocalAI or cloud provider with
-// Embedded Whisper as its fallback.
-function sttChip(st) {
-  if (!st) return { text: '—', muted: true }
-  const whisper = `Whisper ${st.model || ''}`.trim()
-  const cloud = STT_CLOUD[st.provider]
-  const onWhisper = !cloud || st.active === 'whisper'
-  if (onWhisper && st.state === 'error') return { tone: 'danger', text: 'whisper failed', title: st.error || 'Whisper failed to load' }
-  if (cloud && st.active === 'whisper') {
-    const rooms = (st.fallback_rooms || []).map(esc)
-    return { tone: 'warning', text: 'embedded fallback',
-      title: `${st.fallback_reason || `${cloud.name} unreachable`}${rooms.length ? ` (rooms: ${rooms.join(', ')})` : ''}` }
-  }
-  if (cloud) return { text: cloud.chip(st) }
-  if (st.provider === 'localai') {
-    if (st.active === 'whisper')
-      return { tone: 'warning', text: 'embedded fallback', href: '#localai',
-        title: `${st.fallback_reason || 'LocalAI unreachable'}: Whisper base on this appliance is listening` }
-    return { text: `localai ${st.localai_model || ''}`.trim() }
-  }
-  if (st.state === 'loading') return { text: 'loading', muted: true, title: `${whisper} is loading` }
-  return { text: whisper.toLowerCase() }
 }
 
 // A list's state row: one row across every column, so loading, a failed
