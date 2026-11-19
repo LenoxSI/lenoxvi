@@ -8,6 +8,13 @@ The two version streams are independent.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-11-18 — First-run setup wizard
+
+A fresh install now opens a setup wizard in the dashboard that walks through listening, voice, intelligence,
+wake word, speakers and nodes, then restarts the bot and confirms it heard you. Also: VAD timing sliders,
+LocalAI chatterbox voice profiles, a configurable request timeout, and fixes for questions with a pause in the
+middle, fresh-session mode and the installer's Restart button.
+
 ### Added
 - First-run setup wizard in the dashboard. A fresh install opens it on the first dashboard visit; it walks through
   eight steps — Welcome (this machine's processor, memory, free disk and version, and the dashboard token when the
