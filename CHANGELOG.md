@@ -9,6 +9,11 @@ The two version streams are independent.
 ## [Unreleased]
 
 ### Changed
+- LocalAI: the `localai.speed` config key, its `LVI_LOCALAI_SPEED` fallback and the `speed` field of
+  `PUT /api/dashboard/localai` are removed — no LocalAI backend takes a speed and the dashboard had no control for
+  it. When LocalAI is the TTS provider and the embedded Kokoro voice takes over, it speaks at `tts.kokoro_speed`
+  (the TTS card's fallback speed), as the README says. A `speed` left in an existing `localai:` section is
+  ignored. (#82)
 - The dashboard no longer writes `default_zone`: adding a zone sets none, and deleting a zone no longer hands the
   key to a remaining zone or clears it. A `default_zone` already in someone's config.yaml is left alone and
   ignored — the key routes nothing. (#81)

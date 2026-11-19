@@ -419,6 +419,18 @@ for _prov in ("kokoro", "localai"):
           and _p.locals.get("tts") is _p.locals.get("tts_primary") and _kind(_p.locals.get("tts")) == _prov,
           f"error={_p.error} tts={_kind(_p.locals.get('tts'))}")
 
+
+
+def _localai_with_speeds(data):
+    _tts("localai", kokoro_speed=1.2)(data)
+    data["localai"] = {**(data.get("localai") or {}), "speed": 0.7}
+
+
+_p = _probe(_localai_with_speeds, env=_KEYS)
+_got = getattr(_p.locals.get("tts"), "_standby_speed", None)
+check("speech tiers: LocalAI's Kokoro fallback speaks at tts.kokoro_speed; a leftover localai.speed is not read",
+      _p.error is None and _got == 1.2, f"error={_p.error} speed={_got}")
+
 # Review focus: odd case and spaces mean that provider.
 _p = _probe(_tts(" ElevenLabs "), env=_KEYS)
 check("speech tiers: tts.provider ' ElevenLabs ' means ElevenLabs (case and spaces ignored) — Kokoro standby, no warning",

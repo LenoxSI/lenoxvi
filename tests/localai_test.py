@@ -565,8 +565,8 @@ if HAVE_PIPECAT:
         _tts_room = "Kitchen"
 
     def make():
-        s = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0,
-                                     standby_voice="af_heart")
+        s = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart",
+                                     standby_voice="af_heart", standby_speed=1.0)
         s._sample_rate = 24000  # what StartFrame sets inside a pipeline
         return s
 
@@ -581,8 +581,8 @@ if HAVE_PIPECAT:
     svc = make()
     check("tts localai: is a TTS service with the provider name and a raised stop timeout",
           svc._tts_provider == "localai" and svc._stop_frame_timeout_s >= tts_kokoro.STOP_FRAME_TIMEOUT_S)
-    _s12 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0,
-                                    standby_voice="af_heart", timeout=12.0)
+    _s12 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart",
+                                    standby_voice="af_heart", standby_speed=1.0, timeout=12.0)
     check("tts localai: pipecat's idle stop outlasts the LocalAI budget plus the Kokoro fallback",
           _s12._stop_frame_timeout_s == 22.0 and svc._stop_frame_timeout_s == 15.0,
           f"{_s12._stop_frame_timeout_s} {svc._stop_frame_timeout_s}")
@@ -649,7 +649,7 @@ if HAVE_PIPECAT:
     la._reset_for_tests()
     BEHAVIOUR["/v1/audio/speech"] = (200, "audio/wav", LA_WAV, 0)
     n2 = len(SEEN)
-    s0 = tts_localai.make_service(mixin=Mixin, model="", voice="af_heart", speed=1.0, standby_voice="af_heart")
+    s0 = tts_localai.make_service(mixin=Mixin, model="", voice="af_heart", standby_voice="af_heart", standby_speed=1.0)
     s0._sample_rate = 24000
     frames = asyncio.run(drain(s0, "No model was picked for this."))
     check("tts localai: no model picked -> Kokoro, nothing sent, the shared box NOT marked down",
@@ -664,19 +664,24 @@ if HAVE_PIPECAT:
     _urls = []
     la.speech = lambda text, model, voice, url=None, key=None, timeout=None: (
         _urls.append((url, timeout)), (LA_WAV[44:], 24000))[1]
-    s1 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=1.0, standby_voice="af_heart",
+    s1 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", standby_voice="af_heart", standby_speed=1.0,
                                   url="http://192.0.2.9:8080", timeout=12.0)
     s1._sample_rate = 24000
     asyncio.run(drain(s1, "Bound to its URL."))
     la.speech = _real_sp
     check("tts localai: requests use the URL and budget the session was built with",
           _urls == [("http://192.0.2.9:8080", 12.0)], str(_urls))
-    s2 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", speed=9.0, standby_voice="af_heart")
+    s2 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", standby_voice="af_heart", standby_speed=9.0)
     s2._sample_rate = 24000
     la.mark_down("LocalAI unreachable")
     frames = asyncio.run(drain(s2, "Speed out of range for Kokoro."))
     check("tts localai: an out-of-range speed is clamped for the Kokoro fallback (no assert)",
           any(isinstance(f, TTSAudioRawFrame) for f in frames) and not any(isinstance(f, ErrorFrame) for f in frames))
+    _s125 = tts_localai.make_service(mixin=Mixin, model="kokoro", voice="af_heart", standby_voice="af_heart",
+                                     standby_speed=1.25)
+    check("tts localai: the Kokoro fallback speaks at the standby speed it was built with (out of range = the default)",
+          _s125._standby_speed == 1.25 and s2._standby_speed == tts_kokoro.DEFAULT_SPEED,
+          f"{_s125._standby_speed} {s2._standby_speed}")
     la._reset_for_tests()
     _saved_k = tts_kokoro._kokoro
     tts_kokoro._kokoro = None

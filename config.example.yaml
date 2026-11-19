@@ -90,7 +90,6 @@ tts:
 #   model_stt: faster-whisper-small      # a LocalAI model flagged for transcription
 #   model_tts: kokoro                    # a LocalAI model flagged for speech
 #   voice: af_heart                      # that model's voice
-#   speed: 1.0
 #   voices:                              # chatterbox reference voices: label -> WAV path
 #                                        # on the LOCALAI HOST (its TTS clones the voice
 #                                        # from the file; 'default' needs no entry).

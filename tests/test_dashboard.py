@@ -1336,6 +1336,8 @@ def main():
             check(f"localai card: a bad URL is refused (422) [{_bad[:18]}]", r.status_code == 422, r.text[:120])
         r = client.put("/api/dashboard/localai", json={"nope": 1})
         check("localai card: an unknown field is refused (422)", r.status_code == 422)
+        r = client.put("/api/dashboard/localai", json={"speed": 1.0})
+        check("localai card: the removed speed field is refused (422)", r.status_code == 422)
         r = client.put("/api/dashboard/localai", json={"model_stt": "bad name; rm"})
         check("localai card: a model name with odd characters is refused (422)", r.status_code == 422)
         r = client.put("/api/dashboard/stt", json={"provider": "localai"})

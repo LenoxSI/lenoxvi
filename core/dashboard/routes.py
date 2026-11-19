@@ -1647,7 +1647,6 @@ def _localai_saved() -> dict:
             "model_stt": str(pick("model_stt", "LVI_LOCALAI_MODEL_STT") or ""),
             "model_tts": str(pick("model_tts", "LVI_LOCALAI_MODEL_TTS") or ""),
             "voice": str(pick("voice", "LVI_LOCALAI_VOICE") or ""),
-            "speed": pick("speed", "LVI_LOCALAI_SPEED", None),
             "voices": voices}
 
 
@@ -1666,7 +1665,6 @@ class LocalAIPayload(BaseModel):
     model_stt: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
     model_tts: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
     voice: str | None = Field(default=None, max_length=64, pattern=_LOCALAI_NAME)
-    speed: float | None = Field(default=None, ge=0.5, le=1.5)
 
     @model_validator(mode="after")
     def _url_ok(self):
@@ -1698,7 +1696,7 @@ async def put_localai(payload: LocalAIPayload):
 
     def _save():
         current = dict(config_store.read_section("localai") or {})
-        for field in ("url", "model_stt", "model_tts", "voice", "speed"):
+        for field in ("url", "model_stt", "model_tts", "voice"):
             value = getattr(payload, field)
             if value is None:
                 continue

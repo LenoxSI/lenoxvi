@@ -81,13 +81,6 @@ def normalize_url(raw) -> str | None:
     return url
 
 
-def _speed(value) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 1.0
-
-
 def settings() -> dict:
     from config import cfg_env
     return {
@@ -95,7 +88,6 @@ def settings() -> dict:
         "model_stt": str(cfg_env("localai", "model_stt", "LVI_LOCALAI_MODEL_STT", "") or ""),
         "model_tts": str(cfg_env("localai", "model_tts", "LVI_LOCALAI_MODEL_TTS", "") or ""),
         "voice": str(cfg_env("localai", "voice", "LVI_LOCALAI_VOICE", "") or ""),
-        "speed": _speed(cfg_env("localai", "speed", "LVI_LOCALAI_SPEED", 1.0)),
         # Per-request budgets: the defaults suit a GPU host; a slow CPU box
         # can raise them (a longer wait before the fallback takes over).
         "stt_timeout": _secs(cfg_env("localai", "stt_timeout", "LVI_LOCALAI_STT_TIMEOUT", STT_TIMEOUT), STT_TIMEOUT),

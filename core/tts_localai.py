@@ -46,7 +46,7 @@ def _service_class(mixin: type) -> type:
     class TrackedLocalAITTSService(mixin, TTSService):
         _tts_provider = "localai"
 
-        def __init__(self, *, model: str, voice: str, speed: float, standby_voice: str,
+        def __init__(self, *, model: str, voice: str, standby_voice: str, standby_speed: float,
                      url: str | None = None, timeout: float | None = None, **kwargs):
             # Whole clips per sentence: a slow one must not trip pipecat's
             # idle stop (same reason as Kokoro). The idle window must outlast
@@ -56,10 +56,10 @@ def _service_class(mixin: type) -> type:
                                 settings=TTSSettings(model=model, voice=voice, language=None), **kwargs)
             self._la_model = model
             self._la_voice = voice
-            self._la_speed = float(speed)
             self._la_url = url  # fixed when the session was built
             self._la_timeout = timeout  # None = the default TTS budget
             self._standby_voice = standby_voice
+            self._standby_speed = tts_kokoro._speed(standby_speed)
             # One resampler per source: LocalAI's rate and Kokoro's can differ.
             self._la_resampler = create_stream_resampler()
             self._kk_resampler = create_stream_resampler()
@@ -81,7 +81,7 @@ def _service_class(mixin: type) -> type:
             v = self._standby_voice
             async with tts_kokoro.GEN_LOCK:
                 async for samples, rate in k.create_stream(part, voice=v, lang=tts_kokoro.language_for(v),
-                                                           speed=tts_kokoro._speed(self._la_speed)):
+                                                           speed=self._standby_speed):
                     pcm = (samples * 32767).astype(np.int16).tobytes()
                     audio = await self._kk_resampler.resample(pcm, rate, self.sample_rate)
                     yield TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1,
@@ -137,9 +137,9 @@ def stop_timeout_for(timeout: float | None) -> float:
     return max(tts_kokoro.STOP_FRAME_TIMEOUT_S, budget + 10.0)
 
 
-def make_service(*, mixin: type, model: str, voice: str, speed: float, standby_voice: str,
+def make_service(*, mixin: type, model: str, voice: str, standby_voice: str, standby_speed: float,
                  url: str | None = None, timeout: float | None = None):
     """A per-session LocalAI TTS service (the Kokoro fallback uses the
     process's shared Kokoro model, loaded by tts_kokoro.warm/preload)."""
-    return _service_class(mixin)(model=model, voice=voice, speed=speed, standby_voice=standby_voice, url=url,
-                                   timeout=timeout)
+    return _service_class(mixin)(model=model, voice=voice, standby_voice=standby_voice,
+                                   standby_speed=standby_speed, url=url, timeout=timeout)
