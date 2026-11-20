@@ -2044,15 +2044,15 @@ def main():
         check("paths: LVI_ENV_FILE still wins; with no LVI_STATE_DIR both stay in the repo (existing installs unchanged)",
               _pinned_SD == SCRATCH / "pinned.env"
               and _repo_default_SD == (paths.REPO / ".env", paths.REPO / "certs"), f"{_pinned_SD} {_repo_default_SD}")
-        from dashboard import routes as _rSD
+        from dashboard import env_store
         (SCRATCH / ".env").unlink(missing_ok=True)
         import asyncio as _aSD
-        _aSD.run(_rSD._write_env_key("LVI_SUITE_STATE_KEY", "suite-not-a-key-123"))
+        _aSD.run(env_store.write_key("LVI_SUITE_STATE_KEY", "suite-not-a-key-123"))
         _wrote_SD = (SCRATCH / ".env").read_text() if (SCRATCH / ".env").exists() else ""
         _mode_SD = oct((SCRATCH / ".env").stat().st_mode & 0o777) if (SCRATCH / ".env").exists() else None
         check("paths: a Keys save lands in the state dir's .env (0600), not the repo's",
               "LVI_SUITE_STATE_KEY=suite-not-a-key-123" in _wrote_SD and _mode_SD == "0o600"
-              and _rSD._env_path() == SCRATCH / ".env"
+              and env_store.path() == SCRATCH / ".env"
               and (_repo_env_SD.stat().st_mtime_ns if _repo_env_SD.exists() else None) == _repo_env_mt_SD,
               f"mode={_mode_SD} wrote={'yes' if _wrote_SD else 'no'}")
         import subprocess as _spSD
@@ -4481,6 +4481,7 @@ def main():
             import io as _io9
             import urllib.request as _urq9
             from dashboard import routes as _routes9
+            from dashboard import env_store
 
             # (a) PUT intelligence: kind+url+agent written, fillers SURVIVE
             _r = client.put("/api/dashboard/intelligence", json={
@@ -4684,12 +4685,12 @@ def main():
                     else:
                         _os.environ[_k9] = _v9
 
-            # (e) key POST: response carries no key material; _write_env_key
+            # (e) key POST: response carries no key material; write_key
             # monkeypatched so the real .env is NEVER touched
-            _saved_wek9 = _routes9._write_env_key
+            _saved_wek9 = env_store.write_key
             async def _fake_wek9(var, value):
                 return True
-            _routes9._write_env_key = _fake_wek9
+            env_store.write_key = _fake_wek9
             try:
                 _kr = client.put("/api/dashboard/intelligence/key",
                                  json={"kind": "hermes",
@@ -4728,7 +4729,7 @@ def main():
                 async def _fake_wek_rec9(var, value):
                     _wek_calls9.append(var)
                     return True
-                _routes9._write_env_key = _fake_wek_rec9
+                env_store.write_key = _fake_wek_rec9
                 try:
                     client.put("/api/dashboard/intelligence",
                                json={"kind": "hermes"})
@@ -4774,11 +4775,11 @@ def main():
                         else:
                             _os.environ["LVI_OPENCLAW_KEY"] = _sko9
                 finally:
-                    _routes9._write_env_key = _fake_wek9
+                    env_store.write_key = _fake_wek9
                     client.put("/api/dashboard/intelligence",
                                json={"kind": "hermes"})
             finally:
-                _routes9._write_env_key = _saved_wek9
+                env_store.write_key = _saved_wek9
 
             # Agent picker + masked key hints: agents
             # discovered per provider, remembered per kind; a Hermes profile
@@ -5003,7 +5004,7 @@ def main():
                 async def _fake_wek12(var, value):
                     _wek12.append(var)
                     return True
-                _routes9._write_env_key = _fake_wek12
+                env_store.write_key = _fake_wek12
                 try:
                     _kp12 = client.put("/api/dashboard/intelligence/key", json={
                         "kind": "hermes", "agent": "home-helper", "api_key": "helperkey-abcdefghijkl"})
@@ -5021,7 +5022,7 @@ def main():
                         "kind": "hermes", "agent": "../x", "api_key": "helperkey-abcdefghijkl"})
                     check("agent picker: key save: invalid agent name 422s", _kb12.status_code == 422, str(_kb12.status_code))
                 finally:
-                    _routes9._write_env_key = _saved_wek9
+                    env_store.write_key = _saved_wek9
                 _t12 = client.get("/api/dashboard/tts").json()
                 check("agent picker: TTS GET carries key hints (first 4 or null), never a key",
                       "elevenlabs_key_hint" in _t12 and "deepgram_key_hint" in _t12, str(_t12)[:160])
@@ -7408,6 +7409,7 @@ def main():
 
     # ── Keys card: every API key in one place (presence + hint only) ──
     from dashboard import routes as _rk
+    from dashboard import env_store
     _K_VARS = ("LVI_ENV_FILE", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "LVI_HERMES_KEY",
                "LVI_OPENCLAW_KEY", "LVI_NANOBOT_KEY", "LVI_HERMES_KEY_HA_BUTLER", "LVI_HERMES_KEY_STRAY")
     _k_before_env = {k: os.environ.get(k) for k in _K_VARS}
@@ -7656,17 +7658,17 @@ def main():
 
         def _baks():
             return sorted(x for x in _benv.parent.glob(".env.bak-*") if x != _hand)
-        _asyncio.run(_rk._write_env_key("B_KEY", "first"))
+        _asyncio.run(env_store.write_key("B_KEY", "first"))
         check("backup: a first set makes no backup", _baks() == [], str(_baks()))
-        _asyncio.run(_rk._write_env_key("A_KEY", "two"))
+        _asyncio.run(env_store.write_key("A_KEY", "two"))
         _b = _baks()
         check("backup: replacing a key backs up the old .env first (0600, holds the old value)",
               len(_b) == 1 and "A_KEY=one" in _b[0].read_text() and (_b[0].stat().st_mode & 0o777) == 0o600
               and "A_KEY=two" in _benv.read_text(), str(_b))
-        _asyncio.run(_rk._write_env_key("A_KEY", "two"))
+        _asyncio.run(env_store.write_key("A_KEY", "two"))
         check("backup: saving the same value again makes no backup", len(_baks()) == 1, str(_baks()))
         for _v in ("three", "four", "five", "six"):
-            _asyncio.run(_rk._write_env_key("A_KEY", _v))
+            _asyncio.run(env_store.write_key("A_KEY", _v))
         _b = _baks()
         check("backup: only the newest 3 are kept", len(_b) == 3 and "A_KEY=five" in _b[-1].read_text(),
               f"{len(_b)} {[x.read_text() for x in _b]}")
@@ -7695,9 +7697,9 @@ def main():
         _umask = os.umask(0o022)  # the common default: plain creates are world-readable
         os.chmod, os.replace = _seen_chmod, _seen_replace
         try:
-            _asyncio.run(_rk._write_env_key("P_KEY", "new"))
-            _asyncio.run(_rk._write_env_key("R_KEY", "r"))
-            _asyncio.run(_rk._remove_env_key("Q_KEY"))
+            _asyncio.run(env_store.write_key("P_KEY", "new"))
+            _asyncio.run(env_store.write_key("R_KEY", "r"))
+            _asyncio.run(env_store.remove_key("Q_KEY"))
         finally:
             os.chmod, os.replace = _real_chmod, _real_replace
             os.umask(_umask)
@@ -7731,7 +7733,7 @@ def main():
     import urllib.request as _urqNB
 
     import intelligence.agent as _iaNB
-    from dashboard import routes as _rNB
+    from dashboard import env_store
     from loguru import logger as _lgNB
 
     import intelligence.target as _itNB
@@ -7816,7 +7818,7 @@ def main():
     _nb_base = {k: v for k, v in dict(_nb_cfg["intelligence"] or {}).items()
                 if k not in ("kind", "url", "urls", "agent", "agents", "model")}
     _nb_env_file = SCRATCH / "nanobot.env"
-    _nb_saved_wek = _rNB._write_env_key
+    _nb_saved_wek = env_store.write_key
     _nb_real_open = _urqNB.urlopen
 
     def _nb_put_cfg(**kv):
@@ -8011,11 +8013,11 @@ def main():
         async def _fake_wekNB(var, value):
             _wekNB.append(var)
             return True
-        _rNB._write_env_key = _fake_wekNB
+        env_store.write_key = _fake_wekNB
         _ksNB = client.put("/api/dashboard/intelligence/key", json={"kind": "nanobot", "api_key": "nb-new-key-abcdefghijkl"})
         _ksNB2 = client.put("/api/dashboard/intelligence/key",
                             json={"kind": "nanobot", "agent": _NB_MODEL, "api_key": "nb-new-key-abcdefghijkl"})
-        _rNB._write_env_key = _nb_saved_wek
+        env_store.write_key = _nb_saved_wek
         check("nanobot: key save writes LVI_NANOBOT_KEY only (an agent never changes the variable), never echoed",
               _ksNB.status_code == 200 and _ksNB2.status_code == 200 and _wekNB == ["LVI_NANOBOT_KEY"] * 2
               and _ksNB.json().get("var") == "LVI_NANOBOT_KEY"
@@ -8160,7 +8162,7 @@ def main():
               and "const lane = laneOf(row.kind)" in _appNB and "if (!lane) return null" in _appNB
               and "kind: 'nanobot', label: 'Nanobot'" in _appNB, "")
     finally:
-        _rNB._write_env_key = _nb_saved_wek
+        env_store.write_key = _nb_saved_wek
         _urqNB.urlopen = _nb_real_open
         _NB["force"] = None
         for _s in (_srvNB, _srvNB2):
@@ -8175,6 +8177,7 @@ def main():
 
     # ── cloud STT provider (Deepgram) ─────────────────────────────────
     from dashboard import routes as _rdg
+    from dashboard import env_store
     _dg_saved = tuple(getattr(_rdg, _n, None) for _n in ("_stt_deepgram_sdk",))
     _DGSDK = {"ok": True}
     _rdg._stt_deepgram_sdk = lambda: _DGSDK["ok"]
@@ -8214,14 +8217,14 @@ def main():
         check("cloud stt PUT same provider again: no restart", _r.status_code == 200 and _r.json().get("restart_needed") is False,
               _r.text[:120])
         os.environ.pop("DEEPGRAM_API_KEY", None)
-        _saved_env_fn = _rdg._saved_env
-        _rdg._saved_env = dict
+        _saved_env_fn = env_store.saved_env
+        env_store.saved_env = dict
         try:
             client.put("/api/dashboard/stt", json={"provider": "whisper"})
             _r = client.put("/api/dashboard/stt", json={"provider": "deepgram"})
             _g = client.get("/api/dashboard/stt").json()
         finally:
-            _rdg._saved_env = _saved_env_fn
+            env_store.saved_env = _saved_env_fn
         check("cloud stt without a key: allowed, but key_needed true and GET says key not set",
               _r.status_code == 200 and _r.json().get("key_needed") is True and _g.get("deepgram_key_set") is False,
               f"{_r.text[:160]} set={_g.get('deepgram_key_set')}")
@@ -10737,6 +10740,7 @@ def main():
     # (with_suffix on a dot-file appends: '.env.env.tmp'). Driven
     # through the real writer against a scratch .env; os.replace is the
     # boundary that sees the temp name. ─────────────────────────────────
+    from dashboard import env_store
     _envd_TN = SCRATCH / "tmpname-env"
     _envd_TN.mkdir(exist_ok=True)
     _envf_TN = _envd_TN / ".env"
@@ -10751,7 +10755,7 @@ def main():
     os.environ["LVI_ENV_FILE"] = str(_envf_TN)
     os.replace = _spy_replace_TN
     try:
-        asyncio.run(_rUL._write_env_key("LVI_SUITE_TMPNAME_KEY", "suite-not-a-key-456"))
+        asyncio.run(env_store.write_key("LVI_SUITE_TMPNAME_KEY", "suite-not-a-key-456"))
     finally:
         os.replace = _real_replace_TN
         if _saved_envf_TN is None:
