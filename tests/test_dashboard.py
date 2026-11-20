@@ -8463,6 +8463,7 @@ def main():
     import re as _reui
     _appsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
     _chipsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "chips.js").read_text()
+    _unsavedrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "unsaved.js").read_text()
 
     def _jsbody(src, head):
         """Text of the block opened by `head` (which ends in '{'), brace-matched."""
@@ -9455,7 +9456,7 @@ def main():
     _barUS = _fnUI("function UnsavedBar({ cards, units, setMsg }) {")
     _allUS = _jsbody(_barUS, "const saveAll = async () => {")
     # The loop itself is saveCards(), shared with the setup wizard's Save and continue.
-    _scUS = _jsbody(_appsrc, "async function saveCards(cards, units, keys) {")
+    _scUS = _jsbody(_unsavedrc, "export async function saveCards(cards, units, keys) {")
     _voUS = _fnUI("function TtsCard({ tts, reloadAll }) {")
     _stUS = _fnUI("function SttCard({ status, setMsg }) {")
     _tuUS = _fnUI("function Tuning({ tuning, reloadAll }) {")
@@ -9473,8 +9474,8 @@ def main():
         "wake name": _jsbody(_wkUS, "const saveName = async say => {"),
     }
     check("unsaved: changed means differs from saved: numbers as numbers, strings trimmed, unset as ''",
-          "const norm = v => (v == null ? '' : typeof v === 'string' ? v.trim() : v)" in _appsrc
-          and "!isNaN(x) && !isNaN(y) && Number(x) === Number(y)" in _appsrc
+          "export const norm = v => (v == null ? '' : typeof v === 'string' ? v.trim() : v)" in _unsavedrc
+          and "!isNaN(x) && !isNaN(y) && Number(x) === Number(y)" in _unsavedrc
           and "const eq = (k, v) => same(v ?? blank[k], saved[k] ?? blank[k])" in _drUS, _drUS[:200])
     check("unsaved: a draft holds only differing fields; reverting one drops it at once",
           "val: k => (k in d ? d[k] : saved[k])" in _drUS and "changed: k => k in d && !eq(k, d[k])" in _drUS

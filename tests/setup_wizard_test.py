@@ -478,15 +478,16 @@ check("setup.py stays framework-free (no FastAPI import)", "fastapi" not in _set
 # Intelligence cards are their own components, and the shared cards take
 # wizard props whose defaults change nothing on the tabs.
 APP = (REPO / "dashboard-ui" / "src" / "App.jsx").read_text()
+UNSAVED_JS = (REPO / "dashboard-ui" / "src" / "unsaved.js").read_text()
 
 
-def fn(head):
+def fn(head, src=APP):
     """A top-level component's source, up to the next top-level function."""
-    i = APP.find(head)
+    i = src.find(head)
     if i < 0:
         return ""
-    j = re.search(r"\n(export default )?function ", APP[i + 1:])
-    return APP[i:i + 1 + j.start()] if j else APP[i:]
+    j = re.search(r"\n(export default )?function ", src[i + 1:])
+    return src[i:i + 1 + j.start()] if j else src[i:]
 
 
 def rendered(src):
@@ -572,7 +573,7 @@ check("shell: 'Run setup again' over unsaved edits asks first (Discard N … and
 # ── the speech steps: the cards as they are, saved by their own save() ──
 _wiz = fn("function SetupWizard({")
 _speech = fn("function SpeechStep({")
-_save_cards = fn("async function saveCards(cards, units, keys) {")
+_save_cards = fn("export async function saveCards(cards, units, keys) {", UNSAVED_JS)
 _bar = fn("function UnsavedBar({ cards, units, setMsg }) {")
 check("speech steps: one saveCards() loop, shared by the unsaved bar and the wizard's Save and continue",
       bool(_save_cards) and "await cards.current[k]?.save(" in _save_cards
