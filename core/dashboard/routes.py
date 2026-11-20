@@ -43,7 +43,7 @@ import tts_catalog
 import tts_kokoro
 import wake_name
 
-from . import config_store, node_command, registry, setup
+from . import config_store, env_store, node_command, registry, setup
 from .guard import mutation_guard
 from .upload_limit import FIRMWARE_IMAGE_MAX, WAKE_MODEL_MAX
 
@@ -278,7 +278,7 @@ def _restart_pending() -> list:
     if any(_uses_localai(c) for c in (boot, saved)) and differs("localai"):
         out.append("localai")
     # A key nothing uses yet needs no restart.
-    for row in keys_catalog.rows(_saved_env(), dict(os.environ), _keys_cfg(), file_env=_file_env()):
+    for row in keys_catalog.rows(env_store.saved_env(), dict(os.environ), _keys_cfg(), file_env=env_store.file_env()):
         if row["in_use"] and row["pending_restart"]:
             out.append(f"{row['label'].lower()} key")
     return out
@@ -1205,7 +1205,7 @@ def _tts_providers(kokoro_problem: str | None, localai_problem: str | None) -> l
             item.update(available=False, reason="model files missing" if tts_kokoro.kokoro_available() else "not installed")
         elif p["name"] == "localai" and localai_problem:
             item.update(available=False, reason=_LOCALAI_REASON)
-        elif p["key_var"] and not _key_set(p["key_var"]):
+        elif p["key_var"] and not env_store.key_set(p["key_var"]):
             item.update(available=False, reason=_ADD_KEY_REASON)
         out.append(item)
     return out
@@ -1256,9 +1256,9 @@ async def get_tts():
         # own voice, "").
         "chatterbox_voices": {"default": "", **la["voices"]},
         # First 4 characters of a set key, so a wrong key is recognisable.
-        "elevenlabs_key_hint": intelligence_target.key_hint(_saved_env().get("ELEVENLABS_API_KEY")),
-        "localai_key_hint": intelligence_target.key_hint(_saved_env().get("LVI_LOCALAI_KEY")),
-        "deepgram_key_hint": intelligence_target.key_hint(_saved_env().get("DEEPGRAM_API_KEY")),
+        "elevenlabs_key_hint": intelligence_target.key_hint(env_store.saved_env().get("ELEVENLABS_API_KEY")),
+        "localai_key_hint": intelligence_target.key_hint(env_store.saved_env().get("LVI_LOCALAI_KEY")),
+        "deepgram_key_hint": intelligence_target.key_hint(env_store.saved_env().get("DEEPGRAM_API_KEY")),
         # The three tiers and every provider in card order (tts_catalog): the
         # card's grouped dropdown, with a reason on each one it can't offer yet.
         "tiers": tts_catalog.TIERS,
@@ -1317,43 +1317,6 @@ async def put_tts(payload: TTSPayload):
     return {"ok": True, "provider": payload.provider}
 
 
-def _env_path():
-    import paths as _paths
-    return _paths.env_file()
-
-
-def _file_env() -> dict:
-    """What .env holds NOW, parsed exactly the way the bot loads it
-    (python-dotenv: quotes, `export`, inline comments). Read-only."""
-    try:
-        from dotenv import dotenv_values
-    except ImportError:  # pragma: no cover — dotenv ships with the bot
-        dotenv_values = None
-    path = _env_path()
-    if not path.is_file():
-        return {}
-    if dotenv_values is not None:
-        return {k: v for k, v in dotenv_values(path).items() if v is not None}
-    view = {}
-    for ln in path.read_text().splitlines():
-        k, sep, v = ln.partition("=")
-        if sep and k and not k.lstrip().startswith("#"):
-            view[k.strip()] = v.strip()
-    return view
-
-
-def _saved_env() -> dict:
-    """Process env overlaid with what .env holds NOW, so key status and
-    hints show a key the moment it is saved (the voice agent itself still
-    reads the process env, at the next restart). Read-only."""
-    view = dict(os.environ)
-    try:
-        view.update(_file_env())
-    except OSError:
-        pass
-    return view
-
-
 # Why a cloud provider shows disabled on either speech card.
 _ADD_KEY_REASON = "add the key on System · Keys"
 # Reasons are short on purpose: the option text reads "<label> — <reason>";
@@ -1361,85 +1324,10 @@ _ADD_KEY_REASON = "add the key on System · Keys"
 _LOCALAI_REASON = "set it up on System"
 
 
-def _key_set(var: str | None) -> bool:
-    """A key is set: the live process env OR the saved .env (a key saved on
-    the Keys card counts before the restart that loads it). Presence only —
-    never the value."""
-    return bool(var and (os.getenv(var) or _saved_env().get(var)))
-
-
-_ENV_BACKUPS_KEPT = 3
-
-
-def _backup_env(env_path) -> None:
-    """Before a key is REPLACED: copy .env to .env.bak-<time> (0600) and
-    keep the newest few — a bad paste stays recoverable. A key line is
-    never deleted, and neither is its last copy."""
-    import os as _os
-    import re as _re
-    from datetime import datetime as _dt
-    from datetime import timezone as _tz
-
-    # UTC + 'Z': names sort in time order all year (no DST repeat hour).
-    stamp = _dt.now(_tz.utc).strftime("%Y%m%d-%H%M%S-%fZ")
-    bak = env_path.with_name(f"{env_path.name}.bak-{stamp}")
-    fd = _os.open(bak, _os.O_WRONLY | _os.O_CREAT | _os.O_EXCL, 0o600)
-    with _os.fdopen(fd, "w") as f:
-        f.write(env_path.read_text())
-    # Prune only OUR backups; a hand-made .env.bak-whatever is never touched.
-    ours = _re.compile(_re.escape(env_path.name) + r"\.bak-\d{8}-\d{6}-\d{6}Z")
-    mine = sorted(p for p in env_path.parent.glob(f"{env_path.name}.bak-*") if ours.fullmatch(p.name))
-    for old in mine[:-_ENV_BACKUPS_KEPT]:
-        old.unlink(missing_ok=True)
-
-
-async def _write_env_key(var: str, value: str) -> None:
-    """Replace-or-append `var=value` in .env.
-
-    Atomic write + 0600: write_text created a
-    missing .env as 0644, and a crash mid-write could truncate it.
-    TTSKeyPayload's character-class pattern is the upstream defense
-    against newline smuggling — this is the belt to that suspenders.
-    """
-    env_path = _env_path()
-    lines = env_path.read_text().splitlines() if env_path.is_file() else []
-    out, replaced, changed = [], False, False
-    for ln in lines:
-        # Both line forms, like _remove_env_key: an `export VAR=` line
-        # missed here was kept AND a duplicate appended. It keeps its prefix.
-        if ln.startswith(var + "="):
-            new = var + "=" + value
-        elif ln.lstrip().startswith(f"export {var}="):
-            new = ln[:ln.index("export ")] + f"export {var}=" + value
-        else:
-            out.append(ln)
-            continue
-        changed = changed or ln != new
-        out.append(new)
-        replaced = True
-    if not replaced:
-        out.append(var + "=" + value)
-    if changed:
-        _backup_env(env_path)
-    _write_private(env_path, "\n".join(out) + "\n")
-
-
-def _write_private(env_path, text: str) -> None:
-    """Atomic 0600 write of .env. The temp file is 0600 from creation —
-    created under the umask and chmod'ed after, it held every secret
-    world-readable for a moment."""
-    tmp = env_path.parent / (env_path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)  # a leftover temp file keeps its old mode through O_CREAT
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, env_path)  # atomic on the same filesystem
-
-
 @router.put("/tts/key/elevenlabs", dependencies=GUARD)
 async def put_tts_key_elevenlabs(payload: TTSKeyPayload):
     """ElevenLabs API key → .env (appliance-side, gitignored, never echoed)."""
-    await _write_env_key("ELEVENLABS_API_KEY", payload.api_key)
+    await env_store.write_key("ELEVENLABS_API_KEY", payload.api_key)
     logger.info("dashboard: ELEVENLABS_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True}
 
@@ -1447,7 +1335,7 @@ async def put_tts_key_elevenlabs(payload: TTSKeyPayload):
 @router.put("/tts/key/deepgram", dependencies=GUARD)
 async def put_tts_key_deepgram(payload: TTSKeyPayload):
     """Deepgram API key → .env (appliance-side, gitignored, never echoed)."""
-    await _write_env_key("DEEPGRAM_API_KEY", payload.api_key)
+    await env_store.write_key("DEEPGRAM_API_KEY", payload.api_key)
     logger.info("dashboard: DEEPGRAM_API_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True}
 
@@ -1456,7 +1344,7 @@ async def put_tts_key_deepgram(payload: TTSKeyPayload):
 async def put_localai_key(payload: TTSKeyPayload):
     """LocalAI API key → .env (LVI_LOCALAI_KEY; never echoed). Saved from the
     Keys card, like every other key."""
-    await _write_env_key("LVI_LOCALAI_KEY", payload.api_key)
+    await env_store.write_key("LVI_LOCALAI_KEY", payload.api_key)
     logger.info("dashboard: LVI_LOCALAI_KEY written to .env (value never logged)")
     return {"ok": True, "api_key_set": True, "var": "LVI_LOCALAI_KEY"}
 
@@ -1471,7 +1359,7 @@ async def put_localai_key(payload: TTSKeyPayload):
 async def get_keys():
     import keys_catalog
 
-    return {"keys": keys_catalog.rows(_saved_env(), dict(os.environ), _keys_cfg(), file_env=_file_env())}
+    return {"keys": keys_catalog.rows(env_store.saved_env(), dict(os.environ), _keys_cfg(), file_env=env_store.file_env())}
 
 
 def _keys_cfg() -> dict:
@@ -1564,38 +1452,14 @@ async def post_key_test(payload: KeyTestPayload):
     # A per-agent key is testable only once it's in .env (never a stray
     # process variable).
     if row is None or (lane is not None and lane.per_agent_keys and row["var"] != lane.base_key_var
-                       and payload.var not in _file_env()):
+                       and payload.var not in env_store.file_env()):
         raise HTTPException(status_code=422, detail=f"{payload.var} is not an API key this appliance uses")
-    key = _key_saved_value(payload.var)
+    key = env_store.saved_value(payload.var)
     if not key:
         return {"ok": False, "status": "missing", "detail": f"{payload.var} is not set"}
     result = await asyncio.to_thread(_key_test, row, key)
     logger.info(f"dashboard: key test {payload.var} -> {result['status']}")
     return result
-
-
-def _key_saved_value(var: str) -> str:
-    """The key the NEXT restart loads: .env is the store (systemd loads it
-    as EnvironmentFile), so a removed line means removed even while the
-    running process still holds the old value."""
-    if _env_path().is_file():
-        return _file_env().get(var) or ""
-    return os.environ.get(var) or ""
-
-
-async def _remove_env_key(var: str) -> bool:
-    """Drop `var=` from .env (backup first, atomic, 0600). False if absent."""
-    env_path = _env_path()
-    if not env_path.is_file():
-        return False
-    lines = env_path.read_text().splitlines()
-    keep = [ln for ln in lines
-            if not (ln.startswith(var + "=") or ln.lstrip().startswith(f"export {var}="))]
-    if len(keep) == len(lines):
-        return False
-    _backup_env(env_path)
-    _write_private(env_path, "\n".join(keep) + ("\n" if keep else ""))
-    return True
 
 
 @router.delete("/keys/{var}", dependencies=GUARD)
@@ -1610,7 +1474,7 @@ async def delete_key(var: str):
     row = keys_catalog.target_for(var, keys_catalog.known_agents(_keys_cfg()))
     if row is None:
         raise HTTPException(status_code=422, detail=f"{var} is not an API key this appliance uses")
-    if not await _remove_env_key(var):
+    if not await env_store.remove_key(var):
         raise HTTPException(status_code=404, detail=f"{var} is not in .env")
     logger.info(f"dashboard: {var} removed from .env (backup kept; value never logged)")
     return {"ok": True, "var": var, "removed": True}
@@ -1654,7 +1518,7 @@ def _localai_problem() -> str | None:
     """Why LocalAI can't be picked yet (None = it can)."""
     if not _localai_saved()["url"]:
         return "Set the LocalAI URL on the LocalAI card first"
-    if not _key_saved_value("LVI_LOCALAI_KEY"):
+    if not env_store.saved_value("LVI_LOCALAI_KEY"):
         return "Add the LocalAI key on System · Keys first"
     return None
 
@@ -1686,7 +1550,7 @@ async def get_localai():
     """Saved LocalAI URL + speech-to-text model, and whether its key is
     saved. Never the key."""
     s = _localai_saved()
-    return {"url": s["url"], "model_stt": s["model_stt"], "key_set": bool(_key_saved_value("LVI_LOCALAI_KEY"))}
+    return {"url": s["url"], "model_stt": s["model_stt"], "key_set": bool(env_store.saved_value("LVI_LOCALAI_KEY"))}
 
 
 @router.put("/localai", dependencies=GUARD)
@@ -1721,7 +1585,7 @@ async def post_localai_test():
     speech-to-text and voice models it serves. A result, never a 500."""
     import localai
     s = _localai_saved()
-    key = _key_saved_value("LVI_LOCALAI_KEY")
+    key = env_store.saved_value("LVI_LOCALAI_KEY")
     out = {"ok": False, "ms": None, "reason": None, "stt": [], "tts": []}
     if not s["url"]:
         return {**out, "reason": "Set the LocalAI URL first"}
@@ -1749,7 +1613,7 @@ async def get_localai_voices():
     free-text fallback."""
     import localai
     s = _localai_saved()
-    key = _key_saved_value("LVI_LOCALAI_KEY")
+    key = env_store.saved_value("LVI_LOCALAI_KEY")
     voices = {"default": "", **s["voices"]}
     unavailable = None
     if not s["url"]:
@@ -1860,7 +1724,7 @@ async def get_intelligence():
 
 def _intelligence_view() -> dict:
     """GET /intelligence's body; sync, so the setup probe can build it off the loop."""
-    _env = _saved_env()
+    _env = env_store.saved_env()
     intelligence_cfg = config_store.read_section("intelligence") or {}
     kind = intelligence_cfg.get("kind") or intelligence.DEFAULT_KIND
     # Key law (strict): each kind reads exactly ONE variable —
@@ -1966,7 +1830,7 @@ async def put_intelligence_key(payload: IntelligenceKeyPayload):
     the variable so the UI can say where the key went."""
     kind = payload.kind
     var = intelligence_target.key_var(kind, payload.agent or "")
-    await _write_env_key(var, payload.api_key)
+    await env_store.write_key(var, payload.api_key)
     logger.info(f"dashboard: {var} written to .env for kind={kind} (value never logged)")
     return {"ok": True, "key_set": True, "var": var, "kind": kind}
 
@@ -1991,7 +1855,7 @@ def _intelligence_probe(intelligence_cfg: dict) -> dict:
     # fallback anywhere, so the Test button can never 401 on a key no
     # lane reads.
     _kv = intelligence_target.key_var(kind, agent) or default_lane.base_key_var
-    key = _saved_env().get(_kv) or ""  # the saved key: Test checks what will run
+    key = env_store.saved_env().get(_kv) or ""  # the saved key: Test checks what will run
     if not url:
         return {"ok": False, "error": "no url configured"}
     if not key:
@@ -2059,7 +1923,7 @@ async def post_intelligence_agents(payload: IntelligenceAgentsPayload):
     url = payload.url or saved_url
     attach_key = not payload.url or intelligence_target.same_target(payload.url, saved_url)
     result = await asyncio.to_thread(
-        intelligence_target.discover_agents, payload.kind, url, _saved_env(), 4.0,
+        intelligence_target.discover_agents, payload.kind, url, env_store.saved_env(), 4.0,
         icfg.get(lane.status_url_key) if lane.status_url_key else None,
         attach_key)
     return {"agents": [{"id": a["id"], "key_set": a["key_set"]} for a in result["agents"]],
@@ -2286,7 +2150,7 @@ def _stt_deepgram_sdk() -> bool:
 
 
 def _stt_key_set(provider: str) -> bool:
-    return _key_set(stt_catalog.KEY_VARS.get(provider))
+    return env_store.key_set(stt_catalog.KEY_VARS.get(provider))
 
 
 def _stt_providers() -> list:
