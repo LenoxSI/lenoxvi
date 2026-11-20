@@ -9,6 +9,7 @@ import { Fragment, createContext, useCallback, useContext, useEffect, useRef, us
 import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart } from './nodeSetup.js'
 import { TABS } from './tabs.js'
 import { BUILTIN, ECHO_KIND, TTS_NAMES, ttsName, TTS_KEY_HINT, STT_CLOUD, intelligenceChip, nodesChip, ttsChip, sttChip } from './chips.js'
+import { norm, same, saveCards } from './unsaved.js'
 import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView, wakePhrase, heardSince } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
@@ -731,14 +732,6 @@ function KeysCard({ setMsg, only }) {
 }
 
 /* ── unsaved changes ───────────────────────────────────────── */
-// "Changed" means the draft differs from the saved value: numbers compare as
-// numbers, strings trimmed, unset as ''.
-const norm = v => (v == null ? '' : typeof v === 'string' ? v.trim() : v)
-const same = (a, b) => {
-  const x = norm(a), y = norm(b)
-  return x === y || (x !== '' && y !== '' && !isNaN(x) && !isNaN(y) && Number(x) === Number(y))
-}
-
 // A settings card's draft: only the fields that differ from `saved`.
 // Untouched fields follow the server on every poll and a changed one is never
 // overwritten; a revert, or a poll that brings the saved value level with it,
@@ -793,37 +786,6 @@ function useUnsaved(key, card) {
   const put = useContext(UnsavedCtx)
   useEffect(() => put(key, card))  // every render: save and discard see the current draft
   useEffect(() => () => put(key, null), [key, put])
-}
-
-// Saves the listed cards one after another with their own save(), for the
-// unsaved bar and the setup wizard. One summary at the end instead of each
-// card's message flashing over the last; a failed card keeps its draft.
-async function saveCards(cards, units, keys) {
-  const end = s => (/[.!?]$/.test(s) ? s : s + '.')
-  let done = 0, restart = false
-  const failed = [], notes = []
-  for (const k of keys) {
-    const said = []
-    let ok = false
-    try { ok = !!(await cards.current[k]?.save(text => { said.push(text) })) }
-    catch (e) { said.push(e.message) }
-    const label = units[k].label
-    if (!ok) {
-      const why = (said[said.length - 1] || '').replace(/^[^:]*failed: /, '')
-      failed.push(end(`${label} failed${why ? `: ${why}` : ''}`))
-      continue
-    }
-    done++
-    for (const text of said) {
-      // "Saved — …" folds into the summary; anything else is a next step
-      // the card asked for, kept in full.
-      if (!text.startsWith('Saved')) notes.push(end(`${label}: ${text}`))
-      else if (/restart/i.test(text) && !/no restart/i.test(text)) restart = true
-    }
-  }
-  const head = failed.length ? `Saved ${done} of ${keys.length}. ${failed.join(' ')}`
-    : `Saved.${restart ? ' Restart to apply.' : ''}`
-  return { ok: !failed.length, notes, text: [head, ...notes].join(' ') }
 }
 
 function UnsavedBar({ cards, units, setMsg }) {
