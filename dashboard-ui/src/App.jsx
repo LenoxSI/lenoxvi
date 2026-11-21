@@ -10,6 +10,7 @@ import { isSupported, hostOfferUrl, validateSettings, NodeLink, saveThenRestart 
 import { TABS } from './tabs.js'
 import { BUILTIN, ECHO_KIND, TTS_NAMES, ttsName, TTS_KEY_HINT, STT_CLOUD, intelligenceChip, nodesChip, ttsChip, sttChip } from './chips.js'
 import { norm, same, saveCards } from './unsaved.js'
+import { keyRoute, keyState } from './keys.js'
 import { STEPS, shouldOpen, nextStep, prevStep, tokenStep, stepView, wakePhrase, heardSince } from './setupWizard.js'
 import { XmosDfu, XMOS_IMAGES, isUsbSupported, platformOf, fetchXmosImage, checkXmosImage, watchSound, expectVersion,
          xmosImageName, xmosImageUrl } from './xmosDfu.js'
@@ -449,33 +450,6 @@ function useLocalAIVoices(on) {
   return voices
 }
 
-// The save route for a row: the existing kind-aware routes (one write path).
-// A catalog key with no route here can't be saved from the card (null) —
-// never sent through another kind's route.
-function keyRoute(row) {
-  if (row.kind === 'elevenlabs') return ['/api/dashboard/tts/key/elevenlabs', {}]
-  if (row.kind === 'deepgram') return ['/api/dashboard/tts/key/deepgram', {}]
-  if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]
-  const lane = laneOf(row.kind)
-  if (!lane) return null
-  const named = lane.per_agent_keys && row.agent && row.agent !== lane.default_agent
-  return ['/api/dashboard/intelligence/key', { kind: row.kind, ...(named ? { agent: row.agent } : {}) }]
-}
-
-function keyState(row) {
-  // Chip words: lowercase, one or two words (brand Chip rule); the restart
-  // note moves to the hover. Warning tone = needs a restart or a key.
-  // A key nothing uses yet needs no restart: neutral tone, no restart note.
-  if (!row.set && row.pending_restart) return row.in_use
-    ? { text: 'removed', cls: WARN_CHIP_CLS, title: 'Removed. Restart the bot to apply.' }
-    : { text: 'removed', cls: CHIP_CLS, title: 'Removed. Nothing uses it, so no restart is needed.' }
-  if (!row.set) return row.in_use ? { text: 'missing', cls: WARN_CHIP_CLS } : { text: 'not set', cls: CHIP_CLS }
-  if (row.pending_restart) return row.in_use
-    ? { text: `saved · ${row.hint || ''}`, cls: WARN_CHIP_CLS, title: 'Saved. Restart the bot to apply.' }
-    : { text: `saved · ${row.hint || ''}`, cls: CHIP_CLS, title: 'Saved. Not in use yet: switching to it marks a restart pending.' }
-  return { text: `set · ${row.hint || ''}`, cls: CHIP_CLS }
-}
-
 // only: the setup wizard's filter. Just these vars get a row (set or not), and
 // the Add box is hidden; unset, the card is the System tab's as ever.
 function KeysCard({ setMsg, only }) {
@@ -528,7 +502,7 @@ function KeysCard({ setMsg, only }) {
   const save = async (row, inputId) => {
     const key = readKey(inputId)
     if (!key) { setMsg('Nothing to save — paste a key first.', 'muted', 'Keys'); return null }
-    const target = keyRoute(row)
+    const target = keyRoute(row, LANES)
     if (!target) { setMsg(`${row.label} keys can't be saved from the card yet.`, 'err', 'Keys'); return null }
     const [route, extra] = target
     try {
@@ -584,7 +558,7 @@ function KeysCard({ setMsg, only }) {
   const shown = r => r.set || r.pending_restart || r.in_use
   const services = (keys || []).filter(r => !shown(r))
   const offered = v => (v.startsWith('agent:') ? agents.includes(v.slice(6))
-    : services.some(r => r.var === v && keyRoute(r)))
+    : services.some(r => r.var === v && keyRoute(r, LANES)))
   // Only an explicit pick is ever saved to. A default first entry moved
   // under a pasted key whenever a refresh changed the list, so the key went
   // to a service nobody chose. A pick that a refresh removed stays visible
@@ -646,7 +620,7 @@ function KeysCard({ setMsg, only }) {
                           <div className="sm:hidden flex flex-wrap items-center gap-2 mt-1">
                             {row.used_by.map(u => <span key={u} className={CHIP_CLS}>{u.toLowerCase()}</span>)}
                             {row.in_use && <span className={OK_CHIP_CLS}>in use</span>}
-                            <span className={st.cls} title={st.title}>{st.text}</span>
+                            <span className={st.tone === 'warning' ? WARN_CHIP_CLS : CHIP_CLS} title={st.title}>{st.text}</span>
                           </div>
                         </td>
                         <td className="hidden sm:table-cell px-4 py-2">
@@ -657,7 +631,7 @@ function KeysCard({ setMsg, only }) {
                         <td className="hidden sm:table-cell px-4 py-2">
                           {row.in_use && <span className={OK_CHIP_CLS}>in use</span>}
                         </td>
-                        <td className="hidden sm:table-cell px-4 py-2"><span className={st.cls} title={st.title} data-role="state">{st.text}</span></td>
+                        <td className="hidden sm:table-cell px-4 py-2"><span className={st.tone === 'warning' ? WARN_CHIP_CLS : CHIP_CLS} title={st.title} data-role="state">{st.text}</span></td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex flex-wrap items-center justify-end gap-2">
                             <button className={BTN_DEFAULT} disabled={!row.set || t?.status === 'testing'} onClick={() => test(row)}>
@@ -709,8 +683,8 @@ function KeysCard({ setMsg, only }) {
                 {services.length > 0 && (
                   <optgroup label="Services">
                     {services.map(r => (
-                      <option key={r.var} value={r.var} disabled={!keyRoute(r)}>
-                        {`${r.label} — ${r.used_by.join(' · ')}${keyRoute(r) ? '' : ' (not supported yet)'}`}</option>
+                      <option key={r.var} value={r.var} disabled={!keyRoute(r, LANES)}>
+                        {`${r.label} — ${r.used_by.join(' · ')}${keyRoute(r, LANES) ? '' : ' (not supported yet)'}`}</option>
                     ))}
                   </optgroup>
                 )}
