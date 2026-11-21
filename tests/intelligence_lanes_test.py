@@ -165,6 +165,7 @@ def main():
     import config
     import dashboard
     import intelligence.agent as ia
+    import intelligence.hermes as ih
     import intelligence.target as it
     import keys_catalog
     from dashboard import config_store, routes
@@ -297,7 +298,7 @@ def main():
             "http://h:8900/v1", "", "https://h/api/v1"]
     scenario("target/request_url", lambda: [[k, u, a, it.request_url(k, u, a)] for k in kinds for u in urls
                                              for a in ("", "default", "kids-agent")])
-    scenario("target/constants", lambda: {"port": it.HERMES_STATUS_PORT,
+    scenario("target/constants", lambda: {"port": ih.HERMES_STATUS_PORT,
                                           "agent_re": it.AGENT_RE.pattern,
                                           "is_default": [it.is_default_agent(a) for a in ("", None, "default", "x")]})
     env = dict(keys)
@@ -332,10 +333,10 @@ def main():
     for name, (k, u, e, su, ak, rules) in disc.items():
         scenario(f"target/discover/{name}", lambda k=k, u=u, e=e, su=su, ak=ak: it.discover_agents(k, u, e, 4.0, su, ak),
                  rules)
-    _port = it.HERMES_STATUS_PORT
-    it.HERMES_STATUS_PORT = 19119
+    _port = ih.HERMES_STATUS_PORT
+    ih.HERMES_STATUS_PORT = 19119
     scenario("target/discover/hermes/patched-port", lambda: it.discover_agents("hermes", HM, env), [status_hm])
-    it.HERMES_STATUS_PORT = _port
+    ih.HERMES_STATUS_PORT = _port
 
     # ── dashboard routes ────────────────────────────────────────────
     route_cfgs = {**turn_cfgs, "bogus": dict(kind="bogus", url=HM)}

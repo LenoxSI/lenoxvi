@@ -13,6 +13,10 @@ import urllib.parse
 
 from intelligence.base import AGENT_RE, Lane, get_json, key_test_via_probe
 
+# The Hermes web dashboard's public status route lists the gateway's
+# profiles (the API server itself has no list endpoint).
+HERMES_STATUS_PORT = 9119
+
 
 class HermesLane(Lane):
     kind = "hermes"
@@ -81,15 +85,12 @@ class HermesLane(Lane):
         return payload, headers
 
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
-        # Read at call time: the suite swaps intelligence_target.HERMES_STATUS_PORT.
-        import intelligence.target as _it
-
         fallback = {"agents": [self.entry("default", env)], "source": "fallback"}
         if not status_url:
             p = urllib.parse.urlsplit(url)
             if not p.hostname:
                 return {**fallback, "note": "set the Hermes URL first"}
-            status_url = f"{p.scheme or 'http'}://{p.hostname}:{_it.HERMES_STATUS_PORT}/api/status"
+            status_url = f"{p.scheme or 'http'}://{p.hostname}:{HERMES_STATUS_PORT}/api/status"
         try:
             data = get_json(status_url, {}, timeout)
         except Exception as e:

@@ -34,10 +34,6 @@ import urllib.parse
 import intelligence
 from intelligence.base import AGENT_RE, get_json, key_hint  # noqa: F401 — re-exported
 
-# The Hermes web dashboard's public status route lists the gateway's
-# profiles (the API server itself has no list endpoint).
-HERMES_STATUS_PORT = 9119
-
 
 def _lane(kind):
     """The lane for EXACTLY `kind`: no case folding, so a spelling this

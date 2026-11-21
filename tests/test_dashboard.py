@@ -4785,6 +4785,7 @@ def main():
             # discovered per provider, remembered per kind; a Hermes profile
             # routes to <base>/p/<agent>/v1 with ITS OWN key; set keys show
             # their first 4 characters, never more.
+            import intelligence.hermes as _ih12
             import intelligence.target as _it12
             import threading as _th12
             import http.server as _hs12
@@ -4839,7 +4840,7 @@ def main():
                 "/api/status": lambda h: (200, {"profiles": ["home-helper", "default", "parked-one", "../evil"],
                                                 "parked_profiles": ["parked-one"]})}
             _env12 = {"LVI_OPENCLAW_KEY": "ockey-abcdefghijkl", "LVI_HERMES_KEY": "hmkey-abcdefghijkl"}
-            _saved_port12 = _it12.HERMES_STATUS_PORT
+            _saved_port12 = _ih12.HERMES_STATUS_PORT
             _saved_env12 = {k: _os.environ.get(k) for k in
                             ("LVI_OPENCLAW_KEY", "LVI_HERMES_KEY", "LVI_HERMES_KEY_HOME_HELPER")}
             _saved_open12 = _urq9.urlopen
@@ -4925,7 +4926,7 @@ def main():
                 # route: kind validated, URL override, hermes via the status port
                 _os.environ["LVI_OPENCLAW_KEY"] = "ockey-abcdefghijkl"
                 _os.environ["LVI_HERMES_KEY"] = "hmkey-abcdefghijkl"
-                _it12.HERMES_STATUS_PORT = _port12
+                _ih12.HERMES_STATUS_PORT = _port12
                 _ra12 = client.post("/api/dashboard/intelligence/agents",
                                     json={"kind": "openclaw", "url": f"http://127.0.0.1:{_port12}"})
                 check("agent picker: POST /intelligence/agents openclaw: agents + selected",
@@ -5028,7 +5029,7 @@ def main():
                       "elevenlabs_key_hint" in _t12 and "deepgram_key_hint" in _t12, str(_t12)[:160])
             finally:
                 _urq9.urlopen = _saved_open12
-                _it12.HERMES_STATUS_PORT = _saved_port12
+                _ih12.HERMES_STATUS_PORT = _saved_port12
                 _srv12.shutdown()
                 for _k12, _v12 in _saved_env12.items():
                     if _v12 is None:
