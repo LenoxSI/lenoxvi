@@ -165,6 +165,7 @@ def main():
     import config
     import dashboard
     import intelligence.agent as ia
+    import intelligence.base as ib
     import intelligence.hermes as ih
     import intelligence.target as it
     import keys_catalog
@@ -300,7 +301,7 @@ def main():
                                              for a in ("", "default", "kids-agent")])
     scenario("target/constants", lambda: {"port": ih.HERMES_STATUS_PORT,
                                           "agent_re": it.AGENT_RE.pattern,
-                                          "is_default": [it.is_default_agent(a) for a in ("", None, "default", "x")]})
+                                          "is_default": [ib.is_default_agent(a) for a in ("", None, "default", "x")]})
     env = dict(keys)
     models_oc = ("/models", ("json", {"data": [{"id": "openclaw/main"}, {"id": "openclaw/kidbot"}, {"id": "gpt-x"},
                                                 {"id": "openclaw/bad name"}, {"id": "openclaw/main"}, None]}))

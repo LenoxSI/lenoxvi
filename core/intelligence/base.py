@@ -153,6 +153,10 @@ class Lane:
         return {"id": agent_id, "key_set": bool(value), "key_hint": key_hint(value)}
 
 
+def is_default_agent(agent) -> bool:
+    return not agent or agent == "default"
+
+
 def get_json(url: str, headers: dict, timeout: float):
     """GET -> parsed JSON. Module-level so the suite can patch urlopen."""
     req = urllib.request.Request(url, headers=headers, method="GET")

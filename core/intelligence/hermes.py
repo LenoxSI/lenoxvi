@@ -11,7 +11,7 @@ Contract: intelligence/base.py.
 import re
 import urllib.parse
 
-from intelligence.base import AGENT_RE, Lane, get_json, key_test_via_probe
+from intelligence.base import AGENT_RE, Lane, get_json, is_default_agent, key_test_via_probe
 
 # The Hermes web dashboard's public status route lists the gateway's
 # profiles (the API server itself has no list endpoint).
@@ -35,16 +35,12 @@ class HermesLane(Lane):
         return agent
 
     def key_var(self, agent: str = "") -> str:
-        from intelligence.target import is_default_agent
-
         base = self.base_key_var
         if not is_default_agent(agent):
             return base + "_" + re.sub(r"[^A-Z0-9]", "_", agent.upper())
         return base
 
     def request_url(self, url: str, agent: str = "") -> str:
-        from intelligence.target import is_default_agent
-
         url = (url or "").rstrip("/")
         if not is_default_agent(agent):
             root = url[:-3] if url.endswith("/v1") else url

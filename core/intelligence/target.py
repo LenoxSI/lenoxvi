@@ -44,10 +44,6 @@ def _lane(kind):
         return None
 
 
-def is_default_agent(agent) -> bool:
-    return not agent or agent == "default"
-
-
 def agent_for(cfg: dict, kind: str) -> str:
     """The live agent for `kind` from an intelligence config section."""
     lane = _lane(kind)
