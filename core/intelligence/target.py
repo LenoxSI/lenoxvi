@@ -24,7 +24,7 @@ profile that does not exist. OpenClaw falls back to the legacy key.
 
 The per-lane rules above live in the lane classes (core/intelligence/);
 this module is the facade every caller keeps importing, plus the kind-free
-helpers (key_hint, http_error_message, same_target).
+helpers (http_error_message, same_target).
 """
 
 import json
@@ -32,7 +32,7 @@ import re
 import urllib.parse
 
 import intelligence
-from intelligence.base import AGENT_RE, get_json  # noqa: F401 — re-exported
+from intelligence.base import AGENT_RE, get_json, key_hint  # noqa: F401 — re-exported
 
 # The Hermes web dashboard's public status route lists the gateway's
 # profiles (the API server itself has no list endpoint).
@@ -76,17 +76,6 @@ def request_url(kind: str, url: str, agent: str = "") -> str:
     if lane is None:
         return (url or "").rstrip("/")
     return lane.request_url(url, agent)
-
-
-def key_hint(value):
-    """Set keys show their first 4 characters so a wrong key is recognisable;
-    short keys show none (4 of 9 characters would be most of the secret).
-    Fixed-length mask: the hint never reveals the key's length."""
-    if not value:
-        return None
-    if len(value) < 12:
-        return "\u2022" * 8
-    return value[:4] + "\u2022" * 8
 
 
 def http_error_message(err, key=None) -> str:

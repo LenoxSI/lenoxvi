@@ -147,7 +147,6 @@ class Lane:
             (icfg.get("url") if (icfg.get("kind") or "hermes") == self.kind else None) or ""
 
     def entry(self, agent_id: str, env) -> dict:
-        from intelligence.target import key_hint  # kind-free helper stays there
         var = self.key_var(agent_id)
         value = env.get(var) if var else None
         return {"id": agent_id, "key_set": bool(value), "key_hint": key_hint(value)}
@@ -158,6 +157,17 @@ def get_json(url: str, headers: dict, timeout: float):
     req = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
+
+
+def key_hint(value):
+    """Set keys show their first 4 characters so a wrong key is recognisable;
+    short keys show none (4 of 9 characters would be most of the secret).
+    Fixed-length mask: the hint never reveals the key's length."""
+    if not value:
+        return None
+    if len(value) < 12:
+        return "\u2022" * 8
+    return value[:4] + "\u2022" * 8
 
 
 def key_test_via_probe(lane: Lane, row: dict, url: str, agent: str, icfg: dict,
