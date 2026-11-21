@@ -8157,10 +8157,12 @@ def main():
 
         # ── dashboard ui (App.jsx) ──
         _appNB = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
+        _keysNB = (REPO_CORE.parent / "dashboard-ui" / "src" / "keys.js").read_text()
         _sysNB = _appNB[_appNB.find("function IntelligenceCard({"):]
         check("nanobot: dashboard ui: the provider dropdown offers Nanobot and the Keys card can save its key",
               "{LANES.map(l => <option key={l.kind} value={l.kind}>{l.label}</option>)}" in _sysNB
-              and "const lane = laneOf(row.kind)" in _appNB and "if (!lane) return null" in _appNB
+              and "const lane = lanes.find(l => l.kind === row.kind)" in _keysNB and "if (!lane) return null" in _keysNB
+              and "const target = keyRoute(row, LANES)" in _appNB
               and "kind: 'nanobot', label: 'Nanobot'" in _appNB, "")
     finally:
         env_store.write_key = _nb_saved_wek
