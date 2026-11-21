@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -190,3 +191,37 @@ def key_test_via_probe(lane: Lane, row: dict, url: str, agent: str, icfg: dict,
     if "HTTP 404" in err and not url.rstrip("/").endswith("/v1"):
         err += " — the saved URL may need /v1 at the end (Intelligence card)"
     return {"ok": False, "status": status, "detail": err}
+
+
+def discover_via_models(lane: Lane, url: str, env, timeout: float, attach_key: bool, *,
+                        key_note: str, empty_note: str, agent_id) -> dict:
+    """Lane.discover_agents for lanes that list their agents on
+    GET <url>/models with the lane's one key (openclaw, nanobot).
+    `agent_id(model_id)` names the agent for one listed model id, or ''
+    to skip it; `key_note` is the no-key note, `empty_note` the note for
+    an empty list."""
+    if not url:
+        return {"agents": [], "source": "none", "note": f"set the {lane.label} URL first"}
+    token = env.get(lane.base_key_var)
+    if attach_key and not token:
+        return {"agents": [], "source": "none", "note": key_note}
+    models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
+    headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
+    try:
+        data = get_json(models_url, headers, timeout)
+    except urllib.error.HTTPError as e:
+        note = f"{lane.label} answered HTTP {e.code}"
+        if e.code == 401 and not attach_key:
+            note += " — this URL is not saved yet; save it and the stored key will be used"
+        return {"agents": [], "source": "none", "note": note}
+    except Exception as e:
+        return {"agents": [], "source": "none", "note": f"{lane.label} unreachable ({type(e).__name__})"}
+    ids = []
+    models = data.get("data") if isinstance(data, dict) else None
+    for m in (models if isinstance(models, list) else []):
+        mid = str(m.get("id") or "") if isinstance(m, dict) else ""
+        name = agent_id(mid)
+        if AGENT_RE.match(name) and name not in ids:
+            ids.append(name)
+    return {"agents": [lane.entry(a, env) for a in ids], "source": f"{lane.kind}-models",
+            "note": None if ids else empty_note}

@@ -7,11 +7,10 @@ field is omitted.
 Contract: intelligence/base.py.
 """
 
-import urllib.error
 import urllib.parse
 import uuid
 
-from intelligence.base import AGENT_RE, Lane, get_json
+from intelligence.base import Lane, discover_via_models
 
 
 class NanobotLane(Lane):
@@ -60,31 +59,11 @@ class NanobotLane(Lane):
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
         # nanobot serves exactly one model (its configured one); the picker
         # lists it. Same key rule as OpenClaw: only the saved URL gets it.
-        if not url:
-            return {"agents": [], "source": "none", "note": "set the Nanobot URL first"}
-        token = env.get(self.base_key_var)
-        if attach_key and not token:
-            return {"agents": [], "source": "none",
-                    "note": "save the Nanobot key to list its agent"}
-        models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
-        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
-        try:
-            data = get_json(models_url, headers, timeout)
-        except urllib.error.HTTPError as e:
-            note = f"Nanobot answered HTTP {e.code}"
-            if e.code == 401 and not attach_key:
-                note += " — this URL is not saved yet; save it and the stored key will be used"
-            return {"agents": [], "source": "none", "note": note}
-        except Exception as e:  # noqa: BLE001 — any failure is a discovery note, never a 500
-            return {"agents": [], "source": "none", "note": f"Nanobot unreachable ({type(e).__name__})"}
-        ids = []
-        models = data.get("data") if isinstance(data, dict) else None
-        for m in (models if isinstance(models, list) else []):
-            mid = str(m.get("id") or "") if isinstance(m, dict) else ""
-            if AGENT_RE.match(mid) and mid not in ids:
-                ids.append(mid)
-        return {"agents": [self.entry(a, env) for a in ids], "source": "nanobot-models",
-                "note": None if ids else "Nanobot listed no model"}
+        return discover_via_models(
+            self, url, env, timeout, attach_key,
+            key_note="save the Nanobot key to list its agent",
+            empty_note="Nanobot listed no model",
+            agent_id=lambda mid: mid)
 
     def health_url(self, url):
         # nanobot's /health lives at the server root, beside /v1.

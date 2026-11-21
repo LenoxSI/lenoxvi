@@ -6,9 +6,7 @@ back to the legacy top-level `agent` key (it was always OpenClaw's).
 Contract: intelligence/base.py.
 """
 
-import urllib.error
-
-from intelligence.base import AGENT_RE, Lane, get_json, key_test_via_probe
+from intelligence.base import Lane, discover_via_models, key_test_via_probe
 
 
 class OpenClawLane(Lane):
@@ -60,33 +58,11 @@ class OpenClawLane(Lane):
         return None
 
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
-        if not url:
-            return {"agents": [], "source": "none", "note": "set the OpenClaw URL first"}
-        token = env.get(self.base_key_var)
-        if attach_key and not token:
-            return {"agents": [], "source": "none",
-                    "note": "save the OpenClaw key to list its agents"}
-        models_url = url + ("/models" if url.endswith("/v1") else "/v1/models")
-        headers = {"Authorization": f"Bearer {token}"} if (attach_key and token) else {}
-        try:
-            data = get_json(models_url, headers, timeout)
-        except urllib.error.HTTPError as e:
-            note = f"OpenClaw answered HTTP {e.code}"
-            if e.code == 401 and not attach_key:
-                note += " — this URL is not saved yet; save it and the stored key will be used"
-            return {"agents": [], "source": "none", "note": note}
-        except Exception as e:
-            return {"agents": [], "source": "none", "note": f"OpenClaw unreachable ({type(e).__name__})"}
-        ids = []
-        models = data.get("data") if isinstance(data, dict) else None
-        for m in (models if isinstance(models, list) else []):
-            mid = str(m.get("id") or "") if isinstance(m, dict) else ""
-            if mid.startswith("openclaw/"):
-                name = mid[len("openclaw/"):]
-                if AGENT_RE.match(name) and name not in ids:
-                    ids.append(name)
-        return {"agents": [self.entry(a, env) for a in ids], "source": "openclaw-models",
-                "note": None if ids else "OpenClaw listed no agents"}
+        return discover_via_models(
+            self, url, env, timeout, attach_key,
+            key_note="save the OpenClaw key to list its agents",
+            empty_note="OpenClaw listed no agents",
+            agent_id=lambda mid: mid[len("openclaw/"):] if mid.startswith("openclaw/") else "")
 
     def probe_body(self, agent, icfg):
         model = "openclaw/" + agent
