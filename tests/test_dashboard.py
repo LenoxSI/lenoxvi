@@ -8465,6 +8465,7 @@ def main():
     _appsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "App.jsx").read_text()
     _chipsrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "chips.js").read_text()
     _unsavedrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "unsaved.js").read_text()
+    _keysrc = (REPO_CORE.parent / "dashboard-ui" / "src" / "keys.js").read_text()
 
     def _jsbody(src, head):
         """Text of the block opened by `head` (which ends in '{'), brace-matched."""
@@ -8507,8 +8508,8 @@ def main():
     check("dashboard ui: Keys Add tests the saved key and never restarts the bot itself",
           "await test({ var: v })" in _kaddf and "restartBot(" not in _kaddf, _kaddf[-200:])
     check("dashboard ui: a saved or removed key nothing uses gets a neutral chip, never 'restart to apply'",
-          "Not in use yet: switching to it marks a restart pending." in _appsrc
-          and "Nothing uses it, so no restart is needed." in _appsrc)
+          "Not in use yet: switching to it marks a restart pending." in _keysrc
+          and "Nothing uses it, so no restart is needed." in _keysrc)
     check("dashboard ui: a key Test whose setup isn't finished shows an info note, not a red failure",
           "t.status === 'needs_setup' ? 'text-[var(--muted)]'" in _kc and "'note — '" in _kc)
 
@@ -10068,7 +10069,7 @@ def main():
           and "/api/dashboard/localai/test" in _laCard and "models/apply" not in _appsrc, _laCard[:200])
     check("localai ui: no key saved -> the card links to System · Keys; Keys saves the LocalAI key on its own route",
           "{saved?.url && !saved.key_set && <MissingKey label=\"LocalAI\" />}" in _laCard
-          and "if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]" in _appsrc)
+          and "if (row.kind === 'localai') return ['/api/dashboard/localai/key', {}]" in _keysrc)
     check("localai ui: model lists come from the server's Test (keys never reach the browser), refreshed after saves",
           "api('/api/dashboard/localai/test', { method: 'POST' })" in _laHook and "lenoxvi:reload-all" in _laHook
           and "useLocalAIModels(provider === 'localai')" in _laVo and "useLocalAIModels(onLocalAIPick)" in _laSt)
