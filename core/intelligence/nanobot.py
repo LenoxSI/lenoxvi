@@ -10,7 +10,7 @@ Contract: intelligence/base.py.
 import urllib.parse
 import uuid
 
-from intelligence.base import Lane, discover_via_models
+from intelligence.base import Lane, discover_via_models, http_error_message
 
 
 class NanobotLane(Lane):
@@ -52,9 +52,8 @@ class NanobotLane(Lane):
         # nanobot explains a refusal in its body ("Only a single user
         # message is supported", "Only configured model ... is
         # available"); put that in the failure log, never the key.
-        import intelligence.target as _it
         return RuntimeError(f"nanobot answered HTTP {err.code}: "
-                            f"{_it.http_error_message(err, key)}")
+                            f"{http_error_message(err, key)}")
 
     def discover_agents(self, url, env, timeout=4.0, status_url=None, attach_key=True):
         # nanobot serves exactly one model (its configured one); the picker
@@ -82,9 +81,8 @@ class NanobotLane(Lane):
         return model, body
 
     def probe_error(self, err, key):
-        import intelligence.target as _it
         return (f"gateway error: HTTP {err.code}: "
-                f"{_it.http_error_message(err, key)}")
+                f"{http_error_message(err, key)}")
 
     def key_test(self, row, key, icfg, *, probe, http, scrub):
         # GET <saved url>/models answers 401 to a wrong key. The key only

@@ -175,6 +175,29 @@ def key_hint(value):
     return value[:4] + "\u2022" * 8
 
 
+def http_error_message(err, key=None) -> str:
+    """The server's own error text from an HTTPError (OpenAI shape:
+    {"error": {"message"}}), short, with the key scrubbed should a server
+    ever echo it."""
+    try:
+        raw = err.read(2000).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — no body is still an answer
+        raw = ""
+    msg = raw
+    try:
+        body = json.loads(raw)
+        inner = body.get("error") if isinstance(body, dict) else None
+        if isinstance(inner, dict) and inner.get("message"):
+            msg = str(inner["message"])
+        elif isinstance(inner, str):
+            msg = inner
+    except (ValueError, TypeError):
+        pass
+    if key:
+        msg = msg.replace(key, "***")
+    return " ".join(msg.split())[:200] or str(getattr(err, "reason", "") or "no detail")
+
+
 def key_test_via_probe(lane: Lane, row: dict, url: str, agent: str, icfg: dict,
                        probe, scrub) -> dict:
     """Lane.key_test for lanes whose Test probe proves the key (hermes,

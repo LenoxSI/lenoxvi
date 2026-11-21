@@ -24,10 +24,9 @@ profile that does not exist. OpenClaw falls back to the legacy key.
 
 The per-lane rules above live in the lane classes (core/intelligence/);
 this module is the facade every caller keeps importing, plus the kind-free
-helpers (http_error_message, same_target).
+helper same_target.
 """
 
-import json
 import re
 import urllib.parse
 
@@ -68,29 +67,6 @@ def request_url(kind: str, url: str, agent: str = "") -> str:
     if lane is None:
         return (url or "").rstrip("/")
     return lane.request_url(url, agent)
-
-
-def http_error_message(err, key=None) -> str:
-    """The server's own error text from an HTTPError (OpenAI shape:
-    {"error": {"message"}}), short, with the key scrubbed should a server
-    ever echo it."""
-    try:
-        raw = err.read(2000).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 — no body is still an answer
-        raw = ""
-    msg = raw
-    try:
-        body = json.loads(raw)
-        inner = body.get("error") if isinstance(body, dict) else None
-        if isinstance(inner, dict) and inner.get("message"):
-            msg = str(inner["message"])
-        elif isinstance(inner, str):
-            msg = inner
-    except (ValueError, TypeError):
-        pass
-    if key:
-        msg = msg.replace(key, "***")
-    return " ".join(msg.split())[:200] or str(getattr(err, "reason", "") or "no detail")
 
 
 def same_target(a: str, b: str) -> bool:
